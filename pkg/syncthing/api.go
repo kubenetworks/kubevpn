@@ -68,7 +68,8 @@ func (c *Client) Call(ctx context.Context, uri, method string, body []byte) ([]b
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("unexpected response from syncthing [%s | %d]: %s", req.URL.String(), resp.StatusCode, string(body))
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("unexpected response from syncthing [%s | %d]: %s", req.URL.String(), resp.StatusCode, string(respBody))
 	}
 	body, err = io.ReadAll(resp.Body)
 	if err != nil {

@@ -80,7 +80,9 @@ func (c *Config) SetupDNS(ctx context.Context) error {
 			if ctx.Err() != nil {
 				return
 			}
+			c.Lock.Lock()
 			c.Services = services
+			c.Lock.Unlock()
 			c.usingResolver(ctx)
 		}
 	}()
@@ -107,7 +109,10 @@ func (c *Config) usingResolver(ctx context.Context) {
 		Ndots:   clientConfig.Ndots,
 		Timeout: clientConfig.Timeout,
 	}
-	for _, filename := range getResolvers(c.Config.Search, c.Ns, c.Services) {
+	c.Lock.Lock()
+	services := c.Services
+	c.Lock.Unlock()
+	for _, filename := range getResolvers(c.Config.Search, c.Ns, services) {
 		// ignore search suffix like com, io, net, org, cn, ru, those are top dns server
 		if slices.Contains(ignoreSearchSuffix, filepath.Base(filename)) {
 			continue
@@ -175,7 +180,10 @@ func toString(config miekgdns.ClientConfig) string {
 
 // CancelDNS removes the injected DNS nameserver from macOS resolver files and cleans up hosts entries.
 func (c *Config) CancelDNS() {
-	for _, filename := range getResolvers(c.Config.Search, c.Ns, c.Services) {
+	c.Lock.Lock()
+	services := c.Services
+	c.Lock.Unlock()
+	for _, filename := range getResolvers(c.Config.Search, c.Ns, services) {
 		content, err := os.ReadFile(filename)
 		if err != nil {
 			continue

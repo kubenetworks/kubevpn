@@ -233,11 +233,11 @@ func JumpTo(ctx context.Context, bClient *gossh.Client, to SshConfig, stopChan <
 	go func() {
 		if stopChan != nil {
 			<-stopChan
-			conn.Close()
-			if client != nil {
-				client.Close()
-			}
-			bClient.Close()
+			// Closing conn/bClient tears down both an in-progress handshake and an
+			// established client. Avoid reading the named return `client` here — it
+			// races with the function's return assignment.
+			_ = conn.Close()
+			_ = bClient.Close()
 		}
 	}()
 	defer func() {

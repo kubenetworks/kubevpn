@@ -63,9 +63,10 @@ func RunWithElevatedInnerExec() error {
 
 // IsAdmin reports whether the current process is running with root/administrator privileges.
 func IsAdmin() bool {
-	_, err := os.Open("\\\\.\\PHYSICALDRIVE0")
+	f, err := os.Open("\\\\.\\PHYSICALDRIVE0")
 	if err != nil {
 		return false
 	}
+	_ = f.Close()
 	return true
 }

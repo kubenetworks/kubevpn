@@ -111,7 +111,12 @@ func newEnvoyContainer(ns, nodeID string, ipv6 bool, managerNamespace, image str
 // AddVPNAndEnvoyContainer adds VPN and Envoy sidecar containers for mesh mode.
 func AddVPNAndEnvoyContainer(spec *v1.PodTemplateSpec, ns, nodeID string, ipv6 bool, managerNamespace string, secret *v1.Secret, image string) {
 	RemoveContainers(&spec.Spec)
-	spec.Spec.ServiceAccountName = config.ConfigMapPodTrafficManager
+	// NOTE: do NOT pin the pod to the traffic-manager ServiceAccount. That SA only
+	// exists in the manager namespace, so referencing it from a workload in any other
+	// namespace makes the ServiceAccount admission controller reject pod creation —
+	// the new ReplicaSet never produces a pod, the rollout times out, and RolloutStatus
+	// undoes the patch. The sidecar reaches the control plane over gRPC+TLS and never
+	// touches the K8s API, so it needs no ServiceAccount token.
 
 	var envs []v1.EnvVar
 	envs = append(envs, commonEnvVars(managerNamespace)...)

@@ -121,6 +121,8 @@ func ConvertToTempKubeconfigFile(kubeconfigBytes []byte, path string) (string, e
 	if err != nil {
 		return "", err
 	}
+	// Safety net: close on every error path; the explicit Close below surfaces flush errors.
+	defer f.Close()
 	_, err = f.Write(kubeconfigBytes)
 	if err != nil {
 		return "", err

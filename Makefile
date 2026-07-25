@@ -105,9 +105,19 @@ version:
 gen:
 	go generate ./...
 
+# ut runs the FULL suite, including tests that need a real Kubernetes cluster
+# (and therefore a kubeconfig). Those live behind the `integration` build tag.
+# The linux/macos CI jobs provision a cluster before running this.
 .PHONY: ut
 ut:
 	go test -p=1 -v -tags=integration -timeout=120m ${LDFLAGS} -coverprofile=coverage.txt -coverpkg=./... ./...
+
+# ut-no-cluster runs ONLY the tests that need no kubeconfig / real cluster, i.e.
+# everything NOT behind the `integration` build tag. Used by the Windows CI job,
+# which has no Kubernetes cluster available.
+.PHONY: ut-no-cluster
+ut-no-cluster:
+	go test -p=1 -v -timeout=60m ${LDFLAGS} ./...
 
 .PHONY: cover
 cover: ut

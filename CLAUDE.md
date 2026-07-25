@@ -17,9 +17,13 @@ go build ./...              # verify compilation
 make kubevpn                # build binary with ldflags
 
 # Test
-go test ./pkg/...           # run all package tests
+go test ./pkg/...           # run no-cluster tests (no kubeconfig needed)
+go test -tags=integration ./pkg/...  # also run tests that need a real cluster
 go test ./pkg/inject/... -v # test specific package
 go vet ./pkg/...            # static analysis
+
+make ut             # FULL suite incl. cluster tests (-tags=integration); needs kubeconfig
+make ut-no-cluster  # ONLY no-kubeconfig tests; used by the Windows CI job
 
 # Note: TestPing always fails in this environment (needs raw socket)
 # Note: CGO_ENABLED=0, so -race is unavailable
@@ -27,6 +31,21 @@ go vet ./pkg/...            # static analysis
 # Generate protobuf
 make gen
 ```
+
+### Test Build Tags (kubeconfig vs no-kubeconfig)
+
+Tests that need a real Kubernetes cluster (and therefore a kubeconfig) live behind
+the **`integration`** build tag — `//go:build integration` at the top of the file.
+Everything without that tag must run with NO kubeconfig (use `fake.NewSimpleClientset()`,
+`httptest`, temp/dummy kubeconfig files, or `net.Pipe()`). The Windows CI job has no
+cluster and runs `make ut-no-cluster`, so:
+
+- **Never** make a non-`integration` test call a real cluster API (`ToRESTConfig()` +
+  real Get/List, `kubernetes.NewForConfig` against a live server). If it needs a cluster,
+  move it to a `//go:build integration` file (e.g. `*_integration_test.go`).
+- A non-`integration` test that builds a `genericclioptions.ConfigFlags` MUST point
+  `configFlags.KubeConfig` at a temp/dummy/nonexistent path — never the ambient default.
+- Other tag in use: `tun` for real-TUN tests needing `CAP_NET_ADMIN` (run on demand).
 
 ## Test Cluster
 

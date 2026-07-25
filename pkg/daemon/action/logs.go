@@ -174,5 +174,7 @@ func seekToLastLine(filename string, lines int64) (int64, int64, error) {
 		}
 		remaining -= chunkSize
 	}
-	return 0, 0, nil
+	// Fewer lines than requested: start from the beginning, but report the real
+	// file size so the follower tails from the current end, not byte 0.
+	return 0, size, nil
 }

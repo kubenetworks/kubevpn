@@ -23,7 +23,14 @@ func readFromEndpointWriteToTun(ctx context.Context, endpoint *channel.Endpoint,
 		if pkt != nil {
 			sniffer.LogPacket(prefix, sniffer.DirectionSend, pkt.NetworkProtocolNumber, pkt)
 			buf, length := copyPacketToPool(pkt, 0, headroom)
-			out <- NewPacket(buf[:], length, nil, nil)
+			// Honor cancellation so this goroutine cannot block forever on a full
+			// channel after its consumer has stopped draining (e.g. reconnect/shutdown).
+			select {
+			case out <- NewPacket(buf[:], length, nil, nil):
+			case <-ctx.Done():
+				config.LPool.Put(buf[:])
+				return
+			}
 		}
 	}
 }

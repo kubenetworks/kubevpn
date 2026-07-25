@@ -49,7 +49,7 @@ func (svr *Server) Status(ctx context.Context, req *rpc.StatusRequest) (*rpc.Sta
 				defer wg.Done()
 				result := buildConnectionStatus(options, ips)
 				var err error
-				result.ProxyList, result.SyncList, err = buildProxyAndSyncStatus(ctx, options, options.Sync)
+				result.ProxyList, result.SyncList, err = buildProxyAndSyncStatus(ctx, options, options.GetSync())
 				if err != nil {
 					// Proxy/sync rendering failure is a ConfigMap-read issue, not a data-plane
 					// liveness signal — log it but leave the (heartbeat-based) status intact.
@@ -78,7 +78,7 @@ func (svr *Server) Status(ctx context.Context, req *rpc.StatusRequest) (*rpc.Sta
 			defer wg.Done()
 			result := buildConnectionStatus(options, ips)
 			var err error
-			result.ProxyList, result.SyncList, err = buildProxyAndSyncStatus(ctx, options, options.Sync)
+			result.ProxyList, result.SyncList, err = buildProxyAndSyncStatus(ctx, options, options.GetSync())
 			if err != nil {
 				plog.G(ctx).Errorf("Error generating status: %v", err)
 				result.Status = StatusUnhealthy

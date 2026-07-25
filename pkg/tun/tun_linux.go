@@ -44,6 +44,12 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	if device, err = tun.CreateTUN(fmt.Sprintf("utun%d", maxIndex+1), mtu); err != nil {
 		return
 	}
+	// Close the device on any error after creation; on success conn owns it.
+	defer func() {
+		if err != nil {
+			_ = device.Close()
+		}
+	}()
 
 	var name string
 	name, err = device.Name()

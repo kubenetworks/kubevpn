@@ -134,6 +134,12 @@ func init() {
 		ctx, cancelFunc := context.WithCancel(conn.Request().Context())
 		defer cancelFunc()
 
+		// readyCtx is an independent signal that the terminal is ready; it must NOT
+		// share the session's working context, otherwise signalling readiness would
+		// also tear the session down (closing it mid-handshake).
+		readyCtx, readyCancel := context.WithCancel(context.Background())
+		defer readyCancel()
+
 		h := &wsHandler{
 			ctx:       ctx,
 			sshConfig: &conf.Config,
@@ -143,9 +149,9 @@ func init() {
 			height:    conf.Height,
 			sessionId: conf.SessionID,
 			platform:  platforms.MustParse(conf.Platform),
-			condReady: cancelFunc,
+			condReady: readyCancel,
 		}
-		sessionRegistry.storeReady(conf.SessionID, ctx)
+		sessionRegistry.storeReady(conf.SessionID, readyCtx)
 		defer conn.Close()
 		h.handle(conf.Lite)
 	}))

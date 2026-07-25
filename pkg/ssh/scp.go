@@ -26,12 +26,12 @@ func SCPAndExec(ctx context.Context, stdout, stderr io.Writer, client *ssh.Clien
 			return err
 		}
 		output, err := session.CombinedOutput(command)
+		_ = session.Close()
 		if err != nil {
 			plog.G(ctx).Error(string(output))
 			return err
-		} else {
-			plog.G(ctx).Info(string(output))
 		}
+		plog.G(ctx).Info(string(output))
 	}
 	return nil
 }
@@ -96,8 +96,7 @@ func sCopy(ctx context.Context, dst io.Writer, src io.Reader, size int64, stdout
 		return err
 	}
 	if written != size {
-		plog.G(ctx).Errorf("Failed to transfer file to remote: written size %d but actuall is %d", written, size)
-		return err
+		return fmt.Errorf("failed to transfer file to remote: wrote %d bytes but expected %d", written, size)
 	}
 	return nil
 }

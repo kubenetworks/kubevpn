@@ -3,6 +3,7 @@ package action
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"google.golang.org/grpc"
 
@@ -40,23 +41,29 @@ func (svr *Server) Sync(resp rpc.Daemon_SyncServer) (err error) {
 	}
 
 	var connResp grpc.BidiStreamingClient[rpc.ConnectRequest, rpc.ConnectResponse]
+	var connRespMu sync.Mutex
 	session := NewSessionLifecycle(logger)
 	go func() {
 		var s rpc.Cancel
-		err = resp.RecvMsg(&s)
-		if err != nil {
+		if recvErr := resp.RecvMsg(&s); recvErr != nil {
 			return
 		}
-		if connResp != nil {
-			_ = connResp.SendMsg(&s)
+		connRespMu.Lock()
+		cr := connResp
+		connRespMu.Unlock()
+		if cr != nil {
+			_ = cr.SendMsg(&s)
 		}
 		session.Cancel()
 	}()
 
-	connResp, err = cli.Connect(context.Background())
-	if err != nil {
-		return err
+	cr, connErr := cli.Connect(context.Background())
+	if connErr != nil {
+		return connErr
 	}
+	connRespMu.Lock()
+	connResp = cr
+	connRespMu.Unlock()
 	err = connResp.Send(connReq)
 	if err != nil {
 		return err
@@ -139,6 +146,6 @@ func (svr *Server) Sync(resp rpc.Daemon_SyncServer) (err error) {
 	if opt == nil {
 		return fmt.Errorf("cluster %s not found", connectionID)
 	}
-	opt.Sync = options
+	opt.SetSync(options)
 	return nil
 }

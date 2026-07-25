@@ -33,6 +33,12 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	if err != nil {
 		return
 	}
+	// Close the device on any error after creation; on success conn owns it.
+	defer func() {
+		if err != nil {
+			_ = ifce.Close()
+		}
+	}()
 
 	var name string
 	name, err = ifce.Name()

@@ -26,12 +26,20 @@ func PrintGRPCStream[T any](ctx context.Context, clientStream grpc.ClientStream,
 		break
 	}
 
-	go func() {
-		if ctx != nil {
-			<-ctx.Done()
-			_ = clientStream.SendMsg(&rpc.Cancel{})
-		}
-	}()
+	if ctx != nil {
+		// Watch for cancellation, but stop watching once this function returns
+		// so the goroutine never outlives the stream (avoids a leak when ctx is
+		// a never-cancelled context such as context.Background()).
+		done := make(chan struct{})
+		defer close(done)
+		go func() {
+			select {
+			case <-ctx.Done():
+				_ = clientStream.SendMsg(&rpc.Cancel{})
+			case <-done:
+			}
+		}()
+	}
 
 	for {
 		t := new(T)
@@ -46,10 +54,10 @@ func PrintGRPCStream[T any](ctx context.Context, clientStream grpc.ClientStream,
 			continue
 		}
 		if p, ok := any(t).(Printable); ok {
-			_, _ = fmt.Fprintf(out, p.GetMessage())
+			_, _ = fmt.Fprint(out, p.GetMessage())
 		} else {
 			buf, _ := json.Marshal(t)
-			_, _ = fmt.Fprintf(out, string(buf))
+			_, _ = fmt.Fprint(out, string(buf))
 		}
 	}
 }

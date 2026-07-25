@@ -6,7 +6,6 @@ import (
 	"time"
 
 	networkingv1 "k8s.io/api/networking/v1"
-	v1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
@@ -81,45 +80,45 @@ func TestNewTickerResetHandler(t *testing.T) {
 
 // fakeIngressClient implements typednetworkingv1.IngressInterface for testing.
 type fakeIngressClient struct {
-	items []v1.Ingress
+	items []networkingv1.Ingress
 }
 
-func (f *fakeIngressClient) List(_ context.Context, _ metav1.ListOptions) (*v1.IngressList, error) {
-	return &v1.IngressList{Items: f.items}, nil
+func (f *fakeIngressClient) List(_ context.Context, _ metav1.ListOptions) (*networkingv1.IngressList, error) {
+	return &networkingv1.IngressList{Items: f.items}, nil
 }
 
-func (f *fakeIngressClient) Create(context.Context, *v1.Ingress, metav1.CreateOptions) (*v1.Ingress, error) {
+func (f *fakeIngressClient) Create(context.Context, *networkingv1.Ingress, metav1.CreateOptions) (*networkingv1.Ingress, error) {
 	return nil, nil
 }
-func (f *fakeIngressClient) Update(context.Context, *v1.Ingress, metav1.UpdateOptions) (*v1.Ingress, error) {
+func (f *fakeIngressClient) Update(context.Context, *networkingv1.Ingress, metav1.UpdateOptions) (*networkingv1.Ingress, error) {
 	return nil, nil
 }
-func (f *fakeIngressClient) UpdateStatus(context.Context, *v1.Ingress, metav1.UpdateOptions) (*v1.Ingress, error) {
+func (f *fakeIngressClient) UpdateStatus(context.Context, *networkingv1.Ingress, metav1.UpdateOptions) (*networkingv1.Ingress, error) {
 	return nil, nil
 }
 func (f *fakeIngressClient) Delete(context.Context, string, metav1.DeleteOptions) error { return nil }
 func (f *fakeIngressClient) DeleteCollection(context.Context, metav1.DeleteOptions, metav1.ListOptions) error {
 	return nil
 }
-func (f *fakeIngressClient) Get(context.Context, string, metav1.GetOptions) (*v1.Ingress, error) {
+func (f *fakeIngressClient) Get(context.Context, string, metav1.GetOptions) (*networkingv1.Ingress, error) {
 	return nil, nil
 }
 func (f *fakeIngressClient) Watch(context.Context, metav1.ListOptions) (watch.Interface, error) {
 	return nil, nil
 }
-func (f *fakeIngressClient) Patch(context.Context, string, k8stypes.PatchType, []byte, metav1.PatchOptions, ...string) (*v1.Ingress, error) {
+func (f *fakeIngressClient) Patch(context.Context, string, k8stypes.PatchType, []byte, metav1.PatchOptions, ...string) (*networkingv1.Ingress, error) {
 	return nil, nil
 }
-func (f *fakeIngressClient) Apply(context.Context, *applyconfignetworkingv1.IngressApplyConfiguration, metav1.ApplyOptions) (*v1.Ingress, error) {
+func (f *fakeIngressClient) Apply(context.Context, *applyconfignetworkingv1.IngressApplyConfiguration, metav1.ApplyOptions) (*networkingv1.Ingress, error) {
 	return nil, nil
 }
-func (f *fakeIngressClient) ApplyStatus(context.Context, *applyconfignetworkingv1.IngressApplyConfiguration, metav1.ApplyOptions) (*v1.Ingress, error) {
+func (f *fakeIngressClient) ApplyStatus(context.Context, *applyconfignetworkingv1.IngressApplyConfiguration, metav1.ApplyOptions) (*networkingv1.Ingress, error) {
 	return nil, nil
 }
 
 // fakeNetworkingV1 implements typednetworkingv1.NetworkingV1Interface for testing.
 type fakeNetworkingV1 struct {
-	namespaceIngresses map[string][]v1.Ingress
+	namespaceIngresses map[string][]networkingv1.Ingress
 }
 
 func (f *fakeNetworkingV1) Ingresses(namespace string) typednetworkingv1.IngressInterface {
@@ -135,7 +134,7 @@ func (f *fakeNetworkingV1) RESTClient() rest.Interface { return nil }
 func TestGetIngressRecord(t *testing.T) {
 	t.Run("no ingresses returns empty string", func(t *testing.T) {
 		client := &fakeNetworkingV1{
-			namespaceIngresses: map[string][]v1.Ingress{
+			namespaceIngresses: map[string][]networkingv1.Ingress{
 				"default": {},
 			},
 		}
@@ -147,7 +146,7 @@ func TestGetIngressRecord(t *testing.T) {
 
 	t.Run("matching ingress rule returns IP", func(t *testing.T) {
 		client := &fakeNetworkingV1{
-			namespaceIngresses: map[string][]v1.Ingress{
+			namespaceIngresses: map[string][]networkingv1.Ingress{
 				"default": {
 					{
 						Spec: networkingv1.IngressSpec{
@@ -174,7 +173,7 @@ func TestGetIngressRecord(t *testing.T) {
 
 	t.Run("non-matching domain returns empty string", func(t *testing.T) {
 		client := &fakeNetworkingV1{
-			namespaceIngresses: map[string][]v1.Ingress{
+			namespaceIngresses: map[string][]networkingv1.Ingress{
 				"default": {
 					{
 						Spec: networkingv1.IngressSpec{
@@ -201,7 +200,7 @@ func TestGetIngressRecord(t *testing.T) {
 
 	t.Run("matching TLS host returns IP", func(t *testing.T) {
 		client := &fakeNetworkingV1{
-			namespaceIngresses: map[string][]v1.Ingress{
+			namespaceIngresses: map[string][]networkingv1.Ingress{
 				"default": {
 					{
 						Spec: networkingv1.IngressSpec{
@@ -228,7 +227,7 @@ func TestGetIngressRecord(t *testing.T) {
 
 	t.Run("multiple namespaces searched", func(t *testing.T) {
 		client := &fakeNetworkingV1{
-			namespaceIngresses: map[string][]v1.Ingress{
+			namespaceIngresses: map[string][]networkingv1.Ingress{
 				"default": {},
 				"production": {
 					{
@@ -256,7 +255,7 @@ func TestGetIngressRecord(t *testing.T) {
 
 	t.Run("ingress without IP in status returns empty string", func(t *testing.T) {
 		client := &fakeNetworkingV1{
-			namespaceIngresses: map[string][]v1.Ingress{
+			namespaceIngresses: map[string][]networkingv1.Ingress{
 				"default": {
 					{
 						Spec: networkingv1.IngressSpec{
@@ -283,7 +282,7 @@ func TestGetIngressRecord(t *testing.T) {
 
 	t.Run("rule match takes precedence over TLS match", func(t *testing.T) {
 		client := &fakeNetworkingV1{
-			namespaceIngresses: map[string][]v1.Ingress{
+			namespaceIngresses: map[string][]networkingv1.Ingress{
 				"default": {
 					{
 						Spec: networkingv1.IngressSpec{

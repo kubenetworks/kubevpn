@@ -7,21 +7,16 @@ import (
 )
 
 func TestIsIPv4_EmptySlice(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("expected panic for empty slice, but got none")
-		}
-	}()
-	IsIPv4([]byte{})
+	// Must not panic on an empty slice (callers may pass buf[1:read] with read==1).
+	if IsIPv4([]byte{}) {
+		t.Error("expected false for empty slice")
+	}
 }
 
 func TestIsIPv6_EmptySlice(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("expected panic for empty slice, but got none")
-		}
-	}()
-	IsIPv6([]byte{})
+	if IsIPv6([]byte{}) {
+		t.Error("expected false for empty slice")
+	}
 }
 
 // buildIPv4Header constructs a minimal 20-byte IPv4 header with the given src and dst IPs.

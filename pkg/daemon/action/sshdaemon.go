@@ -90,8 +90,12 @@ func (svr *Server) SshStart(ctx context.Context, req *rpc.SshStartRequest) (resp
 
 // SshStop handles the SshStop RPC, shutting down the SSH TUN server.
 func (svr *Server) SshStop(ctx context.Context, req *rpc.SshStopRequest) (*rpc.SshStopResponse, error) {
-	if svr.sshCancelFunc != nil {
-		svr.sshCancelFunc()
+	// SshStart writes sshCancelFunc under svr.Lock; read it under the same lock.
+	svr.Lock.Lock()
+	cancel := svr.sshCancelFunc
+	svr.Lock.Unlock()
+	if cancel != nil {
+		cancel()
 	}
 	return &rpc.SshStopResponse{}, nil
 }

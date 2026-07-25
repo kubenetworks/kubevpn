@@ -16,7 +16,8 @@ import (
 
 func (c *ConnectOptions) setupSignalHandler() {
 	stopChan := make(chan os.Signal, 1)
-	signal.Notify(stopChan, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGKILL)
+	// SIGKILL and SIGSTOP cannot be caught by signal.Notify, so they are intentionally omitted.
+	signal.Notify(stopChan, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	select {
 	case <-stopChan:
 		c.Cleanup(context.Background())
@@ -37,8 +38,11 @@ func (c *ConnectOptions) Cleanup(logCtx context.Context) {
 		return
 	}
 
-	if c.configMapStore != nil {
-		c.configMapStore.Stop()
+	c.configMapStoreMu.Lock()
+	store := c.configMapStore
+	c.configMapStoreMu.Unlock()
+	if store != nil {
+		store.Stop()
 	}
 	const cleanupTimeout = 10 * time.Second
 	ctx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)

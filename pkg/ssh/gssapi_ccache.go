@@ -146,6 +146,9 @@ func (c *CCache) Marshal() ([]byte, error) {
 
 	// Write the CCache version
 	err = b.WriteByte(c.Version)
+	if err != nil {
+		return []byte{}, err
+	}
 
 	if c.Version == 4 {
 		// Write version 4 header

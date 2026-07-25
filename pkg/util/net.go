@@ -113,12 +113,12 @@ func Ping(ctx context.Context, srcIP, dstIP string) (bool, error) {
 
 // IsIPv4 checks if the packet starts with IPv4 version nibble.
 func IsIPv4(packet []byte) bool {
-	return (packet[0] >> 4) == 4
+	return len(packet) > 0 && (packet[0]>>4) == 4
 }
 
 // IsIPv6 checks if the packet starts with IPv6 version nibble.
 func IsIPv6(packet []byte) bool {
-	return (packet[0] >> 4) == 6
+	return len(packet) > 0 && (packet[0]>>4) == 6
 }
 
 const (
@@ -199,12 +199,17 @@ func GetLocalIPNet() (*net.IPNet, error) {
 	if err != nil {
 		return nil, err
 	}
-	var next net.IP
-	for i := 0; i < sum%255; i++ {
-		next, err = dhcp.AllocateNext()
+	// Allocate at least once so the returned IP is never nil (sum%255 can be 0).
+	count := sum % 255
+	if count == 0 {
+		count = 1
 	}
-	if err != nil {
-		return nil, err
+	var next net.IP
+	for i := 0; i < count; i++ {
+		next, err = dhcp.AllocateNext()
+		if err != nil {
+			return nil, err
+		}
 	}
 	_, bits := config.DockerCIDR.Mask.Size()
 	return &net.IPNet{IP: next, Mask: net.CIDRMask(bits, bits)}, nil

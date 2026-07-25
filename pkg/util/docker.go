@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/docker/docker/api/types"
@@ -19,45 +20,66 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
+// syncBuffer is a bytes.Buffer safe for concurrent Write and String access.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.String()
+}
+
 // RunLogsWaitRunning streams Docker container logs until the startup slogan appears or the context is cancelled.
 func RunLogsWaitRunning(ctx context.Context, name string) error {
-	buf := bytes.NewBuffer(nil)
-	w := io.MultiWriter(buf, os.Stdout)
-
-	args := []string{"logs", name, "--since", "0m", "--details", "--follow"}
-	cmd := exec.Command("docker", args...)
-	cmd.Stdout = w
-	go cmd.Start()
-
 	cancel, cancelFunc := context.WithCancel(ctx)
 	defer cancelFunc()
 
+	args := []string{"logs", name, "--since", "0m", "--details", "--follow"}
+	cmd := exec.CommandContext(cancel, "docker", args...)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	cmd.Stderr = os.Stderr
+	if err = cmd.Start(); err != nil {
+		return err
+	}
+	defer func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	}()
+
+	// Demux docker's multiplexed log stream to stdout (for the user) and to buf
+	// (for slogan detection). buf is read concurrently by the ticker below.
+	buf := &syncBuffer{}
+	copyDone := make(chan struct{})
 	go func() {
-		t := time.NewTicker(time.Second)
-		defer t.Stop()
-		for range t.C {
-			// keyword, maybe can find another way more elegant
+		defer close(copyDone)
+		_, _ = stdcopy.StdCopy(io.MultiWriter(os.Stdout, buf), os.Stderr, stdout)
+	}()
+
+	t := time.NewTicker(time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-cancel.Done():
+			return nil
+		case <-copyDone:
+			return nil
+		case <-t.C:
 			if strings.Contains(buf.String(), config.Slogan) {
-				cancelFunc()
-				return
+				return nil
 			}
 		}
-	}()
-
-	errChan := make(chan error)
-	go func() {
-		var err error
-		_, err = stdcopy.StdCopy(w, os.Stdout, buf)
-		if err != nil {
-			errChan <- err
-		}
-	}()
-
-	select {
-	case err := <-errChan:
-		return err
-	case <-cancel.Done():
-		return nil
 	}
 }
 

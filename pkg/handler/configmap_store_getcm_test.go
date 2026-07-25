@@ -35,6 +35,29 @@ func TestConfigMapStore_GetConfigMap_GETFallback(t *testing.T) {
 	}
 }
 
+// Regression: a retried Cleanup calls Stop() more than once; Stop must be
+// idempotent and never close the informer stop channel twice.
+func TestConfigMapStore_Stop_Idempotent(t *testing.T) {
+	t.Run("before informer created", func(t *testing.T) {
+		store := &ConfigMapStore{
+			clientset:        fake.NewSimpleClientset(),
+			managerNamespace: "test",
+		}
+		store.Stop()
+		store.Stop() // must not panic
+	})
+
+	t.Run("after informer created", func(t *testing.T) {
+		store := &ConfigMapStore{
+			clientset:        fake.NewSimpleClientset(),
+			managerNamespace: "test",
+		}
+		store.GetInformer() // creates informerStop and starts the informer goroutine
+		store.Stop()
+		store.Stop() // second close of informerStop would panic without the fix
+	})
+}
+
 func TestConfigMapStore_GetConfigMap_FromInformerCache(t *testing.T) {
 	const ns = "test"
 	cm := &corev1.ConfigMap{

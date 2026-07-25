@@ -206,6 +206,13 @@ func (conf SshConfig) JumpRecursion(ctx context.Context, stopChan <-chan struct{
 	if err != nil {
 		return nil, err
 	}
+	// Close baseClient only on error; on success it is the transport for the
+	// jumped client (or the returned client itself when there is no further hop).
+	defer func() {
+		if err != nil && baseClient != nil {
+			_ = baseClient.Close()
+		}
+	}()
 
 	var bastionList []SshConfig
 	if conf.ConfigAlias != "" {
@@ -217,6 +224,11 @@ func (conf SshConfig) JumpRecursion(ctx context.Context, stopChan <-chan struct{
 	}
 	if conf.Addr != "" {
 		bastionList = append(bastionList, conf)
+	}
+
+	// No further hop configured: the jump host itself is the target.
+	if len(bastionList) == 0 {
+		return baseClient, nil
 	}
 
 	for _, sshConfig := range bastionList {
@@ -248,10 +260,10 @@ func (conf SshConfig) Dial(ctx context.Context, stopChan <-chan struct{}) (clien
 	go func() {
 		if stopChan != nil {
 			<-stopChan
-			conn.Close()
-			if client != nil {
-				client.Close()
-			}
+			// Closing the underlying conn tears down both an in-progress handshake
+			// and an established client (which is layered on conn). Avoid reading
+			// the named return `client` here — it races with the function's return.
+			_ = conn.Close()
 		}
 	}()
 	defer func() {

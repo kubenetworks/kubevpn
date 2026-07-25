@@ -31,14 +31,6 @@ func basePodTemplateSpec() *v1.PodTemplateSpec {
 	}
 }
 
-func basePodSpec() *v1.PodSpec {
-	return &v1.PodSpec{
-		Containers: []v1.Container{
-			{Name: "app", Image: "nginx:latest"},
-		},
-	}
-}
-
 // Req3: the injected fargate VPN sidecar (server) defaults to --debug.
 func TestAddEnvoyAndSSHContainer_DefaultDebug(t *testing.T) {
 	spec := basePodTemplateSpec()
@@ -62,6 +54,24 @@ func TestAddEnvoyAndSSHContainer_DefaultDebug(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("vpn sidecar container %q not found", config.ContainerSidecarVPN)
+	}
+}
+
+// Regression: mesh injection must NOT pin the workload pod to the traffic-manager
+// ServiceAccount. That SA only exists in the manager namespace; referencing it from a
+// workload in another namespace makes the ServiceAccount admission controller reject
+// pod creation, so the new ReplicaSet never produces a pod, the rollout times out, and
+// RolloutStatus undoes the patch — leaving the workload on its original single-container
+// spec. The sidecar reaches the control plane over gRPC+TLS and needs no SA token.
+func TestAddVPNAndEnvoyContainer_DoesNotPinManagerServiceAccount(t *testing.T) {
+	spec := basePodTemplateSpec()
+	// Workload lives in "default"; manager is in "kubevpn-system" — a different namespace.
+	AddVPNAndEnvoyContainer(spec, "default", "node1", false, "kubevpn-system", fakeSecret(), "kubevpn:test")
+
+	if spec.Spec.ServiceAccountName == config.ConfigMapPodTrafficManager {
+		t.Errorf("injected pod must not reference the manager ServiceAccount %q "+
+			"(it does not exist in the workload namespace and blocks pod creation)",
+			config.ConfigMapPodTrafficManager)
 	}
 }
 
