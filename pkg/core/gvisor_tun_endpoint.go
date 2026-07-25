@@ -28,13 +28,13 @@ func (h *gvisorTCPHandler) readFromEndpointWriteToTCPConn(ctx context.Context, c
 			view := pkt.ToView()
 			data := view.AsSlice()
 			buf := config.LPool.Get().([]byte)
-			payloadLen := len(data) + 1
-			binary.BigEndian.PutUint16(buf[:2], uint16(payloadLen))
-			buf[2] = 0
-			copy(buf[3:], data)
+			payloadLen := len(data) + typePrefixLen
+			binary.BigEndian.PutUint16(buf[:datagramHeaderLen], uint16(payloadLen))
+			buf[datagramHeaderLen] = 0
+			copy(buf[tunReserve:], data)
 			view.Release()
 			pkt.DecRef()
-			_, err := conn.Write(buf[:payloadLen+2])
+			_, err := conn.Write(buf[:payloadLen+datagramHeaderLen])
 			config.LPool.Put(buf)
 			if err != nil {
 				plog.G(ctx).Errorf("[Gvisor-TCP] Failed to write to conn: %v", err)
@@ -52,7 +52,9 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 
 	for ctx.Err() == nil {
 		buf := config.LPool.Get().([]byte)[:]
-		read, err := tcpConn.Read(buf[:])
+		// Read into buf[datagramHeaderLen:] so the stripped payload lands in canonical position:
+		// buf[datagramHeaderLen] = type prefix, buf[tunReserve:] = IP. read = type+IP length.
+		read, err := tcpConn.Read(buf[datagramHeaderLen:])
 		if err != nil {
 			if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) {
 				plog.G(ctx).Debugf("[Gvisor-TCP] Connection closed: %v", err)
@@ -67,11 +69,12 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 			config.LPool.Put(buf[:])
 			continue
 		}
+		ip := buf[tunReserve : datagramHeaderLen+read]
 		// Determine network protocol from IP version field (IFF_NO_PI mode)
 		var protocol tcpip.NetworkProtocolNumber
-		if util.IsIPv4(buf[1:read]) {
+		if util.IsIPv4(ip) {
 			protocol = header.IPv4ProtocolNumber
-		} else if util.IsIPv6(buf[1:read]) {
+		} else if util.IsIPv6(ip) {
 			protocol = header.IPv6ProtocolNumber
 		} else {
 			plog.G(ctx).Errorf("[Gvisor-TCP] Unknown packet, dropping")
@@ -79,7 +82,7 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 			continue
 		}
 
-		src, dst, ipProtocol, parseErr := util.ParseIPFast(buf[1:read])
+		src, dst, ipProtocol, parseErr := util.ParseIPFast(ip)
 		if parseErr != nil {
 			plog.G(ctx).Errorf("[Gvisor-TCP] Failed to parse IP header: %v", parseErr)
 			config.LPool.Put(buf[:])
@@ -89,21 +92,22 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 		h.hub.AddRoute(ctx, src, conn)
 		dstKey := string(dst)
 		if h.hub.HasRoute(dstKey) {
-			dgram := newDatagramPacket(buf, read)
-			// Write with fallback: tries all conns for dst, removes dead ones
-			usedConn, writeErr := h.hub.WriteFuncToRoute(dstKey, func(c net.Conn) error {
-				return dgram.Write(c)
-			})
-			config.LPool.Put(buf[:])
+			// Zero-copy: buf is canonical (IP at buf[tunReserve:], 2 bytes of headroom at
+			// buf[:datagramHeaderLen]). Stamp the length in place and hand the packet to the
+			// route by reference; the chosen conn takes a reference and we drop ours below.
+			pkt := NewPacket(buf, read, src, dst)
+			binary.BigEndian.PutUint16(buf[:datagramHeaderLen], uint16(read))
+			usedConn, writeErr := h.hub.WriteToRoutePacket(dstKey, pkt)
+			pkt.release()
 			if writeErr != nil {
 				plog.G(ctx).Warnf("[Gvisor-TCP] All routes dead for %s: %v", dst, writeErr)
 			} else if config.Debug {
 				plog.G(ctx).Debugf("[Gvisor-TCP] Routed %s -> %s via %s", src, dst, usedConn.RemoteAddr())
 			}
-		} else if buf[0] == 1 {
+		} else if buf[datagramHeaderLen] == 1 {
 			pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
 				ReserveHeaderBytes: 0,
-				Payload:            buffer.MakeWithData(buf[1:read]),
+				Payload:            buffer.MakeWithData(ip),
 			})
 			config.LPool.Put(buf[:])
 			sniffer.LogPacket("[gVISOR] ", sniffer.DirectionRecv, protocol, pkt)
@@ -113,18 +117,13 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 				plog.G(ctx).Debugf("[Gvisor-TCP] Injected to stack: %s -> %s, protocol=%s, length=%d", src, dst, layers.IPProtocol(ipProtocol).String(), read)
 			}
 		} else {
-			pkt := &Packet{
-				data:   buf[:],
-				length: read,
-				src:    src,
-				dst:    dst,
-			}
+			pkt := NewPacket(buf[:], read, src, dst)
 			// Honor cancellation so this goroutine never blocks forever on a full
 			// channel after the consumer (routeTCPToTun) has exited at shutdown.
 			select {
 			case h.hub.TCPPacketChan <- pkt:
 			case <-ctx.Done():
-				config.LPool.Put(buf[:])
+				pkt.release()
 				return
 			}
 		}

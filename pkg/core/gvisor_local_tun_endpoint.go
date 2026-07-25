@@ -45,19 +45,20 @@ func readFromGvisorInboundWriteToEndpoint(ctx context.Context, in <-chan *Packet
 				return
 			}
 			var protocol tcpip.NetworkProtocolNumber
-			if util.IsIPv4(packet.data[1:packet.length]) {
+			ip := packet.data[tunReserve : datagramHeaderLen+packet.length]
+			if util.IsIPv4(ip) {
 				protocol = header.IPv4ProtocolNumber
-			} else if util.IsIPv6(packet.data[1:packet.length]) {
+			} else if util.IsIPv6(ip) {
 				protocol = header.IPv6ProtocolNumber
 			} else {
 				plog.G(ctx).Errorf("[Gvisor-TCP] Unknown packet, dropping")
-				config.LPool.Put(packet.data[:])
+				packet.release()
 				continue
 			}
 			pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
-				Payload: buffer.MakeWithData(packet.data[1:packet.length]),
+				Payload: buffer.MakeWithData(ip),
 			})
-			config.LPool.Put(packet.data[:])
+			packet.release()
 			sniffer.LogPacket(prefix, sniffer.DirectionRecv, protocol, pkt)
 			endpoint.InjectInbound(protocol, pkt)
 			pkt.DecRef()

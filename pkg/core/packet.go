@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"net"
+	"sync/atomic"
 
 	"github.com/google/gopacket/layers"
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
@@ -12,15 +13,63 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
+const (
+	// datagramHeaderLen is the 2-byte big-endian length prefix that frames each
+	// datagram on the wire: [2-byte length][payload].
+	datagramHeaderLen = 2
+	// typePrefixLen is the 1-byte type prefix in front of the IP payload
+	// (0 = write back to TUN, 1 = inject into the local gvisor stack).
+	typePrefixLen = 1
+	// tunReserve is the headroom reserved at the front of every pooled buffer when
+	// reading from the TUN: [datagramHeaderLen][typePrefixLen]. It lets the datagram
+	// length and type prefix be written in place, without copying, on the way out.
+	tunReserve = datagramHeaderLen + typePrefixLen // 3
+)
+
 // Packet represents a network packet with source and destination addresses.
+//
+// Canonical buffer layout (single, system-wide):
+//
+//	data[0:2]            = datagram length header (datagramHeaderLen)
+//	data[2]              = type prefix (typePrefixLen)
+//	data[3:]             = raw IP payload (starts at tunReserve)
+//	length               = typePrefixLen + len(IP)  // type + IP
+//	wire frame           = data[0 : datagramHeaderLen+length]
+//	raw IP               = data[tunReserve : datagramHeaderLen+length]
 type Packet struct {
 	data   []byte
 	length int
 	src    net.IP
 	dst    net.IP
+	// refs counts EXTRA references beyond the implicit owner: the zero value means a
+	// single owner, so a freshly created Packet (including a plain &Packet{}) is valid
+	// and is freed by exactly one release(). acquire() adds a reference; release()
+	// removes one and returns the pooled buffer to config.LPool when the last (implicit)
+	// reference is dropped. This lets one buffer be shared by N consumers (heartbeat
+	// fan-out across conn slots, or an async bufferedTCP queue) without copying — each
+	// consumer release()s when done and the last one frees. Modeled on gvisor's chunk
+	// refcount (buffer.View.Clone / Release).
+	refs atomic.Int32
+}
+
+// acquire adds a reference to the packet's buffer. Pair every acquire with a release.
+func (p *Packet) acquire() { p.refs.Add(1) }
+
+// release drops a reference; the pooled buffer is returned to config.LPool when the
+// implicit owner's reference is dropped (refs goes to -1). Releasing again is a
+// lifecycle bug that would otherwise surface as a hard-to-debug use-after-free, so
+// fail loudly instead.
+func (p *Packet) release() {
+	switch n := p.refs.Add(-1); {
+	case n == -1:
+		config.LPool.Put(p.data[:])
+	case n < -1:
+		panic("core: Packet released more times than acquired")
+	}
 }
 
 // NewPacket creates a Packet with the given buffer, length, and parsed IP addresses.
+// The returned packet has a single (implicit) reference to data; see Packet.refs.
 func NewPacket(data []byte, length int, src net.IP, dst net.IP) *Packet {
 	return &Packet{
 		data:   data,
@@ -49,7 +98,7 @@ func copyPacketToPool(pkt *stack.PacketBuffer, prefix byte, headroom int) (buf [
 	view := pkt.ToView()
 	data := view.AsSlice()
 	buf = config.LPool.Get().([]byte)[:]
-	n := copy(buf[headroom+1:], data)
+	n := copy(buf[headroom+typePrefixLen:], data)
 	buf[headroom] = prefix
 	view.Release()
 	pkt.DecRef()
