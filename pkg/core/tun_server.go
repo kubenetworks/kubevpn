@@ -40,7 +40,7 @@ func (t *serverTransport) routeOutbound(ctx context.Context, buf []byte, n int, 
 	// Canonical layout: set the type prefix in place; IP already sits at buf[tunReserve:].
 	// length is type+IP so routeTun can frame without further arithmetic.
 	logIPPacket(ctx, "[TUN]", buf[tunReserve:tunReserve+n])
-	buf[datagramHeaderLen] = 1
+	buf[datagramHeaderLen] = packetTypeToGvisor
 	sendStart := time.Now()
 	t.dev.tunInbound <- NewPacket(buf[:], n+typePrefixLen, src, dst)
 	if elapsed := time.Since(sendStart); elapsed > slowPathWarnThreshold {

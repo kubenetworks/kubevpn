@@ -4,25 +4,55 @@
 
 KubeVPN uses a TUN device + gvisor network stack to create a VPN tunnel between a local client and a remote K8s cluster. All traffic between client and server is multiplexed over a single TCP connection using a custom datagram protocol (2-byte length header + payload).
 
-## Protocol Byte Prefix
+## Canonical buffer layout
 
-Every packet between client and server carries a 1-byte type prefix at `data[0]`:
+The whole data plane uses a single buffer layout (constants in `packet.go`):
 
-| Prefix | Meaning | Action at receiver |
-|--------|---------|--------------------|
-| `0` | Gvisor-processed packet (response from real network) | Write to TUN device directly |
-| `1` | Raw IP packet (needs gvisor processing) | Inject into gvisor stack |
+```
+data[0:2]  datagram length header  (datagramHeaderLen = 2)
+data[2]    type prefix             (typePrefixLen = 1)
+data[3:]   raw IP payload          (starts at tunReserve = 3)
+
+Packet.length = typePrefixLen + len(IP)   // type + IP
+wire frame    = data[0 : datagramHeaderLen+length]
+raw IP        = data[tunReserve : datagramHeaderLen+length]
+```
+
+`pumpTun` reads the TUN into `data[3:]`, reserving the 3-byte head so the datagram
+length and type prefix can be written in place — no shifting on the way out.
+
+### Type prefix
+
+The 1-byte type prefix at `data[2]` (named constants in `packet.go`); it is a small
+extensible discriminator — values `2..255` are reserved for future packet types:
+
+| Prefix | Constant | Meaning | Action at receiver |
+|--------|----------|---------|--------------------|
+| `0` | `packetTypeToTUN` | Gvisor-processed packet (response from real network) | Write to TUN device directly |
+| `1` | `packetTypeToGvisor` | Raw IP packet (needs gvisor processing) | Inject into gvisor stack |
 
 ## Datagram Protocol (UDP-over-TCP)
 
 TCP is a stream protocol, so packets are framed with a 2-byte big-endian length header:
 
 ```
-[2 bytes: payload length][N bytes: payload (prefix byte + IP packet)]
+[2 bytes: payload length][N bytes: payload (type prefix + IP packet)]
 ```
 
-Read: `readDatagramPacket` reads 2-byte length, then reads exactly N bytes.
-Write: `DatagramPacket.Write` prepends the 2-byte header and writes atomically.
+Read: `readDatagramPacket` reads the 2-byte length, then reads exactly N bytes.
+Write: `writeDatagram(w, buf, payloadLen)` stamps the length header in place in the
+buffer's reserved head and writes the frame `buf[:2+payloadLen]` in a single Write. It
+is idempotent (safe to retry across connections) and emits one contiguous Write, so it
+composes with `bufferedTCP` (one Write == one frame).
+
+### Reference-counted packet buffers
+
+Pooled buffers (`config.LPool`) are wrapped in `*Packet` with an atomic reference count
+(`packet.go`, modeled on gvisor's `buffer.View` chunk refcount). The zero value means a
+single owner; `acquire()` adds a reference and `release()` returns the buffer to the pool
+when the last reference is dropped (releasing more than acquired panics, turning a
+use-after-free into a loud failure). This lets a buffer be handed to an async consumer
+(e.g. `bufferedTCP`'s queue) by reference instead of being copied.
 
 ---
 
@@ -84,7 +114,7 @@ Client TCP conn
   → readFromTCPConnWriteToEndpoint
     → UDPConnOverTCP.Read (parse 2-byte datagram header)
     → Parse IP header, RouteMapTCP.AddRoute(srcIP, conn)
-    → buf[0]==1 → inject to gvisor stack
+    → buf[2]==1 → inject to gvisor stack
   → gvisor TCPForwarder/UDPForwarder
     → net.Dial to real k8s service IP:port
     → bidirectional io.Copy
@@ -95,28 +125,29 @@ Client TCP conn
 Real k8s service responds
   → gvisor stack processes response
   → readFromEndpointWriteToTCPConn
-    → copyPacketToPool(pkt, prefix=0)
-    → UDPConnOverTCP.Write (2-byte header + data)
-    → TCP conn → Client
+    → copy gvisor section views straight into a pooled buffer (pkt.AsSlices, one copy)
+      at the canonical IP offset, type prefix = 0, length header in place
+    → conn.Write(frame) → TCP conn → Client
 ```
 
 **Path 3: Inter-client routing (Client A → Client B)**
 ```
 Client A sends packet to Client B's tun IP
   → readFromTCPConnWriteToEndpoint on A's conn
-    → RouteMapTCP.Load(dst) → found B's conn
-    → DatagramPacket.Write → B's BufferedTCP
-    → B's BufferedTCP.run → B's raw TCP conn → Client B
+    → RouteMapTCP.Load(dst) → found B's ConnList
+    → stamp length header in place, WriteToRoutePacket(dst, pkt)
+      → B's bufferedTCP.writePacket takes a reference (no copy)
+      → B's bufferedTCP.run → B's raw TCP conn → Client B → release()
 ```
 
 **Path 4: Server TUN → Client (kernel-originated traffic)**
 ```
 Server kernel sends IP packet to tun device
-  → Device.readFromTun → tunInbound
-  → Peer.routeTun
+  → pumpTun reads into data[3:], routeOutbound sets type=1 → tunInbound
+  → serverTransport.routeTun
     → RouteMapTCP.Load(dst)
-    → found: shift data +1 byte (add prefix=1) → DatagramPacket.Write
-      → BufferedTCP → Client TCP conn
+    → found: stamp length header in place (no shift), WriteToRoutePacket(dst, pkt)
+      → bufferedTCP takes a reference → Client TCP conn
     → not found: drop packet, log warning
 ```
 
@@ -152,12 +183,12 @@ Server kernel sends IP packet to tun device
 │  │                                      │                  │ │
 │  │  Forwarder.DialContext ──▶ TCP conn to server           │ │
 │  │                              │                          │ │
-│  │  writeToConn ◀── tunInbound ─┘                          │ │
-│  │    └─ UDPConnOverTCP.Write → TCP → server               │ │
+│  │  writeToConn ◀── slot.inbound ◀── runConnPool ◀─ tunInbound│
+│  │    └─ stamp length in place → raw TCP → server          │ │
 │  │                                                         │ │
-│  │  readFromConn ──▶ UDPConnOverTCP.Read                   │ │
-│  │    ├─ prefix==0 ──▶ tunOutbound ──▶ writeToTun          │ │
-│  │    └─ prefix==1 ──▶ gvisor stack #2                     │ │
+│  │  readFromConn ──▶ UDPConnOverTCP.Read into buf[2:]       │ │
+│  │    ├─ type==0 ──▶ tunOutbound ──▶ writeToTun            │ │
+│  │    └─ type==1 ──▶ gvisor stack #2                       │ │
 │  │                     (inter-client)                      │ │
 │  │                     └─ LocalTCPForwarder                │ │
 │  │                        dials 127.0.0.1:port             │ │
@@ -176,19 +207,19 @@ Server kernel sends IP packet to tun device
 ```
 App sends TCP/UDP to k8s service IP (e.g. 10.96.0.1:80)
   → kernel routes to TUN device (via route table)
-  → ClientDevice.readFromTun
-    → read at buf[1:], set buf[0]=1
+  → ClientDevice.readFromTun (pumpTun)
+    → read at buf[3:] (tunReserve), routeOutbound sets type at buf[2]=1
     → parse IP: src=198.18.0.100, dst=10.96.0.1
-    → src != dst → tunInbound channel
+    → src != dst → tunInbound → runConnPool hashes dst to a slot → slot.inbound
   → writeToConn
-    → UDPConnOverTCP.Write (2-byte header + data)
-    → TCP conn → Server
+    → stamp 2-byte length header in place at buf[0:2]
+    → raw TCP conn → Server
   → Server processes (Path 1 above) → response comes back
   → readFromConn
-    → UDPConnOverTCP.Read
-    → buf[0]==0 → tunOutbound channel
+    → UDPConnOverTCP.Read into buf[2:] (type at buf[2], IP at buf[3:])
+    → buf[2]==0 → tunOutbound channel
   → writeToTun
-    → strip prefix byte, write IP packet to TUN
+    → write IP packet at data[3:] to TUN (skipping length header + type prefix)
     → kernel delivers response to App
 ```
 
@@ -207,7 +238,7 @@ App pings 198.18.0.100 (own tun IP)
 Client B sends packet to this client's tun IP
   → Server routes via RouteMapTCP → this client's TCP conn
   → readFromConn
-    → buf[0]==1 → gvisorInbound
+    → buf[2]==1 → gvisorInbound
     → gvisor stack #2 (NewLocalStack)
       → LocalTCPForwarder dials 127.0.0.1:port
       → connects to local service
@@ -219,7 +250,7 @@ Client B sends packet to this client's tun IP
 ```
 Every KeepAliveTime:
   → generate ICMP echo to server's router IP
-  → buf[0]=1 → tunInbound → writeToConn → server
+  → type at buf[2]=1 → tunInbound → broadcast to all conn-pool slots → server
   → server gvisor handles ICMP → response via Path 2
 ```
 
@@ -243,6 +274,8 @@ type RouteHub struct {
 
 Wraps TCP connections stored in `RouteMapTCP`. When one client's read goroutine routes a packet to another client, the write goes through `BufferedTCP` to prevent blocking the reader. Without this, a slow client would stall packet processing for all clients.
 
+The routing hot paths (`routeTun`, inter-client) hand the framed `*Packet` to `BufferedTCP.writePacket`, which takes one reference and enqueues it; `run()` writes the frame and releases the reference. No per-packet copy. The generic `Write([]byte)` (net.Conn) still copies — the contract lets the caller reuse its buffer — but it is off the routing hot path.
+
 ### Two Client Gvisor Stacks
 
 | Stack | Created in | Purpose | Output |
@@ -263,7 +296,7 @@ Both use `NewLocalStack` with `LocalTCPForwarder` (dials `127.0.0.1`) and `Local
 | TUN read | syscall | ~1μs |
 | Parse IP header | CPU | ~100ns |
 | Channel send/recv (x4) | goroutine scheduling | ~200ns each |
-| UDPConnOverTCP.Write | pool alloc + 1 memcpy | ~200ns |
+| writeToConn (frame in place, raw TCP) | 0 extra copy | ~50ns |
 | TCP write | syscall + possible TLS | ~5-50μs |
 | Server gvisor inject | packet processing | ~1-5μs |
 | TCPForwarder dial (first packet) | TCP handshake | ~1-100ms |
@@ -272,35 +305,42 @@ Both use `NewLocalStack` with `LocalTCPForwarder` (dials `127.0.0.1`) and `Local
 
 ### Optimizations applied
 
-**1. UDPConnOverTCP.Write / PacketConnOverTCP.WriteTo:**
-Before: copy data to `buf[0:]`, then shift ALL data to `buf[2:]` for header.
-After: copy directly to `buf[2:]`, header at `buf[0:2]`. Saves 1 memcpy per packet.
+All built on the single canonical layout (`[2 len][1 type][IP]`, IP reserved at `data[3:]`)
+and reference-counted packet buffers.
 
-**2. Server response path (readFromEndpointWriteToTCPConn):**
-Before: `copyPacketToPool` (alloc+copy) → `UDPConnOverTCP.Write` (alloc+copy) = 2 pool allocs, 2 copies.
-After: single pool alloc, write `[header][prefix][data]` in one copy — bypasses UDPConnOverTCP entirely.
+**1. Unified layout (no shifts):** every producer/consumer agrees on the offsets, so the
+loopback path no longer shifts `[type][IP]` between offsets, and `writeToTun` /
+`readFromGvisorInbound` read the IP straight from `data[3:]`. The two former layout-shift
+copies are gone.
 
-**3. Server TUN→client routing (routeTun):**
-Before: `readFromTun` at `buf[0:]` → shift +1 → `DatagramPacket.Write` shift +2 = 3 memcpys.
-After: `readFromTun` at `buf[3:]` (reserves headroom) → write header/prefix in-place = 0 extra copies.
+**2. In-place datagram framing (`writeDatagram`):** the length header is stamped into the
+reserved 2-byte head and the frame written in one contiguous Write — no scratch buffer.
+Idempotent, so it stays correct across `WriteFunc` retries.
 
-**4. Client outbound (readFromTun → writeToConn):**
-Before: `readFromTun` at `buf[1:]` → `writeToConn` → `UDPConnOverTCP.Write` (alloc + copy to `buf2[2:]`) = 1 extra alloc + 1 extra memcpy.
-After: `readFromTun` at `buf[3:]` (reserves 2-byte headroom) → `writeToConn` writes header in-place at `buf[0:2]`, sends directly to raw TCP conn. Zero extra copy.
+**3. Zero-copy routing into BufferedTCP:** `routeTun` and inter-client routing hand the
+`*Packet` to `bufferedTCP.writePacket` by reference (one reference transferred, released
+after the socket write) instead of copying through `Write([]byte)`.
 
-**Total: reduced from 5 memcpys to 2 per roundtrip (-60%).**
+**4. Heartbeat fan-out:** shares the refcount where safe; the broadcast itself clones per
+slot (each slot's `writeToConn` stamps the header in place and writes concurrently, so a
+shared buffer would be a data race). Heartbeats are infrequent, so the clone is negligible.
 
-### Remaining 2 memcpys (unavoidable)
+**5. gvisor boundary copy halved:** `copyPacketToPool` and `readFromEndpointWriteToTCPConn`
+copy gvisor's section views (`pkt.AsSlices()`, aliased — no copy) straight into the pooled
+buffer in one pass, instead of `pkt.ToView()` (which flattens into a throwaway buffer first)
+followed by a second copy.
+
+### Remaining copies (unavoidable)
 
 1. **`buffer.MakeWithData` in gvisor InjectInbound** — gvisor copies data into its own managed buffer. Cannot be eliminated without modifying gvisor internals.
 
-2. **`copyPacketToPool` in server response** — copies from gvisor endpoint packet to pool buffer. Required because gvisor packet lifecycle is managed by gvisor, and we need data in a pool buffer for TCP framing.
+2. **gvisor → pool boundary (`copyPacketToPool`, `readFromEndpointWriteToTCPConn`)** — one copy out of gvisor's reference-counted, chunked memory into our flat pooled buffer for wire framing. Reference counting addresses sharing, not this representation change; already minimized to a single copy.
+
+3. **`bufferedTCP.Write([]byte)`** — the net.Conn contract lets the caller reuse the buffer, so this generic path copies. The routing hot paths avoid it via `writePacket`.
 
 ### Remaining optimization opportunities
 
-1. **Lazy client gvisor stack #2**: Inter-client traffic is uncommon. Deferring stack creation until first `buf[0]==1` packet from server would save ~2MB memory.
-
-2. **BufferedTCP pool allocation**: Every inter-client write allocates a pool buffer and copies data. Could pass buffer ownership instead.
+1. **Lazy client gvisor stack #2**: Inter-client traffic is uncommon. Deferring stack creation until the first `type==1` packet from the server would save ~2MB memory.
 
 ### Bug fixes: heartbeat and reconnection
 
