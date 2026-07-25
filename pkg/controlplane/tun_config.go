@@ -21,6 +21,10 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
+// annoTunAllocsRejected is the ConfigMap annotation key carrying the breadcrumb for
+// a manual TUN_ALLOCS edit that was not applied (client conflict, IP in use, expiry).
+const annoTunAllocsRejected = "kubevpn.io/tun-allocs-rejected"
+
 // TunConfigServer implements the TunConfigService gRPC API.
 // It manages TUN IP allocations for sidecars and pushes changes via streams.
 type TunConfigServer struct {
@@ -45,6 +49,12 @@ type TunConfigServer struct {
 	// conflicting proposal is simply dropped (decline/expiry) with nothing to roll
 	// back. In-memory only — lost on restart (proposal vanishes; operator re-edits).
 	pendingProposal map[string]proposal
+
+	// rejectedAnno is the latest "manual TUN_ALLOCS edit not applied" breadcrumb.
+	// It is written into the ConfigMap by saveAllocs (the single CM writer), so it
+	// can never be clobbered by a concurrent allocation persist — every saveAllocs
+	// re-applies it. Empty means no rejection to surface. Guarded by mu.
+	rejectedAnno string
 
 	// reconcileMu serializes ReconcileAllocsFromConfigMap so two overlapping
 	// informer-driven reconciles never act on each other's stale snapshot.
@@ -253,6 +263,14 @@ func (s *TunConfigServer) saveAllocs(ctx context.Context) error {
 			cm.Data = make(map[string]string)
 		}
 		cm.Data[config.KeyTunAllocs] = string(data)
+		// Fold the rejection breadcrumb into this same Update so it shares the
+		// allocation write's optimistic lock — a single writer, never clobbered.
+		if s.rejectedAnno != "" {
+			if cm.Annotations == nil {
+				cm.Annotations = make(map[string]string)
+			}
+			cm.Annotations[annoTunAllocsRejected] = s.rejectedAnno
+		}
 		_, updErr := s.clientset.CoreV1().ConfigMaps(s.namespace).Update(ctx, cm, metav1.UpdateOptions{})
 		return updErr
 	})
@@ -296,12 +314,12 @@ func (s *TunConfigServer) GetTunIP(ctx context.Context, req *rpc.TunIPRequest) (
 		}
 		if p.candV4 != nil && isIPExcluded(p.candV4, excludeIPs) {
 			plog.G(ctx).Warnf("[TunConfig] owner %s declined proposed IPv4 %v (local conflict)", req.OwnerID, p.candV4.IP)
-			go s.annotateRejected(context.Background(), req.OwnerID, p.candV4.IP, curV4)
+			s.recordRejectedLocked(req.OwnerID, p.candV4.IP, curV4)
 			p.candV4 = nil
 		}
 		if p.candV6 != nil && isIPExcluded(p.candV6, excludeIPs) {
 			plog.G(ctx).Warnf("[TunConfig] owner %s declined proposed IPv6 %v (local conflict)", req.OwnerID, p.candV6.IP)
-			go s.annotateRejected(context.Background(), req.OwnerID, p.candV6.IP, curV4)
+			s.recordRejectedLocked(req.OwnerID, p.candV6.IP, curV4)
 			p.candV6 = nil
 		}
 		if p.candV4 == nil && p.candV6 == nil {
@@ -419,7 +437,8 @@ func (s *TunConfigServer) commitFamilyLocked(ctx context.Context, owner string, 
 		}
 		if held != nil && held.IP.Equal(candidate.IP) {
 			plog.G(ctx).Warnf("[TunConfig] commit %v for owner %s: in use by owner %s, refusing", candidate.IP, owner, o)
-			go s.annotateRejected(context.Background(), owner, candidate.IP, nil)
+			s.recordRejectedLocked(owner, candidate.IP, nil)
+			go s.persistRejected(context.Background())
 			s.clearProposalFamily(owner, isV6)
 			if cur != nil {
 				return tunResp(cur), nil
@@ -776,7 +795,10 @@ func (s *TunConfigServer) familyCandidate(ctx context.Context, owner, wantStr st
 		}
 		if held != nil && held.IP.Equal(want.IP) {
 			plog.G(ctx).Warnf("[TunConfig] manual TUN_ALLOCS IP %s for owner %s is in use by owner %s, ignoring", want.IP, owner, b)
-			go s.annotateRejected(context.Background(), owner, want.IP, nil)
+			s.mu.Lock()
+			s.recordRejectedLocked(owner, want.IP, nil)
+			s.mu.Unlock()
+			go s.persistRejected(context.Background())
 			return nil
 		}
 	}
@@ -815,20 +837,28 @@ func (s *TunConfigServer) proposeIPChange(owner string, candV4, candV6 *net.IPNe
 	s.notifyWatchers(owner, resp)
 }
 
-// annotateRejected leaves a breadcrumb on the ConfigMap so an operator whose
-// manual TUN_ALLOCS edit was not applied (client conflict, IP in use, or expiry)
-// can see why via `kubectl describe cm`. A nil reason/old keeps the message short.
-func (s *TunConfigServer) annotateRejected(ctx context.Context, owner string, rejected, old net.IP) {
-	var msg string
-	switch {
-	case old != nil:
-		msg = fmt.Sprintf("%s: requested IP %s rejected by client (local conflict), kept %s", owner, rejected, old)
-	default:
-		msg = fmt.Sprintf("%s: requested IP %s not applied (in use or unavailable)", owner, rejected)
+// recordRejectedLocked stages a breadcrumb explaining why a manual TUN_ALLOCS edit
+// was not applied (client conflict, IP in use, or expiry) so an operator can see it
+// via `kubectl describe cm`. The message is persisted by the next saveAllocs (the
+// single ConfigMap writer), which avoids racing a separate annotation patch against
+// the allocation write. A nil old keeps the message short. Caller holds s.mu.
+func (s *TunConfigServer) recordRejectedLocked(owner string, rejected, old net.IP) {
+	if old != nil {
+		s.rejectedAnno = fmt.Sprintf("%s: requested IP %s rejected by client (local conflict), kept %s", owner, rejected, old)
+	} else {
+		s.rejectedAnno = fmt.Sprintf("%s: requested IP %s not applied (in use or unavailable)", owner, rejected)
 	}
-	patch := []byte(fmt.Sprintf(`{"metadata":{"annotations":{%q:%q}}}`, "kubevpn.io/tun-allocs-rejected", msg))
-	if _, err := s.clientset.CoreV1().ConfigMaps(s.namespace).Patch(ctx, config.ConfigMapPodTrafficManager, k8stypes.MergePatchType, patch, metav1.PatchOptions{}); err != nil {
-		plog.G(ctx).Warnf("[TunConfig] annotateRejected: %v", err)
+}
+
+// persistRejected flushes a staged rejection breadcrumb to the ConfigMap promptly,
+// for call sites that record one without an allocation change of their own (so no
+// saveAllocs would otherwise follow). saveAllocs reads only s.allocs/s.rejectedAnno,
+// so a read lock is enough.
+func (s *TunConfigServer) persistRejected(ctx context.Context) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if err := s.saveAllocs(ctx); err != nil {
+		plog.G(ctx).Warnf("[TunConfig] persist rejection annotation: %v", err)
 	}
 }
 
