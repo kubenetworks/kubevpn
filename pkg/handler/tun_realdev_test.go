@@ -446,7 +446,10 @@ func TestRealTUNManualIP_Disconnect(t *testing.T) {
 	ip2 := pickFreeIP(t, used)
 	editTunAllocs(t, env, map[string]string{"o1": cidrPool(ip2)})
 	env.server.ReconcileAllocsFromConfigMap(ctx)
-	waitDeviceHasIP(t, nm.tunName, ip2, 15*time.Second)
+	// After a server restart the client watcher may take up to
+	// ipWatcherRetryInterval (10s) to re-subscribe before the IP change can
+	// propagate, so allow extra headroom on top of that to avoid flakes.
+	waitDeviceHasIP(t, nm.tunName, ip2, 30*time.Second)
 }
 
 // 6. Control-plane restart: committed IP (persisted in TUN_ALLOCS) survives a fresh

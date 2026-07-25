@@ -138,14 +138,16 @@ func TestIsValidCIDR(t *testing.T) {
 }
 
 func TestParseDirMapping(t *testing.T) {
-	// Use /tmp which always exists
+	// Use a real directory that exists on every OS (avoid hardcoding /tmp,
+	// which does not exist on Windows).
+	tmpDir := t.TempDir()
 	cases := []struct {
-		input       string
-		wantLocal   string
-		wantRemote  string
-		wantErr     bool
+		input      string
+		wantLocal  string
+		wantRemote string
+		wantErr    bool
 	}{
-		{"/tmp:/remote", "/tmp", "/remote", false},
+		{tmpDir + ":/remote", tmpDir, "/remote", false},
 		{"no-separator", "", "", true},
 		{"", "", "", true},
 		{"/nonexistent-path-xyz:/app", "", "", true},

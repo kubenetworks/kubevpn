@@ -22,6 +22,11 @@ func TestHttpOverUnix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Close the file handle before removing it: Windows refuses to delete a
+	// file that still has an open handle (Linux allows unlinking open files).
+	if err = temp.Close(); err != nil {
+		t.Fatal(err)
+	}
 	err = os.Remove(temp.Name())
 	if err != nil {
 		t.Fatal(err)
