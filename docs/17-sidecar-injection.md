@@ -53,7 +53,7 @@ Used for `kubevpn proxy`, with or without `--headers`.
 Inject:
   1. collectPorts → envoy ports + portmap
   2. addEnvoyConfig → write Virtual/Rule to ConfigMap
-  3. Check if already injected (skip container add)
+  3. Check if already injected *for the current manager namespace* (skip container add)
   4. AddVPNAndEnvoyContainer → inject VPN + Envoy sidecars
   5. patchWorkload → JSON patch the controller
 ```
@@ -79,7 +79,7 @@ Used when targeting a K8s Service (no `NET_ADMIN` capability available).
 Inject:
   1. collectFargatePorts → allocate random envoy listener ports
   2. addEnvoyConfig → write Virtual/Rule with FargateMode=true
-  3. Check if already injected
+  3. Check if already injected *for the current manager namespace*
   4. AddEnvoyAndSSHContainer → inject SSH + Envoy sidecars
   5. patchWorkload → JSON patch the controller
   6. ModifyServiceTargetPort → redirect Service ports to envoy listeners
@@ -155,6 +155,14 @@ All sidecar containers receive:
 |---------|--------|---------|
 | `CIDR4`, `CIDR6` | `config.CIDR` | VPN address pool |
 | `TrafficManagerService` | `kubevpn-traffic-manager.{managerNs}` | gRPC endpoint (`{managerNs}` is the **manager** namespace, not the workload namespace — see [07-namespace-model.md](07-namespace-model.md)) |
+
+> **Manager-namespace change forces re-injection.** The manager address above (and the
+> identical address baked into the envoy `xds_cluster` bootstrap) is fixed at injection
+> time. If the traffic-manager later moves namespaces (e.g. per-namespace → centralized),
+> the "already injected" check (`injectedForManager`) compares the envoy sidecar's baked
+> address against the *current* manager namespace and re-injects on mismatch — otherwise
+> the sidecar's `xds_cluster` would keep pointing at a deleted Service whose DNS no longer
+> resolves, permanently losing its xDS stream and serving stale routes.
 | `POD_NAMESPACE` | Downward API | Current namespace |
 | `POD_NAME` | Downward API | Current pod name |
 | `tls_crt`, `tls_key`, `tls_server_name` | TLS Secret | mTLS credentials (VPN/mesh only) |
