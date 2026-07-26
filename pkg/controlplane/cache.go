@@ -528,19 +528,17 @@ func buildFilterChains(routeName string) []*listener.FilterChain {
 		StatPrefix: "http",
 		RouteSpecifier: &httpconnectionmanager.HttpConnectionManager_Rds{
 			Rds: &httpconnectionmanager.Rds{
+				// Routes ride the same ADS stream as CDS/LDS/EDS rather than a
+				// separate RDS gRPC stream. With an independent stream, a
+				// traffic-manager restart (Recreate → Service endpoint blackout)
+				// could drop RDS while CDS/LDS kept a stale snapshot, leaving the
+				// listener up but its routes empty — empty-header full-proxy
+				// traffic then fell through to origin_cluster. ADS reconnects all
+				// resource types atomically on a single stream.
 				ConfigSource: &core.ConfigSource{
 					ResourceApiVersion: resource.DefaultAPIVersion,
-					ConfigSourceSpecifier: &core.ConfigSource_ApiConfigSource{
-						ApiConfigSource: &core.ApiConfigSource{
-							TransportApiVersion:       resource.DefaultAPIVersion,
-							ApiType:                   core.ApiConfigSource_GRPC,
-							SetNodeOnFirstMessageOnly: true,
-							GrpcServices: []*core.GrpcService{{
-								TargetSpecifier: &core.GrpcService_EnvoyGrpc_{
-									EnvoyGrpc: &core.GrpcService_EnvoyGrpc{ClusterName: "xds_cluster"},
-								},
-							}},
-						},
+					ConfigSourceSpecifier: &core.ConfigSource_Ads{
+						Ads: &core.AggregatedConfigSource{},
 					},
 				},
 				RouteConfigName: routeName,
