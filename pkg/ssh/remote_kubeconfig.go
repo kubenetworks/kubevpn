@@ -3,7 +3,7 @@ package ssh
 import (
 	"bytes"
 	"fmt"
-	"path/filepath"
+	"path"
 
 	"k8s.io/client-go/tools/clientcmd"
 )
@@ -22,9 +22,9 @@ import (
 // permitted". By inlining here, over the same SSH session that fetched the
 // config, FlattenConfig becomes a no-op instead.
 //
-//   remoteBaseDir - filepath.Dir(conf.RemoteKubeconfig); relative cert paths are
-//                   resolved against it (matching how kubectl would resolve them
-//                   on the remote, where the kubeconfig file is the base).
+//   remoteBaseDir - path.Dir(conf.RemoteKubeconfig) (POSIX); relative cert paths
+//                   are resolved against it (matching how kubectl would resolve
+//                   them on the remote, where the kubeconfig file is the base).
 //   remoteRead    - fetches a resolved remote path's bytes. The caller wires it
 //                   to RemoteRun(cli, shellquote.Join("cat", path), nil); tests
 //                   inject a map-backed implementation.
@@ -95,10 +95,13 @@ func fetchRemoteCertFile(remoteBaseDir, path, field string, remoteRead func(remo
 
 // resolveRemotePath resolves a cert/key/CA path the way kubectl would on the
 // remote host: absolute paths are taken verbatim, relative paths are resolved
-// against the directory of the remote kubeconfig file.
+// against the directory of the remote kubeconfig file. Uses POSIX semantics
+// (path, not path/filepath) because the paths live on a remote Linux bastion
+// regardless of the local OS running kubevpn — otherwise Windows clients would
+// mangle "/etc/..." into "\etc\..." and fail to fetch the files.
 func resolveRemotePath(remoteBaseDir, p string) string {
-	if filepath.IsAbs(p) {
-		return filepath.Clean(p)
+	if path.IsAbs(p) {
+		return path.Clean(p)
 	}
-	return filepath.Clean(filepath.Join(remoteBaseDir, p))
+	return path.Clean(path.Join(remoteBaseDir, p))
 }

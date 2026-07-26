@@ -7,7 +7,7 @@ import (
 	"net"
 	"net/netip"
 	"os"
-	"path/filepath"
+	"path"
 	"strconv"
 
 	"github.com/kballard/go-shellquote"
@@ -65,7 +65,7 @@ func SshJumpBytes(ctx context.Context, conf *SshConfig, kubeconfigBytes []byte, 
 		// session, so the config is self-contained. No-op when already embedded.
 		kubeconfigBytes, err = embedRemoteCertFiles(
 			kubeconfigBytes,
-			filepath.Dir(conf.RemoteKubeconfig),
+			path.Dir(conf.RemoteKubeconfig),
 			func(p string) ([]byte, error) {
 				out, stderr, runErr := RemoteRun(cli, shellquote.Join("cat", p), nil)
 				if runErr != nil {
