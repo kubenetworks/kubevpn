@@ -321,6 +321,57 @@ func TestProcessFile_ClearsStaleSnapshots(t *testing.T) {
 	}
 }
 
+// TestProcessFile_ReAddAfterClearRePushes is a regression test for the bug where
+// clearing a stale snapshot did not invalidate the expireCache entry. A quick
+// leave→re-proxy/sync of the same workload (identical Virtual) would then match the
+// DeepEqual "unchanged" check and skip SetSnapshot, leaving the snapshot cleared
+// until the TTL — so envoy kept serving without routes (full-proxy traffic fell
+// through to origin_cluster). After the fix, re-adding the identical Virtual
+// re-pushes the snapshot.
+func TestProcessFile_ReAddAfterClearRePushes(t *testing.T) {
+	snapshotCache := cache.NewSnapshotCache(false, cache.IDHash{}, nil)
+	logger := log.NewEntry(log.New())
+	p := newProcessor(snapshotCache, logger)
+
+	// Empty headers = full-proxy (match-all) rule, the scenario that regressed.
+	content := `
+- namespace: default
+  Uid: deployments.apps.authors
+  ports:
+    - containerPort: 9080
+      protocol: TCP
+  rules:
+    - localTunIPv4: "198.18.0.1"
+      portMap:
+        9080: "9080"
+`
+	nodeID := "default.deployments.apps.authors"
+
+	// Step 1: serve the Virtual → snapshot exists.
+	if err := p.ProcessFile(NotifyMessage{Content: content}); err != nil {
+		t.Fatalf("initial ProcessFile failed: %v", err)
+	}
+	if _, err := snapshotCache.GetSnapshot(nodeID); err != nil {
+		t.Fatalf("expected snapshot after first ProcessFile: %v", err)
+	}
+
+	// Step 2: workload transiently disappears (e.g. leave) → snapshot cleared.
+	if err := p.ProcessFile(NotifyMessage{Content: ""}); err != nil {
+		t.Fatalf("clear ProcessFile failed: %v", err)
+	}
+	if _, err := snapshotCache.GetSnapshot(nodeID); err == nil {
+		t.Fatal("snapshot should be cleared after the workload disappeared")
+	}
+
+	// Step 3: the identical Virtual is re-added — the snapshot MUST be re-pushed.
+	if err := p.ProcessFile(NotifyMessage{Content: content}); err != nil {
+		t.Fatalf("re-add ProcessFile failed: %v", err)
+	}
+	if _, err := snapshotCache.GetSnapshot(nodeID); err != nil {
+		t.Fatalf("snapshot must be re-pushed after re-adding the identical Virtual: %v", err)
+	}
+}
+
 func TestProcessFile_EmptyContentClearsAll(t *testing.T) {
 	snapshotCache := cache.NewSnapshotCache(false, cache.IDHash{}, nil)
 	logger := log.NewEntry(log.New())

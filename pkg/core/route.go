@@ -26,16 +26,18 @@ type ConnList struct {
 	conns []net.Conn
 }
 
-// Add appends a conn to the list if not already present.
-func (cl *ConnList) Add(conn net.Conn) {
+// Add appends a conn to the list if not already present. Returns true if it was added
+// (false if it was already registered), so callers can log only genuinely new pool members.
+func (cl *ConnList) Add(conn net.Conn) bool {
 	cl.mu.Lock()
 	defer cl.mu.Unlock()
 	for _, c := range cl.conns {
 		if c == conn {
-			return
+			return false
 		}
 	}
 	cl.conns = append(cl.conns, conn)
+	return true
 }
 
 // Remove removes a specific conn from the list. Returns true if the list is now empty.
@@ -154,7 +156,9 @@ func (hub *RouteHub) AddRoute(ctx context.Context, srcIP net.IP, conn net.Conn) 
 	val, loaded := hub.RouteMapTCP.LoadOrStore(key, &ConnList{conns: []net.Conn{conn}})
 	if loaded {
 		list := val.(*ConnList)
-		list.Add(conn)
+		if list.Add(conn) {
+			plog.G(ctx).Infof("[Route] Add pool conn: %s -> %s-%s (now %d conns)", srcIP, conn.LocalAddr(), conn.RemoteAddr(), list.Len())
+		}
 	} else {
 		plog.G(ctx).Infof("[Route] Add route: %s -> %s-%s", srcIP, conn.LocalAddr(), conn.RemoteAddr())
 	}

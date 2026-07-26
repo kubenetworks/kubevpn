@@ -279,8 +279,15 @@ func GenICMPPacketIPv6(src net.IP, dst net.IP) ([]byte, error) {
 		NextHeader: layers.IPProtocolICMPv6,
 		HopLimit:   255,
 	}
+	// ICMPv6's checksum covers the IPv6 pseudo-header, so (unlike ICMPv4) the network layer
+	// must be set for ComputeChecksums to work. Without this the echo request went out with a
+	// zero checksum, which receivers reject — so the IPv6 heartbeat never got a reply.
+	if err := icmpLayer.SetNetworkLayerForChecksum(&ipLayer); err != nil {
+		return nil, fmt.Errorf("failed to set network layer for icmp6 checksum: %w", err)
+	}
 	opts := gopacket.SerializeOptions{
-		FixLengths: true,
+		FixLengths:       true,
+		ComputeChecksums: true,
 	}
 	err := gopacket.SerializeLayers(buf, opts, &ipLayer, &icmpLayer)
 	if err != nil {

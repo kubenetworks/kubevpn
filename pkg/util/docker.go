@@ -224,9 +224,9 @@ func NetworkDisconnect(ctx context.Context, containerName string) ([]byte, error
 }
 
 // ContainerRemove
-// docker remove --force
+// docker rm --force
 func ContainerRemove(ctx context.Context, containerName string) ([]byte, error) {
-	output, err := exec.CommandContext(ctx, "docker", "remove", "--force", containerName).CombinedOutput()
+	output, err := exec.CommandContext(ctx, "docker", "rm", "--force", containerName).CombinedOutput()
 	if err != nil && strings.Contains(string(output), "not found") {
 		return output, nil
 	}

@@ -100,8 +100,23 @@ func addEnvoyConfig(ctx context.Context, mapInterface v12.ConfigMapInterface, sp
 			return err
 		}
 		configMap.Data[config.KeyEnvoy] = string(marshal)
-		_, err = mapInterface.Update(ctx, configMap, metav1.UpdateOptions{})
-		return err
+		if _, err = mapInterface.Update(ctx, configMap, metav1.UpdateOptions{}); err != nil {
+			return err
+		}
+		// Log the persisted rule set for this workload so the actual rules (headers/tunIP/
+		// owner) are visible for diagnosing full-proxy routing and ownership.
+		var rules []string
+		for _, virtual := range v {
+			if virtual.UID == spec.NodeID && virtual.Namespace == spec.Namespace {
+				for _, r := range virtual.Rules {
+					rules = append(rules, fmt.Sprintf("{headers=%v tunV4=%q owner=%q portmap=%v}",
+						r.Headers, r.LocalTunIPv4, r.OwnerID, r.PortMap))
+				}
+			}
+		}
+		plog.G(ctx).Infof("[Envoy] added rule for %s/%s (headers=%v tunV4=%q owner=%q); workload rules now=%v",
+			spec.Namespace, spec.NodeID, spec.Headers, spec.LocalTunIPv4, spec.OwnerID, rules)
+		return nil
 	})
 }
 
@@ -215,6 +230,19 @@ func removeEnvoyConfig(ctx context.Context, mapInterface v12.ConfigMapInterface,
 			}
 		}
 		if !found {
+			// Surface ownership mismatches: a rule that cannot be removed because no rule
+			// for this workload carries our ownerID is how stale rules accumulate (and how
+			// an empty/IP-valued OwnerID anomaly manifests). List the owners that ARE present.
+			var owners []string
+			for _, virtual := range v {
+				if nodeID == virtual.UID && namespace == virtual.Namespace {
+					for _, r := range virtual.Rules {
+						owners = append(owners, fmt.Sprintf("%q(headers=%v)", r.OwnerID, r.Headers))
+					}
+				}
+			}
+			plog.G(ctx).Warnf("[Envoy] removeEnvoyConfig: ownerID %q not found for %s/%s; existing rule owners=%v",
+				ownerID, namespace, nodeID, owners)
 			return nil
 		}
 

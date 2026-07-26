@@ -253,9 +253,9 @@ func (a *Virtual) To(enableIPv6 bool, logger *log.Entry) (
 		}
 		logger.Debugf("[xDS] %s/%s port %d/%s -> listen on %d", a.Namespace, a.UID, port.ContainerPort, port.Protocol, listenPort)
 		if port.Protocol == corev1.ProtocolUDP {
-			a.addUDPPort(&res, port, listenPort, enableIPv6)
+			a.addUDPPort(&res, port, listenPort, enableIPv6, logger)
 		} else {
-			a.addTCPPort(&res, port, listenPort, fargate, enableIPv6)
+			a.addTCPPort(&res, port, listenPort, fargate, enableIPv6, logger)
 		}
 	}
 
@@ -272,8 +272,17 @@ func (a *Virtual) To(enableIPv6 bool, logger *log.Entry) (
 		res.clusters = append(res.clusters, originCluster())
 		logger.Debugf("[xDS] %s/%s added mesh inbound capture listener :%d + origin_cluster", a.Namespace, a.UID, config.PortEnvoyInbound)
 	}
-	logger.Debugf("[xDS] %s/%s generated %d listeners, %d clusters, %d routes, %d endpoints",
-		a.Namespace, a.UID, len(res.listeners), len(res.clusters), len(res.routes), len(res.endpoints))
+	// Info-level rule-set summary so the actual generated rules are visible in the
+	// traffic-manager sidecar log even when it does not run at debug level. Reveals, per
+	// workload, whether a full-proxy (empty-headers) rule exists and its TUN IP / owner —
+	// the key signal for diagnosing "traffic fell through to origin_cluster".
+	rules := make([]string, 0, len(a.Rules))
+	for _, r := range a.Rules {
+		rules = append(rules, fmt.Sprintf("{headers=%v tunV4=%q tunV6=%q owner=%q portmap=%v}",
+			r.Headers, r.LocalTunIPv4, r.LocalTunIPv6, r.OwnerID, r.PortMap))
+	}
+	logger.Infof("[xDS] %s/%s fargate=%v rules=%v -> %d listeners, %d clusters, %d routes, %d endpoints",
+		a.Namespace, a.UID, fargate, rules, len(res.listeners), len(res.clusters), len(res.routes), len(res.endpoints))
 	return res.listeners, res.clusters, res.routes, res.endpoints
 }
 
@@ -283,12 +292,14 @@ func (a *Virtual) To(enableIPv6 bool, logger *log.Entry) (
 // listeners do not collapse to one in the xDS snapshot (which would leave the survivor bound
 // to the wrong family); unpopulated IP families are skipped to avoid an endpoint with an
 // invalid empty address.
-func (a *Virtual) addUDPPort(res *xdsResources, port ContainerPort, listenPort int32, enableIPv6 bool) {
+func (a *Virtual) addUDPPort(res *xdsResources, port ContainerPort, listenPort int32, enableIPv6 bool, logger *log.Entry) {
 	listenerName := fmt.Sprintf("%s_%s_%v_%s", a.Namespace, a.UID, listenPort, port.Protocol)
 	for _, rule := range a.Rules {
 		envoyRulePort := rule.envoyPort(port.ContainerPort)
 		for _, ip := range rule.tunIPs(enableIPv6) {
 			if ip == "" {
+				logger.Warnf("[xDS] %s/%s UDP %d: skip rule (headers=%v, owner=%s) — empty TUN IP (not allocated/propagated yet)",
+					a.Namespace, a.UID, port.ContainerPort, rule.Headers, rule.OwnerID)
 				continue
 			}
 			bindAddr, name := "0.0.0.0", listenerName
@@ -296,6 +307,8 @@ func (a *Virtual) addUDPPort(res *xdsResources, port ContainerPort, listenPort i
 				bindAddr, name = "::", listenerName+"_v6"
 			}
 			clusterName := res.addTunCluster(ip, envoyRulePort)
+			logger.Debugf("[xDS] %s/%s UDP %d -> tunIP=%s envoyPort=%d headers=%v owner=%s",
+				a.Namespace, a.UID, port.ContainerPort, ip, envoyRulePort, rule.Headers, rule.OwnerID)
 			res.listeners = append(res.listeners, toUDPListener(name, bindAddr, listenPort, clusterName))
 		}
 	}
@@ -305,7 +318,7 @@ func (a *Virtual) addUDPPort(res *xdsResources, port ContainerPort, listenPort i
 // TCP port, with header-based routing to each rule's TUN IP. The default route falls back to
 // origin_cluster (mesh, via use_original_dst) or to an explicit per-IP container-port cluster
 // (fargate, where use_original_dst does not work).
-func (a *Virtual) addTCPPort(res *xdsResources, port ContainerPort, listenPort int32, fargate, enableIPv6 bool) {
+func (a *Virtual) addTCPPort(res *xdsResources, port ContainerPort, listenPort int32, fargate, enableIPv6 bool, logger *log.Entry) {
 	listenerName := fmt.Sprintf("%s_%s_%v_%s", a.Namespace, a.UID, listenPort, port.Protocol)
 	// The listener resolves its routes from an RDS config of the same name.
 	routeName := listenerName
@@ -315,6 +328,18 @@ func (a *Virtual) addTCPPort(res *xdsResources, port ContainerPort, listenPort i
 	for _, rule := range a.Rules {
 		envoyRulePort := rule.envoyPort(port.ContainerPort)
 		for _, ip := range rule.tunIPs(enableIPv6) {
+			// Skip an empty TUN IP (e.g. a rule whose IP has not been allocated/propagated
+			// yet, or an absent IPv6 in a v4-only rule). Routing to an empty upstream address
+			// makes envoy fail every request with 503 "connection refused"; an empty-headers
+			// rule would do so for ALL traffic. Skipping lets mesh fall through to
+			// origin_cluster instead. Mirrors addUDPPort's guard.
+			if ip == "" {
+				logger.Warnf("[xDS] %s/%s TCP %d: skip rule (headers=%v, owner=%s) — empty TUN IP (not allocated/propagated yet); mesh falls through to origin_cluster",
+					a.Namespace, a.UID, port.ContainerPort, rule.Headers, rule.OwnerID)
+				continue
+			}
+			logger.Debugf("[xDS] %s/%s TCP %d -> tunIP=%s envoyPort=%d headers=%v owner=%s",
+				a.Namespace, a.UID, port.ContainerPort, ip, envoyRulePort, rule.Headers, rule.OwnerID)
 			rr = append(rr, toRoute(res.addTunCluster(ip, envoyRulePort), rule.Headers))
 		}
 	}
@@ -327,6 +352,10 @@ func (a *Virtual) addTCPPort(res *xdsResources, port ContainerPort, listenPort i
 			ips.Insert(rule.tunIPs(enableIPv6)...)
 		}
 		for _, ip := range ips.UnsortedList() {
+			if ip == "" {
+				logger.Warnf("[xDS] %s/%s TCP %d (fargate): skip default route — empty TUN IP", a.Namespace, a.UID, port.ContainerPort)
+				continue
+			}
 			rr = append(rr, defaultRouteToCluster(res.addTunCluster(ip, port.ContainerPort)))
 		}
 	} else {
@@ -547,6 +576,22 @@ func buildFilterChains(routeName string) []*listener.FilterChain {
 			ConfigType: &v31.AccessLog_TypedConfig{
 				TypedConfig: mustMarshalAny(&accesslogfilev3.FileAccessLog{
 					Path: "/dev/stdout",
+					// Explicit format so the sidecar log directly shows which backend each
+					// request hit: response code + flags (e.g. UF/NR), the matched route, the
+					// chosen UPSTREAM_CLUSTER (tun cluster vs origin_cluster) and host, plus the
+					// env header. This is the primary diagnostic for "wrong backend" / 503 in
+					// full-proxy mode — see docs/17-sidecar-injection.md.
+					AccessLogFormat: &accesslogfilev3.FileAccessLog_LogFormat{
+						LogFormat: &core.SubstitutionFormatString{
+							Format: &core.SubstitutionFormatString_TextFormatSource{
+								TextFormatSource: &core.DataSource{
+									Specifier: &core.DataSource_InlineString{
+										InlineString: "[envoy-access] \"%REQ(:METHOD)% %REQ(X-ENVOY-ORIGINAL-PATH?:PATH)%\" code=%RESPONSE_CODE% flags=%RESPONSE_FLAGS% route=%ROUTE_NAME% cluster=%UPSTREAM_CLUSTER% upstream=%UPSTREAM_HOST% env=%REQ(ENV)%\n",
+									},
+								},
+							},
+						},
+					},
 				}),
 			},
 		}},
