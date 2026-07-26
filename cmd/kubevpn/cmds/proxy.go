@@ -2,7 +2,6 @@ package cmds
 
 import (
 	"context"
-	"fmt"
 	"os"
 
 	log "github.com/sirupsen/logrus"
@@ -16,7 +15,6 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
@@ -140,14 +138,14 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			err = grpcutil.PrintGRPCStream[rpc.ConnectResponse](cmd.Context(), resp)
+			_, err = printProgressStream[rpc.ConnectResponse](cmd.Context(), resp, os.Stdout)
 			if err != nil {
 				if status.Code(err) == codes.Canceled {
 					return nil
 				}
 				return err
 			}
-			_, _ = fmt.Fprintln(os.Stdout, config.Slogan)
+			printSlogan(os.Stdout)
 			// hangup
 			if foreground {
 				// leave from cluster resources
@@ -161,7 +159,7 @@ func CmdProxy(f cmdutil.Factory) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				_, _ = fmt.Fprint(os.Stdout, "Disconnect completed")
+				printSuccess(os.Stdout, "Disconnect completed")
 			}
 			return nil
 		},
@@ -191,7 +189,7 @@ func leave(cli rpc.DaemonClient, ns string, args []string) error {
 	if err != nil {
 		return err
 	}
-	err = grpcutil.PrintGRPCStream[rpc.LeaveResponse](nil, resp)
+	_, err = printProgressStream[rpc.LeaveResponse](nil, resp, os.Stdout)
 	if err != nil {
 		if status.Code(err) == codes.Canceled {
 			return nil

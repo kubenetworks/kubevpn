@@ -93,7 +93,7 @@ func (option *Options) connectViaContainer(ctx context.Context, portBindings nat
 	if err != nil {
 		return err
 	}
-	plog.G(ctx).Infof("Starting connect to cluster in container")
+	plog.G(ctx).Info("Connecting to the cluster (in container) ...")
 	err = util.WaitDockerContainerRunning(ctx, *name)
 	if err != nil {
 		return err

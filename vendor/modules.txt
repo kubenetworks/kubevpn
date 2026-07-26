@@ -978,6 +978,9 @@ github.com/syndtr/goleveldb/leveldb/util
 ## explicit; go 1.12
 github.com/tailscale/netlink
 github.com/tailscale/netlink/nl
+# github.com/theckman/yacspin v0.13.12
+## explicit; go 1.17
+github.com/theckman/yacspin
 # github.com/thejerf/suture/v4 v4.0.6
 ## explicit; go 1.9
 github.com/thejerf/suture/v4

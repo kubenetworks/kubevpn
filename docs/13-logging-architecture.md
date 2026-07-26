@@ -53,6 +53,9 @@ stream at **`streamLevel`**, which is `req.Level` (the CLI's `--debug` intent): 
 Debug when the user passed `--debug`**. So Debug lines always land in the file, and additionally
 reach the CLI only when `--debug` is set.
 
+The same StreamHook also carries the connect progress-step markers (used to drive the CLI spinner)
+without polluting the log file — see [30-connect-progress.md](30-connect-progress.md).
+
 ```go
 // Daemon per-RPC setup (writer.go newServerStreamLogger / initStreamLogger):
 logger := plog.GetLoggerForServer(int32(log.DebugLevel), svr.LogFile) // file: ALL levels, always

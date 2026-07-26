@@ -2,6 +2,7 @@ package cmds
 
 import (
 	"context"
+	"os"
 
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc/codes"
@@ -11,7 +12,6 @@ import (
 	"k8s.io/kubectl/pkg/util/templates"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
@@ -78,7 +78,7 @@ func CmdReset(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			err = grpcutil.PrintGRPCStream[rpc.ResetResponse](cmd.Context(), resp)
+			_, err = printProgressStream[rpc.ResetResponse](cmd.Context(), resp, os.Stdout)
 			if err != nil {
 				if status.Code(err) == codes.Canceled {
 					return nil

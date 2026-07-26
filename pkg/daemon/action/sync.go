@@ -76,7 +76,10 @@ func (svr *Server) Sync(resp rpc.Daemon_SyncServer) (err error) {
 			if r.ConnectionID != "" {
 				connectionID = r.ConnectionID
 			}
-			_, _ = svr.LogFile.Write([]byte(r.Message))
+			// Forward the message (with any step sentinel) to the CLI for spinner
+			// rendering, but strip the sentinel from the log-file copy.
+			_, fileMsg := plog.DecodeStep(r.Message)
+			_, _ = svr.LogFile.Write([]byte(fileMsg))
 			return &rpc.SyncResponse{Message: r.Message}
 		})
 	if err != nil {
@@ -129,7 +132,7 @@ func (svr *Server) Sync(resp rpc.Daemon_SyncServer) (err error) {
 	}
 	svr.connMu.RUnlock()
 
-	logger.Infof("Sync workloads...")
+	logger.Debugf("Syncing workloads")
 	options.SetContext(session.Ctx)
 	newKubeconfigBytes, err := options.ConvertApiServerToNodeIP(resp.Context(), []byte(req.KubeconfigBytes))
 	if err != nil {

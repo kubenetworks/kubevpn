@@ -85,8 +85,9 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 		return err
 	}
 
+	plog.StepStart(ctx, "Injecting proxy sidecar")
 	for _, workload := range workloads {
-		plog.G(ctx).Infof("Injecting inbound sidecar for %s in namespace %s", workload, namespace)
+		plog.G(ctx).Debugf("Injecting proxy sidecar into workload %q in namespace %q", workload, namespace)
 		var object, controller *resource.Info
 		object, controller, err = util.GetTopOwnerObject(ctx, c.factory, namespace, workload)
 		if err != nil {
@@ -129,14 +130,15 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 		})
 		err = injector.Inject(ctx)
 		if err != nil {
-			plog.G(ctx).Errorf("Injecting inbound sidecar for %s in namespace %s failed: %v", workload, namespace, err)
+			plog.G(ctx).Errorf("Failed to inject proxy sidecar into workload %q in namespace %q: %v", workload, namespace, err)
 			return err
 		}
-		plog.G(ctx).Infof("Injected inbound sidecar for %s in namespace %s successfully", workload, namespace)
+		plog.G(ctx).Debugf("Injected proxy sidecar into workload %q in namespace %q", workload, namespace)
 		if mapper != nil {
 			go mapper.Run()
 		}
 	}
+	plog.StepDone(ctx, "Injected proxy sidecar into %d workloads", len(workloads))
 	return nil
 }
 
@@ -152,7 +154,7 @@ func (c *ConnectOptions) CreateOutboundPod(ctx context.Context) error {
 func (c *ConnectOptions) DoConnect(ctx context.Context) (err error) {
 	c.ctx, c.cancel = context.WithCancel(ctx)
 	c.isDataPlane = true
-	plog.G(ctx).Info("Starting connect to cluster")
+	plog.G(ctx).Debug("Starting connect to cluster")
 	go c.setupSignalHandler()
 	var cidrs []*net.IPNet
 	var apiServerIPs []net.IP
@@ -257,7 +259,7 @@ func (c *ConnectOptions) getCIDR(ctx context.Context) ([]*net.IPNet, []net.IP, e
 	}
 	if strings.TrimSpace(ipPoolStr) != "" {
 		cidrs := parseCachedCIDRs(ipPoolStr, apiServerIPs)
-		plog.G(ctx).Infof("Get network CIDR from cache")
+		plog.StepDone(ctx, "Detected cluster CIDRs: %s (cached)", util.CIDRsToString(cidrs))
 		return cidrs, apiServerIPs, nil
 	}
 

@@ -87,6 +87,7 @@ func (svr *Server) redirectConnectToSudoDaemon(req *rpc.ConnectRequest, resp rpc
 		return err
 	}
 
+	plog.StepTitle(session.Ctx, "Connecting to the cluster ...")
 	if err = svr.detectAndSetManagerNamespace(session.Ctx, req, connect, logger); err != nil {
 		return err
 	}
@@ -127,10 +128,10 @@ func (svr *Server) detectAndSetManagerNamespace(ctx context.Context, req *rpc.Co
 	}
 	if req.ManagerNamespace == "" {
 		// No existing manager found anywhere: fall back to the request namespace.
-		logger.Infof("Use special namespace %s", req.Namespace)
+		plog.StepDone(plog.WithLogger(ctx, logger), "Using namespace %q", req.Namespace)
 		req.ManagerNamespace = req.Namespace
 	} else {
-		logger.Infof("Use manager namespace %s", req.ManagerNamespace)
+		plog.StepDone(plog.WithLogger(ctx, logger), "Using manager namespace %q", req.ManagerNamespace)
 	}
 	// Keep the user-daemon ConnectOptions and the request forwarded to the root
 	// daemon in lock-step: both must carry the SAME resolved namespace. Assign it

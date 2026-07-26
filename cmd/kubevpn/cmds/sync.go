@@ -2,7 +2,6 @@ package cmds
 
 import (
 	"context"
-	"fmt"
 	"os"
 
 	pkgerr "github.com/pkg/errors"
@@ -17,7 +16,6 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
@@ -129,14 +127,14 @@ func CmdSync(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			err = grpcutil.PrintGRPCStream[rpc.SyncResponse](cmd.Context(), resp)
+			_, err = printProgressStream[rpc.SyncResponse](cmd.Context(), resp, os.Stdout)
 			if err != nil {
 				if status.Code(err) == codes.Canceled {
 					return nil
 				}
 				return err
 			}
-			_, _ = fmt.Fprintln(os.Stdout, config.Slogan)
+			printSlogan(os.Stdout)
 			return nil
 		},
 	}

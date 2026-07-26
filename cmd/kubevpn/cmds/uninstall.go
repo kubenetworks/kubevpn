@@ -2,6 +2,7 @@ package cmds
 
 import (
 	"context"
+	"os"
 
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc/codes"
@@ -12,7 +13,6 @@ import (
 	"k8s.io/utils/ptr"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
@@ -78,7 +78,7 @@ func CmdUninstall(f cmdutil.Factory) *cobra.Command {
 				if err != nil {
 					plog.G(cmd.Context()).Warnf("Failed to disconnect from cluter: %v", err)
 				}
-				_ = grpcutil.PrintGRPCStream[rpc.DisconnectResponse](cmd.Context(), disconnectResp)
+				_, _ = printProgressStream[rpc.DisconnectResponse](cmd.Context(), disconnectResp, os.Stdout)
 			}
 
 			req := &rpc.UninstallRequest{
@@ -94,7 +94,7 @@ func CmdUninstall(f cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			err = grpcutil.PrintGRPCStream[rpc.UninstallResponse](cmd.Context(), resp)
+			_, err = printProgressStream[rpc.UninstallResponse](cmd.Context(), resp, os.Stdout)
 			if err != nil {
 				if status.Code(err) == codes.Canceled {
 					return nil

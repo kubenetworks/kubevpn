@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	v1 "k8s.io/api/core/v1"
@@ -27,7 +28,7 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 		return err
 	}
 	if exists {
-		plog.G(ctx).Infof("Use exist traffic manager in namespace %s", namespace)
+		plog.StepDone(ctx, "Using traffic manager in namespace %q", namespace)
 		return nil
 	}
 
@@ -39,103 +40,109 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 	cleanupTrafficManagerResources(ctx, clientset, namespace)
 
 	// 1) label namespace
-	plog.G(ctx).Infof("Labeling Namespace %s", namespace)
+	plog.StepStart(ctx, "Labeling namespace")
 	ns, err := clientset.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
 	if err != nil {
-		plog.G(ctx).Errorf("Get Namespace error: %v", err)
-		return err
+		return fmt.Errorf("failed to get namespace %s: %w", namespace, err)
 	}
 	if ns.Labels == nil {
 		ns.Labels = map[string]string{}
 	}
 	ns.Labels["ns"] = namespace
-	_, err = clientset.CoreV1().Namespaces().Update(ctx, ns, metav1.UpdateOptions{})
-	if err != nil {
-		plog.G(ctx).Infof("Labeling Namespace error: %v", err)
-		return err
+	if _, err = clientset.CoreV1().Namespaces().Update(ctx, ns, metav1.UpdateOptions{}); err != nil {
+		return fmt.Errorf("failed to label namespace %s: %w", namespace, err)
 	}
+	plog.StepDone(ctx, "Labeled namespace %q", namespace)
 
 	// 2) create serviceAccount
-	plog.G(ctx).Infof("Creating ServiceAccount %s", config.ConfigMapPodTrafficManager)
-	_, err = clientset.CoreV1().ServiceAccounts(namespace).Create(ctx, genServiceAccount(namespace), metav1.CreateOptions{})
-	if err != nil {
-		plog.G(ctx).Infof("Creating ServiceAccount error: %v", err)
-		return err
+	plog.StepStart(ctx, "Creating ServiceAccount")
+	if _, err = clientset.CoreV1().ServiceAccounts(namespace).Create(ctx, genServiceAccount(namespace), metav1.CreateOptions{}); err != nil {
+		return fmt.Errorf("failed to create service account: %w", err)
 	}
+	plog.StepDone(ctx, "Created ServiceAccount %q", config.ConfigMapPodTrafficManager)
 
-	// 3) create roles
-	plog.G(ctx).Infof("Creating Roles %s", config.ConfigMapPodTrafficManager)
-	_, err = clientset.RbacV1().Roles(namespace).Create(ctx, genRole(namespace), metav1.CreateOptions{})
-	if err != nil {
-		plog.G(ctx).Errorf("Creating Roles error: %v", err)
-		return err
+	// 3) create role
+	plog.StepStart(ctx, "Creating Role")
+	if _, err = clientset.RbacV1().Roles(namespace).Create(ctx, genRole(namespace), metav1.CreateOptions{}); err != nil {
+		return fmt.Errorf("failed to create role: %w", err)
 	}
+	plog.StepDone(ctx, "Created Role %q", config.ConfigMapPodTrafficManager)
 
 	// 4) create roleBinding
-	plog.G(ctx).Infof("Creating RoleBinding %s", config.ConfigMapPodTrafficManager)
-	_, err = clientset.RbacV1().RoleBindings(namespace).Create(ctx, genRoleBinding(namespace), metav1.CreateOptions{})
-	if err != nil {
-		plog.G(ctx).Errorf("Creating RoleBinding error: %v", err)
-		return err
+	plog.StepStart(ctx, "Creating RoleBinding")
+	if _, err = clientset.RbacV1().RoleBindings(namespace).Create(ctx, genRoleBinding(namespace), metav1.CreateOptions{}); err != nil {
+		return fmt.Errorf("failed to create role binding: %w", err)
 	}
+	plog.StepDone(ctx, "Created RoleBinding %q", config.ConfigMapPodTrafficManager)
 
 	// 5) create service
-	plog.G(ctx).Infof("Creating Service %s", config.ConfigMapPodTrafficManager)
-	svcSpec := genService(namespace)
-	_, err = clientset.CoreV1().Services(namespace).Create(ctx, svcSpec, metav1.CreateOptions{})
-	if err != nil {
-		plog.G(ctx).Errorf("Creating Service error: %v", err)
-		return err
+	plog.StepStart(ctx, "Creating Service")
+	if _, err = clientset.CoreV1().Services(namespace).Create(ctx, genService(namespace), metav1.CreateOptions{}); err != nil {
+		return fmt.Errorf("failed to create service: %w", err)
 	}
+	plog.StepDone(ctx, "Created Service %q", config.ConfigMapPodTrafficManager)
 
-	plog.G(ctx).Infof("Creating ConfigMap %s", config.ConfigMapPodTrafficManager)
+	// 6) create configMap
+	plog.StepStart(ctx, "Creating ConfigMap")
 	_, err = clientset.CoreV1().ConfigMaps(namespace).Create(ctx, &v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      config.ConfigMapPodTrafficManager,
 			Namespace: namespace,
 		},
 		Data: map[string]string{
-			config.KeyEnvoy:       "",
-			config.KeyTunIPPool:   "",
+			config.KeyEnvoy:        "",
+			config.KeyTunIPPool:    "",
 			config.KeyClusterCIDRs: "",
 		},
 	}, metav1.CreateOptions{})
 	if err != nil {
-		plog.G(ctx).Errorf("Creating ConfigMap error: %v", err)
+		return fmt.Errorf("failed to create config map: %w", err)
+	}
+	plog.StepDone(ctx, "Created ConfigMap %q", config.ConfigMapPodTrafficManager)
+
+	// 7) create TLS secret (not surfaced as a step)
+	if _, err = createTLSSecret(ctx, clientset, namespace); err != nil {
 		return err
 	}
 
-	_, err = createTLSSecret(ctx, clientset, namespace)
-	if err != nil {
-		return err
-	}
-
-	// 6) create deployment
-	plog.G(ctx).Infof("Creating Deployment %s", config.ConfigMapPodTrafficManager)
+	// 8) create deployment
+	plog.StepStart(ctx, "Creating Deployment")
 	deploy := genDeploySpec(namespace, image, imagePullSecretName)
 	deploy, err = clientset.AppsV1().Deployments(namespace).Create(ctx, deploy, metav1.CreateOptions{})
 	if err != nil {
-		plog.G(ctx).Errorf("Failed to create deployment for %s: %v", config.ConfigMapPodTrafficManager, err)
-		return err
+		return fmt.Errorf("failed to create deployment for %s: %w", config.ConfigMapPodTrafficManager, err)
 	}
+	plog.StepDone(ctx, "Created Deployment %q", config.ConfigMapPodTrafficManager)
 
 	_, selector, err := polymorphichelpers.SelectorsForObject(deploy)
 	if err != nil {
 		return err
 	}
-	return WaitPodReady(ctx, clientset.CoreV1().Pods(namespace), selector.String())
+	if err = WaitPodReady(ctx, clientset.CoreV1().Pods(namespace), selector.String(), "traffic manager"); err != nil {
+		return err
+	}
+	plog.StepDone(ctx, "Traffic manager ready in namespace %q", namespace)
+	return nil
 }
 
-func WaitPodReady(ctx context.Context, clientset corev1.PodInterface, labelSelector string) error {
+// WaitPodReady blocks until a pod matching labelSelector is ready. When stepName
+// is non-empty the wait is shown as a single in-place spinner line that updates
+// with a one-line pod status ("Waiting for <stepName> pod (<summary>)"); when
+// empty (callers that own their own step, e.g. sync, and tests) the status is
+// logged at Debug instead. The full multi-line status table is kept only for the
+// timeout error, so the reason survives without --debug.
+func WaitPodReady(ctx context.Context, clientset corev1.PodInterface, labelSelector, stepName string) error {
 	const (
 		podReadyTimeout      = 60 * time.Minute
 		podReadyPollInterval = 3 * time.Second
 	)
 	var isPodReady bool
-	var lastMessage string
+	var lastSummary, lastDetail string
+	if stepName != "" {
+		plog.StepStart(ctx, fmt.Sprintf("Waiting for %s pod", stepName))
+	}
 	ctx2, cancelFunc := context.WithTimeout(ctx, podReadyTimeout)
 	defer cancelFunc()
-	plog.G(ctx).Infoln()
 	wait.UntilWithContext(ctx2, func(ctx context.Context) {
 		podList, err := clientset.List(ctx, metav1.ListOptions{
 			LabelSelector: labelSelector,
@@ -152,16 +159,30 @@ func WaitPodReady(ctx context.Context, clientset corev1.PodInterface, labelSelec
 				cancelFunc()
 				return
 			}
+			// Only react when the one-line summary changes, to avoid needless
+			// repaints / log lines.
+			summary := util.PodStatusSummary(&pod)
+			if summary == lastSummary {
+				continue
+			}
+			lastSummary = summary
 			var sb bytes.Buffer
 			util.PrintStatus(&pod, &sb)
-			newMsg := sb.String()
-			if newMsg != lastMessage {
-				lastMessage = newMsg
-				plog.G(ctx).Infof(newMsg)
+			lastDetail = sb.String()
+			if stepName != "" {
+				// Live one-line status, in place on the spinner.
+				plog.StepStart(ctx, fmt.Sprintf("Waiting for %s pod (%s)", stepName, summary))
+			} else {
+				plog.G(ctx).Debugf("%s", summary)
 			}
 		}
 	}, podReadyPollInterval)
 	if !isPodReady {
+		if lastDetail != "" {
+			// Carry the full last status so the timeout reason (e.g.
+			// Unschedulable / Insufficient memory) is visible without --debug.
+			return fmt.Errorf("wait for pod ready timeout, last status:\n%s", lastDetail)
+		}
 		return errors.New("wait for pod ready timeout")
 	}
 	return nil

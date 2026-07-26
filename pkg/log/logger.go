@@ -60,6 +60,71 @@ func InitLoggerForServer() *log.Logger {
 	return GetLoggerForServer(int32(log.InfoLevel), os.Stderr)
 }
 
+const (
+	// stepFieldKey marks a log entry as a CLI progress step. It is consumed by
+	// StreamHook (encoded as a stream sentinel for the spinner renderer) and is
+	// never rendered into the daemon log file (serverFormat strips it).
+	stepFieldKey = "_kubevpn_step"
+	stepStart    = "start"
+	stepDone     = "done"
+	stepTitle    = "title"
+
+	// stepSentinelStart/Done/Title prefix a streamed message to tell the CLI
+	// renderer to begin a spinner / finalize it with a check mark / print it as a
+	// bold heading. They use the ASCII Unit Separator (U+001F) — valid UTF-8 that
+	// never appears in normal messages.
+	stepSentinelStart = "\x1fS"
+	stepSentinelDone  = "\x1fD"
+	stepSentinelTitle = "\x1fT"
+)
+
+// StepKind classifies a streamed message for the CLI progress renderer.
+type StepKind int
+
+const (
+	// StepNone is an ordinary log line (no spinner involvement).
+	StepNone StepKind = iota
+	// StepBegin starts/updates the active spinner line.
+	StepBegin
+	// StepEnd finalizes the active spinner line with a check mark.
+	StepEnd
+	// StepHeading is a bold heading line (no spinner, no check mark) — e.g. the
+	// "Connecting to the cluster ..." banner that precedes the steps. Emitted by
+	// the StepTitle helper.
+	StepHeading
+)
+
+// EncodeStep prefixes a message with the step sentinel for the given kind so the
+// CLI renderer can recognize it. StepNone returns the message unchanged.
+func EncodeStep(kind StepKind, message string) string {
+	switch kind {
+	case StepBegin:
+		return stepSentinelStart + message
+	case StepEnd:
+		return stepSentinelDone + message
+	case StepHeading:
+		return stepSentinelTitle + message
+	default:
+		return message
+	}
+}
+
+// DecodeStep inspects a streamed message, strips any step sentinel, and reports
+// its kind. The CLI progress renderer uses this to drive the spinner without
+// hard-coding the wire encoding.
+func DecodeStep(message string) (StepKind, string) {
+	switch {
+	case strings.HasPrefix(message, stepSentinelStart):
+		return StepBegin, message[len(stepSentinelStart):]
+	case strings.HasPrefix(message, stepSentinelDone):
+		return StepEnd, message[len(stepSentinelDone):]
+	case strings.HasPrefix(message, stepSentinelTitle):
+		return StepHeading, message[len(stepSentinelTitle):]
+	default:
+		return StepNone, message
+	}
+}
+
 // StreamHook sends message-only text to a writer (typically a gRPC stream).
 // Attach to a server-format logger so the primary output (log file) gets full
 // debug info while the stream gets clean user-facing messages.
@@ -79,7 +144,16 @@ func (h *StreamHook) Levels() []log.Level {
 }
 
 func (h *StreamHook) Fire(entry *log.Entry) error {
-	_, err := h.Writer.Write([]byte(entry.Message + "\n"))
+	msg := entry.Message
+	switch entry.Data[stepFieldKey] {
+	case stepStart:
+		msg = EncodeStep(StepBegin, msg)
+	case stepDone:
+		msg = EncodeStep(StepEnd, msg)
+	case stepTitle:
+		msg = EncodeStep(StepHeading, msg)
+	}
+	_, err := h.Writer.Write([]byte(msg + "\n"))
 	return err
 }
 
@@ -96,11 +170,23 @@ type serverFormat struct{}
 // same like log.SetFlags(log.LstdFlags | log.Lshortfile)
 // 2009/01/23 01:23:23 d.go:23: message
 func (*serverFormat) Format(e *log.Entry) ([]byte, error) {
+	// Drop internal-only fields (e.g. the CLI step marker) so the log file stays
+	// clean; they are meant for the stream sentinel, not the on-disk record.
+	data := e.Data
+	if _, ok := data[stepFieldKey]; ok {
+		data = make(log.Fields, len(e.Data))
+		for k, v := range e.Data {
+			if k == stepFieldKey {
+				continue
+			}
+			data[k] = v
+		}
+	}
 	// e.Caller maybe is nil, because pkg/handler/connect.go:252
-	if len(e.Data) > 0 {
+	if len(data) > 0 {
 		return []byte(
 			fmt.Sprintf("%s %s %s:%d %s: %s\n",
-				GenStr(e.Data),
+				GenStr(data),
 				e.Time.Format("2006-01-02 15:04:05.000"),
 				filepath.Base(ptr.Deref(e.Caller, runtime.Frame{}).File),
 				ptr.Deref(e.Caller, runtime.Frame{}).Line,

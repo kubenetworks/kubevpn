@@ -43,7 +43,7 @@ func (svr *Server) Uninstall(resp rpc.Daemon_UninstallServer) (err error) {
 // 3) cleanup all containers
 // 4) cleanup hosts
 func Uninstall(ctx context.Context, clientset kubernetes.Interface, ns string) error {
-	plog.G(ctx).Infof("Cleaning up resources")
+	plog.StepStart(ctx, "Uninstalling traffic manager")
 	name := config.ConfigMapPodTrafficManager
 	options := metav1.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0)}
 	_ = clientset.CoreV1().ConfigMaps(ns).Delete(ctx, name, options)
@@ -56,7 +56,7 @@ func Uninstall(ctx context.Context, clientset kubernetes.Interface, ns string) e
 	_ = clientset.AppsV1().Deployments(ns).Delete(ctx, name, options)
 	_ = clientset.BatchV1().Jobs(ns).Delete(ctx, name, options)
 	_ = cleanupLocalContainer(ctx)
-	plog.G(ctx).Info("Done")
+	plog.StepDone(ctx, "Uninstalled traffic manager from namespace %q", ns)
 	return nil
 }
 

@@ -71,8 +71,9 @@ func (d *SyncOptions) DoSync(ctx context.Context, kubeconfigJsonBytes []byte, im
 	if len(d.Headers) != 0 {
 		args = append(args, "--headers", labels.Set(d.Headers).String())
 	}
+	plog.StepStart(ctx, "Syncing files")
 	for _, workload := range d.Workloads {
-		plog.G(ctx).Infof("Sync workload %s", workload)
+		plog.G(ctx).Debugf("Syncing files for workload %q", workload)
 		_, controller, err := util.GetTopOwnerObject(ctx, d.factory, d.WorkloadNamespace, workload)
 		if err != nil {
 			return err
@@ -132,10 +133,9 @@ func (d *SyncOptions) DoSync(ctx context.Context, kubeconfigJsonBytes []byte, im
 		if retryErr != nil {
 			return fmt.Errorf("create sync for resource %s failed: %w", workload, retryErr)
 		}
-		plog.G(ctx).Infof("Create sync resource %s/%s in target cluster", u.GetObjectKind().GroupVersionKind().GroupKind().String(), u.GetName())
-		plog.G(ctx).Infof("Wait for sync resource %s/%s to be ready", u.GetObjectKind().GroupVersionKind().GroupKind().String(), u.GetName())
-		plog.G(ctx).Infoln()
-		err = WaitPodReady(ctx, d.clientset.CoreV1().Pods(d.WorkloadNamespace), fields.SelectorFromSet(labelsMap).String())
+		plog.G(ctx).Debugf("Created sync resource %s/%s in target cluster", u.GetObjectKind().GroupVersionKind().GroupKind().String(), u.GetName())
+		plog.G(ctx).Debugf("Waiting for sync resource %s/%s to be ready", u.GetObjectKind().GroupVersionKind().GroupKind().String(), u.GetName())
+		err = WaitPodReady(ctx, d.clientset.CoreV1().Pods(d.WorkloadNamespace), fields.SelectorFromSet(labelsMap).String(), "")
 		if err != nil {
 			return err
 		}
@@ -148,6 +148,7 @@ func (d *SyncOptions) DoSync(ctx context.Context, kubeconfigJsonBytes []byte, im
 			}
 		}
 	}
+	plog.StepDone(ctx, "Synced files for %d workloads", len(d.Workloads))
 	return nil
 }
 
@@ -247,9 +248,11 @@ func (d *SyncOptions) Cleanup(ctx context.Context, workloads ...string) error {
 			workloads = append(workloads, v)
 		}
 	}
+	plog.StepStart(ctx, "Stopping file sync")
+	syncCount := len(workloads)
 	var firstErr error
 	for _, workload := range workloads {
-		plog.G(ctx).Infof("Cleaning up sync workload: %s", workload)
+		plog.G(ctx).Debugf("Stopping file sync for workload %q", workload)
 		object, err := util.GetUnstructuredObject(d.factory, d.WorkloadNamespace, workload)
 		if err != nil {
 			plog.G(ctx).Errorf("Failed to get unstructured object: %v", err)
@@ -275,7 +278,7 @@ func (d *SyncOptions) Cleanup(ctx context.Context, workloads ...string) error {
 			}
 			continue
 		}
-		plog.G(ctx).Infof("Deleted sync object: %s/%s", object.Mapping.Resource.GroupResource().Resource, object.Name)
+		plog.G(ctx).Debugf("Deleted sync object %s/%s", object.Mapping.Resource.GroupResource().Resource, object.Name)
 	}
 	for _, f := range d.rollbackFuncList {
 		if f != nil {
@@ -285,12 +288,13 @@ func (d *SyncOptions) Cleanup(ctx context.Context, workloads ...string) error {
 		}
 	}
 	for _, workload := range d.Workloads {
-		plog.G(ctx).Infof("Wait workload %s", workload)
+		plog.G(ctx).Debugf("Waiting for workload %q to roll back", workload)
 		err := util.RolloutStatus(ctx, d.factory, d.WorkloadNamespace, workload)
 		if err != nil {
 			plog.G(ctx).Warnf("Failed to rollback workload %s: %v", workload, err)
 		}
 	}
+	plog.StepDone(ctx, "Stopped file sync for %d workloads", syncCount)
 	return firstErr
 }
 

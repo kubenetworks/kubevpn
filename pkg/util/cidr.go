@@ -35,14 +35,15 @@ func GetCIDR(ctx context.Context, clientset kubernetes.Interface, restconfig *re
 	}()
 
 	var result []*net.IPNet
-	plog.G(ctx).Infoln("Detecting cluster CIDRs from component flags...")
+	plog.StepStart(ctx, "Detecting cluster CIDRs")
+	plog.G(ctx).Debugln("Detecting cluster CIDRs from component flags...")
 	info, err := GetCIDRByDumpClusterInfo(ctx, clientset)
 	if err == nil {
 		plog.G(ctx).Debugf("Detected CIDRs from component flags")
 		result = append(result, info...)
 	}
 
-	plog.G(ctx).Infoln("Detecting cluster CIDRs from CNI config...")
+	plog.G(ctx).Debugln("Detecting cluster CIDRs from CNI config...")
 	cni, err := GetCIDRFromCNI(ctx, clientset, restconfig, namespace, image)
 	if err == nil {
 		plog.G(ctx).Debugf("Detected CIDRs from CNI config")
@@ -53,20 +54,37 @@ func GetCIDR(ctx context.Context, clientset kubernetes.Interface, restconfig *re
 	if err == nil {
 		result = append(result, podCIDR...)
 	}
+	plog.StepDone(ctx, "Detected cluster CIDRs: %s", CIDRsToString(result))
 
-	plog.G(ctx).Infoln("Detecting service CIDR...")
+	plog.StepStart(ctx, "Detecting service CIDR")
 	svcCIDR, _ := GetServiceCIDRByCreateService(ctx, clientset.CoreV1().Services(namespace))
 	if svcCIDR != nil {
-		plog.G(ctx).Debugf("Detected service CIDR")
+		plog.StepDone(ctx, "Detected service CIDR: %s", svcCIDR.String())
 		result = append(result, svcCIDR)
 
 		podCIDR, err = GetPodCIDRFromPod(ctx, clientset, namespace, svcCIDR)
 		if err == nil {
 			result = append(result, podCIDR...)
 		}
+	} else {
+		plog.StepDone(ctx, "Detected service CIDR: (none)")
 	}
 
 	return result
+}
+
+// CIDRsToString joins CIDRs into a comma-separated string, or "(none)" if empty.
+func CIDRsToString(cidrs []*net.IPNet) string {
+	if len(cidrs) == 0 {
+		return "(none)"
+	}
+	parts := make([]string, 0, len(cidrs))
+	for _, c := range cidrs {
+		if c != nil {
+			parts = append(parts, c.String())
+		}
+	}
+	return strings.Join(parts, ", ")
 }
 
 // parseCIDRFromFlag extracts CIDRs from Kubernetes component command-line flags
@@ -172,7 +190,7 @@ func GetPodCIDRFromCNI(ctx context.Context, clientset kubernetes.Interface, rest
 	if err != nil {
 		return nil, err
 	}
-	plog.G(ctx).Infoln("Found CNI config", configList.Name)
+	plog.G(ctx).Debugln("Found CNI config", configList.Name)
 	var cidrList []*net.IPNet
 	for _, plugin := range configList.Plugins {
 		switch plugin.Network.Type {
