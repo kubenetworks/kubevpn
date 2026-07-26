@@ -541,6 +541,24 @@ func isIPExcluded(ipNet *net.IPNet, excludeIPs []net.IP) bool {
 	return false
 }
 
+// pendingProposalResp builds a DryRun snapshot of an owner's outstanding proposal,
+// or nil if none. Used to re-deliver a pending proposal to a freshly (re)subscribed
+// watcher. Caller holds s.mu.
+func (s *TunConfigServer) pendingProposalResp(ownerID string) *rpc.TunIPResponse {
+	p, ok := s.pendingProposal[ownerID]
+	if !ok || (p.candV4 == nil && p.candV6 == nil) {
+		return nil
+	}
+	resp := &rpc.TunIPResponse{Version: time.Now().UnixNano(), DryRun: true}
+	if p.candV4 != nil {
+		resp.IPv4 = p.candV4.String()
+	}
+	if p.candV6 != nil {
+		resp.IPv6 = p.candV6.String()
+	}
+	return resp
+}
+
 // WatchTunIP streams IP changes to the caller. Blocks until context is cancelled.
 // An active stream acts as an implicit lease renewal — LastRenew is refreshed
 // periodically so the LeaseReaper won't reclaim the IP while the stream is alive.
@@ -550,6 +568,19 @@ func (s *TunConfigServer) WatchTunIP(req *rpc.TunIPRequest, stream rpc.TunConfig
 	s.mu.Lock()
 	s.watchers[req.OwnerID] = append(s.watchers[req.OwnerID], ch)
 	s.renewLease(req.OwnerID)
+	// Replay any outstanding dry-run proposal to this (re)subscriber as an initial
+	// snapshot. A proposal pushed via notifyWatchers while the client was briefly
+	// absent — e.g. mid-reconnect after a control-plane outage, when a stale watcher
+	// channel still lingered — reaches no live client and is otherwise lost: the
+	// server keeps the pending intent but never re-pushes it, so the client never
+	// confirms and the operator's edit silently stalls. Re-delivering here closes
+	// that window. Buffered send mirrors notifyWatchers (the channel is fresh/empty).
+	if snap := s.pendingProposalResp(req.OwnerID); snap != nil {
+		select {
+		case ch <- snap:
+		default:
+		}
+	}
 	s.mu.Unlock()
 
 	defer func() {
