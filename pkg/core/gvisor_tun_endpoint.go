@@ -29,7 +29,7 @@ func (h *gvisorTCPHandler) readFromEndpointWriteToRoute(ctx context.Context, end
 		if pkt == nil {
 			continue
 		}
-		sniffer.LogPacket("[gVISOR] ", sniffer.DirectionSend, pkt.NetworkProtocolNumber, pkt)
+		logStackPacket(ctx, "[gVISOR] ", sniffer.DirectionSend, pkt.NetworkProtocolNumber, pkt)
 
 		buf := config.LPool.Get().([]byte)
 		if tunReserve+pkt.Size() > config.LargeBufferSize {
@@ -159,7 +159,7 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 				Payload:            buffer.MakeWithData(ip),
 			})
 			config.LPool.Put(buf[:])
-			sniffer.LogPacket("[gVISOR] ", sniffer.DirectionRecv, protocol, pkt)
+			logStackPacket(ctx, "[gVISOR] ", sniffer.DirectionRecv, protocol, pkt)
 			cs.endpoint.InjectInbound(protocol, pkt)
 			pkt.DecRef()
 			if plog.IsDebugEnabled(ctx) {

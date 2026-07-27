@@ -55,19 +55,21 @@ func newStreamWriter(send func(string) error) io.Writer {
 // It lets concurrent operations be told apart in the shared daemon log file.
 const LogFieldConnID = "connID"
 
-// newServerStreamLogger builds a server-format logger that writes ALL levels
-// (DebugLevel) to the daemon log file, and streams message-only text to the
-// client via a StreamHook at streamLevel. The log file is always full-debug for
-// post-mortem debugging; the CLI sees Info by default and Debug only when the
-// client passed --debug (streamLevel carries that intent).
+// newServerStreamLogger builds a server-format logger for one RPC whose level FOLLOWS the
+// request's log level (streamLevel = req.Level: Info by default, Debug when the client passed
+// --debug). Both the log file and the StreamHook (message-only → gRPC stream → CLI) use that
+// level, so a connection's whole footprint — file, stream, per-packet, and the background
+// data-plane tasks it spawns (they run on this logger's ctx) — is recorded at the level the
+// user asked for. A non-debug connection therefore neither floods the file with per-packet lines
+// nor pays the formatting cost (IsDebugEnabled(ctx) is false).
 func newServerStreamLogger(out io.Writer, streamLevel int32, sendMsg func(string) error) *log.Logger {
-	// A zero streamLevel is logrus PanicLevel, which would suppress almost everything streamed to
-	// the CLI. Treat it as Info — it means the caller's request carried no Level (e.g. an older
-	// client, or an RPC whose request predates the Level field). The file side stays full Debug.
+	// A zero streamLevel is logrus PanicLevel, which would suppress almost everything. Treat it as
+	// Info — it means the caller's request carried no Level (e.g. an older client, or an RPC whose
+	// request predates the Level field).
 	if streamLevel == 0 {
 		streamLevel = int32(log.InfoLevel)
 	}
-	logger := plog.GetLoggerForServer(int32(log.DebugLevel), out)
+	logger := plog.GetLoggerForServer(streamLevel, out)
 	logger.AddHook(&plog.StreamHook{
 		Writer: newStreamWriter(sendMsg),
 		Level:  log.Level(streamLevel),

@@ -8,7 +8,6 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/header"
 	"gvisor.dev/gvisor/pkg/tcpip/link/channel"
-	"gvisor.dev/gvisor/pkg/tcpip/link/sniffer"
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -66,7 +65,7 @@ func newInterClientStack(ctx context.Context, out chan<- *Packet, headroom int) 
 	// large segments to <=MTU internally before they reach this endpoint (not HostGSO, which would
 	// push super-MTU segments a TUN cannot write). See gvisorLocalHandler.Run.
 	endpoint.SupportedGSOKind = stack.GVisorGSOSupported
-	s := NewLocalStack(ctx, sniffer.NewWithPrefix(endpoint, fmt.Sprintf("[gVISOR]%s ", plog.GenStr(plog.GetFields(ctx)))))
+	s := NewLocalStack(ctx, sniffLink(ctx, endpoint, fmt.Sprintf("[gVISOR]%s ", plog.GenStr(plog.GetFields(ctx)))))
 	go func() {
 		defer netutil.HandleCrash()
 		readFromEndpointWriteToTun(ctx, endpoint, out, headroom)
@@ -118,7 +117,7 @@ func (h *gvisorLocalHandler) Run(ctx context.Context) {
 		readFromEndpointWriteToTun(ctx, endpoint, h.outbound, h.headroom)
 		netutil.SafeClose(h.errChan)
 	}()
-	s := NewLocalStack(ctx, sniffer.NewWithPrefix(endpoint, fmt.Sprintf("[gVISOR]%s ", plog.GenStr(plog.GetFields(ctx)))))
+	s := NewLocalStack(ctx, sniffLink(ctx, endpoint, fmt.Sprintf("[gVISOR]%s ", plog.GenStr(plog.GetFields(ctx)))))
 	defer s.Destroy()
 	select {
 	case <-h.errChan:

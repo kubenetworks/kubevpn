@@ -6,6 +6,11 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// FieldTun is the context field key for the TUN device name. Set on the data-plane context by the
+// core TunHandler; the server log format renders it as a "tun=utunX" field (via GenStr), which lets
+// `kubevpn logs --tun utunX` filter a connection's data-plane lines out of the shared log file.
+const FieldTun = "tun"
+
 // G is a shorthand for [GetLogger].
 //
 // We may want to define this locally to a package to get package tagged log

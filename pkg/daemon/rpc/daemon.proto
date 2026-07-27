@@ -326,6 +326,13 @@ message SshConnectResponse {
 message LogRequest {
   bool Follow = 1;
   int32 Lines = 2;
+  // ConnectionID, when set, keeps only lines tagged with this connection id (connID=...) plus
+  // lines that carry no connID tag at all (shared/early/setup logs). Lines tagged with a different
+  // connID are dropped.
+  string ConnectionID = 3;
+  // Tun, when set, keeps only lines tagged with this TUN device name (tun=...) plus lines that
+  // carry no tun tag. Lines tagged with a different tun are dropped.
+  string Tun = 4;
 }
 
 message LogResponse {

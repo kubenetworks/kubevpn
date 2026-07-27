@@ -142,32 +142,36 @@ being formatted and written to the log synchronously.
 
 Root cause:
 
-1. The daemon's per-RPC logger records the file at Debug **by design** (a full control-plane
-   record — see `log.IsDebugEnabled`), so `logIPPacket`, gated on `IsDebugEnabled(ctx)`, fired for
+1. The daemon's per-RPC logger recorded the file at Debug **regardless of `--debug`** (the old
+   "file is a full record" design), so `logIPPacket`, gated on `IsDebugEnabled(ctx)`, fired for
    every packet in the daemon.
 2. gvisor's `sniffer.LogPackets` defaults to **1** and was never disabled, so every
    `sniffer.NewWithPrefix`-wrapped stack and every bare `sniffer.LogPacket` call logged every packet
    (gvisor glog Info → the always-Debug plog target; lowering plog to Info would not stop Info).
 
-Per-packet tracing is a hot-path cost that must not ride on the always-on daemon debug record.
+Per-packet tracing is a hot-path cost that must follow the connection's actual `--debug` intent.
 
-### Fix — reference-counted, opt-in packet tracing (off by default)
+### Fix — per-packet logging follows the connection's req.Level
 
-- `pkg/core/packet_trace.go`: `init()` sets `sniffer.LogPackets.Store(0)` (neutralizes gvisor's
-  default per-packet logging in every binary). `AcquirePacketLogging()` turns tracing on and returns
-  an idempotent release; a reference count keeps it on while any holder is active and restores off
-  when the last releases.
-- `packet.go` `logIPPacket`: gated on `packetLoggingEnabled()` (the toggle) instead of
-  `IsDebugEnabled(ctx)` — decoupled from the daemon's always-Debug file record; its `ctx` parameter
-  was dropped as no longer needed.
-- Wiring reuses the existing `--debug` intent (no new CLI flag, no proto change): the root daemon's
-  `Connect` handler (`daemon/action/connect.go`) acquires when `req.Level == Debug` and releases via
-  a `DataSession` rollback (scoped to the connection's lifetime, ref-counted across `--debug`
-  connections); `kubevpn server` (traffic-manager pod) acquires once for the process under `--debug`.
+Instead of a separate packet-logging switch, the daemon's per-RPC logger level was changed to
+**`req.Level`** (see docs/13), so a non-`--debug` connection's whole footprint — file, stream,
+per-packet, and background data-plane tasks (they run on that logger's ctx) — records nothing at
+Debug. Per-packet logging then follows naturally, per connection:
 
-Effect: without `--debug`, per-packet logging is fully off and the hot path pays only an atomic
-load (`BenchmarkLogIPPacket`: **1.1 ns/op off vs ~1676 ns/op on** — a ~1500× per-packet cost). With
-`connect --debug`, tracing turns on for that connection and off again when it ends.
+- `pkg/daemon/action/writer.go` `newServerStreamLogger`: logger level = `streamLevel` (req.Level),
+  not forced `DebugLevel`.
+- `packet.go` `logIPPacket`: gated on `IsDebugEnabled(ctx)` (the session ctx now reflects req.Level).
+- gvisor's built-in sniffer (which writes straight to the file via glog, bypassing the per-RPC
+  level) is made per-ctx too: `sniffLink(ctx, ep, prefix)` only wraps a stack with a sniffer when
+  `IsDebugEnabled(ctx)`, and `logStackPacket(ctx, …)` gates the bare `sniffer.LogPacket` calls.
+  `sniffer.LogPackets` stays at its default 1 (these ctx-gates are the real switch now).
+- The client stacks take the session ctx (req.Level); the traffic-manager pod's stacks take the
+  server ctx (`config.Debug`). The interim `AcquirePacketLogging` reference-counted switch was
+  removed.
+
+Effect: without `--debug`, per-packet logging is fully off and the hot path pays only the
+`IsDebugEnabled` check. With `connect --debug`, that connection logs packets (file + stream); other
+concurrent non-debug connections stay silent.
 
 ## Remaining work
 

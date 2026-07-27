@@ -12,7 +12,6 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/header"
 	"gvisor.dev/gvisor/pkg/tcpip/link/channel"
-	"gvisor.dev/gvisor/pkg/tcpip/link/sniffer"
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -126,7 +125,7 @@ func (h *gvisorTCPHandler) getOrCreateClientStack(srcKey string) *clientStack {
 	endpoint.LinkEPCapabilities = stack.CapabilityRXChecksumOffload
 	endpoint.SupportedGSOKind = stack.GVisorGSOSupported
 
-	s := h.newStack(stackCtx, sniffer.NewWithPrefix(endpoint, "[gVISOR] "))
+	s := h.newStack(stackCtx, sniffLink(stackCtx, endpoint, "[gVISOR] "))
 
 	cs := &clientStack{
 		endpoint: endpoint,

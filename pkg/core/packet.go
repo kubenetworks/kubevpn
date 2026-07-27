@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"net"
 	"strings"
 	"sync/atomic"
@@ -12,6 +13,7 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	netutil "github.com/wencaiwulue/kubevpn/v2/pkg/util/netutil"
 )
 
@@ -127,10 +129,10 @@ func copyPacketToPool(pkt *stack.PacketBuffer, prefix byte, headroom int) (buf [
 
 // logIPPacket logs one bare IP packet (no framing prefix) via gvisor's sniffer, which renders
 // full transport-layer detail (ports, TCP flags/seq/ack/win, ICMP types, etc.). It is gated on
-// packetLoggingEnabled() — an explicit, reference-counted opt-in tied to --debug data-plane
-// connections — so the parse+format cost is skipped (default) unless packet tracing is acquired.
-func logIPPacket(label string, data []byte) {
-	if !packetLoggingEnabled() {
+// the ctx logger's level (IsDebugEnabled) so the parse+format cost is skipped unless this
+// connection is running at Debug — i.e. per-packet logging follows the connection's req.Level.
+func logIPPacket(ctx context.Context, label string, data []byte) {
+	if !plog.IsDebugEnabled(ctx) {
 		return
 	}
 	var protocol tcpip.NetworkProtocolNumber
@@ -150,4 +152,25 @@ func logIPPacket(label string, data []byte) {
 	})
 	sniffer.LogPacket(label+" ", dir, protocol, pkt)
 	pkt.DecRef()
+}
+
+// sniffLink wraps a gvisor link endpoint with a per-packet sniffer only when the ctx logger is at
+// Debug, otherwise returns the endpoint unwrapped. This keeps gvisor's built-in packet logging
+// (which writes straight to the log file via glog, bypassing the per-RPC logger's level) tied to
+// the connection's req.Level: a non-debug connection's stack is never wrapped, so it emits no
+// per-packet lines and pays no sniffer overhead.
+func sniffLink(ctx context.Context, ep stack.LinkEndpoint, prefix string) stack.LinkEndpoint {
+	if !plog.IsDebugEnabled(ctx) {
+		return ep
+	}
+	return sniffer.NewWithPrefix(ep, prefix)
+}
+
+// logStackPacket logs a gvisor stack packet via the sniffer, gated on the ctx logger's level so
+// the pump goroutines only format+emit when this connection runs at Debug (follows req.Level).
+func logStackPacket(ctx context.Context, prefix string, dir sniffer.Direction, protocol tcpip.NetworkProtocolNumber, pkt *stack.PacketBuffer) {
+	if !plog.IsDebugEnabled(ctx) {
+		return
+	}
+	sniffer.LogPacket(prefix, dir, protocol, pkt)
 }

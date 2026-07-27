@@ -45,11 +45,6 @@ func CmdServer(cmdutil.Factory) *cobra.Command {
 			ctx := cmd.Context()
 			logger := plog.InitLoggerForServer()
 			logger.SetLevel(util.If(config.Debug, log.DebugLevel, log.InfoLevel))
-			// Per-packet data-plane tracing is off by default (it caps throughput). In the
-			// traffic-manager pod, enable it for the process lifetime only under --debug.
-			if config.Debug {
-				core.AcquirePacketLogging()
-			}
 			servers, err := core.GenerateServers(listeners, core.NewRouteHub())
 			if err != nil {
 				plog.G(ctx).Errorf("Parse server failed: %v", err)

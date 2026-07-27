@@ -114,7 +114,7 @@ func (s *connSlot) readFromConn(ctx context.Context, conn net.Conn, errChan chan
 			continue
 		}
 		ip := buf[tunReserve : datagramHeaderLen+n]
-		logIPPacket(fmt.Sprintf("[Client-%d] INBOUND", s.id), ip)
+		logIPPacket(ctx, fmt.Sprintf("[Client-%d] INBOUND", s.id), ip)
 		if buf[datagramHeaderLen] == packetTypeToGvisor {
 			// Inject directly into the shared inter-client stack, mirroring the server's
 			// readFromTCPConnWriteToEndpoint: no intermediate bounded queue, so TCP's receive
