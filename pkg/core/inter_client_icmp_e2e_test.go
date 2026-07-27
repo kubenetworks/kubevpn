@@ -119,7 +119,7 @@ type interClientServer struct {
 	port int
 }
 
-func newInterClientServer(ctx context.Context, t *testing.T) interClientServer {
+func newInterClientServer(ctx context.Context, t testing.TB) interClientServer {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -143,7 +143,7 @@ func newInterClientServer(ctx context.Context, t *testing.T) interClientServer {
 // startPipeClient builds a clientTransport whose TUN is a net.Pipe. It returns the "OS side" of
 // the pipe (write to it = the OS sending a packet out the TUN; read from it = the OS receiving a
 // packet) and a channel of ICMP/ICMPv6 echo replies addressed to this client's TUN IP.
-func startPipeClient(ctx context.Context, t *testing.T, serverPort int, tunIP string) (net.Conn, <-chan []byte) {
+func startPipeClient(ctx context.Context, t testing.TB, serverPort int, tunIP string) (net.Conn, <-chan []byte) {
 	t.Helper()
 	osSide, tunSide := net.Pipe()
 
@@ -198,7 +198,7 @@ func startPipeClient(ctx context.Context, t *testing.T, serverPort int, tunIP st
 
 // registerRoute makes the server learn this client's route by emitting a heartbeat-style ICMP
 // echo to the gateway (src = the client's TUN IP), which the server AddRoutes on receipt.
-func registerRoute(t *testing.T, os net.Conn, tunIP string) {
+func registerRoute(t testing.TB, os net.Conn, tunIP string) {
 	t.Helper()
 	ip := net.ParseIP(tunIP)
 	var pkt []byte
@@ -282,7 +282,7 @@ func verifyEchoReplyChecksum(ipData []byte) error {
 	return fmt.Errorf("not an IP packet")
 }
 
-func waitForRoutes(t *testing.T, hub *RouteHub, ips ...string) {
+func waitForRoutes(t testing.TB, hub *RouteHub, ips ...string) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for _, ip := range ips {

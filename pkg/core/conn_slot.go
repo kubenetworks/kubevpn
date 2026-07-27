@@ -26,10 +26,10 @@ type connSlot struct {
 	// (re)connect, so the server registers the route immediately instead of waiting for data or a
 	// periodic heartbeat. Computed lazily (picks up the current TUN IP); may be nil in tests.
 	registrations func() [][]byte
-	// interClientInbound is the transport-level channel feeding the shared inter-client gvisor
-	// stack. readFromConn routes type == packetTypeToGvisor packets here instead of to a per-slot
+	// interClient is the shared transport-level inter-client gvisor stack. readFromConn injects
+	// type == packetTypeToGvisor packets directly into it (InjectIP) rather than into a per-slot
 	// stack, so the stack outlives any single slot. nil in tests that drive a slot in isolation.
-	interClientInbound chan *Packet
+	interClient *interClientStack
 	// isControl marks this slot as the dedicated control-plane connection. On connect, it sends
 	// a packetTypeControl declaration so the server handles it separately (no RouteHub registration).
 	isControl bool
@@ -116,11 +116,16 @@ func (s *connSlot) readFromConn(ctx context.Context, conn net.Conn, errChan chan
 		ip := buf[tunReserve : datagramHeaderLen+n]
 		logIPPacket(ctx, fmt.Sprintf("[Client-%d] INBOUND", s.id), ip)
 		if buf[datagramHeaderLen] == packetTypeToGvisor {
-			// Hand off to the transport-level inter-client stack. Drop-if-full (and nil-safe for
-			// tests that drive a slot in isolation) so a busy stack cannot stall this slot's reader.
-			if !trySendToSlot(s.interClientInbound, NewPacket(buf[:], n, nil, nil)) {
-				plog.G(ctx).Warnf("[Client-%d] Inter-client buffer full, dropping inbound packet", s.id)
+			// Inject directly into the shared inter-client stack, mirroring the server's
+			// readFromTCPConnWriteToEndpoint: no intermediate bounded queue, so TCP's receive
+			// window throttles the peer instead of a blind drop that forces sender retransmits.
+			// InjectIP returns promptly (the localhost copy runs in the forwarder's goroutines),
+			// so a busy stack never stalls this reader — heartbeat-reply liveness is preserved.
+			// nil-safe for tests that drive a slot in isolation.
+			if s.interClient != nil {
+				s.interClient.InjectIP(ip)
 			}
+			config.LPool.Put(buf[:])
 		} else {
 			// Heartbeat echo replies from the gateway are the data-plane liveness signal:
 			// record them and drop (the OS would discard them — the echo was crafted by us).
