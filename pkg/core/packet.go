@@ -1,7 +1,6 @@
 package core
 
 import (
-	"context"
 	"net"
 	"strings"
 	"sync/atomic"
@@ -13,7 +12,6 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	netutil "github.com/wencaiwulue/kubevpn/v2/pkg/util/netutil"
 )
 
@@ -127,11 +125,12 @@ func copyPacketToPool(pkt *stack.PacketBuffer, prefix byte, headroom int) (buf [
 	return buf, n + typePrefixLen
 }
 
-// logIPPacket logs one bare IP packet (no framing prefix) at Debug via gvisor's sniffer, which
-// renders full transport-layer detail (ports, TCP flags/seq/ack/win, ICMP types, etc.). It is
-// gated on the ctx logger's level so the parse+format cost is skipped when debug is off.
-func logIPPacket(ctx context.Context, label string, data []byte) {
-	if !plog.IsDebugEnabled(ctx) {
+// logIPPacket logs one bare IP packet (no framing prefix) via gvisor's sniffer, which renders
+// full transport-layer detail (ports, TCP flags/seq/ack/win, ICMP types, etc.). It is gated on
+// packetLoggingEnabled() — an explicit, reference-counted opt-in tied to --debug data-plane
+// connections — so the parse+format cost is skipped (default) unless packet tracing is acquired.
+func logIPPacket(label string, data []byte) {
+	if !packetLoggingEnabled() {
 		return
 	}
 	var protocol tcpip.NetworkProtocolNumber

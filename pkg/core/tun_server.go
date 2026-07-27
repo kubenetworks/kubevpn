@@ -38,7 +38,7 @@ func (t *serverTransport) routines() []namedRoutine {
 func (t *serverTransport) routeOutbound(ctx context.Context, buf []byte, n int, src, dst net.IP) {
 	// Canonical layout: set the type prefix in place; IP already sits at buf[tunReserve:].
 	// length is type+IP so routeTun can frame without further arithmetic.
-	logIPPacket(ctx, "[TUN]", buf[tunReserve:tunReserve+n])
+	logIPPacket("[TUN]", buf[tunReserve:tunReserve+n])
 	buf[datagramHeaderLen] = packetTypeToGvisor
 	sendStart := time.Now()
 	t.dev.tunInbound <- NewPacket(buf[:], n+typePrefixLen, src, dst)

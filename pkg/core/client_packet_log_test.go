@@ -22,14 +22,6 @@ func debugCtx(buf *bytes.Buffer) context.Context {
 	return plog.WithLogger(context.Background(), logger)
 }
 
-// infoCtx returns a ctx carrying an Info-level message-only logger writing to buf. Used to
-// assert that packet logging is suppressed when the logger itself is not at Debug (as in the
-// CLI/server process without --debug); the daemon's file logger is always Debug.
-func infoCtx(buf *bytes.Buffer) context.Context {
-	logger := plog.GetLoggerForClient(int32(log.InfoLevel), buf)
-	return plog.WithLogger(context.Background(), logger)
-}
-
 // bufferEmitter captures gvisor glog output into a bytes.Buffer for test assertions.
 type bufferEmitter struct {
 	buf *bytes.Buffer
@@ -50,12 +42,14 @@ func setGvisorLog(buf *bytes.Buffer) func() {
 	}
 }
 
-// TestClientLog_Outbound verifies the client logs every outbound packet (read
-// from the local TUN) at Debug with an OUTBOUND tag when the ctx logger is at Debug.
+// TestClientLog_Outbound verifies that, WHILE packet tracing is acquired, the client logs every
+// outbound packet (read from the local TUN) with an OUTBOUND tag and the flow addresses.
 func TestClientLog_Outbound(t *testing.T) {
 	var buf bytes.Buffer
 	cleanup := setGvisorLog(&buf)
 	defer cleanup()
+	rel := AcquirePacketLogging()
+	defer rel()
 
 	ctx, cancel := context.WithCancel(debugCtx(&buf))
 	defer cancel()
@@ -87,12 +81,14 @@ func TestClientLog_Outbound(t *testing.T) {
 	}
 }
 
-// TestClientLog_Inbound verifies the client logs every inbound packet (read from
-// the server connection) at Debug with an INBOUND tag when the ctx logger is at Debug.
+// TestClientLog_Inbound verifies that, WHILE packet tracing is acquired, the client logs every
+// inbound packet (read from the server connection) with an INBOUND tag and the flow addresses.
 func TestClientLog_Inbound(t *testing.T) {
 	var buf bytes.Buffer
 	cleanup := setGvisorLog(&buf)
 	defer cleanup()
+	rel := AcquirePacketLogging()
+	defer rel()
 
 	ctx, cancel := context.WithCancel(debugCtx(&buf))
 	defer cancel()
@@ -130,15 +126,19 @@ func TestClientLog_Inbound(t *testing.T) {
 	}
 }
 
-// TestClientLog_InfoLoggerSuppressed verifies no per-packet line when the ctx logger is below
-// Debug (e.g. CLI/server without --debug). Packet logging is gated on the logger level, not the
-// global config.Debug flag — so the daemon (file logger always Debug) still records packets.
-func TestClientLog_InfoLoggerSuppressed(t *testing.T) {
+// TestClientLog_SuppressedByDefault verifies that per-packet logging is off unless explicitly
+// acquired: even with a Debug-level ctx logger (which used to enable it), no packet line is
+// emitted. Per-packet tracing is now decoupled from the logger level — it is an explicit,
+// reference-counted opt-in (AcquirePacketLogging), so it never floods the daemon log by default.
+func TestClientLog_SuppressedByDefault(t *testing.T) {
+	if packetLoggingEnabled() {
+		t.Fatal("precondition: packet logging must be off (do not acquire in this test)")
+	}
 	var buf bytes.Buffer
 	cleanup := setGvisorLog(&buf)
 	defer cleanup()
 
-	ctx, cancel := context.WithCancel(infoCtx(&buf))
+	ctx, cancel := context.WithCancel(debugCtx(&buf))
 	defer cancel()
 
 	tun := newMockTUN()
@@ -160,6 +160,6 @@ func TestClientLog_InfoLoggerSuppressed(t *testing.T) {
 	}
 
 	if strings.Contains(buf.String(), "OUTBOUND") {
-		t.Fatalf("expected no packet line when debug disabled, got %q", buf.String())
+		t.Fatalf("expected no packet line when tracing not acquired, got %q", buf.String())
 	}
 }

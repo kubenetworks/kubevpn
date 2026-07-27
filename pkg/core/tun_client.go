@@ -78,7 +78,7 @@ func (t *clientTransport) routeOutbound(ctx context.Context, buf []byte, n int, 
 	// buf is canonical (pumpTun reserved buf[0:tunReserve]): set the type prefix and the
 	// IP already sits at buf[tunReserve:]. Both branches forward the same canonical buffer.
 	buf[datagramHeaderLen] = packetTypeToGvisor
-	logIPPacket(ctx, "[Client] OUTBOUND", buf[tunReserve:tunReserve+n])
+	logIPPacket("[Client] OUTBOUND", buf[tunReserve:tunReserve+n])
 	if src.Equal(dst) {
 		t.gvisorInbound <- NewPacket(buf[:], n+typePrefixLen, src, dst)
 	} else {

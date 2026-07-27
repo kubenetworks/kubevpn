@@ -132,6 +132,43 @@ intermediate channel + per-packet `Packet` are gone). The residual gap to the cl
 flows is the inherent extra hop (B's single shared stack + the return through B's pool) — bottleneck
 #2/#3, far milder than the drop-induced collapse.
 
+## Second finding — per-packet logging (the dominant real-world cost)
+
+After the direct-injection fix was deployed to two real clients (interA/interB), throughput was
+still poor. Their daemon logs (`root_daemon.log`) rotated 100MB every few minutes; a 200k-line
+sample was **~99.9% per-packet log lines** — 2–4 lines per packet in the data-plane hot path
+(`packet.go` `logIPPacket`, gvisor `sniffer.go`, `gvisor_local_tun_endpoint.go`). Every packet was
+being formatted and written to the log synchronously.
+
+Root cause:
+
+1. The daemon's per-RPC logger records the file at Debug **by design** (a full control-plane
+   record — see `log.IsDebugEnabled`), so `logIPPacket`, gated on `IsDebugEnabled(ctx)`, fired for
+   every packet in the daemon.
+2. gvisor's `sniffer.LogPackets` defaults to **1** and was never disabled, so every
+   `sniffer.NewWithPrefix`-wrapped stack and every bare `sniffer.LogPacket` call logged every packet
+   (gvisor glog Info → the always-Debug plog target; lowering plog to Info would not stop Info).
+
+Per-packet tracing is a hot-path cost that must not ride on the always-on daemon debug record.
+
+### Fix — reference-counted, opt-in packet tracing (off by default)
+
+- `pkg/core/packet_trace.go`: `init()` sets `sniffer.LogPackets.Store(0)` (neutralizes gvisor's
+  default per-packet logging in every binary). `AcquirePacketLogging()` turns tracing on and returns
+  an idempotent release; a reference count keeps it on while any holder is active and restores off
+  when the last releases.
+- `packet.go` `logIPPacket`: gated on `packetLoggingEnabled()` (the toggle) instead of
+  `IsDebugEnabled(ctx)` — decoupled from the daemon's always-Debug file record; its `ctx` parameter
+  was dropped as no longer needed.
+- Wiring reuses the existing `--debug` intent (no new CLI flag, no proto change): the root daemon's
+  `Connect` handler (`daemon/action/connect.go`) acquires when `req.Level == Debug` and releases via
+  a `DataSession` rollback (scoped to the connection's lifetime, ref-counted across `--debug`
+  connections); `kubevpn server` (traffic-manager pod) acquires once for the process under `--debug`.
+
+Effect: without `--debug`, per-packet logging is fully off and the hot path pays only an atomic
+load (`BenchmarkLogIPPacket`: **1.1 ns/op off vs ~1676 ns/op on** — a ~1500× per-packet cost). With
+`connect --debug`, tracing turns on for that connection and off again when it ends.
+
 ## Remaining work
 
 - **CI minikube e2e** (real RTT): `iperf3` A→B single-stream vs `-P 8`, and A→cluster, on both

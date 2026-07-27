@@ -3,6 +3,9 @@ package action
 import (
 	"context"
 
+	log "github.com/sirupsen/logrus"
+
+	"github.com/wencaiwulue/kubevpn/v2/pkg/core"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
@@ -69,6 +72,17 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 		session.Teardown()
 		return nil
 	})
+	// Per-packet data-plane tracing is off by default because it caps throughput (every packet is
+	// formatted and written to the log synchronously — see docs/50). Enable it only for the
+	// lifetime of this connection when the user connected with --debug (carried in req.Level), and
+	// release on teardown so it reverts to off once the last --debug connection ends.
+	if req.Level == int32(log.DebugLevel) {
+		releasePacketLog := core.AcquirePacketLogging()
+		ds.AddRollbackFunc(func() error {
+			releasePacketLog()
+			return nil
+		})
+	}
 	go grpcutil.ListenCancel(resp, session.Cancel)
 	defer func() {
 		if err != nil {
