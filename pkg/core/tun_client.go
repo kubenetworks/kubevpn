@@ -33,12 +33,14 @@ type clientTransport struct {
 	controlSlot *connSlot
 	// gvisorInbound carries src == dst packets to the local loopback (self-to-self) gvisor stack.
 	gvisorInbound chan *Packet
-	// interClientInbound carries inter-client packets (type == packetTypeToGvisor, from the server)
-	// to a single transport-level gvisor stack. It is NOT per-slot: the stack's lifetime is the
-	// whole connection, so tearing down/reconnecting one pool slot never destroys an in-flight
-	// inter-client transfer. The stack's output goes to the shared tunInbound (dispatched to a slot
-	// by five-tuple hash), decoupling it from any one slot.
-	interClientInbound chan *Packet
+	// interClient is the single transport-level gvisor stack that terminates inbound inter-client
+	// traffic (type == packetTypeToGvisor, from the server). It is NOT per-slot: its lifetime is the
+	// whole connection, so reconnecting one pool slot never destroys an in-flight inter-client
+	// transfer. Each slot's reader injects directly into it (interClientStack.InjectIP) — no
+	// intermediate bounded channel, so TCP's receive window (not a blind drop) throttles the peer.
+	// Created by runConnPool before the slots, whose readers reference it. Its output goes to the
+	// shared tunInbound (dispatched to a slot by five-tuple hash), decoupling it from any one slot.
+	interClient *interClientStack
 	// stats records data-plane liveness from observed heartbeat echo replies; may be nil.
 	stats *HeartbeatStats
 	// poolSize overrides the number of parallel connections; <=0 means use ConnPoolSize.
@@ -48,11 +50,10 @@ type clientTransport struct {
 
 func newClientTransport(dev *tunDevice, forward *Forwarder, stats *HeartbeatStats) *clientTransport {
 	return &clientTransport{
-		dev:                dev,
-		forward:            forward,
-		gvisorInbound:      make(chan *Packet, MaxSize),
-		interClientInbound: make(chan *Packet, MaxSize),
-		stats:              stats,
+		dev:           dev,
+		forward:       forward,
+		gvisorInbound: make(chan *Packet, MaxSize),
+		stats:         stats,
 	}
 }
 
@@ -63,12 +64,8 @@ func (t *clientTransport) routines() []namedRoutine {
 		{"client-gvisor", func(ctx context.Context) {
 			handleGvisorPacket(t.gvisorInbound, t.dev.tunOutbound, datagramHeaderLen).Run(ctx)
 		}},
-		{"client-gvisor-inter", func(ctx context.Context) {
-			// Inter-client stack: shared across all pool slots (not bound to any slot's lifetime).
-			// Its output goes to the shared tunInbound, which runConnPool dispatches to a slot by
-			// five-tuple hash — so reconnecting a slot never tears down an active inter-client flow.
-			handleGvisorPacket(t.interClientInbound, t.dev.tunInbound, datagramHeaderLen).Run(ctx)
-		}},
+		// The inter-client stack is created inside runConnPool (before its slots), because each
+		// slot's reader injects into it directly; it is not a channel-fed routine of its own.
 		{"client-conn-pool", t.runConnPool},
 		{"client-control-slot", t.runControlSlot},
 		{"client-heartbeat", t.heartbeats},
@@ -98,17 +95,21 @@ func (t *clientTransport) runConnPool(ctx context.Context) {
 	if n <= 0 {
 		n = ConnPoolSize
 	}
+	// Create the shared inter-client stack before the slots: their readers inject inbound
+	// inter-client packets directly into it. Its output (replies to peers) goes to tunInbound,
+	// which this function's loop below dispatches to a slot by five-tuple hash.
+	t.interClient = newInterClientStack(ctx, t.dev.tunInbound, datagramHeaderLen)
 	t.slots = make([]*connSlot, n)
 	var wg sync.WaitGroup
 	for i := range t.slots {
 		slot := &connSlot{
-			id:                 i,
-			inbound:            make(chan *Packet, MaxSize),
-			tunOutbound:        t.dev.tunOutbound,
-			forward:            t.forward,
-			stats:              t.stats,
-			registrations:      t.registrationPayloads,
-			interClientInbound: t.interClientInbound,
+			id:            i,
+			inbound:       make(chan *Packet, MaxSize),
+			tunOutbound:   t.dev.tunOutbound,
+			forward:       t.forward,
+			stats:         t.stats,
+			registrations: t.registrationPayloads,
+			interClient:   t.interClient,
 		}
 		t.slots[i] = slot
 		wg.Add(1)

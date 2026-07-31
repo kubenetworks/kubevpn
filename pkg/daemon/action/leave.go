@@ -32,5 +32,12 @@ func (svr *Server) Leave(resp rpc.Daemon_LeaveServer) error {
 			Workload:  resource,
 		})
 	}
-	return conn.LeaveResource(ctx, resources, conn.GetOwnerID())
+	// LeaveResource is control-plane-only (ProxyController). The Leave RPC runs in
+	// the user daemon where conn is a *ConnectOptions satisfying ProxyController; if
+	// it somehow is not, there is nothing to leave.
+	pc, ok := conn.(handler.ProxyController)
+	if !ok {
+		return nil
+	}
+	return pc.LeaveResource(ctx, resources, conn.GetOwnerID())
 }

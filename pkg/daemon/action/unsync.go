@@ -3,6 +3,7 @@ package action
 import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 )
 
 // Unsync handles the Unsync RPC, stopping file synchronization for the specified workloads on the current connection.
@@ -23,7 +24,11 @@ func (svr *Server) Unsync(resp rpc.Daemon_UnsyncServer) error {
 	}
 	if sync := conn.GetSync(); sync != nil {
 		err = sync.Cleanup(ctx, req.Workloads...)
-		conn.SetSync(nil)
+		// SetSync is control-plane-only (ProxyController). Unsync runs in the user
+		// daemon where conn is a *ConnectOptions satisfying ProxyController.
+		if pc, ok := conn.(handler.ProxyController); ok {
+			pc.SetSync(nil)
+		}
 	}
 	return err
 }

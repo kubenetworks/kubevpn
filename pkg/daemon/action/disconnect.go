@@ -149,7 +149,7 @@ func resolveConnectionIDByKubeconfig(ctx context.Context, jump *rpc.SshJump, kub
 	if managerNamespace == "" {
 		managerNamespace = ns
 	}
-	return util.GetConnectionID(context.Background(), connect.GetClientset().CoreV1().Namespaces(), managerNamespace)
+	return util.GetConnectionID(ctx, connect.GetClientset().CoreV1().Namespaces(), managerNamespace)
 }
 
 // leaveProxiesBeforeTeardown resolves the connections targeted by a Disconnect request
@@ -184,8 +184,14 @@ func (svr *Server) leaveProxiesBeforeTeardown(ctx context.Context, req *rpc.Disc
 		svr.connMu.RUnlock()
 	}
 	for _, conn := range targets {
-		if err := conn.LeaveAllProxyResources(ctx); err != nil {
-			plog.G(ctx).Warnf("Leave proxy resources before VPN teardown failed (lease reaper will reclaim): %v", err)
+		// LeaveAllProxyResources is control-plane-only (ProxyController). In the
+		// root daemon connections are *DataSession (not ProxyController), so the
+		// assertion fails and we skip — correct, the root daemon holds no proxy
+		// resources. Mirrors the old data-plane no-op stub.
+		if pc, ok := conn.(handler.ProxyController); ok {
+			if err := pc.LeaveAllProxyResources(ctx); err != nil {
+				plog.G(ctx).Warnf("Leave proxy resources before VPN teardown failed (lease reaper will reclaim): %v", err)
+			}
 		}
 	}
 }

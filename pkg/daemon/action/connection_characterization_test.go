@@ -821,8 +821,16 @@ func (m *mockConnection) GetSocksEgress() bool            { return false }
 // satisfy remaining interface methods not on *ConnectOptions embed (none needed
 // as *ConnectOptions already satisfies the full interface)
 
-// Ensure mockConnection satisfies handler.Connection at compile time.
-var _ handler.Connection = (*mockConnection)(nil)
+// Ensure mockConnection satisfies the handler interfaces at compile time. mockConnection
+// is a full-featured mock (it implements all three roles: Connection, DataPlane, and
+// ProxyController), so asserting all three pins the role-interface contracts from the
+// Connection ISP split — a future signature change to any role surfaces here, not at a
+// far-away call site.
+var (
+	_ handler.Connection     = (*mockConnection)(nil)
+	_ handler.DataPlane       = (*mockConnection)(nil)
+	_ handler.ProxyController = (*mockConnection)(nil)
+)
 
 // Stub methods needed by handler.Connection that are not inherited from
 // *ConnectOptions via embedding (all are already provided by ConnectOptions embed).
@@ -951,10 +959,6 @@ func TestC1_Connects_Sort_WithAPIServerIPs(t *testing.T) {
 // by providing stub implementations for methods NOT provided by the embedded
 // *ConnectOptions. (In practice all methods are provided by the embed, but
 // this comment serves as documentation.)
-
-// noopFactory is a minimal cmdutil.Factory stub used where a nil factory panics.
-// It is only used in tests.
-type noopFactory struct{ cmdutil.Factory }
 
 // Stub implementations for methods missing on mockConnection due to the fact
 // that *handler.ConnectOptions does not yet provide them directly.

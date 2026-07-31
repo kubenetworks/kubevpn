@@ -172,7 +172,7 @@ func recreatePod(ctx context.Context, factory cmdutil.Factory, p *v1.Pod, helper
 		if err != nil {
 			return true // cannot verify the existing pod — retry
 		}
-		get, err := clientset.CoreV1().Pods(p.Namespace).Get(context.Background(), p.Name, metav1.GetOptions{})
+		get, err := clientset.CoreV1().Pods(p.Namespace).Get(ctx, p.Name, metav1.GetOptions{})
 		if err != nil || get.Status.Phase != v1.PodRunning {
 			return true
 		}

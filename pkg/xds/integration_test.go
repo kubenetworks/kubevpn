@@ -90,6 +90,40 @@ func parseV4(t *testing.T, resp *rpc.TunIPResponse) net.IP {
 	return ip
 }
 
+// waitForEnvoyRuleIPv4 polls the ENVOY_CONFIG ConfigMap until ownerID's rule has
+// LocalTunIPv4 equal to want (compared as IPs, so format-agnostic), or until the
+// timeout elapses. It replaces a fixed time.Sleep waiting for the async
+// syncEnvoyRuleIP goroutine (fired by GetTunIP/lease-renew) to finish its
+// read-modify-write of ENVOY_CONFIG — a sleep that flaked on slow CI when the
+// 500ms budget ran out before the goroutine completed.
+//
+// Polls every 10ms; the 2s ceiling is generous since syncEnvoyRuleIP only does an
+// in-memory ConfigMap RMW against a fake clientset (no real API latency), so it
+// completes in microseconds on a healthy run.
+func waitForEnvoyRuleIPv4(t *testing.T, env *testEnv, ownerID string, want net.IP) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		cm, err := env.server.clientset.CoreV1().ConfigMaps("test-ns").Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+		if err == nil {
+			virtuals, perr := parseYaml(cm.Data[config.KeyEnvoy])
+			if perr == nil {
+				for _, v := range virtuals {
+					for _, r := range v.Rules {
+						if r.OwnerID == ownerID {
+							if ruleIP := net.ParseIP(r.LocalTunIPv4); ruleIP != nil && ruleIP.Equal(want) {
+								return
+							}
+						}
+					}
+				}
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("envoy rule for owner %s did not converge to %s within 2s (async syncEnvoyRuleIP?)", ownerID, want)
+}
+
 // ---- Integration Tests: Client ↔ Server over gRPC ----
 
 // 1. Client 正常分配：通过 gRPC 首次获取 IP
@@ -827,8 +861,8 @@ func TestIntegration_SleepWake_SyncEnvoyRuleIP(t *testing.T) {
 		t.Fatalf("expected different IP, got same %s", origIP)
 	}
 
-	// Phase 5: wait for async syncEnvoyRuleIP to complete
-	time.Sleep(500 * time.Millisecond)
+	// Phase 5: wait for async syncEnvoyRuleIP to converge the rule IP.
+	waitForEnvoyRuleIPv4(t, env, ownerID, newIP)
 
 	// Phase 6: verify ENVOY_CONFIG was updated
 	cm, _ = env.server.clientset.CoreV1().ConfigMaps("test-ns").Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
@@ -979,7 +1013,8 @@ func TestIntegration_SleepWake_MultiUser_NoInterference(t *testing.T) {
 	respA2, _ := env.client.GetTunIP(ctx, &rpc.TunIPRequest{OwnerID: ownerA, Namespace: "test-ns"})
 	newIPa := parseV4(t, respA2)
 
-	time.Sleep(500 * time.Millisecond) // wait for syncEnvoyRuleIP
+	// wait for async syncEnvoyRuleIP to converge Alice's rule IP before asserting.
+	waitForEnvoyRuleIPv4(t, env, ownerA, newIPa)
 
 	// Phase 5: verify Alice's rule updated, Bob's rule untouched
 	cm, _ = env.server.clientset.CoreV1().ConfigMaps("test-ns").Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
@@ -1081,7 +1116,8 @@ func TestIntegration_SleepWake_FullLifecycle(t *testing.T) {
 	t.Logf("✓ WatchTunIP received push: %s", pushedIP)
 
 	// === Verify 2: ENVOY_CONFIG was updated ===
-	time.Sleep(500 * time.Millisecond) // wait for async syncEnvoyRuleIP
+	// wait for async syncEnvoyRuleIP to converge the rule IP before asserting.
+	waitForEnvoyRuleIPv4(t, env, ownerID, newIP)
 	cm, _ = env.server.clientset.CoreV1().ConfigMaps("test-ns").Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	virtuals, _ := parseYaml(cm.Data[config.KeyEnvoy])
 	for _, v := range virtuals {

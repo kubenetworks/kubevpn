@@ -5,43 +5,35 @@ import (
 	"testing"
 )
 
-// TestC2A_ControlSession_StubsReturnCorrectZeroValues verifies that a zero-value ConnectOptions
-// (user-daemon construction, DoConnect never called) behaves correctly:
-// all data-plane accessor stubs return safe zero values, DoConnect returns an error,
-// and Cleanup does not panic.
-func TestC2A_ControlSession_StubsReturnCorrectZeroValues(t *testing.T) {
+// TestC2A_ControlSession_SatisfiesProxyController verifies the Interface Segregation
+// contract for the user-daemon session: *ConnectOptions satisfies the shared
+// Connection interface AND the control-plane role interface ProxyController, and
+// the shared accessors return safe zero values on a zero-value construction.
+// It deliberately does NOT satisfy DataPlane — the data-plane methods (DoConnect,
+// GetLocalTunIP, GetAPIServerIPs, GetNetworkExtraHost, GetLastHeartbeat) are absent
+// from ConnectOptions, which is the whole point of the split: a wrong-plane call
+// now fails to compile instead of returning a stub error at runtime.
+func TestC2A_ControlSession_SatisfiesProxyController(t *testing.T) {
 	c := &ConnectOptions{} // = &ControlSession{}
 
-	// DoConnect stub must return an error, not panic.
-	err := c.DoConnect(context.Background())
-	if err == nil {
-		t.Error("expected DoConnect to return error on ControlSession")
-	}
+	// Compile-time role assertions (also enforced in connection.go; repeated here
+	// so a future regression that re-adds a data-plane stub to ConnectOptions is
+	// caught by this test failing to express the intent).
+	var _ Connection = c
+	var _ ProxyController = c
 
-	// Context stub must return nil.
+	// Shared accessors return safe zero values.
 	if ctx := c.Context(); ctx != nil {
 		t.Errorf("expected nil Context() on ControlSession, got %v", ctx)
 	}
-
-	// GetLocalTunIP stubs.
-	v4, v6 := c.GetLocalTunIP()
-	if v4 != "" || v6 != "" {
-		t.Errorf("expected empty TUN IPs on ControlSession, got %s/%s", v4, v6)
+	if s := c.GetSync(); s != nil {
+		t.Errorf("expected nil GetSync on ControlSession, got %v", s)
 	}
-
-	// GetLastHeartbeat stub.
-	if hb := c.GetLastHeartbeat(); !hb.IsZero() {
-		t.Errorf("expected zero heartbeat on ControlSession, got %v", hb)
+	if addr := c.GetSocksListenAddr(); addr != "" {
+		t.Errorf("expected empty SocksListenAddr on ControlSession, got %s", addr)
 	}
-
-	// GetAPIServerIPs stub.
-	if ips := c.GetAPIServerIPs(); ips != nil {
-		t.Errorf("expected nil APIServerIPs on ControlSession, got %v", ips)
-	}
-
-	// GetNetworkExtraHost stub.
-	if hosts := c.GetNetworkExtraHost(); hosts != nil {
-		t.Errorf("expected nil NetworkExtraHost on ControlSession, got %v", hosts)
+	if c.GetSocksEgress() {
+		t.Error("expected false SocksEgress on ControlSession")
 	}
 
 	// Cleanup on zero-value ControlSession must not panic.
@@ -50,39 +42,22 @@ func TestC2A_ControlSession_StubsReturnCorrectZeroValues(t *testing.T) {
 	c.Cleanup(context.Background())
 }
 
-// TestC2A_DataSession_StubsReturnCorrectZeroValues verifies that a zero-value DataSession
-// returns safe zero values for control-plane stubs and does not panic.
-func TestC2A_DataSession_StubsReturnCorrectZeroValues(t *testing.T) {
+// TestC2A_DataSession_SatisfiesDataPlane verifies the Interface Segregation contract
+// for the root-daemon session: *DataSession satisfies Connection AND the data-plane
+// role interface DataPlane, and the shared GetSync accessor returns nil (file sync is
+// a control-plane responsibility). It deliberately does NOT satisfy ProxyController —
+// the proxy methods (CreateRemoteInboundPod, LeaveAllProxyResources, LeaveResource,
+// ProxyResources, SetSync) are absent from DataSession.
+func TestC2A_DataSession_SatisfiesDataPlane(t *testing.T) {
 	ds := &DataSession{}
 
-	// CreateRemoteInboundPod stub must return error.
-	err := ds.CreateRemoteInboundPod(context.Background(), "ns", nil, nil, nil, "", "", "")
-	if err == nil {
-		t.Error("expected CreateRemoteInboundPod to return error on DataSession")
-	}
+	var _ Connection = ds
+	var _ DataPlane = ds
 
-	// LeaveAllProxyResources stub must return nil (safe no-op).
-	if err := ds.LeaveAllProxyResources(context.Background()); err != nil {
-		t.Errorf("expected nil from LeaveAllProxyResources on DataSession, got %v", err)
-	}
-
-	// LeaveResource stub must return nil.
-	if err := ds.LeaveResource(context.Background(), nil, ""); err != nil {
-		t.Errorf("expected nil from LeaveResource on DataSession, got %v", err)
-	}
-
-	// ProxyResources stub must return nil.
-	if pr := ds.ProxyResources(); pr != nil {
-		t.Errorf("expected nil ProxyResources on DataSession, got %v", pr)
-	}
-
-	// GetSync stub must return nil.
+	// GetSync is a shared safe read returning nil on the data plane.
 	if s := ds.GetSync(); s != nil {
 		t.Errorf("expected nil GetSync on DataSession, got %v", s)
 	}
-
-	// SetSync must not panic.
-	ds.SetSync(nil)
 }
 
 // TestC2A_Cleanup_ControlPlanePath verifies that Cleanup on a zero-value ConnectOptions

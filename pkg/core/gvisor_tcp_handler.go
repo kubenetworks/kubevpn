@@ -12,7 +12,6 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/header"
 	"gvisor.dev/gvisor/pkg/tcpip/link/channel"
-	"gvisor.dev/gvisor/pkg/tcpip/link/sniffer"
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -20,6 +19,19 @@ import (
 	netutil "github.com/wencaiwulue/kubevpn/v2/pkg/util/netutil"
 )
 
+// stackConstructor is the strategy for creating a gvisor network stack from a TUN
+// link endpoint. Two implementations exist: NewStack (forwards to real destinations)
+// and NewLocalStack (forwards to 127.0.0.1, for testing/dev).
+//
+// It is deliberately a function type, not an interface. The strategy is stateless,
+// takes no construction parameters beyond (ctx, link endpoint), returns no error
+// (gvisor stacks are built in-memory and cannot fail), and the returned *stack.Stack
+// is a concrete gvisor type the handler must call directly — so an interface would
+// not decouple callers from gvisor and would only add boilerplate. A function type
+// is the idiomatic Go shape for a stateless single-method strategy. If a future stack
+// implementation needs state, multiple return values (e.g. a cleanup func), or an
+// error, promote THIS to an interface at that point (the single call site at
+// getOrCreateClientStack is the only consumer).
 type stackConstructor func(ctx context.Context, tun stack.LinkEndpoint) *stack.Stack
 
 // clientStack manages an independent gvisor stack for one client (identified by TUN IP).
@@ -113,7 +125,7 @@ func (h *gvisorTCPHandler) getOrCreateClientStack(srcKey string) *clientStack {
 	endpoint.LinkEPCapabilities = stack.CapabilityRXChecksumOffload
 	endpoint.SupportedGSOKind = stack.GVisorGSOSupported
 
-	s := h.newStack(stackCtx, sniffer.NewWithPrefix(endpoint, "[gVISOR] "))
+	s := h.newStack(stackCtx, sniffLink(stackCtx, endpoint, "[gVISOR] "))
 
 	cs := &clientStack{
 		endpoint: endpoint,

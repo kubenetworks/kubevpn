@@ -156,6 +156,10 @@ func (svr *Server) Sync(resp rpc.Daemon_SyncServer) (err error) {
 	if err = opt.RefreshConfigMapCache(resp.Context()); err != nil {
 		plog.G(resp.Context()).Debugf("Failed to refresh ConfigMap cache after sync: %v", err)
 	}
-	opt.SetSync(options)
+	// SetSync is control-plane-only (ProxyController). Sync runs in the user
+	// daemon where opt is a *ConnectOptions satisfying ProxyController.
+	if pc, ok := opt.(handler.ProxyController); ok {
+		pc.SetSync(options)
+	}
 	return nil
 }

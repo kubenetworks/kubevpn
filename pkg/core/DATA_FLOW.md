@@ -306,16 +306,26 @@ The routing hot paths (`routeTun`, inter-client) hand the framed `*Packet` to `B
 
 | Stack | Created in | Purpose | Input | Output |
 |-------|-----------|---------|-------|--------|
-| #1 | `clientTransport.routines` (`client-gvisor`) | Self-to-self traffic | `t.gvisorInbound` (src==dst) | `tunOutbound` → TUN |
-| #2 | `clientTransport.routines` (`client-gvisor-inter`) | Inter-client traffic | `t.interClientInbound` (all slots' type==1) | `tunInbound` → runConnPool → slot → server |
+| #1 | `clientTransport.routines` (`client-gvisor`) | Self-to-self traffic | `t.gvisorInbound` channel (src==dst) | `tunOutbound` → TUN |
+| #2 | `runConnPool` (`interClientStack`) | Inter-client traffic | direct `InjectIP` from every slot's `readFromConn` (type==1) | `tunInbound` → runConnPool → slot → server |
 
 Both use `NewLocalStack` with `LocalTCPForwarder` (dials `127.0.0.1`) and `LocalUDPForwarder`.
 
-**Both stacks are transport-level, not per-slot.** Each slot's `readFromConn` routes inter-client
-(type == `packetTypeToGvisor`) packets to the shared `t.interClientInbound`; the single stack #2
-feeds its output to the shared `tunInbound`, which `runConnPool` dispatches to a slot by five-tuple
-hash. So reconnecting or tearing down any one pool slot never destroys an in-flight inter-client
-transfer (this used to be a per-slot stack bound to the slot's `subCtx` — see the bug-fix note below).
+**Both stacks are transport-level, not per-slot.** For inter-client stack #2 each slot's
+`readFromConn` injects `packetTypeToGvisor` packets **directly** into the shared stack via
+`interClientStack.InjectIP` — mirroring the server's `readFromTCPConnWriteToEndpoint`. There is no
+intermediate Go channel: an earlier design used a bounded `interClientInbound` channel with
+drop-if-full, which under a bulk A→B transfer became silent receive-side TCP segment loss and
+collapsed cross-client throughput (it got *worse* with concurrency). Direct injection makes flow
+control TCP's own receive window instead of a blind drop, and — because `InjectInbound` returns
+promptly (the localhost copy runs in the forwarder's goroutines) — never stalls a slot's reader, so
+heartbeat-reply liveness on the data conns is preserved. See
+[50-crossclient-throughput-diagnosis.md](../../docs/50-crossclient-throughput-diagnosis.md).
+
+Stack #2 feeds its output to the shared `tunInbound`, which `runConnPool` dispatches to a slot by
+five-tuple hash. So reconnecting or tearing down any one pool slot never destroys an in-flight
+inter-client transfer (this used to be a per-slot stack bound to the slot's `subCtx` — see the
+bug-fix note below).
 
 ---
 

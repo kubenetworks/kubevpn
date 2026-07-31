@@ -5,9 +5,7 @@ import (
 	"net"
 	"strings"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/client-go/util/retry"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
@@ -42,12 +40,13 @@ func (s *TunConfigServer) warmClusterCIDRCache(ctx context.Context, detect func(
 		}
 	}()
 
-	cm, err := s.clientset.CoreV1().ConfigMaps(s.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	// Skip the (empty-never-overwrite) RMW entirely when the cache is already populated.
+	absent, err := s.configMapKeyAbsent(ctx, config.KeyClusterCIDRs)
 	if err != nil {
 		plog.G(ctx).Warnf("[TunConfig] CIDR warm-up: get ConfigMap: %v", err)
 		return
 	}
-	if strings.TrimSpace(cm.Data[config.KeyClusterCIDRs]) != "" {
+	if !absent {
 		return // already populated — never overwrite
 	}
 
@@ -58,22 +57,7 @@ func (s *TunConfigServer) warmClusterCIDRCache(ctx context.Context, detect func(
 	}
 	encoded := encodeCIDRSet(deduped)
 
-	err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-		cm, err := s.clientset.CoreV1().ConfigMaps(s.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
-		if err != nil {
-			return err
-		}
-		if strings.TrimSpace(cm.Data[config.KeyClusterCIDRs]) != "" {
-			return nil // a client filled it in the meantime — leave it
-		}
-		if cm.Data == nil {
-			cm.Data = map[string]string{}
-		}
-		cm.Data[config.KeyClusterCIDRs] = encoded
-		_, err = s.clientset.CoreV1().ConfigMaps(s.namespace).Update(ctx, cm, metav1.UpdateOptions{})
-		return err
-	})
-	if err != nil {
+	if err := s.writeConfigMapKeyIfAbsent(ctx, config.KeyClusterCIDRs, encoded); err != nil {
 		plog.G(ctx).Warnf("[TunConfig] CIDR warm-up: write cache: %v", err)
 		return
 	}

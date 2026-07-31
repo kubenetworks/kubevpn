@@ -25,6 +25,27 @@ import (
 // after which every read is served from memory and a cache miss returns empty instead
 // of a doomed live GET that would block on the TCP timeout when the cluster is
 // unreachable. Writes (Set) still go straight to the API.
+//
+// # Three ConfigMap stores, by design
+//
+// The traffic-manager ConfigMap is the shared state for several subsystems, and each
+// one has its OWN store type rather than a shared generic KVStore. They are NOT
+// duplicated code to be unified — they wrap the ConfigMap around three different
+// typed states, and unifying them would erase that type safety:
+//
+//   - ConfigMapStore (this type): generic string key→value KV + informer cache for
+//     hot read paths (status, socksvr config). Get/Set/EnsureSynced/Refresh.
+//   - inject.VirtualStore: read-modify-write with RetryOnConflict over the typed
+//     []*controlplane.Virtual envoy rule set (Mutate/AddRule/RemoveRule). Optimistic
+//     RMW, no informer — writes win on conflict retry.
+//   - dhcp.Manager: read-modify-write over the typed ipallocator.Range IP pool
+//     (retryUpdate/updateDHCPConfigMap). Bitmap state, conflict retry.
+//
+// What IS shared is the low-level k8s Get+Update+RetryOnConflict pattern, which the
+// client-go retry package already provides. Extracting a generic ConfigMapRMW[T]
+// helper would only re-express retry.RetryOnConflict with less type information.
+// If a FOURTH typed ConfigMap-backed store appears, reconsider — that is the bar for
+// "extract a shared abstraction" (CLAUDE.md refactoring rule 9).
 type ConfigMapStore struct {
 	clientset        kubernetes.Interface
 	managerNamespace string

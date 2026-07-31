@@ -57,7 +57,7 @@ func (h *tunHandler) Handle(ctx context.Context, tun net.Conn) {
 		plog.G(ctx).Errorf("[TUN] Failed to get tun device: %v", err)
 		return
 	}
-	ctx = plog.WithField(ctx, tunIfi.Name, "")
+	ctx = plog.WithField(ctx, plog.FieldTun, tunIfi.Name)
 
 	dev := &tunDevice{
 		tun:         tun,

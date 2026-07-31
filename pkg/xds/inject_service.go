@@ -13,6 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/cli-runtime/pkg/resource"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
@@ -81,9 +82,9 @@ func (s *TunConfigServer) ProxyInject(req *rpc.InjectRequest, stream rpc.TunConf
 	plog.StepStart(ctx, "Injecting proxy sidecar (server-side)")
 	var services []*rpc.ServiceWorkload
 	for _, workload := range req.GetWorkloads() {
-		object, controller, err := util.GetTopOwnerObject(ctx, s.factory, req.GetNamespace(), workload)
+		object, controller, nodeID, err := s.resolveWorkloadNodeID(ctx, req.GetNamespace(), workload)
 		if err != nil {
-			return status.Errorf(codes.Internal, "resolve workload %s: %v", workload, err)
+			return err
 		}
 		templateSpec, _, err := util.GetPodTemplateSpecPath(controller.Object.(*unstructured.Unstructured))
 		if err != nil {
@@ -99,7 +100,6 @@ func (s *TunConfigServer) ProxyInject(req *rpc.InjectRequest, stream rpc.TunConf
 			})
 		}
 
-		nodeID := fmt.Sprintf("%s.%s", object.Mapping.Resource.GroupResource().String(), object.Name)
 		injector := inject.NewInjector(inject.InjectOptions{
 			Factory:          s.factory,
 			Clientset:        s.clientset,
@@ -156,11 +156,10 @@ func (s *TunConfigServer) LeaveInject(req *rpc.InjectRequest, stream rpc.TunConf
 
 	plog.StepStart(ctx, "Removing proxy from workloads (server-side)")
 	for _, workload := range workloads {
-		object, controller, err := util.GetTopOwnerObject(ctx, s.factory, req.GetNamespace(), workload)
+		object, controller, nodeID, err := s.resolveWorkloadNodeID(ctx, req.GetNamespace(), workload)
 		if err != nil {
-			return status.Errorf(codes.Internal, "resolve workload %s: %v", workload, err)
+			return err
 		}
-		nodeID := fmt.Sprintf("%s.%s", object.Mapping.Resource.GroupResource().String(), object.Name)
 		empty, err := inject.UnpatchContainer(ctx, nodeID, s.factory, s.clientset.CoreV1().ConfigMaps(s.namespace), controller, req.GetOwnerID())
 		if err != nil {
 			return status.Errorf(codes.Internal, "leave workload %s: %v", workload, err)
@@ -176,6 +175,20 @@ func (s *TunConfigServer) LeaveInject(req *rpc.InjectRequest, stream rpc.TunConf
 	}
 	plog.StepDone(ctx, "Removed proxy from %d workloads", len(workloads))
 	return stream.Send(&rpc.InjectResponse{})
+}
+
+// resolveWorkloadNodeID resolves a workload string (group/resource/name) to its top
+// owner object, the controller resource.Info, and the envoy nodeID
+// ("group.resource/name" of the top owner). Shared by ProxyInject and LeaveInject so
+// the resolve+nodeID+error-wrap sequence stays in one place. Returns a gRPC
+// status.Errorf (codes.Internal) so callers can return it directly.
+func (s *TunConfigServer) resolveWorkloadNodeID(ctx context.Context, namespace, workload string) (object, controller *resource.Info, nodeID string, err error) {
+	object, controller, err = util.GetTopOwnerObject(ctx, s.factory, namespace, workload)
+	if err != nil {
+		return nil, nil, "", status.Errorf(codes.Internal, "resolve workload %s: %v", workload, err)
+	}
+	nodeID = fmt.Sprintf("%s.%s", object.Mapping.Resource.GroupResource().String(), object.Name)
+	return object, controller, nodeID, nil
 }
 
 // workloadsOwnedBy returns the workloads (as "group.resource/name") in the given

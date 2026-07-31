@@ -11,11 +11,12 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
-// TestServerStreamLogger_FileAlwaysDebug_StreamFollowsLevel verifies Req1:
-// the daemon log file always captures Debug, while the gRPC stream to the CLI
-// is filtered to streamLevel (Info by default, Debug when --debug).
-func TestServerStreamLogger_FileAlwaysDebug_StreamFollowsLevel(t *testing.T) {
-	t.Run("stream Info: file has Debug, stream does not", func(t *testing.T) {
+// TestServerStreamLogger_FileAndStreamFollowLevel verifies that BOTH the daemon log file and the
+// gRPC stream to the CLI follow the request's level (req.Level): Info by default, Debug with
+// --debug. A non-debug connection records no Debug lines anywhere (file included), so per-packet
+// tracing never floods the file unless the user asked for it.
+func TestServerStreamLogger_FileAndStreamFollowLevel(t *testing.T) {
+	t.Run("Info: neither file nor stream has Debug", func(t *testing.T) {
 		var file, stream bytes.Buffer
 		logger := newServerStreamLogger(&file, int32(log.InfoLevel), func(msg string) error {
 			stream.WriteString(msg)
@@ -24,8 +25,11 @@ func TestServerStreamLogger_FileAlwaysDebug_StreamFollowsLevel(t *testing.T) {
 		logger.Debug("dbg-line")
 		logger.Info("info-line")
 
-		if !strings.Contains(file.String(), "dbg-line") || !strings.Contains(file.String(), "info-line") {
-			t.Fatalf("file should contain both Debug and Info, got: %q", file.String())
+		if strings.Contains(file.String(), "dbg-line") {
+			t.Fatalf("file should NOT contain Debug at Info level, got: %q", file.String())
+		}
+		if !strings.Contains(file.String(), "info-line") {
+			t.Fatalf("file should contain Info, got: %q", file.String())
 		}
 		if strings.Contains(stream.String(), "dbg-line") {
 			t.Fatalf("stream should NOT contain Debug at Info level, got: %q", stream.String())
@@ -35,7 +39,7 @@ func TestServerStreamLogger_FileAlwaysDebug_StreamFollowsLevel(t *testing.T) {
 		}
 	})
 
-	t.Run("stream Debug (--debug): stream also has Debug", func(t *testing.T) {
+	t.Run("Debug (--debug): both file and stream have Debug", func(t *testing.T) {
 		var file, stream bytes.Buffer
 		logger := newServerStreamLogger(&file, int32(log.DebugLevel), func(msg string) error {
 			stream.WriteString(msg)
@@ -44,7 +48,7 @@ func TestServerStreamLogger_FileAlwaysDebug_StreamFollowsLevel(t *testing.T) {
 		logger.Debug("dbg-line")
 
 		if !strings.Contains(file.String(), "dbg-line") {
-			t.Fatalf("file should contain Debug, got: %q", file.String())
+			t.Fatalf("file should contain Debug when streamLevel=Debug, got: %q", file.String())
 		}
 		if !strings.Contains(stream.String(), "dbg-line") {
 			t.Fatalf("stream should contain Debug when streamLevel=Debug, got: %q", stream.String())

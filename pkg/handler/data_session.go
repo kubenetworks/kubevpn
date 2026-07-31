@@ -243,36 +243,12 @@ func (ds *DataSession) RefreshConfigMapCache(ctx context.Context) error {
 
 // --- Connection interface: control-plane stubs (data-plane session does not proxy workloads) ---
 
-// CreateRemoteInboundPod is not available on a data-plane session.
-// Proxy injection is a control-plane responsibility run by ConnectOptions (user daemon).
-func (ds *DataSession) CreateRemoteInboundPod(_ context.Context, _ string, _ []string, _ map[string]string, _ []string, _ string, _, _ string) error {
-	return fmt.Errorf("cannot inject sidecar from data-plane session")
-}
-
-// LeaveAllProxyResources is a safe no-op on the data-plane session.
-// Root daemon never holds proxy resources.
-func (ds *DataSession) LeaveAllProxyResources(_ context.Context) error {
-	return nil
-}
-
-// LeaveResource is a safe no-op on the data-plane session.
-func (ds *DataSession) LeaveResource(_ context.Context, _ []Resources, _ string) error {
-	return nil
-}
-
-// ProxyResources returns nil on the data-plane session.
-func (ds *DataSession) ProxyResources() ProxyList {
-	return nil
-}
-
 // GetSync returns nil on the data-plane session.
-// File sync is a control-plane responsibility.
+// File sync is a control-plane responsibility; this is a safe read (the method is
+// on the shared Connection interface) returning "not applicable", not a stub.
 func (ds *DataSession) GetSync() *SyncOptions {
 	return nil
 }
-
-// SetSync is a no-op on the data-plane session.
-func (ds *DataSession) SetSync(_ *SyncOptions) {}
 
 // --- Internal data-plane helpers ---
 

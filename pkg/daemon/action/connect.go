@@ -32,6 +32,14 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 		return svr.redirectConnectToSudoDaemon(req, resp, logger)
 	}
 
+	// Tag every root-daemon log for this connection with its ID from the moment the request
+	// arrives (the user daemon always forwards it), so the whole lifecycle — idempotency guard,
+	// setup, data plane, cleanup — is filterable by connID in the shared log file.
+	ctx := plog.WithLogger(resp.Context(), logger)
+	if req.ConnectionID != "" {
+		ctx = plog.WithField(ctx, LogFieldConnID, req.ConnectionID)
+	}
+
 	// Idempotency guard (root daemon): if a data-plane session already exists for this
 	// ConnectionID, short-circuit instead of building a second one. This is hit when the
 	// user daemon restarts and LoadFromConfig replays Connect while this (surviving) root
@@ -44,7 +52,7 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 		existing, _ := svr.findConnection(req.ConnectionID)
 		svr.connMu.RUnlock()
 		if existing != nil {
-			logger.Infof("Data plane already established for connection %s", req.ConnectionID)
+			plog.G(ctx).Infof("Data plane already established for connection %s", req.ConnectionID)
 			return resp.Send(&rpc.ConnectResponse{ConnectionID: req.ConnectionID})
 		}
 	}
@@ -56,7 +64,7 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
 		WorkloadNamespace:    req.Namespace,
-		Lock:                 &svr.Lock,
+		Lock:                 &svr.dnsMu,
 		Image:                req.Image,
 		ImagePullSecretName:  req.ImagePullSecretName,
 		OwnerID:              req.OwnerID,
@@ -65,14 +73,25 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 		SshConf:              parseSshFromRPC(req.SshJump),
 	}
 	session := NewSessionLifecycle(logger)
+	// Tag the data-plane session context with the connection ID up front so DoConnect and every
+	// background goroutine it spawns (TUN, routes, DNS, per-packet) carry connID in the log file.
+	if req.ConnectionID != "" {
+		session.Ctx = plog.WithField(session.Ctx, LogFieldConnID, req.ConnectionID)
+	}
 	ds.AddRollbackFunc(func() error {
 		session.Teardown()
 		return nil
 	})
 	go grpcutil.ListenCancel(resp, session.Cancel)
+	// Cleanup runs on a background context (must survive resp/session cancellation) but keeps the
+	// connID tag so teardown logs stay filterable.
+	cleanupCtx := plog.WithLogger(context.Background(), logger)
+	if req.ConnectionID != "" {
+		cleanupCtx = plog.WithField(cleanupCtx, LogFieldConnID, req.ConnectionID)
+	}
 	defer func() {
 		if err != nil {
-			ds.Cleanup(plog.WithLogger(context.Background(), logger))
+			ds.Cleanup(cleanupCtx)
 			session.Cancel()
 		}
 	}()
@@ -84,9 +103,6 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 	if err != nil {
 		return err
 	}
-	// Tag all downstream logs with the connection ID so concurrent connects can
-	// be told apart in the shared root daemon log file.
-	session.Ctx = plog.WithField(session.Ctx, LogFieldConnID, ds.ConnectionID)
 
 	// Serialize the allocation phase: two concurrent connects must not race their
 	// TUN IP allocation with empty sibling snapshots.
@@ -94,7 +110,7 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 	err = ds.DoConnect(session.Ctx)
 	svr.connectMu.Unlock()
 	if err != nil {
-		logger.Errorf("Failed to connect...")
+		plog.G(ctx).Errorf("Failed to connect...")
 		return err
 	}
 

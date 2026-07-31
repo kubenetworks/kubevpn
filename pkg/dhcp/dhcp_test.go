@@ -170,3 +170,64 @@ func TestBase64Encoding(t *testing.T) {
 		t.Fatalf("snapshot is not valid base64: %v", err)
 	}
 }
+
+// TestRestoreAllocator pins the strict/lenient divergence that updateDHCPConfigMap
+// (write-back, strict) and ForEach (read-only, lenient) rely on. The behavior table:
+//
+//	bitmap=""      strict→ empty alloc (short-circuit)    lenient→ empty alloc (Restore no-op)
+//	valid base64   strict→ restored alloc                 lenient→ restored alloc
+//	corrupt base64 strict→ error (cannot write back bad)  lenient→ empty alloc (degrade to 0 IPs)
+//
+// RetryOnConflict is not exercised (fake clientset; CLAUDE.md fake limitation).
+func TestRestoreAllocator(t *testing.T) {
+	// A valid snapshot with one IP allocated, so a restored allocator differs from empty.
+	empty := newAllocator(t, config.CIDR, "")
+	_, _ = empty.AllocateNext()
+	validSnap := snapshot(t, empty)
+
+	const corrupt = "!!!not-base64!!!" // contains '!' → base64 decoder rejects
+
+	cases := []struct {
+		name    string
+		bitmap  string
+		strict  bool
+		wantErr bool
+		// wantAllocated reports whether the restored allocator should still hold the
+		// IP snap allocated (true) or be a fresh empty allocator (false).
+		wantAllocated bool
+	}{
+		{"strict empty bitmap", "", true, false, false},
+		{"lenient empty bitmap", "", false, false, false},
+		{"strict valid bitmap", validSnap, true, false, true},
+		{"lenient valid bitmap", validSnap, false, false, true},
+		{"strict corrupt bitmap", corrupt, true, true, false},
+		{"lenient corrupt bitmap", corrupt, false, false, false},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r, err := restoreAllocator(config.CIDR, c.bitmap, c.strict)
+			if (err != nil) != c.wantErr {
+				t.Fatalf("err=%v wantErr=%v", err, c.wantErr)
+			}
+			if err != nil {
+				return
+			}
+			// An allocator restored from validSnap still holds that IP; AllocateNext must
+			// return a DIFFERENT one. A fresh/corrupt-degraded allocator returns the same
+			// first IP the empty allocator did — so allocate from both and compare.
+			fresh, _ := restoreAllocator(config.CIDR, "", true)
+			got, gErr := r.AllocateNext()
+			want, wErr := fresh.AllocateNext()
+			if gErr != nil || wErr != nil {
+				t.Fatalf("AllocateNext got=%v want=%v", gErr, wErr)
+			}
+			if c.wantAllocated && got.Equal(want) {
+				t.Fatalf("expected restored allocator to NOT return the fresh-first IP %s (it should be already allocated)", got)
+			}
+			if !c.wantAllocated && !got.Equal(want) {
+				t.Fatalf("expected empty allocator to return fresh-first IP %s, got %s", want, got)
+			}
+		})
+	}
+}

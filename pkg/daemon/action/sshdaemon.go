@@ -23,8 +23,8 @@ var defaultServerIP = func() string {
 
 // SshStart handles the SshStart RPC, creating a TUN server and adding a route for the SSH client's IP.
 func (svr *Server) SshStart(ctx context.Context, req *rpc.SshStartRequest) (resp *rpc.SshStartResponse, err error) {
-	svr.Lock.Lock()
-	defer svr.Lock.Unlock()
+	svr.sshMu.Lock()
+	defer svr.sshMu.Unlock()
 
 	var clientIP net.IP
 	var clientCIDR *net.IPNet
@@ -90,10 +90,10 @@ func (svr *Server) SshStart(ctx context.Context, req *rpc.SshStartRequest) (resp
 
 // SshStop handles the SshStop RPC, shutting down the SSH TUN server.
 func (svr *Server) SshStop(ctx context.Context, req *rpc.SshStopRequest) (*rpc.SshStopResponse, error) {
-	// SshStart writes sshCancelFunc under svr.Lock; read it under the same lock.
-	svr.Lock.Lock()
+	// SshStart writes sshCancelFunc under svr.sshMu; read it under the same lock.
+	svr.sshMu.Lock()
 	cancel := svr.sshCancelFunc
-	svr.Lock.Unlock()
+	svr.sshMu.Unlock()
 	if cancel != nil {
 		cancel()
 	}

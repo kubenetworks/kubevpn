@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -33,10 +34,18 @@ const runStartupTimeout = 6 * time.Minute
 // fast if it exits before startup, or — on runStartupTimeout — kills the process (via
 // cancel) and dumps the KubeVPN sidecar logs before failing. Shared by the SSH and
 // non-SSH run tests; the caller keeps cmd to signal/stop it once startup succeeds.
-func waitRunStartup(t *testing.T, cmd *exec.Cmd, cancel context.CancelFunc, clientset kubernetes.Interface, marker string) {
+//
+// It returns a channel closed once the run process has exited AND its final output has
+// been logged; stopRunCmd waits on it to tear the run down without busy-spinning on
+// cmd.ProcessState (a data race against os/exec's Wait). The two t.Fatal branches below
+// end the test and never return, so only the successful-startup path yields the channel.
+func waitRunStartup(t *testing.T, cmd *exec.Cmd, cancel context.CancelFunc, clientset kubernetes.Interface, marker string) <-chan struct{} {
 	t.Helper()
 	done := make(chan any)
 	startupErr := make(chan error, 1)
+	// exited is closed by the reader goroutine after the run process exits and its output
+	// has been logged, so a waiter that unblocks on it is guaranteed to see that output.
+	exited := make(chan struct{})
 	var once sync.Once
 	// rolling captures every line the run container emits, tee'd from the checker as it
 	// streams. RunWithRollingOutWithChecker only returns its own buffer after the process
@@ -45,6 +54,7 @@ func waitRunStartup(t *testing.T, cmd *exec.Cmd, cancel context.CancelFunc, clie
 	var rollingMu sync.Mutex
 	var rolling bytes.Buffer
 	go func() {
+		defer close(exited)
 		stdout, stderr, err := util.RunWithRollingOutWithChecker(cmd, func(log string) (stop bool) {
 			rollingMu.Lock()
 			rolling.WriteString(log + "\n")
@@ -58,7 +68,10 @@ func waitRunStartup(t *testing.T, cmd *exec.Cmd, cancel context.CancelFunc, clie
 		if err != nil {
 			select {
 			case <-done:
-				t.Log(err, stdout, stderr)
+				// Startup already succeeded; the process has now exited (normally on stop,
+				// or after stopRunCmd's SIGQUIT dumps its goroutine stacks). Always log the
+				// captured output so that diagnostic dump lands in the test log.
+				t.Logf("===== kubevpn run exited: %v =====\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
 			default:
 				// Exited before startup completed. Signal the waiter instead of calling
 				// t.Fatal from this non-test goroutine (which would not stop the test and
@@ -69,8 +82,10 @@ func waitRunStartup(t *testing.T, cmd *exec.Cmd, cancel context.CancelFunc, clie
 	}()
 	select {
 	case <-done:
+		return exited
 	case err := <-startupErr:
 		t.Fatal(err)
+		return exited
 	case <-time.After(runStartupTimeout):
 		cancel() // kill the run process so the reader goroutine returns its captured output
 		rollingMu.Lock()
@@ -89,6 +104,67 @@ func waitRunStartup(t *testing.T, cmd *exec.Cmd, cancel context.CancelFunc, clie
 				"(run container output and sidecar logs dumped above)", marker, runStartupTimeout)
 		}
 	}
+	// Unreachable: every case above either returns or calls t.Fatal(f) (which ends the
+	// test via runtime.Goexit). Present so the function satisfies its return type.
+	return exited
+}
+
+// runStopTimeout bounds how long stopRunCmd waits for a `kubevpn run` to exit after
+// SIGINT before forcing it down. It must exceed the client-side teardown budget in
+// pkg/run/connect.go (leaveTeardownTimeout + disconnectTeardownTimeout ≈ 5m) so a
+// healthy, still-progressing teardown completes on its own; only a genuinely wedged
+// process reaches the SIGQUIT/SIGKILL path below. vars (not consts) so tests can shrink
+// them. runStopQuitGrace is how long we wait after SIGQUIT (for the goroutine dump to
+// print and the process to die) before the SIGKILL backstop.
+var (
+	runStopTimeout   = 6 * time.Minute
+	runStopQuitGrace = 30 * time.Second
+)
+
+// stopRunCmd stops a started `kubevpn run` and blocks until it exits. It sends SIGINT
+// (mirroring Ctrl-C) so the run performs its normal leave+disconnect teardown, then waits
+// on exited. If the process is still alive after runStopTimeout the teardown is wedged
+// (e.g. against an unreachable cluster): tryStopRun sends SIGQUIT to dump the run/daemon
+// goroutine stacks — captured by waitRunStartup and logged — so the blocker can be
+// pinpointed, then falls back to cancel() (CommandContext → SIGKILL). Replaces a
+// `for cmd.ProcessState == nil {}` busy-wait that had no timeout (turning a transient
+// cluster hiccup into a 2h test hang), raced os/exec's Wait on ProcessState, and pinned a
+// CPU core spinning. A wedged teardown fails the test (loudly, fast) rather than hanging.
+func stopRunCmd(t *testing.T, cmd *exec.Cmd, cancel context.CancelFunc, exited <-chan struct{}) {
+	t.Helper()
+	killed, err := tryStopRun(cmd, cancel, exited)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if killed {
+		t.Errorf("kubevpn run did not exit within %s after SIGINT; SIGQUIT/SIGKILL used "+
+			"(goroutine dump logged above) — teardown is likely wedged against the cluster", runStopTimeout)
+	}
+}
+
+// tryStopRun implements the stop sequence for stopRunCmd, free of *testing.T so the
+// anti-hang guarantee is unit-testable. It returns killed=true when the process had to be
+// force-terminated (SIGQUIT/SIGKILL) rather than exiting cleanly after SIGINT. It always
+// returns once the process has exited (exited closed), never hangs.
+func tryStopRun(cmd *exec.Cmd, cancel context.CancelFunc, exited <-chan struct{}) (killed bool, err error) {
+	if err := cmd.Process.Signal(os.Interrupt); err != nil {
+		return false, err
+	}
+	select {
+	case <-exited:
+		return false, nil
+	case <-time.After(runStopTimeout):
+	}
+	// Wedged: SIGQUIT first so a Go process prints its goroutine stacks (reader captures
+	// them), then SIGKILL via cancel() as the ultimate backstop.
+	_ = cmd.Process.Signal(syscall.SIGQUIT)
+	select {
+	case <-exited:
+	case <-time.After(runStopQuitGrace):
+		cancel() // SIGKILL backstop
+		<-exited
+	}
+	return true, nil
 }
 
 // forceCleanupRunContainers removes any `kubevpn run` containers left behind for the given
@@ -154,7 +230,7 @@ func (u *ut) kubevpnRunWithFullProxy(t *testing.T) {
 		"--rm",
 		"--entrypoint", "go", "run", fmt.Sprintf("%s/%s", remoteDir, name),
 	)
-	waitRunStartup(t, cmd, cancelFunc, u.clientset, "Start listening http port 9080 ...")
+	exited := waitRunStartup(t, cmd, cancelFunc, u.clientset, "Start listening http port 9080 ...")
 
 	app := "authors"
 	ip, err := u.getPodIP(app)
@@ -169,12 +245,7 @@ func (u *ut) kubevpnRunWithFullProxy(t *testing.T) {
 	t.Run("kubevpnRunWithFullProxyStatus", u.checkRunWithFullProxyStatus)
 	t.Run("commonTest", u.commonTest)
 
-	err = cmd.Process.Signal(os.Interrupt)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for cmd.ProcessState == nil {
-	}
+	stopRunCmd(t, cmd, cancelFunc, exited)
 }
 
 func (u *ut) kubevpnRunWithServiceMesh(t *testing.T) {
@@ -200,7 +271,7 @@ func (u *ut) kubevpnRunWithServiceMesh(t *testing.T) {
 		"--rm",
 		"--entrypoint", "go", "run", fmt.Sprintf("%s/%s", remoteDir, name),
 	)
-	waitRunStartup(t, cmd, cancelFunc, u.clientset, "Start listening http port 9080 ...")
+	exited := waitRunStartup(t, cmd, cancelFunc, u.clientset, "Start listening http port 9080 ...")
 
 	app := "authors"
 	ip, err := u.getServiceIP(app)
@@ -219,12 +290,7 @@ func (u *ut) kubevpnRunWithServiceMesh(t *testing.T) {
 	t.Run("kubevpnRunWithServiceMeshStatus", u.checkRunWithServiceMeshStatus)
 	t.Run("commonTest", u.commonTest)
 
-	err = cmd.Process.Signal(os.Interrupt)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for cmd.ProcessState == nil {
-	}
+	stopRunCmd(t, cmd, cancelFunc, exited)
 }
 
 func (u *ut) checkRunWithFullProxyStatus(t *testing.T) {

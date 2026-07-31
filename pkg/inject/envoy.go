@@ -83,6 +83,14 @@ func (s *envoyRuleSpec) validate() error {
 	return nil
 }
 
+// addEnvoyConfig is the injector-facing entry point for adding an envoy proxy rule.
+// It is a thin wrapper over VirtualStore (virtual_store.go), which is the
+// EnvoyConfigManager: it owns the read-modify-write loop, the ENVOY_CONFIG key, and
+// the traffic-manager ConfigMap name. Injectors (mesh, fargate) depend on this free
+// function — and through it on the v12.ConfigMapInterface abstraction (a k8s
+// interface, fakeable via fake.NewSimpleClientset) — rather than on *VirtualStore
+// directly, keeping the storage boundary in one place. Define a RuleStore interface
+// here only if a second, non-ConfigMap-backed implementation is ever needed.
 func addEnvoyConfig(ctx context.Context, mapInterface v12.ConfigMapInterface, spec envoyRuleSpec) error {
 	return NewVirtualStore(mapInterface).AddRule(ctx, spec)
 }

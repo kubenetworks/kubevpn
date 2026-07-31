@@ -31,10 +31,10 @@ KubeVPN runs as three processes: **CLI** (user-facing command), **User Daemon** 
 ┌─────────────────────────┼───────────────────────────────────┐
 │ Daemon Process           │                                    │
 │                          │                                    │
-│  Per-RPC logger (server-format, file ALWAYS DebugLevel)       │
+│  Per-RPC logger (server-format, level = req.Level)            │
 │       │                                                      │
-│       ├──→ svr.LogFile (timestamp + [connID=…] + file:line)  │
-│       │    ALL levels including Debug (always)                │
+│       ├──→ svr.LogFile (timestamp + [connID=… tun=…] + file:line) │
+│       │    Debug only when req.Level=Debug (--debug)          │
 │       │                                                      │
 │       └──→ StreamHook ──→ gRPC stream (message only)         │
 │            streamLevel = req.Level (Info default, Debug w/ --debug) │
@@ -44,14 +44,21 @@ KubeVPN runs as three processes: **CLI** (user-facing command), **User Daemon** 
 └──────────────────────────────────────────────────────────────┘
 ```
 
-### Key principle: one logger, two outputs, two formats, two levels
+### Key principle: one logger, two outputs, one level (the request's)
 
-The daemon's per-RPC logger uses **server-format** as its primary formatter and **always writes
-to the log file at DebugLevel** — independent of the CLI `--debug` flag, so the file is always a
-full record for post-mortem debugging. A **StreamHook** sends only the message text to the gRPC
-stream at **`streamLevel`**, which is `req.Level` (the CLI's `--debug` intent): **Info by default,
-Debug when the user passed `--debug`**. So Debug lines always land in the file, and additionally
-reach the CLI only when `--debug` is set.
+The daemon's per-RPC logger uses **server-format** as its primary formatter and its **level is
+`req.Level`** — the CLI's `--debug` intent: **Info by default, Debug when the user passed
+`--debug`**. Both outputs follow that level: the **log file** (`svr.LogFile`) and the **StreamHook**
+(message-only → gRPC stream → CLI). So a non-`--debug` connection records no Debug lines at all
+(file included) — which is what keeps per-packet tracing (gated by `IsDebugEnabled(ctx)`) from
+flooding the file — while a `--debug` connection records Debug to both the file and the CLI. The
+long-running background tasks a connect spawns (TUN, routes, DNS, per-packet) run on this logger's
+context, so they inherit the connection's level too.
+
+> This replaced an earlier "file is ALWAYS Debug" design: that made `IsDebugEnabled(ctx)` permanently
+> true in the daemon and let per-packet logging flood the log file on every connection regardless of
+> `--debug` (see docs/50). The global fallback `L` (used only by `context.Background()` logs) does
+> still sit at Debug — see Rule 1.
 
 The same StreamHook also carries the connect progress-step markers (used to drive the CLI spinner)
 without polluting the log file — see [30-connect-progress.md](30-connect-progress.md).
@@ -94,21 +101,37 @@ cmd.SetContext(plog.WithLogger(cmd.Context(), plog.NewClientLogger()))
 
 `NewClientLogger()` returns a message-only logger writing to stdout. Respects `--debug` flag via `config.Debug`.
 
-### 3. StreamHook level follows `--debug`; the file is always Debug
+### 3. File and stream both follow `req.Level`
 
-The file side is **always** `DebugLevel`. The StreamHook level is `req.Level`:
-- no `--debug` → StreamHook at `Info` → CLI sees only `Info`/`Warn`/`Error`; Debug stays in the file
-  (user never sees `[Client-0] Connected`, `[Transport] Using TLS mode`, etc.)
-- `--debug` → StreamHook at `Debug` → CLI also sees Debug lines (file unchanged, always Debug)
+The per-RPC logger's level IS `req.Level`, and both the file (`svr.LogFile`) and the StreamHook use it:
+- no `--debug` → level `Info` → neither the file nor the CLI gets Debug lines (no `[Client-0] Connected`,
+  `[Transport] Using TLS mode`, and — importantly — no per-packet lines to flood the file)
+- `--debug` → level `Debug` → both the file and the CLI get Debug lines
 
-### 3a. Per-connection tagging (`connID`)
+The StreamHook's own `Level` is set to the same `req.Level` (redundant with the logger level, but
+harmless): entries the logger admits are exactly those at/above `req.Level`, and the hook forwards
+them to the CLI.
+
+### 3a. Per-connection tagging (`connID`, `tun`) and `kubevpn logs` filtering
 
 Connection-scoped handlers tag their context with the connection ID via
-`plog.WithField(ctx, action.LogFieldConnID, id)`. The server format renders it as a `[connID=xxxx]`
-prefix (via `GenStr`), so concurrent operations sharing one daemon log file can be filtered apart
-(`grep connID=xxxx`). The StreamHook uses the message-only client format, so the prefix never reaches
-CLI stdout. Tagged at: connect (root + user daemon, on `session.Ctx`), proxy, and disconnect-by-id.
-core/gVISOR logs inherit the tag automatically through `plog.GetFields(ctx)`.
+`plog.WithField(ctx, action.LogFieldConnID, id)`, and the data plane adds the TUN device name via
+`plog.WithField(ctx, plog.FieldTun, name)` (core `TunHandler`). The server format renders them as a
+`[connID=xxxx tun=utun5]` prefix (via `GenStr`), so concurrent operations sharing one daemon log
+file can be filtered apart. The StreamHook uses the message-only client format, so the prefix never
+reaches CLI stdout. core/gVISOR logs inherit the tags automatically through `plog.GetFields(ctx)`.
+
+The root daemon tags `connID` from `req.ConnectionID` **as soon as the request arrives** (idempotency
+guard, setup, data plane, and cleanup all carry it). The user daemon tags it only after computing the
+ID from the namespace UID (needs the cluster client up), so its earliest connect lines are untagged;
+`tun` exists only on the root daemon's data plane. A few one-time `context.Background()` setup logs
+carry no tag at all.
+
+`kubevpn logs --connection-id <id>` / `--tun <name>` filter on these tags with **lenient** semantics
+(daemon side, `makeLogFilter`): a line is kept when it has no such tag (shared/early/setup logs, or
+the user daemon which has no tun) **or** its tag matches; only a line tagged with a *different* value
+is dropped. Tags match as whole tokens, so `connID=abc` doesn't match `connID=abcdef`. `--lines N`
+still seeks the last N raw lines before filtering.
 
 ### 3b. In-cluster sidecars default to Debug
 
@@ -127,10 +150,13 @@ Code using `context.Background()` falls back to global `L`:
 
 | Level | Log file | gRPC stream → CLI | CLI stdout |
 |---|---|---|---|
-| Debug | ✅ (always, both daemons) | ✅ only with `--debug` (StreamHook at req.Level) | ✅ (only with `--debug`) |
+| Debug | ✅ only with `--debug` (per-RPC logger at req.Level) | ✅ only with `--debug` | ✅ (only with `--debug`) |
 | Info | ✅ | ✅ | ✅ |
 | Warn | ✅ | ✅ | ✅ |
 | Error | ✅ | ✅ | ✅ |
+
+Exception: logs emitted with `context.Background()` fall back to the global `L`, which the daemon
+holds at Debug (Rule 1) — a small number of one-time setup lines that are not per-connection.
 
 ## Component Reference
 

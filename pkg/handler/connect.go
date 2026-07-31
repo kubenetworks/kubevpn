@@ -6,7 +6,6 @@ import (
 	"net"
 	"strings"
 	"sync"
-	"time"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -14,7 +13,6 @@ import (
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/dns"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -73,37 +71,6 @@ func (c *ConnectOptions) InitClient(f cmdutil.Factory) error {
 // Context is a stub on the control-plane session (ConnectOptions/ControlSession).
 // The data-plane context lives in DataSession; this returns nil for all user-daemon instances.
 func (c *ConnectOptions) Context() context.Context {
-	return nil
-}
-
-// DoConnect is not available on the control-plane session (ConnectOptions/ControlSession).
-// It exists only to satisfy the Connection interface. The data-plane DoConnect
-// runs on DataSession in the root daemon.
-func (c *ConnectOptions) DoConnect(_ context.Context) error {
-	return fmt.Errorf("DoConnect is not available on a control-plane session")
-}
-
-// GetLocalTunIP is a stub on the control-plane session.
-// TUN IP allocation is performed by DataSession (root daemon).
-func (c *ConnectOptions) GetLocalTunIP() (v4 string, v6 string) {
-	return "", ""
-}
-
-// GetLastHeartbeat is a stub on the control-plane session.
-// The user daemon obtains heartbeat info via the sudo Status RPC, not from a local NetworkManager.
-func (c *ConnectOptions) GetLastHeartbeat() time.Time {
-	return time.Time{}
-}
-
-// GetAPIServerIPs is a stub on the control-plane session.
-// API server IPs are held by DataSession's NetworkManager in the root daemon.
-func (c *ConnectOptions) GetAPIServerIPs() []net.IP {
-	return nil
-}
-
-// GetNetworkExtraHost is a stub on the control-plane session.
-// Extra hosts are accumulated by DataSession's NetworkManager in the root daemon.
-func (c *ConnectOptions) GetNetworkExtraHost() []dns.Entry {
 	return nil
 }
 

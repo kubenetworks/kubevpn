@@ -17,7 +17,14 @@ func (svr *Server) siblingTunIPs() []net.IP {
 	defer svr.connMu.RUnlock()
 	var ips []net.IP
 	for _, conn := range svr.connections {
-		v4, v6 := conn.GetLocalTunIP()
+		// GetLocalTunIP is data-plane-only (DataPlane). In the user daemon
+		// connections are *ConnectOptions (not DataPlane), so the assertion fails
+		// and contributes no IPs — correct, since sibling-IP reservation is a
+		// root-daemon concern. Mirrors the old stub-returns-empty behavior.
+		var v4, v6 string
+		if dp, ok := conn.(handler.DataPlane); ok {
+			v4, v6 = dp.GetLocalTunIP()
+		}
 		if ip := net.ParseIP(v4); ip != nil {
 			ips = append(ips, ip)
 		}

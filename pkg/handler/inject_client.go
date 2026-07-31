@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -157,11 +159,35 @@ func (c *ConnectOptions) createRemoteInboundViaManager(ctx context.Context, name
 	return nil
 }
 
+// managerLeaveRetryBudget bounds the total time LeaveInject retries on transient errors.
+// Shorter than inject (15s vs 45s) since leave is a user-interactive operation.
+const managerLeaveRetryBudget = 15 * time.Second
+
 // leaveViaManager unpatches workloads server-side via the manager's LeaveInject RPC over
 // the VPN. An empty workloads slice means "leave all workloads this OwnerID proxies in
 // the namespace" (the manager derives them from ENVOY_CONFIG) — used by disconnect
-// cleanup. No local fallback: failures are returned.
+// cleanup. Retries on transient gRPC errors (Unavailable/EOF); LeaveInject is idempotent.
 func (c *ConnectOptions) leaveViaManager(ctx context.Context, namespace string, workloads []string, ownerID string) error {
+	deadline := time.Now().Add(managerLeaveRetryBudget)
+	for attempt := 1; ; attempt++ {
+		err := c.tryLeaveInject(ctx, namespace, workloads, ownerID)
+		if err == nil {
+			return nil
+		}
+		if !isTransientGRPC(err) || ctx.Err() != nil || !time.Now().Add(managerDialRetryBackoff).Before(deadline) {
+			return err
+		}
+		plog.G(ctx).Warnf("LeaveInject failed (attempt %d), retrying in %s: %v", attempt, managerDialRetryBackoff, err)
+		select {
+		case <-time.After(managerDialRetryBackoff):
+		case <-ctx.Done():
+			return err
+		}
+	}
+}
+
+// tryLeaveInject performs a single attempt of dial + LeaveInject stream.
+func (c *ConnectOptions) tryLeaveInject(ctx context.Context, namespace string, workloads []string, ownerID string) error {
 	conn, err := c.dialManager(ctx)
 	if err != nil {
 		return err
@@ -190,6 +216,12 @@ func (c *ConnectOptions) leaveViaManager(ctx context.Context, namespace string, 
 		}
 	}
 	return nil
+}
+
+// isTransientGRPC reports whether err is a transient gRPC error worth retrying.
+func isTransientGRPC(err error) bool {
+	code := status.Code(err)
+	return code == codes.Unavailable || code == codes.DeadlineExceeded
 }
 
 // startServiceMappers starts a client-side port Mapper for each K8s Service workload the

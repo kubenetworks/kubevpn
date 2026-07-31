@@ -58,7 +58,7 @@ func (u *sshUt) kubevpnRunWithFullProxy(t *testing.T) {
 		"--rm",
 		"--entrypoint", "go", "run", fmt.Sprintf("%s/%s", remoteDir, name),
 	)
-	waitRunStartup(t, cmd, cancelFunc, u.clientset, "Start listening http port 9080 ...")
+	exited := waitRunStartup(t, cmd, cancelFunc, u.clientset, "Start listening http port 9080 ...")
 
 	app := "authors"
 	ip, err := u.getPodIP(app)
@@ -73,12 +73,7 @@ func (u *sshUt) kubevpnRunWithFullProxy(t *testing.T) {
 	t.Run("kubevpnRunWithFullProxyStatus", u.checkRunWithFullProxyStatus)
 	t.Run("commonTest", u.commonTest)
 
-	err = cmd.Process.Signal(os.Interrupt)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for cmd.ProcessState == nil {
-	}
+	stopRunCmd(t, cmd, cancelFunc, exited)
 }
 
 func (u *sshUt) kubevpnRunWithServiceMesh(t *testing.T) {
@@ -104,7 +99,7 @@ func (u *sshUt) kubevpnRunWithServiceMesh(t *testing.T) {
 		"--rm",
 		"--entrypoint", "go", "run", fmt.Sprintf("%s/%s", remoteDir, name),
 	)
-	waitRunStartup(t, cmd, cancelFunc, u.clientset, "Start listening http port 9080 ...")
+	exited := waitRunStartup(t, cmd, cancelFunc, u.clientset, "Start listening http port 9080 ...")
 
 	app := "authors"
 	ip, err := u.getServiceIP(app)
@@ -123,12 +118,7 @@ func (u *sshUt) kubevpnRunWithServiceMesh(t *testing.T) {
 	t.Run("kubevpnRunWithServiceMeshStatus", u.checkRunWithServiceMeshStatus)
 	t.Run("commonTest", u.commonTest)
 
-	err = cmd.Process.Signal(os.Interrupt)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for cmd.ProcessState == nil {
-	}
+	stopRunCmd(t, cmd, cancelFunc, exited)
 }
 
 func (u *sshUt) checkRunWithFullProxyStatus(t *testing.T) {

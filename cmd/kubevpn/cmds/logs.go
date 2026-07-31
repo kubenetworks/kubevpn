@@ -27,6 +27,10 @@ func CmdLogs(f cmdutil.Factory) *cobra.Command {
         kubevpn logs
         # follow more log
         kubevpn logs -f
+        # only show logs for a specific connection
+        kubevpn logs --connection-id 7689bab91b63
+        # only show logs for a specific tun device
+        kubevpn logs --tun utun5
 		`)),
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
 			cmd.SetContext(plog.WithLogger(cmd.Context(), plog.NewClientLogger()))
@@ -58,5 +62,7 @@ func CmdLogs(f cmdutil.Factory) *cobra.Command {
 	}
 	cmd.Flags().BoolVarP(&req.Follow, "follow", "f", false, "Specify if the logs should be streamed.")
 	cmd.Flags().Int32VarP(&req.Lines, "lines", "l", 10, "Lines of recent log file to display.")
+	cmd.Flags().StringVar(&req.ConnectionID, "connection-id", "", "Only show logs tagged with this connection id (untagged/shared lines are kept).")
+	cmd.Flags().StringVar(&req.Tun, "tun", "", "Only show logs tagged with this TUN device name, e.g. utun5 (untagged/shared lines are kept).")
 	return cmd
 }

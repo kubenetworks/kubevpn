@@ -34,7 +34,10 @@ type Server struct {
 	InvalidateClient func(isSudo bool)
 	IsSudo           bool
 	LogFile          *lumberjack.Logger
-	Lock             sync.Mutex
+	// dnsMu is the shared mutex serializing DNS setup/teardown across the data plane
+	// (it is handed by pointer to DataSession → NetworkManager → dns.Config). It is
+	// distinct from sshMu so SSH daemon state and DNS operations do not contend.
+	dnsMu sync.Mutex
 
 	// connMu protects connections and currentConnectionID from concurrent access.
 	// Use RLock for read-only access, Lock for mutations.
@@ -47,6 +50,9 @@ type Server struct {
 	// local TUN IP. Held in the root daemon around DoConnect.
 	connectMu sync.Mutex
 
+	// sshMu guards sshServerIP and sshCancelFunc — the SSH TUN server state owned by
+	// SshStart/SshStop. Separate from dnsMu so the two concerns stay decoupled.
+	sshMu         sync.Mutex
 	sshServerIP   string
 	sshCancelFunc context.CancelFunc
 

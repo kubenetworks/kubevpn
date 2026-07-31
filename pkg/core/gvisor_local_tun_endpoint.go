@@ -21,7 +21,7 @@ func readFromEndpointWriteToTun(ctx context.Context, endpoint *channel.Endpoint,
 	for ctx.Err() == nil {
 		pkt := endpoint.ReadContext(ctx)
 		if pkt != nil {
-			sniffer.LogPacket(prefix, sniffer.DirectionSend, pkt.NetworkProtocolNumber, pkt)
+			logStackPacket(ctx, prefix, sniffer.DirectionSend, pkt.NetworkProtocolNumber, pkt)
 			buf, length := copyPacketToPool(pkt, packetTypeToTUN, headroom)
 			// Parse src/dst so a shared server-bound consumer (runConnPool's five-tuple hash) can
 			// route this packet to a slot. Without a dst, runConnPool would treat it as a heartbeat
@@ -64,7 +64,7 @@ func readFromGvisorInboundWriteToEndpoint(ctx context.Context, in <-chan *Packet
 				Payload: buffer.MakeWithData(ip),
 			})
 			packet.release()
-			sniffer.LogPacket(prefix, sniffer.DirectionRecv, protocol, pkt)
+			logStackPacket(ctx, prefix, sniffer.DirectionRecv, protocol, pkt)
 			endpoint.InjectInbound(protocol, pkt)
 			pkt.DecRef()
 		case <-ctx.Done():

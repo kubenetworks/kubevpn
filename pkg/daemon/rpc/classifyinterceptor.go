@@ -1,7 +1,7 @@
 package rpc
 
 import (
-	"golang.org/x/net/context"
+	"context"
 	"google.golang.org/grpc"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util/exitcode"

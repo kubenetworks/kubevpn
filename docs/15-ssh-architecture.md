@@ -19,6 +19,7 @@ pkg/ssh/                       SSH client core library
 ├── tunnel.go                  PortMapUntil (local port forward) + copyStream
 ├── jump.go                    SshJumpBytes/SshJump/SshJumpAndSetEnv + apiserver reachability probe
 ├── exec.go                    RemoteRun (remote command execution)
+├── remote_kubeconfig.go       embedRemoteCertFiles — inline remote cert/key/CA path refs over SSH
 ├── reverse.go                 Reverse tunnel (SSH -R equivalent)
 ├── scp.go                     SCP file transfer
 ├── gssapi.go                  GSSAPI/Kerberos authentication (SPNEGO negotiation)
@@ -152,6 +153,15 @@ Full flow:
    a. SSH to remote server
    b. Execute kubectl/minikube/cat to get kubeconfig
    c. Replace local kubeconfig with the remote one
+   d. If the `cat` fallback returned a RAW kubeconfig (no kubectl on the
+      bastion) that references cert/key/CA files by path, inline each
+      referenced file over the same SSH session (`cat <shellquoted path>`,
+      resolved relative to the remote kubeconfig dir) into the `*-data`
+      fields and clear the path — so the config is self-contained. No-op when
+      kubectl already flattened it. This prevents the later local
+      `api.FlattenConfig` from resolving those paths against the daemon CWD
+      (where the remote files do not exist) and failing with an opaque
+      `open ..: operation not permitted`.
 
 2. Pick an available local port N
 

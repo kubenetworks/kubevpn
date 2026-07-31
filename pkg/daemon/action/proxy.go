@@ -113,7 +113,10 @@ func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (err error) {
 	defer func() {
 		if err != nil {
 			cleanupCtx := plog.WithLogger(context.Background(), logger)
-			_ = options.LeaveAllProxyResources(cleanupCtx)
+			// LeaveAllProxyResources is control-plane-only (ProxyController).
+			if pc, ok := options.(handler.ProxyController); ok {
+				_ = pc.LeaveAllProxyResources(cleanupCtx)
+			}
 			disconnect(cleanupCtx, svr, connectionID)
 			svr.connMu.Lock()
 			svr.resetCurrentConnection(connectionID)
@@ -132,7 +135,13 @@ func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (err error) {
 		return err
 	}
 	image := podList[0].Spec.Containers[0].Image
-	err = options.CreateRemoteInboundPod(plog.WithLogger(cancel, logger), req.Namespace, workloads, req.Headers, req.PortMap, image, tunV4, tunV6)
+	// CreateRemoteInboundPod is control-plane-only (ProxyController). The Proxy RPC
+	// runs in the user daemon where options is a *ConnectOptions satisfying it.
+	pc, ok := options.(handler.ProxyController)
+	if !ok {
+		return fmt.Errorf("proxy injection not available for connection %s: %w", connectionID, config.ErrConnectionNotFound)
+	}
+	err = pc.CreateRemoteInboundPod(plog.WithLogger(cancel, logger), req.Namespace, workloads, req.Headers, req.PortMap, image, tunV4, tunV6)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to inject inbound sidecar: %v", err)
 		return err

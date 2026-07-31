@@ -166,7 +166,12 @@ func (c *Config) generateAppendHosts(serviceList []corev1.Service, hosts []Entry
 		for {
 			line, err := reader.ReadString('\n')
 			for i := 0; i < len(entryList); i++ {
-				if strings.Contains(line, config.HostsKeyword) && strings.Contains(line, entryList[i].Domain) {
+				// Match the domain as a whole whitespace-delimited field, not a substring:
+				// hosts lines look like "<ip>\t<domain>\t\t# For dev <tun> Added by KubeVPN",
+				// and HostsKeyword itself ("Added by KubeVPN") contains many letters, so a
+				// substring Contains(domain) would match EVERY managed line for short
+				// domains like "b" or "vpn" and wrongly drop entries that still need adding.
+				if strings.Contains(line, config.HostsKeyword) && lineHasDomain(line, entryList[i].Domain) {
 					entryList = append(entryList[:i], entryList[i+1:]...)
 					i--
 				}
@@ -183,6 +188,21 @@ func (c *Config) generateAppendHosts(serviceList []corev1.Service, hosts []Entry
 		return entryList[i].Domain > entryList[j].Domain
 	})
 	return entryList
+}
+
+// lineHasDomain reports whether domain appears as a whole whitespace-delimited field
+// in the given hosts-file line, compared case-insensitively. It replaces a plain
+// strings.Contains check: hosts lines carry the "Added by KubeVPN" marker (and IP,
+// tun name, etc.), so a substring match would match short domains like "b" or "vpn"
+// against the marker text on every managed line, not just the line for that domain.
+// Only a whole-field match correctly identifies "this exact domain is already present".
+func lineHasDomain(line, domain string) bool {
+	for _, field := range strings.Fields(line) {
+		if strings.EqualFold(field, domain) {
+			return true
+		}
+	}
+	return false
 }
 
 // CleanupHosts removes all KubeVPN-managed entries from the system hosts file.

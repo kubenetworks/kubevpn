@@ -424,8 +424,13 @@ func (o *CopyOptions) untarAll(prefix string, dest localPath, reader io.Reader) 
 		if err != nil {
 			return err
 		}
-		defer outFile.Close()
+		// Close explicitly per iteration, NOT via defer: this loop runs once per tar
+		// entry, so a defer would accumulate one open file descriptor per entry until
+		// the whole archive is extracted — enough to exhaust the fd limit on a large
+		// archive. The io.Copy error path closes here too; the success path closes
+		// below and its error is surfaced (a close error on a written file matters).
 		if _, err := io.Copy(outFile, tarReader); err != nil {
+			_ = outFile.Close()
 			return err
 		}
 		if err := outFile.Close(); err != nil {

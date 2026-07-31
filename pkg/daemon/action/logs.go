@@ -4,11 +4,13 @@ import (
 	"io"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/hpcloud/tail"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 // Logs handles the Logs RPC, streaming the daemon's log output (both user and root) with optional follow mode.
@@ -18,6 +20,7 @@ func (svr *Server) Logs(resp rpc.Daemon_LogsServer) error {
 		return err
 	}
 
+	keep := makeLogFilter(req)
 	line := int64(max(req.Lines, -req.Lines))
 	sudoLine, sudoSize, err := seekToLastLine(config.GetDaemonLogPath(true), line)
 	if err != nil {
@@ -27,18 +30,57 @@ func (svr *Server) Logs(resp rpc.Daemon_LogsServer) error {
 	if err != nil {
 		return err
 	}
-	err = recent(resp, sudoLine, userLine)
+	err = recent(resp, sudoLine, userLine, keep)
 	if err != nil {
 		return err
 	}
 
 	if req.Follow {
-		err = tee(resp, sudoSize, userSize)
+		err = tee(resp, sudoSize, userSize, keep)
 		if err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// makeLogFilter builds a per-line predicate from the request's ConnectionID/Tun filters, with
+// lenient semantics: for each set filter, a line is kept if it carries no such tag at all
+// (shared/early/setup logs, or the user daemon which has no tun) OR its tag matches; a line tagged
+// with a different value is dropped. The two filters are ANDed. Empty filters keep everything.
+func makeLogFilter(req *rpc.LogRequest) func(string) bool {
+	id, tun := req.GetConnectionID(), req.GetTun()
+	if id == "" && tun == "" {
+		return func(string) bool { return true }
+	}
+	return func(text string) bool {
+		if id != "" && strings.Contains(text, LogFieldConnID+"=") && !hasField(text, LogFieldConnID, id) {
+			return false
+		}
+		if tun != "" && strings.Contains(text, plog.FieldTun+"=") && !hasField(text, plog.FieldTun, tun) {
+			return false
+		}
+		return true
+	}
+}
+
+// hasField reports whether text contains the rendered field "key=val" as a whole token, i.e.
+// followed by a field separator (space or "]") or end of line — so "connID=abc" does not match
+// "connID=abcdef" and "tun=utun5" does not match "tun=utun50".
+func hasField(text, key, val string) bool {
+	needle := key + "=" + val
+	for i := 0; i <= len(text); {
+		j := strings.Index(text[i:], needle)
+		if j < 0 {
+			return false
+		}
+		end := i + j + len(needle)
+		if end == len(text) || text[end] == ' ' || text[end] == ']' {
+			return true
+		}
+		i = i + j + 1
+	}
+	return false
 }
 
 func newTailConfig(offset int64, follow bool) tail.Config {
@@ -51,7 +93,7 @@ func newTailConfig(offset int64, follow bool) tail.Config {
 	}
 }
 
-func sendLines(resp rpc.Daemon_LogsServer, t *tail.Tail, prefix string) error {
+func sendLines(resp rpc.Daemon_LogsServer, t *tail.Tail, prefix string, keep func(string) bool) error {
 	for {
 		select {
 		case <-resp.Context().Done():
@@ -63,6 +105,9 @@ func sendLines(resp rpc.Daemon_LogsServer, t *tail.Tail, prefix string) error {
 			if line.Err != nil {
 				return line.Err
 			}
+			if !keep(line.Text) {
+				continue
+			}
 			if err := resp.Send(&rpc.LogResponse{Message: prefix + line.Text + "\n"}); err != nil {
 				return err
 			}
@@ -70,7 +115,7 @@ func sendLines(resp rpc.Daemon_LogsServer, t *tail.Tail, prefix string) error {
 	}
 }
 
-func tee(resp rpc.Daemon_LogsServer, sudoOffset int64, userOffset int64) error {
+func tee(resp rpc.Daemon_LogsServer, sudoOffset int64, userOffset int64, keep func(string) bool) error {
 	sudoFile, err := tail.TailFile(config.GetDaemonLogPath(true), newTailConfig(sudoOffset, true))
 	if err != nil {
 		return err
@@ -92,6 +137,9 @@ func tee(resp rpc.Daemon_LogsServer, sudoOffset int64, userOffset int64) error {
 			if line.Err != nil {
 				return line.Err
 			}
+			if !keep(line.Text) {
+				continue
+			}
 			if err := resp.Send(&rpc.LogResponse{Message: "[USER] " + line.Text + "\n"}); err != nil {
 				return err
 			}
@@ -102,6 +150,9 @@ func tee(resp rpc.Daemon_LogsServer, sudoOffset int64, userOffset int64) error {
 			if line.Err != nil {
 				return line.Err
 			}
+			if !keep(line.Text) {
+				continue
+			}
 			if err := resp.Send(&rpc.LogResponse{Message: "[ROOT] " + line.Text + "\n"}); err != nil {
 				return err
 			}
@@ -109,13 +160,13 @@ func tee(resp rpc.Daemon_LogsServer, sudoOffset int64, userOffset int64) error {
 	}
 }
 
-func recent(resp rpc.Daemon_LogsServer, sudoOffset int64, userOffset int64) error {
+func recent(resp rpc.Daemon_LogsServer, sudoOffset int64, userOffset int64, keep func(string) bool) error {
 	userFile, err := tail.TailFile(config.GetDaemonLogPath(false), newTailConfig(userOffset, false))
 	if err != nil {
 		return err
 	}
 	defer userFile.Stop()
-	if err := sendLines(resp, userFile, "[USER] "); err != nil {
+	if err := sendLines(resp, userFile, "[USER] ", keep); err != nil {
 		return err
 	}
 
@@ -124,7 +175,7 @@ func recent(resp rpc.Daemon_LogsServer, sudoOffset int64, userOffset int64) erro
 		return err
 	}
 	defer sudoFile.Stop()
-	return sendLines(resp, sudoFile, "[ROOT] ")
+	return sendLines(resp, sudoFile, "[ROOT] ", keep)
 }
 
 // tailBlockSize is the chunk size used when scanning a log file backwards for the last N lines.

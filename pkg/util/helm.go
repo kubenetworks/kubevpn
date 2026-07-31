@@ -6,6 +6,7 @@ import (
 
 	"helm.sh/helm/v4/pkg/action"
 	"helm.sh/helm/v4/pkg/release/v1"
+	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -78,10 +79,18 @@ func GetHelmInstalledNamespace(ctx context.Context, f cmdutil.Factory) (string, 
 }
 
 // DetectPodExists checks whether a running traffic manager pod exists in the specified namespace.
+// This is the first apiserver call of the connect flow, so its List is retried on transient
+// errors (EOF, TLS handshake timeout, connection reset) — an unstable/warming-up apiserver must
+// not hard-fail the whole connect on a single blip. Definitive rejections are surfaced at once.
 func DetectPodExists(ctx context.Context, clientset kubernetes.Interface, namespace string) (bool, error) {
 	label := fields.OneTermEqualSelector("app", config.ConfigMapPodTrafficManager).String()
-	list, err := clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: label,
+	var list *corev1.PodList
+	err := retryAPIRead(func() error {
+		var e error
+		list, e = clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+			LabelSelector: label,
+		})
+		return e
 	})
 	if err != nil {
 		return false, err

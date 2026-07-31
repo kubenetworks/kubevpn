@@ -171,3 +171,48 @@ func TestGetManifest_UnsupportedPlatform(t *testing.T) {
 		t.Fatal("expected unsupported-platform error, got nil")
 	}
 }
+
+// TestGetManifest_ArchMustBeWholeToken pins the fix for the arch-substring bug: a
+// release asset "kubevpn_v2.0.0_linux_arm64.zip" must NOT be selected when arch="arm",
+// because "arm" is a substring of "arm64" — handing a 32-bit ARM user the arm64 binary
+// (which would fail to run). With the old strings.Contains, the arm64 asset matched
+// arch="arm" and was returned; nameHasToken now requires "arm" as a whole segment.
+func TestGetManifest_ArchMustBeWholeToken(t *testing.T) {
+	// Release ships only the arm64 asset (no 32-bit arm build). arch="arm" must NOT
+	// match it and must surface the unsupported-platform error instead.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"tag_name":"v2.0.0","assets":[{"name":"kubevpn_v2.0.0_linux_arm64.zip","browser_download_url":"http://example.com/arm64.zip"}]}`))
+	}))
+	defer srv.Close()
+
+	orig := address
+	address = []string{srv.URL}
+	defer func() { address = orig }()
+
+	if _, _, err := GetManifest(&http.Client{}, "linux", "arm"); err == nil {
+		t.Fatal("arch=\"arm\" must NOT match the arm64 asset; expected unsupported-platform error, got nil")
+	}
+}
+
+// TestGetManifest_ArchWholeTokenMatches is the positive counterpart: when the release
+// ships an exact arm asset, arch="arm" must select it (not be rejected by the tighter
+// match introduced to fix the arm64 false-positive).
+func TestGetManifest_ArchWholeTokenMatches(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"tag_name":"v2.0.0","assets":[{"name":"kubevpn_v2.0.0_linux_arm64.zip","browser_download_url":"http://example.com/arm64.zip"},{"name":"kubevpn_v2.0.0_linux_arm.zip","browser_download_url":"http://example.com/arm.zip"}]}`))
+	}))
+	defer srv.Close()
+
+	orig := address
+	address = []string{srv.URL}
+	defer func() { address = orig }()
+
+	_, url, err := GetManifest(&http.Client{}, "linux", "arm")
+	if err != nil {
+		t.Fatalf("expected the arm asset to match, got error: %v", err)
+	}
+	if url != "http://example.com/arm.zip" {
+		t.Fatalf("expected arm.zip, got %q (arch=\"arm\" matched the wrong asset)", url)
+	}
+}
+

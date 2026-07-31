@@ -281,7 +281,6 @@ func ensureProxyRBAC(ctx context.Context, clientset kubernetes.Interface, worklo
 
 func cleanupTrafficManagerResources(ctx context.Context, clientset kubernetes.Interface, namespace string) {
 	options := metav1.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0)}
-	name := config.ConfigMapPodTrafficManager
 	// Route-discovery and proxy-inject RBAC (distinct names). In central mode they live
 	// in the workload namespace and are cleaned up there; here we clear the
 	// manager-namespace copy (non-central mode, where workload ns == manager ns).
@@ -289,6 +288,27 @@ func cleanupTrafficManagerResources(ctx context.Context, clientset kubernetes.In
 	_ = clientset.RbacV1().Roles(namespace).Delete(ctx, proxyRBACName, options)
 	_ = clientset.RbacV1().RoleBindings(namespace).Delete(ctx, routeRBACName, options)
 	_ = clientset.RbacV1().Roles(namespace).Delete(ctx, routeRBACName, options)
+	// The traffic-manager core resources (deploy/svc/configmap/secret/sa/role/rolebinding/job),
+	// named config.ConfigMapPodTrafficManager. Shared with the daemon-layer Uninstall path.
+	DeleteTrafficManagerCoreResources(ctx, clientset, namespace, config.ConfigMapPodTrafficManager, options)
+	// Central (kubevpn-namespace) manager owns the cluster-scoped proxy RBAC; remove it too.
+	if namespace == config.DefaultNamespaceKubevpn {
+		_ = clientset.RbacV1().ClusterRoleBindings().Delete(ctx, proxyRBACName, options)
+		_ = clientset.RbacV1().ClusterRoles().Delete(ctx, proxyRBACName, options)
+	}
+}
+
+// DeleteTrafficManagerCoreResources deletes the eight namespaced resources that make up
+// a traffic-manager instance under the given name: Deployment, Job, Service, ConfigMap,
+// Secret, ServiceAccount, Role, RoleBinding. It is the shared teardown primitive for both
+// the handler-layer cleanup (cleanupTrafficManagerResources) and the daemon-layer Uninstall
+// RPC (pkg/daemon/action), which previously triplicated this deletion list.
+//
+// Best-effort: each Delete ignores its error (the resources may not all exist; a missing
+// one is not a failure for teardown). Errors are intentionally swallowed rather than
+// aggregated because callers use this on an already-unreachable cluster where most Delete
+// calls time out — surfacing them would add noise, not signal.
+func DeleteTrafficManagerCoreResources(ctx context.Context, clientset kubernetes.Interface, namespace, name string, options metav1.DeleteOptions) {
 	_ = clientset.RbacV1().RoleBindings(namespace).Delete(ctx, name, options)
 	_ = clientset.RbacV1().Roles(namespace).Delete(ctx, name, options)
 	_ = clientset.CoreV1().ServiceAccounts(namespace).Delete(ctx, name, options)
@@ -297,9 +317,4 @@ func cleanupTrafficManagerResources(ctx context.Context, clientset kubernetes.In
 	_ = clientset.CoreV1().Secrets(namespace).Delete(ctx, name, options)
 	_ = clientset.BatchV1().Jobs(namespace).Delete(ctx, name, options)
 	_ = clientset.AppsV1().Deployments(namespace).Delete(ctx, name, options)
-	// Central (kubevpn-namespace) manager owns the cluster-scoped proxy RBAC; remove it too.
-	if namespace == config.DefaultNamespaceKubevpn {
-		_ = clientset.RbacV1().ClusterRoleBindings().Delete(ctx, proxyRBACName, options)
-		_ = clientset.RbacV1().ClusterRoles().Delete(ctx, proxyRBACName, options)
-	}
 }
