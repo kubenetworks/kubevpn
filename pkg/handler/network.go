@@ -48,6 +48,7 @@ type NetworkConfig struct {
 	Image             string
 	Lock              *sync.Mutex // shared lock for DNS operations
 	OwnerID           string      // unique ID for TunConfigService (UUID)
+	Hostname          string      // local machine name, recorded in TUN_ALLOCS for debugging
 
 	// GetRunningPodList returns running traffic manager pods.
 	GetRunningPodList func(ctx context.Context) ([]v1.Pod, error)
@@ -199,6 +200,7 @@ func (nm *NetworkManager) rentIP(ctx context.Context) error {
 			OwnerID:    nm.cfg.OwnerID,
 			Namespace:  nm.cfg.ManagerNamespace,
 			ExcludeIPs: buildExcludeIPs(nm.cfg.ReservedTunIPs),
+			Hostname:   nm.cfg.Hostname,
 		})
 		if err != nil {
 			return fmt.Errorf("get TUN IP from control-plane: %w", err)
@@ -394,6 +396,7 @@ func (nm *NetworkManager) doWatchTunIP(ctx context.Context, target string, curre
 		OwnerID:    nm.cfg.OwnerID,
 		Namespace:  nm.cfg.ManagerNamespace,
 		ExcludeIPs: nm.excludesForReassert(),
+		Hostname:   nm.cfg.Hostname,
 	}); gerr == nil {
 		v4, v6 := parseTunIPResponse(resp)
 		nm.applyPushedTunIP(ctx, client, v4, v6)
@@ -461,6 +464,7 @@ func (nm *NetworkManager) handleProposalFamily(ctx context.Context, client rpc.T
 			OwnerID:    nm.cfg.OwnerID,
 			Namespace:  nm.cfg.ManagerNamespace,
 			ExcludeIPs: rej,
+			Hostname:   nm.cfg.Hostname,
 		}); err != nil {
 			plog.G(ctx).Errorf("[IPWatcher] decline proposed IP %s: %v", cand.IP, err)
 		}
@@ -472,6 +476,7 @@ func (nm *NetworkManager) handleProposalFamily(ctx context.Context, client rpc.T
 		Namespace:  nm.cfg.ManagerNamespace,
 		ConfirmIP:  cand.IP.String(),
 		ExcludeIPs: excludes,
+		Hostname:   nm.cfg.Hostname,
 	})
 	if err != nil {
 		plog.G(ctx).Errorf("[IPWatcher] confirm proposed IP %s: %v", cand.IP, err)
@@ -541,6 +546,7 @@ func (nm *NetworkManager) applyPushedTunIP(ctx context.Context, client rpc.TunCo
 			OwnerID:    nm.cfg.OwnerID,
 			Namespace:  nm.cfg.ManagerNamespace,
 			ExcludeIPs: rej,
+			Hostname:   nm.cfg.Hostname,
 		}); err != nil {
 			plog.G(ctx).Errorf("[IPWatcher] reject pushed IP %s: %v", newV4.IP, err)
 		}

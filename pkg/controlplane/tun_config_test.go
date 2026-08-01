@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -27,7 +28,7 @@ func newTestServer(t *testing.T) *TunConfigServer {
 			ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "test-ns"},
 			Data: map[string]string{
 				config.KeyTunIPPool: "",
-				config.KeyEnvoy: "",
+				config.KeyEnvoy:     "",
 			},
 		},
 	)
@@ -671,5 +672,69 @@ func TestNotifyIPChange_SyncsEnvoyRuleIP(t *testing.T) {
 			t.Fatalf("envoy rule IP not synced after NotifyIPChange, got %q want 198.18.0.9", got)
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestGetTunIP_HostnamePersistedToConfigMap exercises the full hostname lifecycle:
+// a client passes its machine name to GetTunIP over real gRPC, the server records it
+// in the TUN_ALLOCS ConfigMap, and a restarted server restores it via loadAllocs.
+// It also asserts that a client which sends no hostname leaves a clean entry (omitempty).
+func TestGetTunIP_HostnamePersistedToConfigMap(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+
+	// Phase 1: allocate with a hostname (real gRPC), and a second owner without one.
+	resp, err := env.client.GetTunIP(ctx, &rpc.TunIPRequest{
+		OwnerID: "owner-host", Namespace: "test-ns", Hostname: "dev-laptop-01",
+	})
+	if err != nil {
+		t.Fatalf("GetTunIP(with hostname): %v", err)
+	}
+	if resp.IPv4 == "" {
+		t.Fatal("expected non-empty IPv4")
+	}
+	if _, err = env.client.GetTunIP(ctx, &rpc.TunIPRequest{
+		OwnerID: "owner-nohost", Namespace: "test-ns",
+	}); err != nil {
+		t.Fatalf("GetTunIP(no hostname): %v", err)
+	}
+
+	// Phase 2: the hostname is persisted in the TUN_ALLOCS ConfigMap.
+	cm, err := env.server.clientset.CoreV1().ConfigMaps("test-ns").Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get ConfigMap: %v", err)
+	}
+	raw := cm.Data[config.KeyTunAllocs]
+	persisted, err := parsePersistedAllocs(raw)
+	if err != nil {
+		t.Fatalf("parse TUN_ALLOCS: %v", err)
+	}
+	if got := persisted["owner-host"].Hostname; got != "dev-laptop-01" {
+		t.Fatalf("owner-host hostname = %q, want dev-laptop-01", got)
+	}
+	if got := persisted["owner-nohost"].Hostname; got != "" {
+		t.Fatalf("owner-nohost hostname = %q, want empty", got)
+	}
+	// omitempty: only the owner that sent a hostname produces a Hostname key in the raw YAML.
+	if !strings.Contains(raw, "Hostname: dev-laptop-01") {
+		t.Fatalf("raw TUN_ALLOCS missing hostname entry:\n%s", raw)
+	}
+	if n := strings.Count(raw, "Hostname:"); n != 1 {
+		t.Fatalf("expected exactly 1 Hostname key (omitempty), got %d:\n%s", n, raw)
+	}
+
+	// Phase 3: a restarted server restores the hostname from the ConfigMap.
+	s2, err := NewTunConfigServer(ctx, env.server.clientset, "test-ns")
+	if err != nil {
+		t.Fatalf("restart NewTunConfigServer: %v", err)
+	}
+	s2.mu.RLock()
+	got := s2.allocs["owner-host"]
+	s2.mu.RUnlock()
+	if got == nil {
+		t.Fatal("owner-host alloc not restored after restart")
+	}
+	if got.Hostname != "dev-laptop-01" {
+		t.Fatalf("restored hostname = %q, want dev-laptop-01", got.Hostname)
 	}
 }
