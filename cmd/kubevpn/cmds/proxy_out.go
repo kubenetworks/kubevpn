@@ -98,7 +98,7 @@ func printManagedSocksStarted(out io.Writer, connectionID, socksListen string) {
 	if out == nil {
 		return
 	}
-	_, _ = fmt.Fprintf(out, "Started managed local SOCKS5 proxy for connection %s on %s\n", connectionID, socksListen)
+	printSuccess(out, fmt.Sprintf("Started managed local SOCKS5 proxy for connection %s on %s", connectionID, socksListen))
 	printProxyOutHints(out, socksListen, "")
 }
 
@@ -106,7 +106,7 @@ func printManagedSocksStopped(out io.Writer, connectionID string) {
 	if out == nil || connectionID == "" {
 		return
 	}
-	_, _ = fmt.Fprintf(out, "Stopped managed local SOCKS5 proxy for connection %s\n", connectionID)
+	printSuccess(out, fmt.Sprintf("Stopped managed local SOCKS5 proxy for connection %s", connectionID))
 }
 
 func printProxyOutHints(out io.Writer, socksListen, httpConnectListen string) {

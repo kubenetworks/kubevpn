@@ -53,6 +53,8 @@ func (c *ConnectOptions) UpgradeDeploy(ctx context.Context) error {
 		return nil
 	}
 
+	plog.StepStart(ctx, "Upgrading traffic manager")
+
 	// 1) update secret
 	err = upgradeSecretSpec(ctx, c.factory, c.ManagerNamespace)
 	if err != nil {
@@ -60,7 +62,7 @@ func (c *ConnectOptions) UpgradeDeploy(ctx context.Context) error {
 	}
 
 	// 2) update deploy
-	plog.G(ctx).Infof("Set image %s --> %s...", serverImg, clientImg)
+	plog.G(ctx).Debugf("Set image %s --> %s...", serverImg, clientImg)
 	err = upgradeDeploySpec(ctx, c.factory, c.ManagerNamespace, deploy.Name, clientImg)
 	if err != nil {
 		return err
@@ -70,6 +72,7 @@ func (c *ConnectOptions) UpgradeDeploy(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	plog.StepDone(ctx, "Upgraded traffic manager to %s", config.Version)
 	return nil
 }
 
