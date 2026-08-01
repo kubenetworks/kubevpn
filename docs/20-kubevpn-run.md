@@ -90,7 +90,50 @@ Steps:
 
 `ConfigList.Remove()` cleans up all containers and disconnects from the Docker network.
 
-## 7. Related Files
+## 7. Security Options, Volumes & DinD Details
+
+### 7.1 Security options (`docker_utils.go` / `runconfig.go`)
+
+Every container gets `containerSecurityOpts()` so a locally-run workload behaves like it does in
+the cluster (debuggers, mounts, profilers all work):
+
+```
+--cap-add SYS_PTRACE  --cap-add SYS_ADMIN
+--security-opt apparmor=unconfined  --security-opt seccomp=unconfined
+```
+
+Additionally, if the source container's `SecurityContext.Privileged` is true, `--privileged` is
+propagated. Containers run `--user root` with `LC_ALL=C.UTF-8`, the pod's `Subdomain` as
+`--domainname`, the container's `WorkingDir`, and pod labels as `--label`s. `docker_opts.go`'s
+`Parse` maps user-supplied `-v`/`--privileged`/`-p` flags into the Docker `Config`/`HostConfig`.
+
+### 7.2 Volume conversion (`volume.go`)
+
+`GetVolume` turns each non-sidecar container's `VolumeMounts` into Docker **bind mounts** by
+*downloading* the in-cluster volume contents to a local temp dir (via `pkg/cp` with `MaxTries=10`)
+and binding that dir at the same `MountPath`. Notes:
+
+- The `vpn`/`envoy-proxy` sidecar containers are skipped.
+- `MountPath == /tmp` is skipped (Docker manages its own).
+- `SubPath` is appended to the local path so subpath mounts map correctly.
+- Download failure is non-fatal (logged, mount skipped). `RemoveDir` cleans up the temp dirs on
+  teardown.
+
+This is a snapshot copy, not a live PVC bind — see [25-file-copy.md](25-file-copy.md) for the
+underlying tar transfer.
+
+### 7.3 Container-mode IPv6 & DinD (`connect.go`, `options.go`)
+
+In **Container mode**, the kubevpn-in-Docker container is started `--privileged --rm` with the
+security opts, `--sysctl net.ipv6.conf.all.disable_ipv6=0` (Docker disables IPv6 in the container
+netns by default, which would break the dual-stack TUN — see
+[38-ipv6-dual-stack.md](38-ipv6-dual-stack.md)), `host.docker.internal`/`kubernetes`
+host-gateway entries, and joins the `kubevpn-traffic-manager` Docker network. Container mode is
+auto-selected when the default mode runs **inside a container** — detected via
+`incontainer.Detect()` in `options.go` (Docker-in-Docker), since a nested host-mode daemon cannot
+own the host routes.
+
+## 8. Related Files
 
 | File | Purpose |
 |------|---------|
