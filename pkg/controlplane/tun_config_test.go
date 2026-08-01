@@ -715,12 +715,12 @@ func TestGetTunIP_HostnamePersistedToConfigMap(t *testing.T) {
 	if got := persisted["owner-nohost"].Hostname; got != "" {
 		t.Fatalf("owner-nohost hostname = %q, want empty", got)
 	}
-	// omitempty: only the owner that sent a hostname produces a Hostname key in the raw YAML.
-	if !strings.Contains(raw, "Hostname: dev-laptop-01") {
+	// omitempty: only the owner that sent a hostname produces a hostname key in the raw YAML.
+	if !strings.Contains(raw, "hostname: dev-laptop-01") {
 		t.Fatalf("raw TUN_ALLOCS missing hostname entry:\n%s", raw)
 	}
-	if n := strings.Count(raw, "Hostname:"); n != 1 {
-		t.Fatalf("expected exactly 1 Hostname key (omitempty), got %d:\n%s", n, raw)
+	if n := strings.Count(raw, "hostname:"); n != 1 {
+		t.Fatalf("expected exactly 1 hostname key (omitempty), got %d:\n%s", n, raw)
 	}
 
 	// Phase 3: a restarted server restores the hostname from the ConfigMap.
