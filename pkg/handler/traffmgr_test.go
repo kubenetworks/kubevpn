@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -507,8 +508,8 @@ func TestWaitPodReady_Timeout(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected timeout error, got nil")
 	}
-	if err.Error() != "wait for pod ready timeout" {
-		t.Fatalf("expected error %q, got %q", "wait for pod ready timeout", err.Error())
+	if !errors.Is(err, config.ErrTrafficManagerTimeout) {
+		t.Fatalf("expected error to wrap ErrTrafficManagerTimeout, got %q", err.Error())
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/core"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
@@ -90,7 +91,7 @@ func healthCheckGRPC(ctx context.Context, cancelFunc context.CancelFunc, readyCh
 		if resp.Status != grpc_health_v1.HealthCheckResponse_SERVING {
 			conn.Close()
 			conn = nil
-			return fmt.Errorf("control plane not serving: %s", resp.Status)
+			return fmt.Errorf("control plane not serving: %s: %w", resp.Status, config.ErrControlPlaneNotServing)
 		}
 		return nil
 	})

@@ -142,11 +142,11 @@ func SshJump(ctx context.Context, conf *SshConfig, kubeconfigBytes []byte, print
 			map[string]string{clientcmd.RecommendedConfigPathEnvVar: conf.RemoteKubeconfig},
 		)
 		if err != nil {
-			err = fmt.Errorf("%s: %w", string(stderr), err)
+			err = fmt.Errorf("%s: %w: %w", string(stderr), err, config.ErrSSHRemoteCommand)
 			return
 		}
 		if len(bytes.TrimSpace(stdout)) == 0 {
-			err = fmt.Errorf("cannot get kubeconfig %s from remote ssh server: %s", conf.RemoteKubeconfig, string(stderr))
+			err = fmt.Errorf("cannot get kubeconfig %s from remote ssh server: %s: %w", conf.RemoteKubeconfig, string(stderr), config.ErrSSHRemoteCommand)
 			return
 		}
 		kubeconfigBytes = bytes.TrimSpace(stdout)
@@ -228,6 +228,7 @@ func JumpTo(ctx context.Context, bClient *gossh.Client, to SshConfig, stopChan <
 	var conn net.Conn
 	conn, err = bClient.DialContext(ctx, "tcp", to.Addr)
 	if err != nil {
+		err = fmt.Errorf("dial %s via bastion: %w: %w", to.Addr, err, config.ErrSSHConnect)
 		return
 	}
 	go func() {
@@ -261,6 +262,7 @@ func JumpTo(ctx context.Context, bClient *gossh.Client, to SshConfig, stopChan <
 		Timeout: sshOpTimeout,
 	})
 	if err != nil {
+		err = wrapDialError(err)
 		return
 	}
 

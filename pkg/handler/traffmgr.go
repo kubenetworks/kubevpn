@@ -3,8 +3,8 @@ package handler
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	v1 "k8s.io/api/core/v1"
@@ -178,12 +178,17 @@ func WaitPodReady(ctx context.Context, clientset corev1.PodInterface, labelSelec
 		}
 	}, podReadyPollInterval)
 	if !isPodReady {
+		// An image that cannot be pulled is a distinct, actionable failure.
+		cause := config.ErrTrafficManagerTimeout
+		if strings.Contains(lastDetail, "ImagePullBackOff") || strings.Contains(lastDetail, "ErrImagePull") {
+			cause = config.ErrImagePull
+		}
 		if lastDetail != "" {
 			// Carry the full last status so the timeout reason (e.g.
 			// Unschedulable / Insufficient memory) is visible without --debug.
-			return fmt.Errorf("wait for pod ready timeout, last status:\n%s", lastDetail)
+			return fmt.Errorf("wait for pod ready timeout, last status:\n%s: %w", lastDetail, cause)
 		}
-		return errors.New("wait for pod ready timeout")
+		return fmt.Errorf("wait for pod ready timeout: %w", cause)
 	}
 	return nil
 }

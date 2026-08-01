@@ -3,7 +3,6 @@ package util
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -162,7 +161,7 @@ func ModifyAPIServer(ctx context.Context, kubeconfigBytes []byte, newAPIServer n
 			serverPort = "80"
 		} else {
 			// handle other schemes if necessary
-			err = errors.New("kubeconfig is invalid: wrong protocol")
+			err = fmt.Errorf("kubeconfig server uses wrong protocol %q: %w", u.Scheme, pkgconfig.ErrKubeconfigWrongProtocol)
 			plog.G(ctx).Error(err)
 			return nil, netip.AddrPort{}, err
 		}
@@ -174,7 +173,7 @@ func ModifyAPIServer(ctx context.Context, kubeconfigBytes []byte, newAPIServer n
 
 	if len(ips) == 0 {
 		// handle error: no IP associated with the hostname
-		err = fmt.Errorf("kubeconfig: no IP associated with the hostname %s", serverHost)
+		err = fmt.Errorf("kubeconfig: no IP associated with the hostname %s: %w", serverHost, pkgconfig.ErrKubeconfigUnresolvable)
 		plog.G(ctx).Error(err)
 		return nil, netip.AddrPort{}, err
 	}

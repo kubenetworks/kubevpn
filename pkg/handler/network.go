@@ -160,18 +160,18 @@ func (nm *NetworkManager) Start(ctx context.Context) error {
 
 	forward := fmt.Sprintf("tcp://127.0.0.1:%d", gvisorTCPForwardPort)
 	if err := nm.startTUN(nm.ctx, forward); err != nil {
-		return err
+		return fmt.Errorf("start tun: %w: %w", err, config.ErrTunDeviceFailed)
 	}
 
 	plog.StepStart(nm.ctx, "Adding routes")
 	svcInformer, _, err := nm.AddRouteDynamic(nm.ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("add routes: %w: %w", err, config.ErrRouteSetupFailed)
 	}
 	plog.StepDone(nm.ctx, "Added %d pod/service routes", len(nm.cfg.CIDRs))
 
 	if err := nm.setupDNS(nm.ctx, svcInformer); err != nil {
-		return err
+		return fmt.Errorf("setup dns: %w: %w", err, config.ErrDNSSetupFailed)
 	}
 
 	return nil
@@ -231,7 +231,7 @@ func (nm *NetworkManager) rentIP(ctx context.Context) error {
 		return nil
 	}
 
-	return fmt.Errorf("failed to allocate a non-conflicting TUN IP after %d attempts", maxRetries)
+	return fmt.Errorf("failed to allocate a non-conflicting TUN IP after %d attempts: %w", maxRetries, config.ErrTunIPConflict)
 }
 
 // buildExcludeIPs returns the IPs the TUN allocator must avoid: this host's
@@ -285,10 +285,10 @@ func (nm *NetworkManager) Stop() {
 // The next heartbeat automatically uses the new IP (heartbeat reads from OS each tick).
 func (nm *NetworkManager) ChangeTunIP(ctx context.Context, newIPv4, newIPv6 *net.IPNet) error {
 	if nm.tunName == "" {
-		return fmt.Errorf("TUN device not started")
+		return fmt.Errorf("TUN device not started: %w", config.ErrTunDeviceFailed)
 	}
 	if newIPv4 == nil {
-		return fmt.Errorf("new IPv4 is nil")
+		return fmt.Errorf("new IPv4 is nil: %w", config.ErrTunDeviceFailed)
 	}
 
 	oldV4, oldV6 := nm.localTunIPv4, nm.localTunIPv6
@@ -306,7 +306,7 @@ func (nm *NetworkManager) ChangeTunIP(ctx context.Context, newIPv4, newIPv6 *net
 			oldAddr = host32(oldV4.IP)
 		}
 		if err := tun.ChangeIP(nm.tunName, oldAddr, host32(newIPv4.IP)); err != nil {
-			return fmt.Errorf("change IPv4 on %s: %w", nm.tunName, err)
+			return fmt.Errorf("change IPv4 on %s: %w: %w", nm.tunName, err, config.ErrTunDeviceFailed)
 		}
 	}
 
@@ -741,7 +741,7 @@ func (nm *NetworkManager) startTUN(ctx context.Context, forwardAddress string) e
 	listener, err := tun.Listener(tunConfig)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to create tun listener: %v", err)
-		return err
+		return fmt.Errorf("create tun listener: %w: %w", err, config.ErrTunDeviceFailed)
 	}
 
 	server := core.Server{

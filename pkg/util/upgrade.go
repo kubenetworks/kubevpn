@@ -37,19 +37,19 @@ func GetManifest(httpCli *http.Client, goos string, arch string) (version string
 		errs = append(errs, err)
 	}
 	if resp == nil {
-		err = fmt.Errorf("failed to call github api: %w", utilerrors.NewAggregate(errs))
+		err = fmt.Errorf("failed to call github api: %w: %w", utilerrors.NewAggregate(errs), config.ErrUpgradeNetwork)
 		return
 	}
 	defer resp.Body.Close()
 
 	var content []byte
 	if content, err = io.ReadAll(resp.Body); err != nil {
-		err = fmt.Errorf("failed to read all response from github api: %w", err)
+		err = fmt.Errorf("failed to read all response from github api: %w: %w", err, config.ErrUpgradeNetwork)
 		return
 	}
 	var m githubRelease
 	if err = json.Unmarshal(content, &m); err != nil {
-		err = fmt.Errorf("failed to unmarshal response: %w", err)
+		err = fmt.Errorf("failed to unmarshal response: %w: %w", err, config.ErrUpgradeNetwork)
 		return
 	}
 	version = m.TagName
@@ -70,7 +70,7 @@ func GetManifest(httpCli *http.Client, goos string, arch string) (version string
 		}
 	}
 
-	err = fmt.Errorf("%s: try downloading from: %s", If(m.Message != "", m.Message, string(content)), downloadAddr)
+	err = fmt.Errorf("%s: try downloading from: %s: %w", If(m.Message != "", m.Message, string(content)), downloadAddr, config.ErrUpgradeUnsupportedPlatform)
 	return
 }
 

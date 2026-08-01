@@ -91,27 +91,29 @@ func callClassify(conn *grpc.ClientConn) error {
 	return conn.Invoke(context.Background(), classifyTestMethod, &emptypb.Empty{}, &emptypb.Empty{})
 }
 
-func TestClassifyInterceptor_SentinelMapping(t *testing.T) {
+// TestClassifyInterceptor_RichCodeOverWire verifies the rich exit code (carried in the
+// gRPC status detail, not the coarse code) travels from the daemon to the CLI.
+func TestClassifyInterceptor_RichCodeOverWire(t *testing.T) {
 	tests := []struct {
 		name     string
 		err      error
-		wantCode codes.Code
 		wantExit int
 	}{
-		{"invalid kubeconfig", fmt.Errorf("load: %w", config.ErrInvalidKubeconfig), codes.InvalidArgument, exitcode.BadConfig},
-		{"port-forward timeout", fmt.Errorf("pf: %w", config.ErrPortForwardTimeout), codes.Unavailable, exitcode.ClusterNetwork},
-		{"permission", fmt.Errorf("rbac: %w", config.ErrPermissionDenied), codes.PermissionDenied, exitcode.Permission},
-		{"not found", fmt.Errorf("get: %w", config.ErrNotFound), codes.NotFound, exitcode.NotFound},
-		{"context canceled", context.Canceled, codes.Canceled, exitcode.Interrupted},
-		{"plain error", errors.New("boom"), codes.Unknown, exitcode.Generic},
+		{"kubeconfig invalid", fmt.Errorf("load: %w", config.ErrInvalidKubeconfig), exitcode.KubeconfigInvalid},
+		{"port-forward timeout", fmt.Errorf("pf: %w", config.ErrPortForwardTimeout), exitcode.PortForwardTimeout},
+		{"dhcp exhausted", fmt.Errorf("dhcp: %w", config.ErrDHCPExhausted), exitcode.DHCPExhausted},
+		{"tun device", fmt.Errorf("tun: %w", config.ErrTunDeviceFailed), exitcode.TunDeviceFailed},
+		{"connection not found", fmt.Errorf("x: %w", config.ErrConnectionNotFound), exitcode.ConnectionNotFound},
+		{"ssh auth", fmt.Errorf("jump: %w", config.ErrSSHAuth), exitcode.SSHAuth},
+		{"syncthing", fmt.Errorf("sync: %w", config.ErrSyncthing), exitcode.SyncthingFailed},
+		{"cleanup failed", fmt.Errorf("leave: %w", config.ErrCleanupFailed), exitcode.CleanupFailed},
+		{"context canceled", context.Canceled, exitcode.Interrupted},
+		{"plain error", errors.New("boom"), exitcode.Generic},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			conn := startClassifyServer(t, &classifyTestServer{err: tt.err})
 			err := callClassify(conn)
-			if got := status.Code(err); got != tt.wantCode {
-				t.Fatalf("status code = %v, want %v (err=%v)", got, tt.wantCode, err)
-			}
 			if got := exitcode.FromError(err); got != tt.wantExit {
 				t.Fatalf("exit code = %d, want %d (err=%v)", got, tt.wantExit, err)
 			}
@@ -129,24 +131,21 @@ func TestClassifyInterceptor_PreservesPreCodedError(t *testing.T) {
 	if got := status.Code(err); got != codes.Internal {
 		t.Fatalf("status code = %v, want Internal", got)
 	}
-	if got := exitcode.FromError(err); got != exitcode.Generic {
-		t.Fatalf("exit code = %d, want %d", got, exitcode.Generic)
+	if got := exitcode.FromError(err); got != exitcode.Internal {
+		t.Fatalf("exit code = %d, want %d", got, exitcode.Internal)
 	}
 }
 
-// TestClassifyInterceptor_TwoHopPreservesCode simulates the user-daemon → root-daemon
-// hop: server B classifies a wrapped ErrNotFound into codes.NotFound; server A forwards
-// B's error verbatim and its classify interceptor must preserve the code, so the outer
-// client still sees NotFound.
-func TestClassifyInterceptor_TwoHopPreservesCode(t *testing.T) {
-	connB := startClassifyServer(t, &classifyTestServer{err: fmt.Errorf("root daemon: %w", config.ErrNotFound)})
+// TestClassifyInterceptor_TwoHopPreservesRichCode simulates the user-daemon → root-daemon
+// hop: server B classifies a wrapped ErrDHCPExhausted into a rich-coded status; server A
+// forwards B's error verbatim and its classify interceptor must preserve the detail, so
+// the outer client still derives the precise DHCPExhausted exit code.
+func TestClassifyInterceptor_TwoHopPreservesRichCode(t *testing.T) {
+	connB := startClassifyServer(t, &classifyTestServer{err: fmt.Errorf("root daemon: %w", config.ErrDHCPExhausted)})
 	connA := startClassifyServer(t, &classifyTestServer{forward: func() error { return callClassify(connB) }})
 
 	err := callClassify(connA)
-	if got := status.Code(err); got != codes.NotFound {
-		t.Fatalf("two-hop status code = %v, want NotFound", got)
-	}
-	if got := exitcode.FromError(err); got != exitcode.NotFound {
-		t.Fatalf("two-hop exit code = %d, want %d", got, exitcode.NotFound)
+	if got := exitcode.FromError(err); got != exitcode.DHCPExhausted {
+		t.Fatalf("two-hop exit code = %d, want %d", got, exitcode.DHCPExhausted)
 	}
 }

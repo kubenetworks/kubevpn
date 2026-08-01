@@ -111,7 +111,7 @@ func backoff(min, max time.Duration, attemptNum int) time.Duration {
 func ParseDirMapping(dir string) (local, remote string, err error) {
 	index := strings.LastIndex(dir, ":")
 	if index < 0 {
-		err = fmt.Errorf("directory mapping is invalid: %s", dir)
+		err = fmt.Errorf("directory mapping is invalid: %s: %w", dir, config.ErrInvalidArgument)
 		return
 	}
 	local = dir[:index]

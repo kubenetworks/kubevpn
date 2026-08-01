@@ -13,6 +13,8 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/polymorphichelpers"
+
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
 // GetUnstructuredObject fetches a single Kubernetes resource by type/name string and returns its resource.Info.
@@ -34,7 +36,7 @@ func GetUnstructuredObject(f util.Factory, ns string, workloads string) (*resour
 		return nil, err
 	}
 	if len(infos) == 0 {
-		return nil, fmt.Errorf("cannot find workload %s", workloads)
+		return nil, fmt.Errorf("cannot find workload %s: %w", workloads, config.ErrNotFound)
 	}
 	return infos[0], nil
 }
@@ -58,7 +60,7 @@ func GetUnstructuredObjectList(f util.Factory, ns string, workloads []string) ([
 		return nil, err
 	}
 	if len(infos) == 0 {
-		return nil, fmt.Errorf("cannot find resource %v", workloads)
+		return nil, fmt.Errorf("cannot find resource %v: %w", workloads, config.ErrNotFound)
 	}
 	return infos, nil
 }
@@ -82,7 +84,7 @@ func getUnstructuredObjectBySelector(f util.Factory, ns string, selector string)
 		return nil, err
 	}
 	if len(infos) == 0 {
-		return nil, fmt.Errorf("cannot find resources matching selector %s", selector)
+		return nil, fmt.Errorf("cannot find resources matching selector %s: %w", selector, config.ErrNotFound)
 	}
 	return infos, nil
 }
@@ -218,5 +220,5 @@ func getTopOwnerReferenceBySelector(factory util.Factory, ns, selector string) (
 		}
 		return getTopOwnerReference(factory, ns, fmt.Sprintf("%s/%s", info.Mapping.Resource.GroupResource().String(), info.Name))
 	}
-	return nil, nil, fmt.Errorf("cannot find controller for %s", selector)
+	return nil, nil, fmt.Errorf("cannot find controller for %s: %w", selector, config.ErrNotFound)
 }

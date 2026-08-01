@@ -3,6 +3,7 @@ package syncthing
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"net"
 	"path/filepath"
 	"strconv"
@@ -38,7 +39,7 @@ var (
 // and an event logger, returning both for use by StartClient/StartServer.
 func initServices(ctx context.Context, facilityName, facilityDesc string) (*suture.Supervisor, events.Logger, error) {
 	if err := cmdutil.SetConfigDataLocationsFromFlags(pkgconfig.GetSyncthingPath(), "", ""); err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("set syncthing data location: %w: %w", err, pkgconfig.ErrSyncthing)
 	}
 	spec := svcutil.SpecWithDebugLogger(logger.New().NewFacility(facilityName, facilityDesc))
 	earlyService := suture.New("early", spec)
@@ -69,10 +70,10 @@ func startApp(ctx context.Context, cfgWrapper config.Wrapper, evLogger events.Lo
 
 	app, err := syncthing.New(cfgWrapper, ldb, evLogger, cert, appOpts)
 	if err != nil {
-		return err
+		return fmt.Errorf("create syncthing app: %w: %w", err, pkgconfig.ErrSyncthing)
 	}
 	if err = app.Start(); err != nil {
-		return err
+		return fmt.Errorf("start syncthing app: %w: %w", err, pkgconfig.ErrSyncthing)
 	}
 	go func() {
 		<-ctx.Done()

@@ -74,7 +74,7 @@ func downloadAndInstall(client *http.Client, url string) error {
 	}
 	err = util.Download(client, url, temp.Name(), os.Stdout, os.Stderr)
 	if err != nil {
-		return err
+		return fmt.Errorf("download release: %w: %w", err, config.ErrUpgradeNetwork)
 	}
 
 	var curFolder string
@@ -94,11 +94,11 @@ func downloadAndInstall(client *http.Client, url string) error {
 	}
 	err = util.UnzipKubeVPNIntoFile(temp.Name(), file.Name())
 	if err != nil {
-		return err
+		return fmt.Errorf("unzip release: %w: %w", err, config.ErrUpgradeInstall)
 	}
 	err = os.Chmod(file.Name(), config.FileModeExecutable)
 	if err != nil {
-		return err
+		return fmt.Errorf("chmod new binary: %w: %w", err, config.ErrUpgradeInstall)
 	}
 
 	var createTemp *os.File
@@ -118,14 +118,14 @@ func downloadAndInstall(client *http.Client, url string) error {
 	// Stash the current binary as a backup.
 	err = util.Move(curFolder, backupPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("backup current binary: %w: %w", err, config.ErrUpgradeInstall)
 	}
 	// Install the new binary; if it fails, restore the backup so the user is
 	// never left without a kubevpn binary on disk.
 	err = util.Move(file.Name(), curFolder)
 	if err != nil {
 		_ = util.Move(backupPath, curFolder)
-		return err
+		return fmt.Errorf("install new binary: %w: %w", err, config.ErrUpgradeInstall)
 	}
 	// Success: drop the backup.
 	_ = os.Remove(backupPath)
@@ -163,6 +163,7 @@ func needsUpgrade(ctx context.Context, client *http.Client, version string) (url
 		url = fmt.Sprintf("https://github.com/kubenetworks/kubevpn/releases/download/%s/kubevpn_%s_%s_%s.zip", latestVersion, latestVersion, runtime.GOOS, runtime.GOARCH)
 	}
 	if err != nil {
+		err = fmt.Errorf("determine latest version: %w: %w", err, config.ErrUpgradeNetwork)
 		return
 	}
 

@@ -46,7 +46,7 @@ func NewCopyOptions(ioStreams genericiooptions.IOStreams) *CopyOptions {
 }
 
 var (
-	errFileSpecDoesntMatchFormat = errors.New("filespec must match the canonical format: [[namespace/]pod:]file/path")
+	errFileSpecDoesntMatchFormat = fmt.Errorf("filespec must match the canonical format: [[namespace/]pod:]file/path: %w", config.ErrInvalidArgument)
 )
 
 func extractFileSpec(arg string) (fileSpec, error) {

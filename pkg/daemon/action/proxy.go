@@ -2,7 +2,6 @@ package action
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -11,6 +10,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	v1 "k8s.io/api/core/v1"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
@@ -109,7 +109,7 @@ func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (err error) {
 	options, _ := svr.findConnection(connectionID)
 	svr.connMu.RUnlock()
 	if options == nil {
-		return errors.New("failed to connect to cluster")
+		return fmt.Errorf("failed to connect to cluster: %w", config.ErrConnectionNotFound)
 	}
 
 	defer func() {
@@ -126,7 +126,7 @@ func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (err error) {
 	ips := svr.getSudoTunIPs(ctx)
 	tunV4, tunV6 := resolveTunIP(options, ips)
 	if tunV4 == "" {
-		return fmt.Errorf("no TUN IP found for connection %s", connectionID)
+		return fmt.Errorf("no TUN IP found for connection %s: %w", connectionID, config.ErrTunDeviceFailed)
 	}
 	var podList []v1.Pod
 	podList, err = options.GetRunningPodList(cancel)

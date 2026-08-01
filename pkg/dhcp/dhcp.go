@@ -186,7 +186,7 @@ func allocateOne(r *ipallocator.Range, preferred net.IP, shouldSkip func(net.IP)
 	for {
 		ip, err := r.AllocateNext()
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("allocate next IP: %w: %w", err, config.ErrDHCPExhausted)
 		}
 		if !shouldSkip(ip) {
 			return ip, nil

@@ -12,6 +12,8 @@ import (
 	"github.com/docker/docker/api/types/strslice"
 	"github.com/docker/go-connections/nat"
 	"github.com/spf13/pflag"
+
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
 // ContainerOptions is a data object with all the options for creating a container
@@ -182,7 +184,7 @@ func parsePorts(publish, expose opts.ListOpts) (nat.PortSet, nat.PortMap, error)
 	// Merge in exposed ports to the map of published ports
 	for _, e := range expose.GetAll() {
 		if strings.Contains(e, ":") {
-			return nil, nil, fmt.Errorf("invalid port format for --expose: %s", e)
+			return nil, nil, fmt.Errorf("invalid port format for --expose: %s: %w", e, config.ErrInvalidArgument)
 		}
 		// support two formats for expose, original format <portnum>/[<proto>]
 		// or <startport-endport>/[<proto>]
@@ -191,7 +193,7 @@ func parsePorts(publish, expose opts.ListOpts) (nat.PortSet, nat.PortMap, error)
 		// if expose a port, the start and end port are the same
 		start, end, err := nat.ParsePortRange(port)
 		if err != nil {
-			return nil, nil, fmt.Errorf("invalid range format for --expose: %s, error: %s", e, err)
+			return nil, nil, fmt.Errorf("invalid range format for --expose: %s, error: %s: %w", e, err, config.ErrInvalidArgument)
 		}
 		for i := start; i <= end; i++ {
 			p, err := nat.NewPort(proto, strconv.FormatUint(i, 10))
@@ -215,7 +217,7 @@ func convertToStandardNotation(ports []string) ([]string, error) {
 			for _, param := range strings.Split(publish, ",") {
 				k, v, ok := strings.Cut(param, "=")
 				if !ok || k == "" {
-					return optsList, fmt.Errorf("invalid publish opts format (should be name=value but got '%s')", param)
+					return optsList, fmt.Errorf("invalid publish opts format (should be name=value but got '%s'): %w", param, config.ErrInvalidArgument)
 				}
 				params[k] = v
 			}
@@ -235,7 +237,7 @@ func validateAttach(val string) (string, error) {
 			return s, nil
 		}
 	}
-	return val, fmt.Errorf("valid streams are STDIN, STDOUT and STDERR")
+	return val, fmt.Errorf("valid streams are STDIN, STDOUT and STDERR: %w", config.ErrInvalidArgument)
 }
 
 // Config holds Docker container configuration parsed from user-supplied flags (stdin, tty, cmd, etc.).

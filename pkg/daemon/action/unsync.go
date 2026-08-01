@@ -1,10 +1,9 @@
 package action
 
 import (
-	"fmt"
-
 	log "github.com/sirupsen/logrus"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 )
 
@@ -22,7 +21,7 @@ func (svr *Server) Unsync(resp rpc.Daemon_UnsyncServer) error {
 	svr.connMu.RUnlock()
 	if conn == nil {
 		logger.Infof("No connection found")
-		return fmt.Errorf("no connection found")
+		return config.ErrConnectionNotFound
 	}
 	if sync := conn.GetSync(); sync != nil {
 		err = sync.Cleanup(ctx, req.Workloads...)
@@ -30,4 +29,3 @@ func (svr *Server) Unsync(resp rpc.Daemon_UnsyncServer) error {
 	}
 	return err
 }
-

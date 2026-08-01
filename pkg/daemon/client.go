@@ -31,7 +31,7 @@ var (
 func GetClient(isSudo bool) (cli rpc.DaemonClient, err error) {
 	sockPath := config.GetSockPath(isSudo)
 	if _, err = os.Stat(sockPath); errors.Is(err, os.ErrNotExist) {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", err, config.ErrDaemonNotRunning)
 	}
 	clientMu.Lock()
 	if isSudo && sudoDaemonClient != nil {
@@ -62,7 +62,7 @@ func GetClient(isSudo bool) (cli rpc.DaemonClient, err error) {
 		return nil, err
 	}
 	if response.Status != grpc_health_v1.HealthCheckResponse_SERVING {
-		return nil, fmt.Errorf("health check failed: %v", response.Status)
+		return nil, fmt.Errorf("health check failed: %v: %w", response.Status, config.ErrDaemonNotRunning)
 	}
 
 	cli = rpc.NewDaemonClient(conn)
@@ -84,7 +84,7 @@ func GetClient(isSudo bool) (cli rpc.DaemonClient, err error) {
 		_ = grpcutil.PrintGRPCStream[rpc.QuitResponse](ctx, quitStream, nil)
 		// The daemon is outdated and was asked to quit; do not return or cache a
 		// client to it. Returning nil makes StartupDaemon spawn a fresh daemon.
-		return nil, fmt.Errorf("daemon version is outdated and was asked to quit")
+		return nil, fmt.Errorf("daemon version is outdated and was asked to quit: %w", config.ErrDaemonVersionMismatch)
 	}
 
 	clientMu.Lock()
@@ -101,6 +101,7 @@ func getClientWithoutCache(ctx context.Context, isSudo bool) (cli rpc.DaemonClie
 	sockPath := config.GetSockPath(isSudo)
 	_, err = os.Stat(sockPath)
 	if errors.Is(err, os.ErrNotExist) {
+		err = fmt.Errorf("%w: %w", err, config.ErrDaemonNotRunning)
 		return
 	}
 	conn, err = grpc.NewClient("unix:"+sockPath, grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -119,7 +120,7 @@ func getClientWithoutCache(ctx context.Context, isSudo bool) (cli rpc.DaemonClie
 		return
 	}
 	if response.Status != grpc_health_v1.HealthCheckResponse_SERVING {
-		err = fmt.Errorf("health check failed: %v", response.Status)
+		err = fmt.Errorf("health check failed: %v: %w", response.Status, config.ErrDaemonNotRunning)
 		return
 	}
 	cli = rpc.NewDaemonClient(conn)
