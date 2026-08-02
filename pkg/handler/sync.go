@@ -239,9 +239,14 @@ func (d *SyncOptions) prepareSyncPodSpec(ctx context.Context, s syncPodSpec) err
 	return nil
 }
 
-// Cleanup deletes sync workloads created by DoSync and executes rollback functions.
-// Deletion errors are logged but do not prevent rollback functions from running,
-// ensuring resources are cleaned up even when the API server is partially unreachable.
+// Cleanup deletes sync workloads created by DoSync, waits for the original
+// workloads to roll back, and finally executes the rollback functions.
+//
+// Ordering matters: the rollback functions tear down the session (SSH tunnel and
+// temp kubeconfig) that d.factory communicates through, so they must run LAST —
+// after the rollout-status wait that still needs that connection. Deletion errors
+// are logged but do not prevent the remaining steps from running, ensuring
+// resources are cleaned up even when the API server is partially unreachable.
 func (d *SyncOptions) Cleanup(ctx context.Context, workloads ...string) error {
 	if len(workloads) == 0 {
 		for _, v := range d.TargetWorkloadNames {
@@ -280,18 +285,22 @@ func (d *SyncOptions) Cleanup(ctx context.Context, workloads ...string) error {
 		}
 		plog.G(ctx).Debugf("Deleted sync object %s/%s", object.Mapping.Resource.GroupResource().Resource, object.Name)
 	}
-	for _, f := range d.rollbackFuncList {
-		if f != nil {
-			if err := f(); err != nil {
-				plog.G(ctx).Warnf("Failed to exec rollback function: %s", err)
-			}
-		}
-	}
+	// Wait for the original workloads to roll back BEFORE running the rollback
+	// functions. The rollback funcs tear down the session (SSH tunnel + temp
+	// kubeconfig) that d.factory talks through; if they run first, RolloutStatus
+	// below would hit a closed tunnel and fail with "connection refused".
 	for _, workload := range d.Workloads {
 		plog.G(ctx).Debugf("Waiting for workload %q to roll back", workload)
 		err := util.RolloutStatus(ctx, d.factory, d.WorkloadNamespace, workload)
 		if err != nil {
 			plog.G(ctx).Warnf("Failed to rollback workload %s: %v", workload, err)
+		}
+	}
+	for _, f := range d.rollbackFuncList {
+		if f != nil {
+			if err := f(); err != nil {
+				plog.G(ctx).Warnf("Failed to exec rollback function: %s", err)
+			}
 		}
 	}
 	plog.StepDone(ctx, "Stopped file sync for %d workloads", syncCount)

@@ -127,8 +127,16 @@ A background goroutine polls running pods every 2 seconds. When the pod name cha
 ## 6. Cleanup (`Cleanup`)
 
 1. Delete all sync clone workloads via dynamic client
-2. Execute registered rollback functions
-3. Wait for original workloads to finish rollout (`RolloutStatus`)
+2. Wait for original workloads to finish rollout (`RolloutStatus`)
+3. Execute registered rollback functions
+
+**Ordering matters.** The rollback functions tear down the session — in the daemon
+the only registered one calls `session.RunCleanups()` → `session.Cancel()`, which
+cancels the context the SSH port-forward is bound to and closes the local tunnel
+endpoint that `d.factory` talks through (see [12-session-lifecycle.md](12-session-lifecycle.md)
+and [15-ssh-architecture.md](15-ssh-architecture.md)). The `RolloutStatus` wait in
+step 2 still needs that connection, so it must run **before** the rollback functions —
+otherwise it dials a closed tunnel and fails with `connection refused`.
 
 ## 7. Daemon RPC Flow
 
