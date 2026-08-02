@@ -738,16 +738,19 @@ field** (as `kubectl edit` does; or omit it).
 
 **Stale-echo guard (the ::1↔::3 oscillation fix).** `TUN_ALLOCS` is both the operator's
 input and the server's journal output, so the reconcile must tell a genuine edit from a
-stale read of the server's own write. It uses the per-owner monotonic `version`
-(`time.Now().UnixNano()`, stamped on every commit): the reconcile **ignores any entry
-whose `version` is older than the in-memory allocation**. On a live apiserver a single
-commit makes several rapid ConfigMap writes (bitmap ×2 + allocs), so the informer-driven
-`Get` can lag and return a previous journal write — its version is strictly older, so it
-is rejected instead of re-proposed forever. A real edit keeps the current version (or
-omits it → 0), so it is *not* older and is proposed. Every commit/decline/expire bumps
-the version, so an applied or rejected edit becomes strictly older and cannot be
-re-proposed by a lagging read. (Caveat: don't hand-set `version` to a smaller non-zero
-number; `kubectl edit` preserves it.)
+stale read of the server's own write. The root cause is a **TOCTOU, not apiserver cache
+staleness**: `reconcileManualOnce` reads the ConfigMap (an etcd-consistent quorum `Get`)
+*before* taking `s.mu`, but snapshots `s.allocs` *after* — while a concurrent commit holds
+`s.mu` across its `saveAllocs`. So the desired value (from the CM) can be from *before*
+that commit's `saveAllocs` while "current" (from memory) is from *after* it → desired ≠
+current → re-propose the previous committed value forever. Making the read "more
+consistent" does **not** help (it already is); the CM read and the memory read straddle a
+commit. The fix uses the per-owner monotonic `version` (`time.Now().UnixNano()`, bumped on
+every commit/decline/expire): the reconcile **ignores any entry whose `version` is
+strictly older than the in-memory allocation** — exactly such a cross-commit stale read. A
+real edit keeps the current version (or omits it → 0), so it is *not* older and is
+proposed. (Caveat: don't hand-set `version` to a smaller non-zero number; `kubectl edit`
+preserves it.)
 
 **Per-family & independent:** `ipv4` and `ipv6` are reconciled independently — edit
 just `ipv4`, just `ipv6`, or both. Each family becomes its own proposal that the
