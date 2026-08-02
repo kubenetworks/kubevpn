@@ -24,8 +24,8 @@ tun.Listener(Config)
 ```go
 type Config struct {
     Name    string        // device name (auto-generated if empty)
-    Addr    string        // IPv4 CIDR (e.g. "198.18.0.5/16")
-    Addr6   string        // IPv6 CIDR (e.g. "2001:2::5/64")
+    Addr    string        // IPv4 CIDR (e.g. "198.18.0.5/32")
+    Addr6   string        // IPv6 CIDR (e.g. "2001:2::5/128")
     MTU     int           // defaults to config.DefaultMTU
     Routes  []types.Route // CIDRs to route through TUN
     Gateway string        // gateway IP for routes

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -149,6 +150,25 @@ func cmAnnotation(t *testing.T, s *TunConfigServer, key string) (string, bool) {
 	}
 	v, ok := cm.Annotations[key]
 	return v, ok
+}
+
+//  Manual edits are normalized to a host mask: writing "ip/16" into TUN_ALLOCS
+//  must still propose the candidate with a /32 (familyCandidate normalization),
+//  never the pool prefix the user happened to type.
+func TestManualAlloc_NormalizesToHostMask(t *testing.T) {
+	ctx := context.Background()
+	s := newTestServer(t)
+	_, _ = s.GetTunIP(ctx, &rpc.TunIPRequest{OwnerID: "A", Namespace: "test-ns"})
+	ip2 := freeIPs(t, s, 1)[0]
+
+	ch := registerWatcher(s, "A")
+	setManualAllocs(t, s, map[string]string{"A": cidr16(ip2)}) // user typed /16
+	s.ReconcileAllocsFromConfigMap(ctx)
+
+	push := waitPush(t, ch)
+	if !strings.HasSuffix(push.IPv4, "/32") {
+		t.Fatalf("manual /16 must be normalized to /32 in the proposal, got %q", push.IPv4)
+	}
 }
 
 //  1. Propose does NOT commit: reconcile pushes a dry-run proposal but leaves the

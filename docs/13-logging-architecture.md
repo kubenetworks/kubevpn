@@ -156,7 +156,7 @@ Code using `context.Background()` falls back to global `L`:
 ```
 Starting connect to cluster
 Forwarding port...
-Allocated TUN IP: v4=198.18.0.5/16 v6=2001:2::5/64
+Allocated TUN IP: v4=198.18.0.5/32 v6=2001:2::5/128
 Adding Pod IP and Service IP to route table...
 Configuring DNS service...
 Now you can access resources in the kubernetes cluster !
@@ -172,7 +172,7 @@ Now you can access resources in the kubernetes cluster !
 2026-06-10 08:15:24.300 tun_client.go:126 debug: [Client-0] Connected to 127.0.0.1:51496
 2026-06-10 08:15:24.310 tun_client.go:263 debug: [Client] OUTBOUND SRC: 198.18.0.5, DST: 10.0.0.5, Protocol: TCP, Length: 60
 2026-06-10 08:15:24.320 tun_client.go:198 debug: [Client-0] INBOUND SRC: 10.0.0.5, DST: 198.18.0.5, Protocol: TCP, Length: 52
-2026-06-10 08:15:25.234 network.go:204 info: Allocated TUN IP: v4=198.18.0.5/16 v6=2001:2::5/64
+2026-06-10 08:15:25.234 network.go:204 info: Allocated TUN IP: v4=198.18.0.5/32 v6=2001:2::5/128
 2026-06-10 08:15:25.345 tun_server.go:92 warning: [Perf] Slow tunInbound send blocked 25ms
 2026-06-10 08:15:26.456 network.go:142 info: Adding Pod IP and Service IP to route table...
 ```

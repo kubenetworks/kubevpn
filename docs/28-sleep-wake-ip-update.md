@@ -140,13 +140,13 @@ TUN_IP_POOL: |                         # TUN IP pool (merges the old DHCP + DHCP
 
 TUN_ALLOCS: |                          # TUN IP allocation map (ownerID → dual-stack IP)
   a1b2c3d4e5f6:                        #   ownerID = UUID[:12] (client) or podName (sidecar)
-    ipv4: 198.18.0.5/16
-    ipv6: 2001:2::5/64
+    ipv4: 198.18.0.5/32
+    ipv6: 2001:2::5/128
     version: 1717900000000000000
     lastRenew: 1717900120
   f6e5d4c3b2a1:
-    ipv4: 198.18.0.6/16
-    ipv6: 2001:2::6/64
+    ipv4: 198.18.0.6/32
+    ipv6: 2001:2::6/128
     version: 1717900100000000000
     lastRenew: 1717900200
 

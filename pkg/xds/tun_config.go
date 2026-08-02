@@ -883,9 +883,11 @@ func (s *TunConfigServer) familyCandidate(ctx context.Context, owner, wantStr st
 			return nil
 		}
 	}
-	mask := want.Mask
-	if curIP != nil {
-		mask = curIP.Mask // canonical pool mask
+	// Always commit a host mask, regardless of what a manual TUN_ALLOCS edit wrote
+	// (e.g. "x/16") — leases identify one host, never the pool.
+	mask := net.CIDRMask(32, 32)
+	if isV6 {
+		mask = net.CIDRMask(128, 128)
 	}
 	return &net.IPNet{IP: want.IP, Mask: mask}
 }
