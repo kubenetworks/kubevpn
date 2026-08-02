@@ -181,12 +181,15 @@ func waitWatcher(t *testing.T, env *cpEnv, owner string, timeout time.Duration) 
 	}
 }
 
-// editTunAllocs writes an operator-style TUN_ALLOCS edit (owner→CIDR) to the CM.
+// editTunAllocs writes an operator-style manual-IP edit (owner→CIDR) to the CM's
+// TUN_ALLOCS key. The version field is omitted (0), which bypasses the reconcile's
+// stale-echo guard — an accepted operator action (a real `kubectl edit` keeps the
+// existing version instead; both are treated as a genuine edit).
 func editTunAllocs(t *testing.T, env *cpEnv, m map[string]string) {
 	t.Helper()
 	var b strings.Builder
 	for owner, cidr := range m {
-		fmt.Fprintf(&b, "%s:\n  ipv4: %s\n  version: 1\n  lastRenew: %d\n", owner, cidr, time.Now().Unix())
+		fmt.Fprintf(&b, "%s:\n  ipv4: %s\n  lastRenew: %d\n", owner, cidr, time.Now().Unix())
 	}
 	ctx := context.Background()
 	cm, err := env.clientset.CoreV1().ConfigMaps(env.ns).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
@@ -317,8 +320,8 @@ func TestRealTUNManualIP_SingleChange(t *testing.T) {
 	waitDeviceLacksIP(t, nm.tunName, ip1, 5*time.Second) // old IP must be removed (no dup)
 }
 
-// 2. Edit to an IP that conflicts with another local TUN device → client declines,
-//    device unchanged, ConfigMap annotated.
+//  2. Edit to an IP that conflicts with another local TUN device → client declines,
+//     device unchanged, ConfigMap annotated.
 func TestRealTUNManualIP_DeclineConflict(t *testing.T) {
 	requireTUN(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -427,8 +430,8 @@ func TestRealTUNManualIP_MultiUserSameIP(t *testing.T) {
 	}
 }
 
-// 5. Transient disconnect: control-plane drops then returns on the same port; the
-//    watcher reconnects and a subsequent edit still takes effect.
+//  5. Transient disconnect: control-plane drops then returns on the same port; the
+//     watcher reconnects and a subsequent edit still takes effect.
 func TestRealTUNManualIP_Disconnect(t *testing.T) {
 	requireTUN(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -452,8 +455,8 @@ func TestRealTUNManualIP_Disconnect(t *testing.T) {
 	waitDeviceHasIP(t, nm.tunName, ip2, 30*time.Second)
 }
 
-// 6. Control-plane restart: committed IP (persisted in TUN_ALLOCS) survives a fresh
-//    server; a new edit after restart still works.
+//  6. Control-plane restart: committed IP (persisted in TUN_ALLOCS) survives a fresh
+//     server; a new edit after restart still works.
 func TestRealTUNManualIP_ControlPlaneRestart(t *testing.T) {
 	requireTUN(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -481,8 +484,8 @@ func TestRealTUNManualIP_ControlPlaneRestart(t *testing.T) {
 	waitDeviceHasIP(t, nm.tunName, ip3, 15*time.Second)
 }
 
-// 7. Client (machine) restart: a confirmed manual IP persists; the restarted client
-//    (same OwnerID) reclaims it.
+//  7. Client (machine) restart: a confirmed manual IP persists; the restarted client
+//     (same OwnerID) reclaims it.
 func TestRealTUNManualIP_ClientRestart(t *testing.T) {
 	requireTUN(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -544,7 +547,7 @@ func editTunAllocsDual(t *testing.T, env *cpEnv, m map[string][2]string) {
 		if pair[1] != "" {
 			fmt.Fprintf(&b, "  ipv6: %s\n", pair[1])
 		}
-		fmt.Fprintf(&b, "  version: 1\n  lastRenew: %d\n", time.Now().Unix())
+		fmt.Fprintf(&b, "  lastRenew: %d\n", time.Now().Unix())
 	}
 	ctx := context.Background()
 	cm, err := env.clientset.CoreV1().ConfigMaps(env.ns).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})

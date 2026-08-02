@@ -337,8 +337,16 @@ func (s *TunConfigServer) GetTunIP(ctx context.Context, req *rpc.TunIPRequest) (
 		} else {
 			s.pendingProposal[req.OwnerID] = p
 		}
-		if err := s.saveAllocs(ctx); err != nil { // revert operator's edit in TUN_ALLOCS to actual
-			plog.G(ctx).Warnf("[TunConfig] revert TUN_ALLOCS after decline: %v", err)
+		// Bump the version and overwrite the operator's declined edit in TUN_ALLOCS with
+		// the committed actual. Bumping makes the declined edit (which carried the old
+		// version) strictly older, so a lagging read of it is rejected by the stale-echo
+		// guard and the decline is not re-proposed. saveAllocs also folds in the rejection
+		// breadcrumb (s.rejectedAnno).
+		if a, aok := s.allocs[req.OwnerID]; aok {
+			a.Version = time.Now().UnixNano()
+		}
+		if err := s.saveAllocs(ctx); err != nil {
+			plog.G(ctx).Warnf("[TunConfig] persist rejection after decline: %v", err)
 		}
 		if a, aok := s.allocs[req.OwnerID]; aok {
 			a.LastRenew = time.Now()
@@ -509,6 +517,9 @@ func (s *TunConfigServer) commitFamilyLocked(ctx context.Context, owner string, 
 		plog.G(ctx).Errorf("[TunConfig] commit: persist failed for owner %s: %v", owner, err)
 		return nil, err
 	}
+	// newAlloc.Version was bumped to a fresh UnixNano above, so the operator's edit
+	// (which carried the previous version) is now strictly older: any lagging read of it
+	// is rejected by the stale-echo guard in proposeManualChange and cannot re-propose.
 	plog.G(ctx).Infof("[TunConfig] committed TUN IP %v (v6=%t) for owner %s (client confirmed)", committed.IP, isV6, owner)
 	// Do NOT notifyWatchers here: the confirming client IS this owner's watcher and
 	// applies the returned resp inline. Echoing it over the stream would re-deliver a
@@ -797,9 +808,25 @@ func (s *TunConfigServer) proposeManualChange(ctx context.Context, owner string,
 		curV4, curV6 = live.IPv4, live.IPv6
 	}
 	pend := s.pendingProposal[owner] // zero value (nil slots) if absent
+	liveVersion := int64(0)
+	if ok {
+		liveVersion = live.Version
+	}
 	s.mu.RUnlock()
 	if !ok {
 		return false // owner not active in memory (offline / reaped) — nothing to propose
+	}
+
+	// Stale-echo guard: TUN_ALLOCS is both the operator's input and the server's journal
+	// output (saveAllocs). On a live apiserver a commit makes several rapid writes, so
+	// this Get can lag and return one of the server's OWN earlier journal writes — whose
+	// version is strictly older than the in-memory allocation. Treating that as an
+	// operator edit re-proposes the previous committed value forever (the ::1<->::3
+	// oscillation). A real edit (`kubectl edit`, which keeps the version field, or one
+	// that omits it → 0) carries version == current (or 0); only a strictly-older,
+	// non-zero version is a stale self-echo, so skip it.
+	if want.Version != 0 && want.Version < liveVersion {
+		return false
 	}
 
 	candV4 := s.familyCandidate(ctx, owner, want.IPv4, curV4, pend.candV4, current, false)
@@ -1089,9 +1116,11 @@ func (s *TunConfigServer) reapExpiredLeases(ctx context.Context) {
 	s.scrubOrphanBits(ctx)
 }
 
-// expirePendingProposals drops dry-run proposals past their deadline. Proposals
-// hold no rented IP, so expiry just clears the intent and reverts TUN_ALLOCS to the
-// committed actual (undoing the operator's unconfirmed edit).
+// expirePendingProposals drops dry-run proposals past their deadline. Proposals hold
+// no rented IP, so expiry just clears the intent, bumps the owner's version, and
+// overwrites the operator's unconfirmed edit in TUN_ALLOCS with the committed actual.
+// Bumping makes the expired edit strictly older, so a lagging read of it is rejected by
+// the stale-echo guard and is not re-proposed.
 func (s *TunConfigServer) expirePendingProposals(ctx context.Context) {
 	now := time.Now()
 	expired := false
@@ -1099,12 +1128,15 @@ func (s *TunConfigServer) expirePendingProposals(ctx context.Context) {
 	for owner, p := range s.pendingProposal {
 		if now.After(p.deadline) {
 			delete(s.pendingProposal, owner)
+			if a, ok := s.allocs[owner]; ok {
+				a.Version = time.Now().UnixNano()
+			}
 			expired = true
 			plog.G(ctx).Debugf("[TunConfig] proposal for owner %s expired (no client response); dropping", owner)
 		}
 	}
 	if expired {
-		if err := s.saveAllocs(ctx); err != nil { // revert any unconfirmed edit in TUN_ALLOCS
+		if err := s.saveAllocs(ctx); err != nil {
 			plog.G(ctx).Warnf("[TunConfig] revert TUN_ALLOCS after proposal expiry: %v", err)
 		}
 	}

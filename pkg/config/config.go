@@ -26,6 +26,11 @@ const (
 	// KeyClusterCIDRs is the ConfigMap key for cluster CIDR cache (IPv4 + IPv6).
 	KeyClusterCIDRs = "CLUSTER_CIDRS"
 	// KeyTunAllocs is the ConfigMap key for TUN IP owner allocations (ownerID → IPs).
+	// It is a server-written crash-recovery journal (saveAllocs) AND the operator's
+	// manual-IP control input: editing an owner's ipv4/ipv6 (keeping the version field,
+	// as `kubectl edit` does) proposes a new TUN IP. The reconcile ignores entries whose
+	// version is older than the in-memory allocation — those are stale reads of the
+	// server's own journal writes, not operator edits — which prevents an oscillation.
 	KeyTunAllocs = "TUN_ALLOCS"
 
 	// TLSCertKey is the key for tls certificates in a TLS secret.
