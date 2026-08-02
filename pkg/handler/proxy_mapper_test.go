@@ -8,7 +8,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/xds"
 )
 
 func newTestMapper(ns, workload string, headers map[string]string) *Mapper {
@@ -19,7 +19,7 @@ func newTestMapper(ns, workload string, headers map[string]string) *Mapper {
 	}
 }
 
-func mustMarshalVirtuals(t *testing.T, virtuals []*controlplane.Virtual) string {
+func mustMarshalVirtuals(t *testing.T, virtuals []*xds.Virtual) string {
 	t.Helper()
 	b, err := yaml.Marshal(virtuals)
 	if err != nil {
@@ -44,11 +44,11 @@ func TestExtractPortMapping_EmptyConfigMapData(t *testing.T) {
 }
 
 func TestExtractPortMapping_NoMatchingWorkload(t *testing.T) {
-	virtuals := []*controlplane.Virtual{
+	virtuals := []*xds.Virtual{
 		{
 			Namespace: "default",
 			UID:       "deployments.apps.other-app",
-			Rules: []*controlplane.Rule{
+			Rules: []*xds.Rule{
 				{
 					Headers: map[string]string{"x-user": "alice"},
 					PortMap: map[int32]string{80: "9080:8080"},
@@ -75,15 +75,15 @@ func TestExtractPortMapping_NoMatchingWorkload(t *testing.T) {
 }
 
 func TestExtractPortMapping_UDPPort(t *testing.T) {
-	virtuals := []*controlplane.Virtual{
+	virtuals := []*xds.Virtual{
 		{
 			Namespace: "test-ns",
 			UID:       "deployments.apps.reviews",
-			Ports: []controlplane.ContainerPort{
+			Ports: []xds.ContainerPort{
 				{ContainerPort: 9080, Protocol: corev1.ProtocolTCP},
 				{ContainerPort: 53, Protocol: corev1.ProtocolUDP},
 			},
-			Rules: []*controlplane.Rule{
+			Rules: []*xds.Rule{
 				{
 					Headers: map[string]string{},
 					PortMap: map[int32]string{
@@ -112,11 +112,11 @@ func TestExtractPortMapping_UDPPort(t *testing.T) {
 }
 
 func TestExtractPortMapping_MatchingWorkloadWithPortMapping(t *testing.T) {
-	virtuals := []*controlplane.Virtual{
+	virtuals := []*xds.Virtual{
 		{
 			Namespace: "test-ns",
 			UID:       "deployments.apps.productpage",
-			Rules: []*controlplane.Rule{
+			Rules: []*xds.Rule{
 				{
 					Headers: map[string]string{"x-user": "dev"},
 					PortMap: map[int32]string{
@@ -162,11 +162,11 @@ func TestExtractPortMapping_MatchingWorkloadWithPortMapping(t *testing.T) {
 }
 
 func TestExtractPortMapping_MatchingWorkloadDifferentHeaders(t *testing.T) {
-	virtuals := []*controlplane.Virtual{
+	virtuals := []*xds.Virtual{
 		{
 			Namespace: "default",
 			UID:       "deployments.apps.nginx",
-			Rules: []*controlplane.Rule{
+			Rules: []*xds.Rule{
 				{
 					Headers: map[string]string{"x-env": "staging"},
 					PortMap: map[int32]string{80: "9080:8080"},

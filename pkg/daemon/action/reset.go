@@ -35,4 +35,3 @@ func (svr *Server) Reset(resp rpc.Daemon_ResetServer) error {
 	}
 	return connect.Reset(ctx, req.Namespace, req.Workloads)
 }
-

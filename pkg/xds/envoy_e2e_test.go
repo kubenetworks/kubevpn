@@ -1,4 +1,4 @@
-package controlplane
+package xds
 
 import (
 	"bytes"
@@ -70,7 +70,7 @@ func envoyTestImage() string {
 // Offline/restricted networks: override the image with a reachable mirror, e.g.
 //
 //	KUBEVPN_E2E_ENVOY_IMAGE=docker.m.daocloud.io/envoyproxy/envoy:v1.35.0 \
-//	    go test ./pkg/controlplane/ -run TestIntegration_UDP_EnvoyEndToEnd -v
+//	    go test ./pkg/xds/ -run TestIntegration_UDP_EnvoyEndToEnd -v
 //
 // Use a NATIVE-arch Envoy image: an emulated (qemu) Envoy can silently fail to receive
 // UDP datagrams even though TCP works.
@@ -599,7 +599,7 @@ func TestIntegration_BootstrapFiles_EnvoyEndToEnd(t *testing.T) {
 					Rules:         []*Rule{{LocalTunIPv4: hostIP, OwnerID: "owner-bs", PortMap: map[int32]string{int32(listenPort): strconv.Itoa(echoPort)}}},
 				}
 				sc := newXDSSnapshotCache(t, logger, nodeID, v)
-				startXDSServerOn(t, ctx, sc, config.PortControlPlane) // :9002, as hardcoded in the bootstrap
+				startXDSServerOn(t, ctx, sc, config.PortXDS) // :9002, as hardcoded in the bootstrap
 				udpSpec := fmt.Sprintf("%d/udp", listenPort)
 				dockerHost, adminBase, hostPorts, logs := startTestEnvoyAdmin(t, ctx, nodeID, bootstrap, adminPort, udpSpec)
 				if got := udpRoundTrip(t, net.JoinHostPort(dockerHost, hostPorts[udpSpec]), "hello", 10); got != "HELLO" {
@@ -621,7 +621,7 @@ func TestIntegration_BootstrapFiles_EnvoyEndToEnd(t *testing.T) {
 					Rules:         []*Rule{headerRule(cPort, hostIP, "owner-bs", "go", upstream)},
 				}
 				sc := newXDSSnapshotCache(t, logger, nodeID, v)
-				startXDSServerOn(t, ctx, sc, config.PortControlPlane) // :9002
+				startXDSServerOn(t, ctx, sc, config.PortXDS) // :9002
 				tcpSpec := fmt.Sprintf("%d/tcp", bind)
 				dockerHost, adminBase, hostPorts, logs := startTestEnvoyAdmin(t, ctx, nodeID, bootstrap, adminPort, tcpSpec)
 				url := fmt.Sprintf("http://%s/", net.JoinHostPort(dockerHost, hostPorts[tcpSpec]))

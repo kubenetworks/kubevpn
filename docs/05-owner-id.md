@@ -149,7 +149,7 @@ Since `CurrentSchemaVersion = 2`, OwnerID is **required** on all rules. The YAML
 
 | File | Purpose |
 |------|---------|
-| `pkg/controlplane/cache.go` | `Rule.OwnerID` field definition |
+| `pkg/xds/cache.go` | `Rule.OwnerID` field definition |
 | `pkg/inject/envoy.go` | `addVirtualRule` writes OwnerID; `removeEnvoyConfig` matches and deletes by OwnerID |
 | `pkg/inject/mesh.go` | `UnpatchContainer` receives ownerID parameter |
 | `pkg/handler/proxy_manager.go` | `Leave/LeaveAll` passes ownerID to `UnpatchContainer` |

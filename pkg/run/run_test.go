@@ -276,4 +276,3 @@ func TestCollectExposedPorts(t *testing.T) {
 		}
 	})
 }
-

@@ -6,24 +6,24 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/xds"
 )
 
 func TestAddVirtualRule(t *testing.T) {
 	testdatas := []struct {
-		Rule      []*controlplane.Virtual
-		Ports     []controlplane.ContainerPort
-		Headers   map[string]string
+		Rule         []*xds.Virtual
+		Ports        []xds.ContainerPort
+		Headers      map[string]string
 		LocalTunIPv4 string
 		LocalTunIPv6 string
-		UID       string
-		Namespace string
-		PortMap   map[int32]string
+		UID          string
+		Namespace    string
+		PortMap      map[int32]string
 
-		Expect []*controlplane.Virtual
+		Expect []*xds.Virtual
 	}{
 		{
-			Ports: []controlplane.ContainerPort{
+			Ports: []xds.ContainerPort{
 				{
 					EnvoyListenerPort: 15006,
 					ContainerPort:     9080,
@@ -31,18 +31,18 @@ func TestAddVirtualRule(t *testing.T) {
 			},
 			LocalTunIPv4: "127.0.0.1",
 			LocalTunIPv6: netip.IPv6Loopback().String(),
-			UID: "deployments.authors",
-			Expect: []*controlplane.Virtual{
+			UID:          "deployments.authors",
+			Expect: []*xds.Virtual{
 				{
-					SchemaVersion: controlplane.CurrentSchemaVersion,
+					SchemaVersion: xds.CurrentSchemaVersion,
 					UID:           "deployments.authors",
-					Ports: []controlplane.ContainerPort{
+					Ports: []xds.ContainerPort{
 						{
 							EnvoyListenerPort: 15006,
 							ContainerPort:     9080,
 						},
 					},
-					Rules: []*controlplane.Rule{{
+					Rules: []*xds.Rule{{
 						Headers:      nil,
 						LocalTunIPv4: "127.0.0.1",
 						LocalTunIPv6: netip.IPv6Loopback().String(),

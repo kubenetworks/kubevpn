@@ -1,4 +1,4 @@
-package controlplane
+package xds
 
 import (
 	"context"
@@ -620,7 +620,7 @@ func TestIntegration_ReconcileDHCPReallocatesLostIP(t *testing.T) {
 	// 模拟外部修改：清空 DHCP bitmap（所有 IP 都丢失）
 	cm, _ := env.server.clientset.CoreV1().ConfigMaps("test-ns").Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	cm.Data[config.KeyTunIPPool] = ""
-	
+
 	env.server.clientset.CoreV1().ConfigMaps("test-ns").Update(ctx, cm, metav1.UpdateOptions{})
 
 	// ReconcileDHCP 检测到 IP 丢失

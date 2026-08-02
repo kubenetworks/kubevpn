@@ -28,7 +28,7 @@ The single source of truth is `pkg/util/exitcode` (constants + `Classify`/`AsSta
 | 40 | ClusterUnreachable | API server / control-plane unreachable |
 | 41 | PortForwardTimeout | port-forward did not become ready |
 | 42 | Timeout | operation timed out |
-| 43 | ControlPlaneNotServing | control-plane gRPC not serving |
+| 43 | XDSNotServing | xds gRPC not serving |
 | 50 | NotFound | workload/namespace/resource not found |
 | 51 | ConnectionNotFound | no active VPN connection/session |
 | 53 | AlreadyExists | resource/connection already exists |

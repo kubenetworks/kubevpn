@@ -6,11 +6,11 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/xds"
 )
 
 func TestParsePortMap_ColonSeparated(t *testing.T) {
-	rule := &controlplane.Rule{
+	rule := &xds.Rule{
 		PortMap: map[int32]string{
 			8080: "29450:19080",
 		},
@@ -26,7 +26,7 @@ func TestParsePortMap_ColonSeparated(t *testing.T) {
 }
 
 func TestParsePortMap_PlainNumber(t *testing.T) {
-	rule := &controlplane.Rule{
+	rule := &xds.Rule{
 		PortMap: map[int32]string{8080: "9090"},
 	}
 	mappings := rule.ParsePortMap()
@@ -43,7 +43,7 @@ func TestParsePortMap_PlainNumber(t *testing.T) {
 }
 
 func TestParsePortMap_Invalid(t *testing.T) {
-	rule := &controlplane.Rule{
+	rule := &xds.Rule{
 		PortMap: map[int32]string{8080: "not-a-number"},
 	}
 	mappings := rule.ParsePortMap()

@@ -249,8 +249,8 @@ func TestGenDeploySpec(t *testing.T) {
 
 	// Container 1: Control Plane
 	cp := containers[1]
-	if cp.Name != config.ContainerSidecarControlPlane {
-		t.Fatalf("expected container[1] name %q, got %q", config.ContainerSidecarControlPlane, cp.Name)
+	if cp.Name != config.ContainerSidecarXDS {
+		t.Fatalf("expected container[1] name %q, got %q", config.ContainerSidecarXDS, cp.Name)
 	}
 	if cp.Image != image {
 		t.Fatalf("expected container[1] image %q, got %q", image, cp.Image)
@@ -344,28 +344,28 @@ func TestGenDeploySpec_Probes(t *testing.T) {
 	// Control Plane container: TCP probes on port 9002
 	cp := containers[1]
 	if cp.LivenessProbe == nil || cp.LivenessProbe.TCPSocket == nil {
-		t.Fatal("ControlPlane container: expected liveness probe with TCPSocket")
+		t.Fatal("XDS container: expected liveness probe with TCPSocket")
 	}
 	if cp.LivenessProbe.TCPSocket.Port.IntValue() != 9002 {
-		t.Fatalf("ControlPlane container: expected liveness probe port 9002, got %d", cp.LivenessProbe.TCPSocket.Port.IntValue())
+		t.Fatalf("XDS container: expected liveness probe port 9002, got %d", cp.LivenessProbe.TCPSocket.Port.IntValue())
 	}
 	if cp.LivenessProbe.InitialDelaySeconds != 5 || cp.LivenessProbe.PeriodSeconds != 15 || cp.LivenessProbe.FailureThreshold != 3 {
-		t.Fatalf("ControlPlane container: unexpected liveness probe timing: initial=%d period=%d failure=%d",
+		t.Fatalf("XDS container: unexpected liveness probe timing: initial=%d period=%d failure=%d",
 			cp.LivenessProbe.InitialDelaySeconds, cp.LivenessProbe.PeriodSeconds, cp.LivenessProbe.FailureThreshold)
 	}
 
 	if cp.ReadinessProbe == nil || cp.ReadinessProbe.TCPSocket == nil {
-		t.Fatal("ControlPlane container: expected readiness probe with TCPSocket")
+		t.Fatal("XDS container: expected readiness probe with TCPSocket")
 	}
 	if cp.ReadinessProbe.TCPSocket.Port.IntValue() != 9002 {
-		t.Fatalf("ControlPlane container: expected readiness probe port 9002, got %d", cp.ReadinessProbe.TCPSocket.Port.IntValue())
+		t.Fatalf("XDS container: expected readiness probe port 9002, got %d", cp.ReadinessProbe.TCPSocket.Port.IntValue())
 	}
 
 	if cp.StartupProbe == nil || cp.StartupProbe.TCPSocket == nil {
-		t.Fatal("ControlPlane container: expected startup probe with TCPSocket")
+		t.Fatal("XDS container: expected startup probe with TCPSocket")
 	}
 	if cp.StartupProbe.TCPSocket.Port.IntValue() != 9002 {
-		t.Fatalf("ControlPlane container: expected startup probe port 9002, got %d", cp.StartupProbe.TCPSocket.Port.IntValue())
+		t.Fatalf("XDS container: expected startup probe port 9002, got %d", cp.StartupProbe.TCPSocket.Port.IntValue())
 	}
 
 	// DNS container: no probes
@@ -400,16 +400,16 @@ func TestGenDeploySpec_ContainerPorts(t *testing.T) {
 	// Control Plane container: 1 port (PortNameEnvoy on 9002/TCP)
 	cp := containers[1]
 	if len(cp.Ports) != 1 {
-		t.Fatalf("ControlPlane container: expected 1 port, got %d", len(cp.Ports))
+		t.Fatalf("XDS container: expected 1 port, got %d", len(cp.Ports))
 	}
 	if cp.Ports[0].Name != config.PortNameEnvoy {
-		t.Fatalf("ControlPlane container: expected port name %q, got %q", config.PortNameEnvoy, cp.Ports[0].Name)
+		t.Fatalf("XDS container: expected port name %q, got %q", config.PortNameEnvoy, cp.Ports[0].Name)
 	}
 	if cp.Ports[0].ContainerPort != 9002 {
-		t.Fatalf("ControlPlane container: expected containerPort 9002, got %d", cp.Ports[0].ContainerPort)
+		t.Fatalf("XDS container: expected containerPort 9002, got %d", cp.Ports[0].ContainerPort)
 	}
 	if cp.Ports[0].Protocol != v1.ProtocolTCP {
-		t.Fatalf("ControlPlane container: expected protocol TCP, got %q", cp.Ports[0].Protocol)
+		t.Fatalf("XDS container: expected protocol TCP, got %q", cp.Ports[0].Protocol)
 	}
 
 	// DNS container: 1 port (PortNameDNS on 53/UDP)
@@ -457,7 +457,7 @@ func TestGenDeploySpec_SecurityContext(t *testing.T) {
 		}
 	}
 
-	// ControlPlane and DNS containers should not have a privileged security context either
+	// XDS and DNS containers should not have a privileged security context either
 	for _, c := range containers[1:] {
 		if c.SecurityContext != nil && c.SecurityContext.Privileged != nil && *c.SecurityContext.Privileged {
 			t.Fatalf("container %q: expected Privileged to not be true", c.Name)

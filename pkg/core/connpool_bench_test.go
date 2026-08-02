@@ -90,12 +90,12 @@ func (c *packetConn) Write(p []byte) (int, error) {
 	}
 }
 
-func (c *packetConn) Close() error                       { c.closeO.Do(func() { close(c.done) }); return nil }
-func (c *packetConn) LocalAddr() net.Addr                { return dummyAddr{} }
-func (c *packetConn) RemoteAddr() net.Addr               { return dummyAddr{} }
-func (c *packetConn) SetDeadline(time.Time) error        { return nil }
-func (c *packetConn) SetReadDeadline(time.Time) error    { return nil }
-func (c *packetConn) SetWriteDeadline(time.Time) error   { return nil }
+func (c *packetConn) Close() error                     { c.closeO.Do(func() { close(c.done) }); return nil }
+func (c *packetConn) LocalAddr() net.Addr              { return dummyAddr{} }
+func (c *packetConn) RemoteAddr() net.Addr             { return dummyAddr{} }
+func (c *packetConn) SetDeadline(time.Time) error      { return nil }
+func (c *packetConn) SetReadDeadline(time.Time) error  { return nil }
+func (c *packetConn) SetWriteDeadline(time.Time) error { return nil }
 
 type dummyAddr struct{}
 

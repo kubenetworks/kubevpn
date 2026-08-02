@@ -1,4 +1,4 @@
-package controlplane
+package xds
 
 import (
 	"context"
@@ -14,8 +14,8 @@ import (
 )
 
 // applyDebugLevel raises the logger to DebugLevel when --debug is set. The
-// control-plane command binds --debug to config.Debug, and the sidecar is
-// deployed with --debug, so its control-plane container logs at Debug by
+// xds command binds --debug to config.Debug, and the sidecar is
+// deployed with --debug, so its xds container logs at Debug by
 // default (see pkg/handler/traffmgr_resources.go).
 func applyDebugLevel(logger *log.Entry) {
 	if config.Debug {

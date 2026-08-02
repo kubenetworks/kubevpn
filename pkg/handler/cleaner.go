@@ -95,7 +95,6 @@ func (c *ConnectOptions) cleanupDataPlane(logCtx context.Context) {
 	}
 }
 
-
 // executeRollbackFuncs runs each non-nil rollback function, logging warnings on errors.
 func executeRollbackFuncs(logCtx context.Context, funcs []func() error) {
 	for _, fn := range funcs {

@@ -13,9 +13,9 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-var sidecarNames = sets.New[string](config.ContainerSidecarEnvoyProxy, config.ContainerSidecarVPN)
+var sidecarNames = sets.New[string](config.ContainerSidecarEnvoy, config.ContainerSidecarVPN)
 
-// RemoveContainers removes KubeVPN sidecar containers (VPN, envoy-proxy) from the pod spec.
+// RemoveContainers removes KubeVPN sidecar containers (VPN, envoy) from the pod spec.
 func RemoveContainers(spec *v1.PodSpec) {
 	for i := 0; i < len(spec.Containers); i++ {
 		if sidecarNames.Has(spec.Containers[i].Name) {
@@ -91,7 +91,7 @@ func newEnvoyContainer(ns, nodeID string, ipv6 bool, managerNamespace, image str
 		configYaml = renderEnvoyConfig(string(configIPv6), addr)
 	}
 	return v1.Container{
-		Name:  config.ContainerSidecarEnvoyProxy,
+		Name:  config.ContainerSidecarEnvoy,
 		Image: image,
 		Command: []string{
 			"envoy",

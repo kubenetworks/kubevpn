@@ -40,10 +40,10 @@ const (
 	// TLSServerName for tls config server name
 	TLSServerName = "tls_server_name"
 
-	// ContainerSidecarEnvoyProxy is the container name for the Envoy proxy sidecar.
-	ContainerSidecarEnvoyProxy = "envoy-proxy"
-	// ContainerSidecarControlPlane is the container name for the xDS control plane sidecar.
-	ContainerSidecarControlPlane = "control-plane"
+	// ContainerSidecarEnvoy is the container name for the Envoy proxy sidecar.
+	ContainerSidecarEnvoy = "envoy"
+	// ContainerSidecarXDS is the container name for the xDS server sidecar.
+	ContainerSidecarXDS = "xds"
 	// ContainerSidecarDNS is the container name for the DNS forward server sidecar.
 	ContainerSidecarDNS = "dns"
 	// ContainerSidecarVPN is the container name for the VPN sidecar.
@@ -60,8 +60,8 @@ const (
 	PortTCP = 10801
 	// PortNameEnvoy is the traffic-manager service port name for the Envoy control plane.
 	PortNameEnvoy = "9002-for-envoy"
-	// PortControlPlane is the control-plane gRPC port number.
-	PortControlPlane = 9002
+	// PortXDS is the xDS gRPC port number.
+	PortXDS = 9002
 	// PortNameDNS is the traffic-manager service port name for DNS resolution.
 	PortNameDNS = "53-for-dns"
 	// PortDNS is the traffic-manager DNS service port number.

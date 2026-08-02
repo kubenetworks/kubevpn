@@ -3,7 +3,7 @@
 ## 1. Overview
 
 When KubeVPN proxies a workload it mutates the cluster: it injects sidecar containers
-(`vpn`/`envoy-proxy`/…), adds envoy routing rules to the traffic manager ConfigMap, and may
+(`vpn`/`envoy`/…), adds envoy routing rules to the traffic manager ConfigMap, and may
 rewrite a Service's `targetPort`. Two commands undo this:
 
 - **`kubevpn leave`** — *ownership-scoped* removal. Removes **only the current connection's**

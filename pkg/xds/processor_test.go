@@ -1,4 +1,4 @@
-package controlplane
+package xds
 
 import (
 	"math"

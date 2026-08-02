@@ -72,7 +72,7 @@ func alreadyInjected(templateSpec *v1.PodTemplateSpec) bool {
 	for _, container := range templateSpec.Spec.Containers {
 		containerNames.Insert(container.Name)
 	}
-	return containerNames.HasAll(config.ContainerSidecarVPN, config.ContainerSidecarEnvoyProxy)
+	return containerNames.HasAll(config.ContainerSidecarVPN, config.ContainerSidecarEnvoy)
 }
 
 // injectedForManager reports whether the workload already carries the kubevpn
@@ -92,7 +92,7 @@ func injectedForManager(templateSpec *v1.PodTemplateSpec, managerNamespace strin
 	}
 	want := "address: " + trafficManagerAddr(managerNamespace) + "\n"
 	for _, c := range templateSpec.Spec.Containers {
-		if c.Name != config.ContainerSidecarEnvoyProxy {
+		if c.Name != config.ContainerSidecarEnvoy {
 			continue
 		}
 		for _, arg := range c.Args {

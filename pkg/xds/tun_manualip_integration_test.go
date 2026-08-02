@@ -1,4 +1,4 @@
-package controlplane
+package xds
 
 import (
 	"context"
@@ -14,7 +14,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 )
 
-// These tests cover the dry-run manual-IP flow at the control-plane layer:
+// These tests cover the dry-run manual-IP flow at the xds layer:
 // an operator edit of TUN_ALLOCS becomes a PROPOSAL (no commit) pushed to the
 // client; the client confirms (→ commit) or declines (→ drop, no rollback).
 
@@ -608,7 +608,7 @@ func TestDryRun_ConfirmV4DeclineV6(t *testing.T) {
 }
 
 // Reconnect replay: a proposal pushed while only a STALE (already-dead) watcher was
-// registered — the window after a transient control-plane outage, before the dead
+// registered — the window after a transient xds outage, before the dead
 // watcher channel is reaped but after the client's stream broke — must be re-delivered
 // to the next real subscriber. Otherwise the server keeps the pending intent yet never
 // re-pushes it, so the reconnecting client never confirms and the operator's edit

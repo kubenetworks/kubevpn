@@ -203,12 +203,12 @@ func TestAlreadyInjected(t *testing.T) {
 			Containers: []v1.Container{
 				{Name: "app"},
 				{Name: "vpn"},
-				{Name: "envoy-proxy"},
+				{Name: "envoy"},
 			},
 		},
 	}
 	if !alreadyInjected(spec) {
-		t.Fatal("expected already injected (has 'vpn' + 'envoy-proxy' containers)")
+		t.Fatal("expected already injected (has 'vpn' + 'envoy' containers)")
 	}
 
 	spec2 := &v1.PodTemplateSpec{
@@ -228,7 +228,7 @@ func TestRemoveContainers(t *testing.T) {
 		Containers: []v1.Container{
 			{Name: "app"},
 			{Name: "vpn"},
-			{Name: "envoy-proxy"},
+			{Name: "envoy"},
 			{Name: "helper"},
 		},
 	}
@@ -237,7 +237,7 @@ func TestRemoveContainers(t *testing.T) {
 		t.Fatalf("expected 2 containers after removal, got %d", len(spec.Containers))
 	}
 	for _, c := range spec.Containers {
-		if c.Name == "vpn" || c.Name == "envoy-proxy" {
+		if c.Name == "vpn" || c.Name == "envoy" {
 			t.Fatalf("sidecar %s should have been removed", c.Name)
 		}
 	}

@@ -17,7 +17,7 @@ The traffic manager is a pod deployed in the cluster that provides the VPN serve
 | 5 | Service | `kubevpn-traffic-manager` | ClusterIP: 10801/TCP, 9002/TCP, 53/UDP |
 | 6 | ConfigMap | `kubevpn-traffic-manager` | Initial keys: ENVOY_CONFIG, TUN_IP_POOL, CLUSTER_CIDRS (TUN_ALLOCS added lazily on first IP allocation) |
 | 7 | Secret | `kubevpn-traffic-manager` | TLS cert/key/server_name (Opaque type, env-var friendly keys) |
-| 8 | Deployment | `kubevpn-traffic-manager` | 3 containers: vpn, control-plane, dns |
+| 8 | Deployment | `kubevpn-traffic-manager` | 3 containers: vpn, xds, dns |
 
 If any step fails, `cleanupTrafficManagerResources` deletes all resources (best-effort).
 
@@ -28,12 +28,12 @@ If any step fails, `cleanupTrafficManagerResources` deletes all resources (best-
 | Container | Command | Ports | Resources | Security |
 |-----------|---------|-------|-----------|----------|
 | `vpn` | `kubevpn server -l gtcp://:10801 -l gudp://:10802` | 10801/TCP | 500m-2000m CPU, 512Mi-2Gi mem | `privileged: false` |
-| `control-plane` | `kubevpn control-plane` | 9002/TCP | 100m-200m CPU, 128Mi-256Mi mem | — |
+| `xds` | `kubevpn xds` | 9002/TCP | 100m-200m CPU, 128Mi-256Mi mem | — |
 | `dns` | `kubevpn dns` | 53/UDP | 100m-200m CPU, 128Mi-256Mi mem | — |
 
 ### Health Probes
 
-vpn and control-plane containers have TCP socket probes:
+vpn and xds containers have TCP socket probes:
 
 ```
 Liveness:  TCP port, initialDelay=5s, period=15s, failureThreshold=3

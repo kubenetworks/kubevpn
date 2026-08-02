@@ -59,4 +59,3 @@ func (svr *Server) Quit(resp rpc.Daemon_QuitServer) error {
 	_ = util.CleanupTempKubeConfigFile()
 	return nil
 }
-

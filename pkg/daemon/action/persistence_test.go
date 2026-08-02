@@ -223,8 +223,6 @@ func TestConfig_SerializationRoundTrip(t *testing.T) {
 					Foreground:           true,
 					Level:                3,
 				}),
-				
-				
 			},
 		},
 	}
@@ -287,9 +285,7 @@ func TestConfig_SerializationRoundTrip_NilFields(t *testing.T) {
 	original := &Config{
 		SecondaryConnect: []*handler.ConnectOptions{
 			{
-				RequestRaw:   nil,
-				
-				
+				RequestRaw: nil,
 			},
 		},
 	}
@@ -447,7 +443,6 @@ func TestServer_ConnectionList_CurrentConnectionID(t *testing.T) {
 	}
 }
 
-
 func TestServer_OffloadToConfig_RoundTrip(t *testing.T) {
 	dbPath := config.GetDBPath()
 	origData, origErr := os.ReadFile(dbPath)
@@ -459,7 +454,6 @@ func TestServer_OffloadToConfig_RoundTrip(t *testing.T) {
 		}
 	})
 
-
 	svr := &Server{
 		connections: []*handler.ConnectOptions{
 			{
@@ -468,8 +462,6 @@ func TestServer_OffloadToConfig_RoundTrip(t *testing.T) {
 					OriginKubeconfigPath: "/tmp/kubeconfig",
 					Image:                "ghcr.io/kubenetworks/kubevpn:test",
 				}),
-				
-				
 			},
 		},
 	}

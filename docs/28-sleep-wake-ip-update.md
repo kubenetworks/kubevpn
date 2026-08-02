@@ -79,7 +79,7 @@ deleted as dead code.)
 
 #### Problem 2: GetTunIP does not push on WatchTunIP when allocating a new IP
 
-**Location**: `pkg/controlplane/tun_config.go:227-250` (new-allocation path)
+**Location**: `pkg/xds/tun_config.go:227-250` (new-allocation path)
 
 ```go
 s.allocs[req.OwnerID] = alloc
@@ -264,10 +264,10 @@ deletes the matching Rule by OwnerID. If the Virtual's last Rule is deleted, the
 ```
 addEnvoyConfig / syncEnvoyRuleIP
   → update ConfigMap ENVOY_CONFIG
-  → Watcher (K8s informer, pkg/controlplane/watcher.go)
+  → Watcher (K8s informer, pkg/xds/watcher.go)
     → detects the ConfigMap change
     → notifyCh <- NotifyMessage{Content: configMap.Data["ENVOY_CONFIG"]}
-  → Processor (pkg/controlplane/processor.go)
+  → Processor (pkg/xds/processor.go)
     → parseYaml(content) → []*Virtual
     → for each Virtual:
       → nodeID = GenEnvoyUID(namespace, uid)
@@ -371,7 +371,7 @@ After Alice's machine wakes and its IP becomes `198.18.0.7`: `syncEnvoyRuleIP` u
 
 ### 4.1 Step 0: GetTunIP calls notifyWatchers when allocating a new IP
 
-**Location**: `pkg/controlplane/tun_config.go` — `GetTunIP`
+**Location**: `pkg/xds/tun_config.go` — `GetTunIP`
 
 Currently GetTunIP's new-allocation and reallocation paths return immediately after allocating a new IP,
 without notifying the `WatchTunIP` stream. Fix: call `notifyWatchers` after allocating the new IP.
@@ -417,7 +417,7 @@ func (s *TunConfigServer) notifyWatchers(ownerID string, resp *rpc.TunIPResponse
 
 ### 4.2 Step 0.5: WatchTunIP periodically pushes the current IP (fallback)
 
-**Location**: `pkg/controlplane/tun_config.go` — `WatchTunIP`
+**Location**: `pkg/xds/tun_config.go` — `WatchTunIP`
 
 Currently the `WatchTunIP` ticker only renews the lease every `LeaseDuration/3` (~100s). Extend it to renew
 + push the current IP:
@@ -455,7 +455,7 @@ not trigger `ChangeTunIP` when the IP is unchanged — zero side effects.
 
 ### 4.3 Step 1: GetTunIP auto-updates ENVOY_CONFIG server-side when the IP changes
 
-**Location**: `pkg/controlplane/tun_config.go` — new `syncEnvoyRuleIP`
+**Location**: `pkg/xds/tun_config.go` — new `syncEnvoyRuleIP`
 
 When GetTunIP allocates an IP different from the previous one, look up the matching Rule in ENVOY_CONFIG by
 ownerID and update `LocalTunIPv4/v6`.
@@ -591,7 +591,7 @@ cluster/endpoint are fully shared with TCP.
 
 #### 4.4.4 `Virtual.To()` change
 
-File: `pkg/controlplane/cache.go`
+File: `pkg/xds/cache.go`
 
 Alongside the existing TCP listener generation, generate a UDP listener + udp_proxy filter for UDP ports:
 
@@ -839,9 +839,9 @@ does).
 | `pkg/handler/connect.go` | modify | in `getCIDR`, `KeyClusterIPv4POOLS` → `KeyClusterCIDRs`; `encodeCIDRs`/`parseCachedCIDRs` use a space-separated CIDR string |
 | `pkg/handler/traffmgr.go` | modify | align `createOutboundPod` ConfigMap-init keys |
 | **IP-change push fix** | | |
-| `pkg/controlplane/tun_config.go` | modify | `GetTunIP` calls `notifyWatchers` + `syncEnvoyRuleIP` on new allocation; add `syncEnvoyRuleIP`; `WatchTunIP` ticker periodic push |
+| `pkg/xds/tun_config.go` | modify | `GetTunIP` calls `notifyWatchers` + `syncEnvoyRuleIP` on new allocation; add `syncEnvoyRuleIP`; `WatchTunIP` ticker periodic push |
 | **Proxy mode unification** | | |
-| `pkg/controlplane/cache.go` | modify | `Virtual.To()` generates a UDP listener + `udp_proxy` filter for UDP ports; add `toUDPListener` |
+| `pkg/xds/cache.go` | modify | `Virtual.To()` generates a UDP listener + `udp_proxy` filter for UDP ports; add `toUDPListener` |
 | `pkg/inject/injector.go` | modify | `NewInjector` drops the `vpnInjector` branch; VPN-only goes through `meshInjector` |
 | `pkg/inject/vpn.go` | **delete** | `vpnInjector` no longer needed |
 | `pkg/inject/container.go` | modify | delete `AddVPNContainer` (unify on `AddVPNAndEnvoyContainer`); drop the `LocalTunIPv4/v6` env vars |
@@ -849,8 +849,8 @@ does).
 | `pkg/core/protocol_registry.go` | simplify | delete `watchTunIPChanges` + `pollTunIP` + `applyTunIPChange` (envoy handles routing) |
 | **Manual TUN_ALLOCS IP override (dry-run, §5b)** | | |
 | `pkg/daemon/rpc/daemon.proto` | modify | add `TunIPResponse.DryRun` + `TunIPRequest.ConfirmIP` (regen `*.pb.go`) |
-| `pkg/controlplane/tun_config.go` | modify | `ReconcileAllocsFromConfigMap` (exported) + per-family `proposeManualChange`/`proposeIPChange`; `GetTunIP` confirm/decline + `commitFamilyLocked`; `pendingProposal`; `expirePendingProposals`; `WatcherCount` |
-| `pkg/controlplane/controlplane.go` | modify | wire `ReconcileAllocsFromConfigMap` as an informer onDHCPChange callback |
+| `pkg/xds/tun_config.go` | modify | `ReconcileAllocsFromConfigMap` (exported) + per-family `proposeManualChange`/`proposeIPChange`; `GetTunIP` confirm/decline + `commitFamilyLocked`; `pendingProposal`; `expirePendingProposals`; `WatcherCount` |
+| `pkg/xds/controlplane.go` | modify | wire `ReconcileAllocsFromConfigMap` as an informer onDHCPChange callback |
 | `pkg/dhcp/dhcp.go` | modify | add `RentSpecificIP` + `InRange` (per-family specific allocation) |
 | `pkg/handler/network.go` | modify | `doWatchTunIP` per-family `handleProposal` (validate→confirm/decline) + reconnect self-heal; `ChangeTunIP` replaces address on host masks (`/32`,`/128`), only the changed family |
 | `pkg/tun/ip_windows.go` | modify | implement `changeIP` (winipcfg Delete/AddIPAddress) |
@@ -894,7 +894,7 @@ go build ./...
 go vet ./pkg/...
 
 # unit tests
-go test ./pkg/controlplane/... -v
+go test ./pkg/xds/... -v
 go test ./pkg/inject/... -v
 
 # integration test scenarios:

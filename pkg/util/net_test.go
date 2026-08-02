@@ -27,10 +27,10 @@ func buildIPv4Header(src, dst net.IP) []byte {
 	hdr[1] = 0x00                            // DSCP/ECN
 	binary.BigEndian.PutUint16(hdr[2:4], 20) // total length
 	// identification, flags, fragment offset left as zero
-	hdr[8] = 64   // TTL
-	hdr[9] = 6    // protocol: TCP
-	hdr[10] = 0   // checksum (left zero for test)
-	hdr[11] = 0   // checksum
+	hdr[8] = 64 // TTL
+	hdr[9] = 6  // protocol: TCP
+	hdr[10] = 0 // checksum (left zero for test)
+	hdr[11] = 0 // checksum
 	copy(hdr[12:16], src.To4())
 	copy(hdr[16:20], dst.To4())
 	return hdr
@@ -40,10 +40,10 @@ func buildIPv4Header(src, dst net.IP) []byte {
 // NextHeader is set to TCP (6).
 func buildIPv6Header(src, dst net.IP) []byte {
 	hdr := make([]byte, 40)
-	hdr[0] = 0x60 // version 6, traffic class high nibble
-	hdr[1] = 0x00 // traffic class low + flow label
-	hdr[2] = 0x00 // flow label
-	hdr[3] = 0x00 // flow label
+	hdr[0] = 0x60                           // version 6, traffic class high nibble
+	hdr[1] = 0x00                           // traffic class low + flow label
+	hdr[2] = 0x00                           // flow label
+	hdr[3] = 0x00                           // flow label
 	binary.BigEndian.PutUint16(hdr[4:6], 0) // payload length
 	hdr[6] = 6                              // next header: TCP
 	hdr[7] = 64                             // hop limit
@@ -127,4 +127,3 @@ func TestParseIP(t *testing.T) {
 		})
 	}
 }
-

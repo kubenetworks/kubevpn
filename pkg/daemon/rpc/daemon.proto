@@ -370,7 +370,7 @@ message IdentifyResponse {
 
 message Cancel {}
 
-// TunConfigService is served by the traffic manager's control-plane (port 9002).
+// TunConfigService is served by the traffic manager's xds (port 9002).
 // Sidecars call GetTunIP on startup to allocate an IP, then WatchTunIP for changes.
 service TunConfigService {
   // GetTunIP allocates or retrieves the TUN IP for the given owner.

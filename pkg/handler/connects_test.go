@@ -39,12 +39,12 @@ func TestConnects_Sort_NoDependency(t *testing.T) {
 	// Two independent clusters. Sort should not panic.
 	connects := Connects{
 		{
-			WorkloadNamespace:    "clusterA",
-			network: &NetworkManager{cfg: NetworkConfig{APIServerIPs: []net.IP{net.ParseIP("10.0.0.1")}}},
+			WorkloadNamespace: "clusterA",
+			network:           &NetworkManager{cfg: NetworkConfig{APIServerIPs: []net.IP{net.ParseIP("10.0.0.1")}}},
 		},
 		{
-			WorkloadNamespace:    "clusterB",
-			network: &NetworkManager{cfg: NetworkConfig{APIServerIPs: []net.IP{net.ParseIP("10.0.0.2")}}},
+			WorkloadNamespace: "clusterB",
+			network:           &NetworkManager{cfg: NetworkConfig{APIServerIPs: []net.IP{net.ParseIP("10.0.0.2")}}},
 		},
 	}
 	sorted := connects.Sort()
@@ -57,8 +57,8 @@ func TestConnects_Sort_LoopbackIPIgnored(t *testing.T) {
 	// Loopback IPs in ExtraCIDR should not create a dependency.
 	connects := Connects{
 		{
-			WorkloadNamespace:    "clusterA",
-			network: &NetworkManager{cfg: NetworkConfig{APIServerIPs: []net.IP{net.ParseIP("127.0.0.1")}}},
+			WorkloadNamespace: "clusterA",
+			network:           &NetworkManager{cfg: NetworkConfig{APIServerIPs: []net.IP{net.ParseIP("127.0.0.1")}}},
 		},
 		{
 			WorkloadNamespace: "clusterB",
@@ -79,8 +79,8 @@ func TestConnects_Sort_InvalidCIDRSkipped(t *testing.T) {
 	// Invalid CIDR strings should be skipped without panic.
 	connects := Connects{
 		{
-			WorkloadNamespace:    "clusterA",
-			network: &NetworkManager{cfg: NetworkConfig{APIServerIPs: []net.IP{net.ParseIP("10.0.0.1")}}},
+			WorkloadNamespace: "clusterA",
+			network:           &NetworkManager{cfg: NetworkConfig{APIServerIPs: []net.IP{net.ParseIP("10.0.0.1")}}},
 		},
 		{
 			WorkloadNamespace: "clusterB",
@@ -103,13 +103,13 @@ func TestConnects_Sort_ExtraHostLoopbackIgnored(t *testing.T) {
 	nmB.extraHost = []dns.Entry{{IP: "127.0.0.1"}}
 	connects := Connects{
 		{
-			WorkloadNamespace:    "clusterA",
-			network: &NetworkManager{cfg: NetworkConfig{APIServerIPs: []net.IP{net.ParseIP("127.0.0.1")}}},
+			WorkloadNamespace: "clusterA",
+			network:           &NetworkManager{cfg: NetworkConfig{APIServerIPs: []net.IP{net.ParseIP("127.0.0.1")}}},
 		},
 		{
-			WorkloadNamespace:    "clusterB",
+			WorkloadNamespace: "clusterB",
 
-			network:      nmB,
+			network: nmB,
 		},
 	}
 
@@ -126,13 +126,13 @@ func TestConnects_Sort_ExtraHostInvalidIPIgnored(t *testing.T) {
 	nmB.extraHost = []dns.Entry{{IP: "not-an-ip"}}
 	connects := Connects{
 		{
-			WorkloadNamespace:    "clusterA",
-			network: &NetworkManager{cfg: NetworkConfig{APIServerIPs: []net.IP{net.ParseIP("10.0.0.1")}}},
+			WorkloadNamespace: "clusterA",
+			network:           &NetworkManager{cfg: NetworkConfig{APIServerIPs: []net.IP{net.ParseIP("10.0.0.1")}}},
 		},
 		{
-			WorkloadNamespace:    "clusterB",
+			WorkloadNamespace: "clusterB",
 
-			network:      nmB,
+			network: nmB,
 		},
 	}
 
@@ -146,8 +146,8 @@ func TestConnects_Sort_ExactIPMatchInExtraCIDR(t *testing.T) {
 	// ExtraCIDR IP exactly matches an API server IP (ip.Equal path in Less).
 	connects := Connects{
 		{
-			WorkloadNamespace:    "clusterA",
-			network: &NetworkManager{cfg: NetworkConfig{APIServerIPs: []net.IP{net.ParseIP("10.1.2.3")}}},
+			WorkloadNamespace: "clusterA",
+			network:           &NetworkManager{cfg: NetworkConfig{APIServerIPs: []net.IP{net.ParseIP("10.1.2.3")}}},
 		},
 		{
 			WorkloadNamespace: "clusterB",

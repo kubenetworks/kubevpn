@@ -71,11 +71,11 @@ spec:
             {{- toYaml .Values.resources | nindent 12 }}
           securityContext:
             privileged: false
-        - name: control-plane
+        - name: xds
           command:
             - kubevpn
           args:
-            - control-plane
+            - xds
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:

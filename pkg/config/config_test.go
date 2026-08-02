@@ -114,17 +114,17 @@ func TestGetPProfPath(t *testing.T) {
 
 func TestPathsAreAbsolute(t *testing.T) {
 	paths := map[string]string{
-		"GetSockPath(false)":     GetSockPath(false),
-		"GetSockPath(true)":      GetSockPath(true),
-		"GetPidPath(false)":      GetPidPath(false),
-		"GetPidPath(true)":       GetPidPath(true),
+		"GetSockPath(false)":      GetSockPath(false),
+		"GetSockPath(true)":       GetSockPath(true),
+		"GetPidPath(false)":       GetPidPath(false),
+		"GetPidPath(true)":        GetPidPath(true),
 		"GetDaemonLogPath(false)": GetDaemonLogPath(false),
 		"GetDaemonLogPath(true)":  GetDaemonLogPath(true),
-		"GetDBPath()":            GetDBPath(),
-		"GetSyncthingPath()":     GetSyncthingPath(),
-		"GetConfigFile()":        GetConfigFile(),
-		"GetTempPath()":          GetTempPath(),
-		"GetPProfPath()":         GetPProfPath(),
+		"GetDBPath()":             GetDBPath(),
+		"GetSyncthingPath()":      GetSyncthingPath(),
+		"GetConfigFile()":         GetConfigFile(),
+		"GetTempPath()":           GetTempPath(),
+		"GetPProfPath()":          GetPProfPath(),
 	}
 	for name, p := range paths {
 		if !filepath.IsAbs(p) {
@@ -141,14 +141,14 @@ func TestPathsRootedInHomeDir(t *testing.T) {
 	expected := filepath.Join(homeDir, HOME)
 
 	paths := map[string]string{
-		"GetSockPath":     GetSockPath(false),
-		"GetPidPath":      GetPidPath(false),
+		"GetSockPath":      GetSockPath(false),
+		"GetPidPath":       GetPidPath(false),
 		"GetDaemonLogPath": GetDaemonLogPath(false),
-		"GetDBPath":       GetDBPath(),
+		"GetDBPath":        GetDBPath(),
 		"GetSyncthingPath": GetSyncthingPath(),
-		"GetConfigFile":   GetConfigFile(),
-		"GetTempPath":     GetTempPath(),
-		"GetPProfPath":    GetPProfPath(),
+		"GetConfigFile":    GetConfigFile(),
+		"GetTempPath":      GetTempPath(),
+		"GetPProfPath":     GetPProfPath(),
 	}
 	for name, p := range paths {
 		if !strings.HasPrefix(p, expected) {
@@ -351,9 +351,9 @@ func TestImageContainsRegistry(t *testing.T) {
 func TestConfigMapAndKeyConstants(t *testing.T) {
 	constants := map[string]string{
 		"ConfigMapPodTrafficManager": ConfigMapPodTrafficManager,
-		"KeyTunIPPool":    KeyTunIPPool,
-		"KeyEnvoy":        KeyEnvoy,
-		"KeyClusterCIDRs": KeyClusterCIDRs,
+		"KeyTunIPPool":               KeyTunIPPool,
+		"KeyEnvoy":                   KeyEnvoy,
+		"KeyClusterCIDRs":            KeyClusterCIDRs,
 	}
 	for name, val := range constants {
 		if val == "" {
@@ -364,8 +364,8 @@ func TestConfigMapAndKeyConstants(t *testing.T) {
 
 func TestContainerNameConstants(t *testing.T) {
 	names := []string{
-		ContainerSidecarEnvoyProxy,
-		ContainerSidecarControlPlane,
+		ContainerSidecarEnvoy,
+		ContainerSidecarXDS,
 		ContainerSidecarDNS,
 		ContainerSidecarVPN,
 		ContainerSidecarSyncthing,

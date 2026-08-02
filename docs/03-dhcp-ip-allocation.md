@@ -103,7 +103,7 @@ All `ReleaseIP` calls check and log errors — silent failures could cause perma
 
 ### 4.2 TunConfigServer (Control Plane)
 
-`pkg/controlplane/tun_config.go` — gRPC service running in the Traffic Manager Pod.
+`pkg/xds/tun_config.go` — gRPC service running in the Traffic Manager Pod.
 
 **Responsibility:** Manage ownerID → IP mappings, lease renewal, and IP change notifications.
 
@@ -304,7 +304,7 @@ Consistency between bitmap and allocs is guaranteed by K8s `resourceVersion` opt
 | File | Purpose |
 |------|---------|
 | `pkg/dhcp/dhcp.go` | DHCP Manager — bitmap allocator wrapper |
-| `pkg/controlplane/tun_config.go` | TunConfigServer — IP allocation control plane |
+| `pkg/xds/tun_config.go` | TunConfigServer — IP allocation control plane |
 | `pkg/config/config.go` | CIDR, ConfigMap key name constants, etc. |
 | `pkg/handler/network.go` | NetworkManager.rentIP — client-side IP acquisition |
 | `pkg/daemon/rpc/daemon.proto` | TunIPRequest/TunIPResponse proto definitions |
