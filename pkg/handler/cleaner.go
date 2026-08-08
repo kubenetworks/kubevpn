@@ -66,7 +66,10 @@ func (c *ConnectOptions) Cleanup(logCtx context.Context) {
 // TUN IP is NOT explicitly released — per DHCP protocol, lease expiry handles reclaim.
 // Returns error if critical cleanup steps fail, allowing the caller to retry.
 func (c *ConnectOptions) cleanupControlPlane(logCtx context.Context, ctx context.Context) error {
-	plog.G(logCtx).Info("Performing cleanup operations")
+	// Debug, not Info: in quit/disconnect this marker duplicates the enclosing
+	// "Cleaning up connections"/"Disconnecting" step, so keep it out of the CLI
+	// stream while preserving it in the daemon log file for diagnostics.
+	plog.G(logCtx).Debug("Performing cleanup operations")
 	if c.clientset != nil {
 		_ = c.clientset.CoreV1().Pods(c.ManagerNamespace).Delete(ctx, config.CniNetName, v1.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0)})
 		_ = c.clientset.BatchV1().Jobs(c.ManagerNamespace).Delete(ctx, config.ConfigMapPodTrafficManager, v1.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0)})

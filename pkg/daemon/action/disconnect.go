@@ -125,7 +125,19 @@ func disconnectByKubeconfig(ctx context.Context, svr *Server, kubeconfigBytes st
 	if err != nil {
 		return err
 	}
-	connectionID, err := util.GetConnectionID(context.Background(), connect.GetClientset().CoreV1().Namespaces(), connect.ManagerNamespace)
+	// Connections are stored under the connection ID derived from the *manager*
+	// namespace (see connect_elevate.go detectAndSetManagerNamespace + GetConnectionID),
+	// which may differ from the workload namespace. Resolve it the same way so the
+	// lookup matches — otherwise removeConnection finds nothing and the proxy/VPN
+	// state leaks when the traffic manager lives in its own namespace.
+	managerNamespace, err := util.DetectManagerNamespace(ctx, connect.GetFactory(), ns)
+	if err != nil {
+		return err
+	}
+	if managerNamespace == "" {
+		managerNamespace = ns
+	}
+	connectionID, err := util.GetConnectionID(context.Background(), connect.GetClientset().CoreV1().Namespaces(), managerNamespace)
 	if err != nil {
 		return err
 	}

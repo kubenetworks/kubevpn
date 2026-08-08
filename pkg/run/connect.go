@@ -60,20 +60,7 @@ func (option *Options) connectViaHost(ctx context.Context, sshConfig *pkgssh.Ssh
 		ManagerNamespace:     managerNamespace,
 	}
 	option.AddRollbackFunc(func() error {
-		resp, err := cli.Disconnect(context.Background())
-		if err != nil {
-			return err
-		}
-		err = resp.Send(&rpc.DisconnectRequest{
-			KubeconfigBytes: ptr.To(string(kubeConfigBytes)),
-			Namespace:       ptr.To(ns),
-			SshJump:         handler.SshConfigToRPC(sshConfig),
-		})
-		if err != nil {
-			return err
-		}
-		_ = grpcutil.PrintGRPCStream[rpc.DisconnectResponse](context.Background(), resp)
-		return nil
+		return teardownRunProxy(cli, option.NoProxy, ns, option.Workload, kubeConfigBytes, sshConfig)
 	})
 	resp, err := cli.Proxy(context.Background())
 	if err != nil {
@@ -85,7 +72,54 @@ func (option *Options) connectViaHost(ctx context.Context, sshConfig *pkgssh.Ssh
 		plog.G(ctx).Errorf("Connect to cluster error: %v", err)
 		return err
 	}
-	return grpcutil.PrintGRPCStream[rpc.SyncResponse](ctx, resp)
+	// Render the connect/proxy progress with the same animated spinner + check-mark
+	// UX as `kubevpn connect` (the plain PrintGRPCStream dropped the step markers).
+	return grpcutil.RenderGRPCStream[rpc.SyncResponse](ctx, resp, os.Stdout)
+}
+
+// teardownRunProxy unwinds a `kubevpn run` (host mode) session on exit: it leaves
+// the injected proxy resources and then disconnects, mirroring the proven
+// `kubevpn proxy --foreground` teardown order (cmd/kubevpn/cmds/proxy.go). Leave
+// MUST run first and on its own RPC: the daemon resolves it by currentConnectionID
+// (set in the Proxy handler), so it reliably unpatches the injected sidecars
+// regardless of how the manager/workload namespaces relate — unlike a
+// disconnect-by-kubeconfig, which derives the connection ID from the namespace.
+// Both streams render with the spinner + check-mark UX; a leading blank line keeps
+// the first step off the terminal's "^C" echo line.
+func teardownRunProxy(cli rpc.DaemonClient, noProxy bool, ns, workload string, kubeconfigBytes []byte, sshConfig *pkgssh.SshConfig) error {
+	fmt.Fprintln(os.Stdout)
+
+	if !noProxy {
+		if err := leaveRunProxy(cli, ns, workload); err != nil {
+			// Best-effort: log and still attempt to disconnect so the VPN tears down.
+			plog.G(context.Background()).Errorf("Failed to leave proxy resources: %v", err)
+		}
+	}
+
+	resp, err := cli.Disconnect(context.Background())
+	if err != nil {
+		return err
+	}
+	if err = resp.Send(&rpc.DisconnectRequest{
+		KubeconfigBytes: ptr.To(string(kubeconfigBytes)),
+		Namespace:       ptr.To(ns),
+		SshJump:         handler.SshConfigToRPC(sshConfig),
+	}); err != nil {
+		return err
+	}
+	return grpcutil.RenderGRPCStream[rpc.DisconnectResponse](context.Background(), resp, os.Stdout)
+}
+
+// leaveRunProxy sends a Leave RPC for the proxied workload and renders its stream.
+func leaveRunProxy(cli rpc.DaemonClient, ns, workload string) error {
+	resp, err := cli.Leave(context.Background())
+	if err != nil {
+		return err
+	}
+	if err = resp.Send(&rpc.LeaveRequest{Namespace: ns, Workloads: []string{workload}}); err != nil {
+		return err
+	}
+	return grpcutil.RenderGRPCStream[rpc.LeaveResponse](context.Background(), resp, os.Stdout)
 }
 
 func (option *Options) connectViaContainer(ctx context.Context, portBindings nat.PortMap, managerNamespace string) error {

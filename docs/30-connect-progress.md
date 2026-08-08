@@ -8,9 +8,12 @@ Every operational `kubevpn` command (`connect`, `proxy`, `sync`, `leave`, `reset
 it runs and finalizes with a green `✓` (or `✗` on failure), carrying the data discovered during the
 step. Their terminal success/teardown lines (`Disconnect completed`, `Exited`, `Stopped local SOCKS
 proxies`, and the connect/proxy/sync `Slogan`) are printed bold-green via `progress.Success`
-(`printSuccess`/`printSlogan` in `cmd/kubevpn/cmds/progress.go`). (`logs` and `run` are the exceptions —
-`logs` tails the daemon log files verbatim, and `run` streams via `grpcutil.PrintGRPCStream` in
-container mode; neither animates.) A successful connect looks like:
+(`printSuccess`/`printSlogan` in `cmd/kubevpn/cmds/progress.go`). `logs` is the exception — it tails the
+daemon log files verbatim and never animates. `kubevpn run` (host mode) **does** animate: it renders the
+connect/proxy stream and the teardown leave→disconnect stream via `grpcutil.RenderGRPCStream` (the
+importable spinner sibling of `printProgressStream`, since `pkg/run` cannot import the frozen `cmd`
+package); only run's *container* mode and its container-mode success scan stream plain via
+`grpcutil.PrintGRPCStream`. A successful connect looks like:
 
 ```
 Connecting to the cluster ...
@@ -89,11 +92,16 @@ change in exactly one place (`TestEncodeDecodeStep_RoundTrip` pins the round-tri
 The sentinel is meaningful only to the CLI spinner. Every *other* consumer of a step-bearing stream
 strips it via `plog.DecodeStep`, so the raw `\x1f` never leaks:
 
-- `grpcutil.PrintGRPCStream` (the generic writer used by the `logs` command, the `run` mode, and the
-  daemon's reconnect-from-persistence path that writes to the log file) decodes each message and writes
-  only the text.
+- `grpcutil.PrintGRPCStream` (the generic plain writer used by the `logs` command, `kubevpn run`'s
+  *container* mode, and the daemon's reconnect-from-persistence path that writes to the log file) decodes
+  each message and writes only the text.
 - `daemon/action/sync.go`'s `CopyAndConvertGRPCStream` callback forwards the message to the CLI
   **with** the sentinel (for spinner rendering) but writes the **decoded** text to the log file.
+
+In contrast, `grpcutil.RenderGRPCStream` is the spinner-rendering sibling of `PrintGRPCStream`: it
+**keeps** the sentinel and feeds the raw message to a `progress.Renderer`, so `kubevpn run` (host mode)
+gets the same `✓` checklist as `connect`/`proxy` for both the connect phase and the teardown
+(leave→disconnect) — without importing the frozen `cmd` package.
 
 ## 4. CLI renderer (`pkg/util/progress`)
 
@@ -218,11 +226,11 @@ The terminal success line `config.Slogan` (`Connected. …`) is **not** a step: 
 the stream ends via `progress.Success` (bold green on a TTY, plain otherwise — `printSlogan` in
 `cmd/kubevpn/cmds/progress.go`), so non-TTY success detection keeps working (see §4 "Non-TTY fallback").
 
-> **Double-render guard.** `disconnect` runs in both daemons (the user daemon forwards to the sudo
-> daemon and copies its stream). The step is emitted only from the user daemon (`!svr.IsSudo`) so the
-> CLI never sees it twice. `quit` is immune — the CLI calls each daemon's `Quit` on a separate
-> sequential stream — so it emits unconditionally, but skips the step when a daemon holds no
-> connections.
+> **Double-render guard.** Both `disconnect` and `quit` clean up the same connection in both daemons —
+> `disconnect` by forwarding (user daemon → sudo daemon, copying its stream); `quit` by the CLI invoking
+> each daemon's `Quit` on a separate sequential stream. In either case the step is emitted only from the
+> user daemon (`!svr.IsSudo`), so the CLI never renders it twice; the sudo daemon still performs its
+> data-plane cleanup, just silently. The step is skipped when a daemon holds no connections.
 
 ## 7. Tests
 
@@ -235,7 +243,8 @@ seams of the protocol:
 | `TestEncodeDecodeStep_RoundTrip` | `pkg/log/step_test.go` | `DecodeStep(EncodeStep(k, msg))` round-trips for every `StepKind` — the wire format stays symmetric |
 | `TestRenderer_NonTTY` | `pkg/util/progress/spinner_test.go` | a `*bytes.Buffer` (not a TTY) → yacspin degrades to line-by-line output; ordinary log lines pass through and a finished step renders `✓` + its done text |
 | `TestRenderer_NonTTY_PlainOnly` | `pkg/util/progress/spinner_test.go` | a stream with no step markers (e.g. the header line) passes through verbatim |
-| `TestPrintGRPCStream_StripsStepSentinel` | `pkg/daemon/grpcutil/stream_test.go` | the non-spinner writer decodes the sentinel away, so log file / `run` / `logs` never emit raw `\x1f` |
+| `TestPrintGRPCStream_StripsStepSentinel` | `pkg/daemon/grpcutil/stream_test.go` | the non-spinner writer decodes the sentinel away, so log file / container-mode `run` / `logs` never emit raw `\x1f` |
+| `TestRenderGRPCStream_KeepsStepSentinelForSpinner` | `pkg/daemon/grpcutil/stream_test.go` | the spinner sibling keeps the sentinel and renders a finished step as `✓ <done text>` (so host-mode `run` gets the check-mark UX); the raw `\x1f` never leaks |
 | `TestPrintProgressStream_RendersStepsAndCapturesConnID` | `cmd/kubevpn/cmds/progress_test.go` | the shared CLI renderer drives a fake stream end to end: sentinel stripped, finished step shows `✓` + done text, and `ConnectionID` is captured |
 
 Renderer tests assert on **substrings**, not exact framing: yacspin owns the spinner glyphs, spacing,
@@ -254,7 +263,7 @@ go test ./pkg/log/... ./pkg/util/progress/... ./pkg/daemon/grpcutil/... ./cmd/..
 | `pkg/log/logger.go` | `StreamHook` sentinel injection, `EncodeStep` / `DecodeStep`, `serverFormat` field stripping |
 | `pkg/util/progress/spinner.go` | `Renderer` (yacspin adapter) |
 | `cmd/kubevpn/cmds/progress.go` | `printProgressStream[T]` — the shared CLI renderer entry point for all commands |
-| `pkg/daemon/grpcutil/stream.go` | `PrintGRPCStream` (non-spinner writer; strips the step sentinel) |
+| `pkg/daemon/grpcutil/stream.go` | `PrintGRPCStream` (non-spinner writer; strips the step sentinel) + `RenderGRPCStream` (spinner sibling; keeps the sentinel, used by host-mode `run`) |
 | `pkg/log/step_test.go` | two-output contract + encode/decode round-trip |
 | `pkg/util/progress/spinner_test.go` | non-TTY renderer behavior |
 | `cmd/kubevpn/cmds/connect.go` | `printConnectGRPCStream` (one-line wrapper over `printProgressStream`) |

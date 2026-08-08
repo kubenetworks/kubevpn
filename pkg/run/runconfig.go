@@ -61,6 +61,13 @@ func (l ConfigList) Run(ctx context.Context) error {
 	for index := len(l) - 1; index >= 0; index-- {
 		conf := l[index]
 		if err := util.RunContainer(ctx, convertToDockerArgs(conf)); err != nil {
+			// A cancelled context means the user interrupted (Ctrl-C): exec.CommandContext
+			// SIGKILLs docker, surfacing a spurious "signal: killed: docker run failed".
+			// Treat it as a clean shutdown — the rollback funcs still run, and main sets
+			// exit code 130 from the interrupt signal itself.
+			if ctx.Err() != nil {
+				return nil
+			}
 			return err
 		}
 		if index != 0 {

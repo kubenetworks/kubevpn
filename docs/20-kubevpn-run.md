@@ -25,7 +25,17 @@ kubevpn run deployment/myapp
 Connects via the local daemon (same as `kubevpn connect`/`kubevpn proxy`):
 - Calls daemon gRPC `Proxy()` to establish VPN tunnel on the host
 - The Docker container uses the host network or shares network with the TUN device
-- Registers a rollback function to `Disconnect()` on cleanup
+- Registers `teardownRunProxy` as a rollback function (`connect.go`)
+
+**Teardown (`teardownRunProxy`)** mirrors the proven `kubevpn proxy --foreground` order
+(`cmd/kubevpn/cmds/proxy.go`): it **leaves the proxy first, then disconnects**. Leave runs on its own
+`Leave` RPC, which the daemon resolves by `currentConnectionID` (set in the `Proxy` handler) — so it
+reliably **unpatches the injected sidecars** regardless of how the manager/workload namespaces relate.
+This matters because a bare disconnect-by-kubeconfig derives the connection ID from the *namespace*
+(see [04-connection-id.md](04-connection-id.md)); relying on it alone left the sidecars patched. Both
+the `Leave` and `Disconnect` streams render with the spinner + `✓` UX via `grpcutil.RenderGRPCStream`
+(see [30-connect-progress.md](30-connect-progress.md)), and a leading blank line keeps the first step
+off the terminal's `^C` echo. `--no-proxy` runs skip Leave (nothing was injected).
 
 > **Port coverage caveat (host mode).** The dev container is a standalone container published on
 > `host:<port>`, and the gvisor `LocalTCPForwarder` dials `127.0.0.1` (`pkg/core/gvisor_tcp_forwarder.go`).
@@ -88,7 +98,16 @@ Steps:
 
 `ConfigList.Run()` starts containers in **reverse order**: the network-owning sidecar first (detached), then other sidecars, then the dev container (foreground). This ensures the network namespace exists before other containers attach to it.
 
-`ConfigList.Remove()` cleans up all containers and disconnects from the Docker network.
+The dev container runs in the foreground until the user exits. On **Ctrl-C** the shared context is
+cancelled, `exec.CommandContext` SIGKILLs `docker`, and `cmd.Wait()` returns `signal: killed`. Because
+that kill is the *intended* shutdown, `ConfigList.Run()` treats a `RunContainer` error with a cancelled
+`ctx.Err()` as a clean exit (returns `nil`) instead of surfacing a spurious
+`signal: killed: docker run failed`. The rollback funcs still run, and the process exits `130`
+(Interrupted) from the signal itself — see [31-exit-codes.md](31-exit-codes.md).
+
+`ConfigList.Remove()` cleans up all containers (via `docker rm --force`) and disconnects from the Docker
+network. It is gated on `--rm` (`hostConfig.AutoRemove`): without `--rm`, the run containers are left in
+place, matching plain `docker run` semantics.
 
 ## 7. Security Options, Volumes & DinD Details
 
