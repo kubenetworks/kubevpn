@@ -26,8 +26,11 @@ type ConnList struct {
 	conns []net.Conn
 }
 
-// Add appends a conn to the list if not already present. Returns true if it was added
+// Add registers a conn at the head of the list if not already present. Returns true if it was added
 // (false if it was already registered), so callers can log only genuinely new pool members.
+// Prepending makes Write*/WritePacket try the most recently established conn first: after a
+// reconnect the fresh conn leads and any lingering half-open "ghost" conn sinks to the tail, where
+// it is only a last resort (and is evicted by the read/write deadlines anyway).
 func (cl *ConnList) Add(conn net.Conn) bool {
 	cl.mu.Lock()
 	defer cl.mu.Unlock()
@@ -36,7 +39,7 @@ func (cl *ConnList) Add(conn net.Conn) bool {
 			return false
 		}
 	}
-	cl.conns = append(cl.conns, conn)
+	cl.conns = append([]net.Conn{conn}, cl.conns...)
 	return true
 }
 

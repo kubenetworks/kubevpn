@@ -44,6 +44,8 @@ In addition, the client **observes the ICMP echo replies** to the #1 TUN heartbe
 
 **Broadcast to all slots:** Heartbeat packets have `dst == nil` and are cloned to all N connection pool slots. This was a bug fix — previously only slot 0 received heartbeats, causing slots 1-3 to timeout every 180s.
 
+**Proactive registration on (re)connect:** Waiting up to a full 60s period for the next heartbeat to register a freshly reconnected conn would leave reverse traffic un-routable in the meantime. So each slot, immediately after dialing, writes a registration packet (an ICMP echo to the gateway carrying its TUN IP) **directly on the new conn** — `connSlot.run` via `clientTransport.registrationPayloads()`. The server registers the route from it at once, before any data. Being a direct write (not the `dst == nil` broadcast, which `trySendToSlot` may drop when a slot's channel is full), it is drop-immune. The echo reply also doubles as a liveness ping, so it refreshes the data-plane liveness signal on reconnect without any separate signalling path.
+
 **Reply observation (data-plane liveness):** The server's gvisor stack replies to these echoes (`pkg/core/gvisor_icmp_forwarder.go`, preserving Ident/Sequence). The client's `readFromConn` recognizes echo replies from `RouterIP`/`RouterIP6` (`util.IsICMPEchoReplyFrom`), records the timestamp in `core.HeartbeatStats.MarkReply()`, and drops the packet (the OS would discard it anyway — the echo was crafted by us). A recent reply proves the tunnel carries traffic end-to-end to the server and back. See [Data-Plane Liveness for `kubevpn status`](#data-plane-liveness-for-kubevpn-status).
 
 **Period:** 60s (`config.KeepAliveTime`)
@@ -62,11 +64,13 @@ In addition, the client **observes the ICMP echo replies** to the #1 TUN heartbe
 
 ### #3 TCP Read/Write Deadline
 
-**File:** `pkg/core/tun_client.go` — `readFromConn()`, `writeToConn()`
+**Files:** client — `pkg/core/tun_client.go` (`readFromConn()`, `writeToConn()`); server — `pkg/core/gvisor_tun_endpoint.go` (`readFromTCPConnWriteToEndpoint()`, `readFromEndpointWriteToTCPConn()`) and `pkg/core/conn_buffered_tcp.go` (`bufferedTCP.run()`).
 
-**What:** Sets socket deadlines on tunnel TCP connections. Read timeout is 180s, write timeout is 60s.
+**What:** Sets socket deadlines on tunnel TCP connections, on **both** ends. Read timeout is 180s, write timeout is 60s.
 
-**Why necessary:** Detects application-level stalls where the TCP connection is alive but the remote side has stopped processing data. Triggers slot reconnection.
+**Why necessary:** Detects application-level stalls where the TCP connection is alive but the remote side has stopped processing data.
+- **Client side:** a stall triggers slot reconnection.
+- **Server side:** a stall (e.g. a client that slept or had its NAT rebound, so no FIN/RST ever arrives) evicts the now-stale "ghost" conn from `RouteHub`. The read timeout exits `readFromTCPConnWriteToEndpoint`, whose deferred `RemoveRoutesByConn` deletes the route; the write timeout closes a conn whose half-open socket would otherwise buffer (and black-hole) reverse traffic until the kernel send buffer fills. Without these, a ghost conn lingered until OS keepalive (#2) eventually noticed — minutes of silently dropped reverse traffic. The two server writers (`bufferedTCP.run` and `readFromEndpointWriteToTCPConn`) share the same socket; both use the 60s timeout and refresh before each write, so neither observes the other's deadline as prematurely expired.
 
 **Optimization:** Deadlines are not reset on every packet. They are only refreshed when >50% of the timeout has elapsed, reducing syscalls from 1/packet to ~1/90s.
 
@@ -153,7 +157,7 @@ func deriveConnectionStatus(tunUp bool, lastHeartbeat time.Time) string {
 }
 ```
 
-`heartbeatStaleThreshold = config.KeepAliveTime * 3 / 2` (90s) — tolerates one missed beat's jitter. Worst-case detection latency is ~90s; recovery is fast because the heartbeat fires immediately on reconnect (Iteration 14 in `pkg/core/REFACTOR.md`).
+`heartbeatStaleThreshold = config.KeepAliveTime * 3 / 2` (90s) — tolerates one missed beat's jitter. Worst-case detection latency is ~90s; recovery is fast because each slot proactively re-announces its route directly on the new conn the moment it reconnects (see #1 *Proactive registration on (re)connect*), and that announcement's echo reply also refreshes the liveness signal.
 
 ### The user daemon reuses the verdict (no new proto field)
 

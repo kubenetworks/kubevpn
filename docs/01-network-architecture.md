@@ -216,10 +216,14 @@ to their connection(s).
 
 ### RouteHub and ConnList
 
-Each client IP maps to a `ConnList` — an ordered list of TCP connections for
-that client. Because the connection pool creates N parallel connections per
-client, a single client IP has N entries (one per slot). Multiple clients
-coexist in the same table:
+Each client IP maps to a `ConnList` — a list of TCP connections for that client,
+ordered **newest-first**: `AddRoute` prepends, so the most recently established
+conn leads. Writes try the head first, so after a reconnect reverse traffic flows
+on the fresh conn immediately and any lingering half-open "ghost" conn sinks to
+the tail (where it is a last resort, and is evicted by the read/write deadlines —
+see [Write with Fallback](#write-with-fallback)). Because the connection pool
+creates N parallel connections per client, a single client IP has N entries (one
+per slot). Multiple clients coexist in the same table:
 
 ```
 Client A (198.18.0.2):  4 conns via connection pool
@@ -232,10 +236,16 @@ RouteHub.routeMapTCP:
 
 ### Route Registration
 
-Routes are registered lazily: when the server receives a packet from a client
-connection, it calls `hub.AddRoute(srcIP, conn)`. Duplicate connections are
-ignored (dedup by pointer equality). Heartbeat ICMP packets ensure registration
-happens before any real traffic.
+Routes are registered when the server receives a packet from a client connection:
+it calls `hub.AddRoute(srcIP, conn)`. Duplicate connections are ignored (dedup by
+pointer equality). Two things make registration prompt rather than lazy:
+
+- **Proactive registration** — a freshly dialed slot writes a registration packet
+  (an ICMP echo to the gateway, carrying its TUN IP) on the new conn *before* any
+  data, so the server registers the route immediately. This is sent directly on the
+  conn (not via the heartbeat broadcast channel), so it cannot be dropped under load.
+- **Heartbeat ICMP** — every slot then keeps sending periodic heartbeats, so a route
+  is re-asserted each cycle even for idle conns.
 
 ### Write with Fallback
 
@@ -254,6 +264,13 @@ WriteFuncToRoute("198.18.0.3", dgram.Write):
 This eliminates packet loss during connection pool slot reconnections: when
 one slot dies and reconnects, the remaining 3 slots handle traffic seamlessly.
 
+The fallback walk also covers the **ghost conn** hazard: a write to a half-open
+TCP succeeds into the kernel send buffer (no error) until that buffer fills, so a
+dead-but-undetected conn could silently swallow reverse traffic. Two defenses bound
+this: writes prefer the newest conn (the ghost is at the tail, rarely tried), and a
+ghost is actively evicted by the deadlines below within `KeepAliveTime` (write) /
+`KeepAliveTime*3` (read).
+
 ### Cross-Client Data Flow (A→B)
 
 ```
@@ -271,6 +288,13 @@ one slot dies and reconnects, the remaining 3 slots handle traffic seamlessly.
 When a connection closes, `RemoveRoutesByConn(conn)` iterates all route entries
 and removes that connection from every `ConnList` it appears in. If a `ConnList`
 becomes empty, the route entry is deleted entirely.
+
+This cleanup is driven by the server-side conn deadlines so that even a half-open
+ghost (no FIN/RST) is reclaimed: the read loop (`readFromTCPConnWriteToEndpoint`)
+times out after `KeepAliveTime*3` of silence, and the buffered writer
+(`bufferedTCP.run`) times out a stuck write after `KeepAliveTime`; either closes the
+conn, which exits the reader and triggers `RemoveRoutesByConn`. See
+[08-heartbeat-health.md](08-heartbeat-health.md) §#3.
 
 Note: there is a benign TOCTOU between `IsEmpty()` and `Delete()` in the write path — another goroutine could add a connection between the two calls. This is harmless because `sync.Map.Delete` is idempotent and the next packet will re-register the route via `AddRoute`.
 

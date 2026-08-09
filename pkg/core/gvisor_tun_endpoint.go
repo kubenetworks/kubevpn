@@ -21,6 +21,11 @@ import (
 )
 
 func (h *gvisorTCPHandler) readFromEndpointWriteToTCPConn(ctx context.Context, conn net.Conn, endpoint *channel.Endpoint) {
+	// Write deadline: bound a stuck write to a half-open peer so a dead client cannot wedge this
+	// goroutine for minutes. This conn's underlying socket is shared with bufferedTCP.run (the other
+	// writer for this client); both use KeepAliveTime and refresh before each write, so the shared
+	// deadline is always pushed forward and neither writer sees it expire while it is healthy.
+	dl := &periodicDeadline{timeout: config.KeepAliveTime, set: conn.SetWriteDeadline}
 	for ctx.Err() == nil {
 		pkt := endpoint.ReadContext(ctx)
 		if pkt != nil {
@@ -38,6 +43,11 @@ func (h *gvisorTCPHandler) readFromEndpointWriteToTCPConn(ctx context.Context, c
 			payloadLen := ipLen + typePrefixLen
 			binary.BigEndian.PutUint16(buf[:datagramHeaderLen], uint16(payloadLen))
 			buf[datagramHeaderLen] = packetTypeToTUN
+			if err := dl.refresh(); err != nil {
+				config.LPool.Put(buf)
+				plog.G(ctx).Errorf("[Gvisor-TCP] Failed to set write deadline: %v", err)
+				return
+			}
 			_, err := conn.Write(buf[:payloadLen+datagramHeaderLen])
 			config.LPool.Put(buf)
 			if err != nil {
@@ -54,8 +64,20 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 	defer tcpConn.Close()
 	defer h.hub.RemoveRoutesByConn(ctx, conn)
 
+	// Read deadline: the client sends a heartbeat on every pool conn every KeepAliveTime, so seeing
+	// nothing for KeepAliveTime*3 means the conn is dead — e.g. the client slept or its NAT rebound
+	// without a FIN/RST ever reaching us. Timing out makes the deferred RemoveRoutesByConn fire
+	// promptly, evicting the now-stale "ghost" conn from the route table instead of leaving it to
+	// linger (and silently swallow reverse traffic) until OS TCP keepalive eventually notices.
+	dl := &periodicDeadline{timeout: config.KeepAliveTime * 3, set: tcpConn.SetReadDeadline}
+
 	for ctx.Err() == nil {
 		buf := config.LPool.Get().([]byte)[:]
+		if err := dl.refresh(); err != nil {
+			config.LPool.Put(buf[:])
+			plog.G(ctx).Errorf("[Gvisor-TCP] Failed to set read deadline: %v", err)
+			return
+		}
 		// Read into buf[datagramHeaderLen:] so the stripped payload lands in canonical position:
 		// buf[datagramHeaderLen] = type prefix, buf[tunReserve:] = IP. read = type+IP length.
 		read, err := tcpConn.Read(buf[datagramHeaderLen:])

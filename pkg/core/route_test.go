@@ -151,8 +151,10 @@ func TestConnList_Write_Fallback(t *testing.T) {
 	cl := &ConnList{}
 	dead := newMockConn("dead", true)
 	alive := newMockConn("alive", false)
-	cl.Add(dead)
+	// Add alive first, then dead: Add prepends, so dead ends up at the head and is tried first,
+	// exercising the walk-past-dead fallback under the newest-first ordering.
 	cl.Add(alive)
+	cl.Add(dead)
 	conn, err := cl.Write([]byte("data"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -260,17 +262,18 @@ func TestScenario_SlotReconnect_NoPacketLoss(t *testing.T) {
 	hub.AddRoute(ctx, clientIP, slot2)
 	hub.AddRoute(ctx, clientIP, slot3)
 
-	// slot0 and slot1 die (reconnecting)
-	slot0.writeFail = true
-	slot1.writeFail = true
+	// slot3 and slot2 die (reconnecting). Add prepends, so the list is [slot3, slot2, slot1, slot0]
+	// and the two newest (slot3, slot2) are tried first — exercising the walk-past-dead fallback.
+	slot3.writeFail = true
+	slot2.writeFail = true
 
-	// Should fallback to slot2
+	// Should fall back to slot1
 	conn, err := hub.WriteToRoute(key, []byte("important"))
 	if err != nil {
 		t.Fatalf("packet lost: %v", err)
 	}
-	if conn != slot2 {
-		t.Fatal("expected fallback to slot2")
+	if conn != slot1 {
+		t.Fatal("expected fallback to slot1")
 	}
 
 	// Dead slots auto-removed
@@ -279,9 +282,9 @@ func TestScenario_SlotReconnect_NoPacketLoss(t *testing.T) {
 		t.Fatal("expected 2 surviving")
 	}
 
-	// slot0 reconnects (new conn)
-	newSlot0 := newMockConn("new0", false)
-	hub.AddRoute(ctx, clientIP, newSlot0)
+	// A slot reconnects (new conn)
+	newSlot := newMockConn("new0", false)
+	hub.AddRoute(ctx, clientIP, newSlot)
 	if val.(*ConnList).Len() != 3 {
 		t.Fatal("expected 3 after reconnect")
 	}

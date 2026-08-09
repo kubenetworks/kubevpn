@@ -204,10 +204,12 @@ func TestDataPath_InboundProxy_WithDeadSlots(t *testing.T) {
 	alive2 := newMockConn("alive2", false)
 	alive3 := newMockConn("alive3", false)
 
-	hub.AddRoute(ctx, clientIP.To4(), dead0)
-	hub.AddRoute(ctx, clientIP.To4(), dead1)
-	hub.AddRoute(ctx, clientIP.To4(), alive2)
+	// Add alive conns first, then the dead ones: Add prepends, so the dead conns end up at the head
+	// (newest-first) and the write walks past them to alive2, removing the dead conns on the way.
 	hub.AddRoute(ctx, clientIP.To4(), alive3)
+	hub.AddRoute(ctx, clientIP.To4(), alive2)
+	hub.AddRoute(ctx, clientIP.To4(), dead1)
+	hub.AddRoute(ctx, clientIP.To4(), dead0)
 
 	ipPkt := buildIPv4Packet(net.ParseIP("10.0.1.99"), clientIP, []byte("data"))
 	frame := frameDatagram(1, ipPkt)
@@ -288,15 +290,17 @@ func TestDataPath_InterClient_WithFailover(t *testing.T) {
 	connA0 := newMockConn("A0", false)
 	hub.AddRoute(ctx, clientA.To4(), connA0)
 
-	// B has 4 conns, first 3 are dead (reconnecting)
+	// B has 4 conns; 3 are dead (reconnecting). Add the alive one first, then the dead ones: Add
+	// prepends, so the dead conns sit at the head (newest-first) and the write walks past them to
+	// connB3, removing the dead ones on the way.
 	connB0 := newMockConn("B0", true)
 	connB1 := newMockConn("B1", true)
 	connB2 := newMockConn("B2", true)
 	connB3 := newMockConn("B3", false) // only this one alive
+	hub.AddRoute(ctx, clientB.To4(), connB3)
 	hub.AddRoute(ctx, clientB.To4(), connB0)
 	hub.AddRoute(ctx, clientB.To4(), connB1)
 	hub.AddRoute(ctx, clientB.To4(), connB2)
-	hub.AddRoute(ctx, clientB.To4(), connB3)
 
 	// A→B: should eventually reach B via connB3
 	ipPkt := buildIPv4Packet(clientA, clientB, []byte("important"))
@@ -540,12 +544,14 @@ func TestDataPath_ProxyResource_MultiUser_SameResource_WithFailover(t *testing.T
 	for i := 0; i < 4; i++ {
 		hub.AddRoute(ctx, clientA, newMockConn(fmt.Sprintf("A%d", i), false))
 	}
-	// Client B: first 3 dead, only slot 3 alive
+	// Client B: only slot 3 alive. Add the alive conn first, then the 3 dead (reconnecting) ones:
+	// Add prepends, so the dead conns sit at the head (newest-first) and the write walks past them
+	// to the alive conn, removing the dead ones on the way.
+	aliveB3 := newMockConn("B3-alive", false)
+	hub.AddRoute(ctx, clientB, aliveB3)
 	for i := 0; i < 3; i++ {
 		hub.AddRoute(ctx, clientB, newMockConn(fmt.Sprintf("B%d-dead", i), true))
 	}
-	aliveB3 := newMockConn("B3-alive", false)
-	hub.AddRoute(ctx, clientB, aliveB3)
 
 	// Traffic to A: succeeds immediately
 	conn, err := hub.WriteToRoute(string(clientA), frameDatagram(1, buildIPv4Packet(podIP, clientA, []byte("to-A"))))

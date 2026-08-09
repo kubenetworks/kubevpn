@@ -347,7 +347,9 @@ followed by a second copy.
 **ICMP echo reply (connection stability):**
 The `ICMPForwarder` previously just logged and dropped ICMP packets. Since the gvisor stack has no assigned addresses, echo replies were never generated, causing client connections to timeout every ~60s. Fixed by implementing echo reply generation via `FindRoute` + `WritePacket`. Client read deadline also increased from 1x to 3x `KeepAliveTime`.
 
-**Immediate heartbeat on reconnection (route recovery speed):**
-After reconnection, the server could not register the client's route until it received the first data packet (which triggers `AddRoute`). The heartbeat ticker fired on a fixed 60s schedule unaware of reconnection events, causing 0-58s delay before route recovery. Fixed by adding a `reconnected` channel: `handlePacket` signals it after successful dial, `heartbeats` responds by sending an immediate heartbeat and resetting the ticker. Also moved the 2s backoff sleep to only fire on dial failure.
+**Proactive route registration on reconnection (route recovery speed):**
+After reconnection, the server could not register the client's route until it received the first data packet (which triggers `AddRoute`). The heartbeat ticker fired on a fixed 60s schedule unaware of reconnection events, causing 0-58s delay before route recovery. Fixed by having each slot proactively announce its TUN IP **directly on the freshly dialed conn** before the read/write loops start (`connSlot.run` → `clientTransport.registrationPayloads`): the server registers the route at once, with no dependency on the periodic heartbeat or the (droppable) broadcast path. Also moved the 2s backoff sleep to only fire on dial failure.
 
 Result: route recovery after reconnect dropped from 0-58s to < 100ms.
+
+(An earlier fix used a `reconnected` channel that signalled the heartbeat goroutine to fire an immediate broadcast heartbeat — see REFACTOR.md Iteration 14. It was replaced by the direct per-conn registration above, which is drop-immune and targets the exact new conn.)

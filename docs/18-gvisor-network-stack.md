@@ -112,7 +112,7 @@ shared `periodicDeadline` (one `SetDeadline` syscall per half-timeout instead of
 
 **Heartbeats**: Periodic ICMP packets sent to all connections to keep routes alive in the server's RouteHub.
 
-**Reconnection**: Each slot reconnects independently on failure. After reconnection, slot 0 sends an immediate heartbeat to re-register routes.
+**Reconnection**: Each slot reconnects independently on failure. After reconnecting, the slot proactively announces its TUN IP directly on the new conn (`registrationPayloads`), so the server re-registers the route immediately — no waiting for the next periodic heartbeat.
 
 ### 5.3 File layout
 
@@ -134,9 +134,9 @@ type RouteHub struct {
 }
 ```
 
-**ConnList**: Holds multiple connections for the same client IP (connection pool). `Write()` tries each connection, removing dead ones on failure — providing automatic failover.
+**ConnList**: Holds multiple connections for the same client IP (connection pool), ordered newest-first (`Add` prepends). `Write()` tries each connection from the head, removing dead ones on failure — automatic failover that also keeps reverse traffic on the freshest conn after a reconnect.
 
-**Route registration**: When the server receives a heartbeat (ICMP packet), it calls `AddRoute(srcIP, conn)` to register the client's IP in the routing table.
+**Route registration**: When the server receives a packet from a client (a data packet, the per-conn registration packet a slot sends right after dialing, or a periodic heartbeat), it calls `AddRoute(srcIP, conn)` to register the client's IP. Stale "ghost" conns are evicted by the server-side read/write deadlines (see [08-heartbeat-health.md](08-heartbeat-health.md) §#3).
 
 ## 7. Protocol Encapsulation
 

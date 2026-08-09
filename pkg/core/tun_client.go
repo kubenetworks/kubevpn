@@ -29,9 +29,6 @@ type clientTransport struct {
 	forward *Forwarder
 	// slots holds the per-connection pool; built by runConnPool, read by routeOutbound.
 	slots []*connSlot
-	// reconnected signals the heartbeat goroutine to send an immediate heartbeat after a
-	// connection is (re)established, so the server registers the route without waiting a cycle.
-	reconnected chan struct{}
 	// gvisorInbound carries src == dst packets to the local loopback gvisor stack.
 	gvisorInbound chan *Packet
 	// stats records data-plane liveness from observed heartbeat echo replies; may be nil.
@@ -45,7 +42,6 @@ func newClientTransport(dev *tunDevice, forward *Forwarder, stats *HeartbeatStat
 	return &clientTransport{
 		dev:           dev,
 		forward:       forward,
-		reconnected:   make(chan struct{}, 1),
 		gvisorInbound: make(chan *Packet, MaxSize),
 		stats:         stats,
 	}
@@ -90,15 +86,12 @@ func (t *clientTransport) runConnPool(ctx context.Context) {
 	var wg sync.WaitGroup
 	for i := range t.slots {
 		slot := &connSlot{
-			id:          i,
-			inbound:     make(chan *Packet, MaxSize),
-			tunOutbound: t.dev.tunOutbound,
-			forward:     t.forward,
-			stats:       t.stats,
-		}
-		// Only slot 0 signals reconnects to the heartbeat goroutine.
-		if i == 0 {
-			slot.reconnected = t.reconnected
+			id:            i,
+			inbound:       make(chan *Packet, MaxSize),
+			tunOutbound:   t.dev.tunOutbound,
+			forward:       t.forward,
+			stats:         t.stats,
+			registrations: t.registrationPayloads,
 		}
 		t.slots[i] = slot
 		wg.Add(1)
@@ -176,16 +169,16 @@ type connSlot struct {
 	inbound     chan *Packet
 	tunOutbound chan *Packet
 	forward     *Forwarder
-	// reconnected is non-nil only for slot 0; it signals the heartbeat goroutine to send an
-	// immediate heartbeat after a reconnect so the server re-registers the route promptly.
-	reconnected chan struct{}
 	// stats records data-plane liveness from observed heartbeat echo replies; may be nil.
 	stats *HeartbeatStats
+	// registrations returns the route-registration payloads to announce on this conn after each
+	// (re)connect, so the server registers the route immediately instead of waiting for data or a
+	// periodic heartbeat. Computed lazily (picks up the current TUN IP); may be nil in tests.
+	registrations func() [][]byte
 }
 
 // run manages this slot's single connection with reconnect logic.
 func (s *connSlot) run(ctx context.Context) {
-	firstConnect := true
 	for ctx.Err() == nil {
 		func() {
 			subCtx, cancel := context.WithCancel(ctx)
@@ -200,16 +193,22 @@ func (s *connSlot) run(ctx context.Context) {
 			defer conn.Close()
 			plog.G(ctx).Debugf("[Client-%d] Connected to %s", s.id, conn.RemoteAddr())
 
-			// Signal heartbeat on reconnect (not first connect — initial heartbeat covers that).
-			if s.reconnected != nil && !firstConnect {
-				select {
-				case s.reconnected <- struct{}{}:
-				default:
+			udpConn := conn.(*UDPConnOverTCP)
+
+			// Proactively register this conn's route on the server: announce our TUN IP(s) right
+			// away so the server can route reverse traffic to us immediately, without waiting for
+			// the first data packet or a periodic heartbeat broadcast (which may be dropped under
+			// load). Sent synchronously before the read/write loops start, so there is no competing
+			// writer. Best-effort — a failure just falls through; the loops will catch a dead conn.
+			if s.registrations != nil {
+				for _, payload := range s.registrations() {
+					if _, err = udpConn.Write(payload); err != nil {
+						plog.G(ctx).Debugf("[Client-%d] Failed to send route registration: %v", s.id, err)
+						break
+					}
 				}
 			}
-			firstConnect = false
 
-			udpConn := conn.(*UDPConnOverTCP)
 			errChan := make(chan error, 2)
 			go s.readFromConn(subCtx, udpConn, errChan)
 			go s.writeToConn(subCtx, udpConn.Conn, errChan)
@@ -318,6 +317,37 @@ func (p *periodicDeadline) refresh() error {
 	return p.set(p.next)
 }
 
+// registrationPayloads builds the proactive route-registration payloads — one ICMP echo to the
+// gateway per TUN address family, each prefixed with the gvisor type byte (canonical layout, no
+// datagram length header: UDPConnOverTCP.Write frames that on send). A slot writes these on every
+// (re)connect so the server registers the route for that conn immediately. The echo also doubles
+// as a liveness ping (its reply marks HeartbeatStats). Returns nil if the TUN IPs are unavailable.
+func (t *clientTransport) registrationPayloads() [][]byte {
+	tunIfi, err := netutil.GetTunDeviceByConn(t.dev.tun)
+	if err != nil {
+		return nil
+	}
+	srcIPv4, srcIPv6, _, _ := netutil.GetTunDeviceIP(tunIfi.Name)
+	var payloads [][]byte
+	appendPayload := func(icmp []byte) {
+		payload := make([]byte, typePrefixLen+len(icmp))
+		payload[0] = packetTypeToGvisor
+		copy(payload[typePrefixLen:], icmp)
+		payloads = append(payloads, payload)
+	}
+	if srcIPv4 != nil {
+		if icmp, e := netutil.GenICMPPacket(srcIPv4, config.RouterIP); e == nil {
+			appendPayload(icmp)
+		}
+	}
+	if srcIPv6 != nil {
+		if icmp, e := netutil.GenICMPPacketIPv6(srcIPv6, config.RouterIP6); e == nil {
+			appendPayload(icmp)
+		}
+	}
+	return payloads
+}
+
 func (t *clientTransport) heartbeats(ctx context.Context) {
 	tunIfi, err := netutil.GetTunDeviceByConn(t.dev.tun)
 	if err != nil {
@@ -362,9 +392,6 @@ func (t *clientTransport) heartbeats(ctx context.Context) {
 		select {
 		case <-ticker.C:
 			sendAll("periodic")
-		case <-t.reconnected:
-			sendAll("reconnected")
-			ticker.Reset(config.KeepAliveTime)
 		case <-ctx.Done():
 			return
 		}

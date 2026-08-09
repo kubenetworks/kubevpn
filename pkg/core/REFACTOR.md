@@ -517,6 +517,18 @@ Before: disconnect → 2s sleep → dial → wait 0-58s for heartbeat → AddRou
 After:  disconnect → dial → immediate heartbeat → AddRoute (< 100ms)
 ```
 
+### Superseded
+
+The `reconnected` channel added here was later **removed**. Routing the reconnect
+heartbeat through `tunInbound` → `broadcastToSlots` → `trySendToSlot` meant it
+could be dropped under load (non-blocking send), and it was broadcast to all slots
+rather than the one that reconnected. It is replaced by **proactive per-conn
+registration**: each slot writes its route announcement (ICMP echo carrying its TUN
+IP) directly on the freshly dialed conn before the read/write loops start
+(`connSlot.run` → `clientTransport.registrationPayloads`). That is drop-immune,
+targets the exact new conn, and its echo reply also refreshes the liveness signal —
+so the immediate-recovery result above still holds, more robustly.
+
 ---
 
 ## Iteration 15: Client Outbound Zero-Copy (completed)

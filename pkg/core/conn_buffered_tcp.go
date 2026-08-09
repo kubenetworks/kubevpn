@@ -74,10 +74,24 @@ func (c *bufferedTCP) run(ctx context.Context) {
 		c.closed.Store(true)
 		close(c.done)
 	}()
+	// Write deadline: a Write to a half-open TCP succeeds (the bytes sit in the kernel send buffer)
+	// until that buffer fills, so without a deadline a dead peer stays invisible for minutes. Bound
+	// it to KeepAliveTime: a stuck write then errors, run() closes the conn — which unblocks the
+	// paired reader and triggers RemoveRoutesByConn — and writePacket starts returning false so
+	// ConnList falls back to a healthy conn. The underlying socket is shared with
+	// readFromEndpointWriteToTCPConn; both writers use the same timeout and refresh before each
+	// write, so neither ever observes the other's deadline as prematurely expired.
+	dl := &periodicDeadline{timeout: config.KeepAliveTime, set: c.Conn.SetWriteDeadline}
 	for {
 		select {
 		case pkt := <-c.ch:
 			if pkt == nil {
+				return
+			}
+			if err := dl.refresh(); err != nil {
+				pkt.release()
+				plog.G(ctx).Errorf("[TCP] Failed to set write deadline: %v", err)
+				_ = c.Conn.Close()
 				return
 			}
 			_, err := c.Conn.Write(pkt.data[:datagramHeaderLen+pkt.length])

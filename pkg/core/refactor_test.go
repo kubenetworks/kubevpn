@@ -157,10 +157,13 @@ type errWriter struct {
 	writeErr error
 }
 
-func (e *errWriter) Write([]byte) (int, error) { return 0, e.writeErr }
-func (e *errWriter) Close() error              { return nil }
-func (e *errWriter) LocalAddr() net.Addr       { return &net.TCPAddr{} }
-func (e *errWriter) RemoteAddr() net.Addr      { return &net.TCPAddr{} }
+func (e *errWriter) Write([]byte) (int, error)        { return 0, e.writeErr }
+func (e *errWriter) Close() error                     { return nil }
+func (e *errWriter) LocalAddr() net.Addr              { return &net.TCPAddr{} }
+func (e *errWriter) RemoteAddr() net.Addr             { return &net.TCPAddr{} }
+func (e *errWriter) SetDeadline(time.Time) error      { return nil }
+func (e *errWriter) SetReadDeadline(time.Time) error  { return nil }
+func (e *errWriter) SetWriteDeadline(time.Time) error { return nil }
 
 func TestReadFromEndpointWriteToTCPConn_ReturnsOnWriteError(t *testing.T) {
 	hub := NewRouteHub()
