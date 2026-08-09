@@ -13,8 +13,6 @@ import (
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	v12 "k8s.io/client-go/kubernetes/typed/core/v1"
-	"k8s.io/client-go/util/retry"
-	"sigs.k8s.io/yaml"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
@@ -79,45 +77,7 @@ func (s *envoyRuleSpec) validate() error {
 }
 
 func addEnvoyConfig(ctx context.Context, mapInterface v12.ConfigMapInterface, spec envoyRuleSpec) error {
-	if err := spec.validate(); err != nil {
-		return err
-	}
-	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-		configMap, err := mapInterface.Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
-		if err != nil {
-			return err
-		}
-		v := make([]*xds.Virtual, 0)
-		if str, ok := configMap.Data[config.KeyEnvoy]; ok {
-			if err = yaml.Unmarshal([]byte(str), &v); err != nil {
-				return err
-			}
-		}
-
-		v = addVirtualRule(ctx, v, spec)
-		marshal, err := yaml.Marshal(v)
-		if err != nil {
-			return err
-		}
-		configMap.Data[config.KeyEnvoy] = string(marshal)
-		if _, err = mapInterface.Update(ctx, configMap, metav1.UpdateOptions{}); err != nil {
-			return err
-		}
-		// Log the persisted rule set for this workload so the actual rules (headers/tunIP/
-		// owner) are visible for diagnosing full-proxy routing and ownership.
-		var rules []string
-		for _, virtual := range v {
-			if virtual.UID == spec.NodeID && virtual.Namespace == spec.Namespace {
-				for _, r := range virtual.Rules {
-					rules = append(rules, fmt.Sprintf("{headers=%v tunV4=%q owner=%q portmap=%v}",
-						r.Headers, r.LocalTunIPv4, r.OwnerID, r.PortMap))
-				}
-			}
-		}
-		plog.G(ctx).Infof("[Envoy] added rule for %s/%s (headers=%v tunV4=%q owner=%q); workload rules now=%v",
-			spec.Namespace, spec.NodeID, spec.Headers, spec.LocalTunIPv4, spec.OwnerID, rules)
-		return nil
-	})
+	return NewVirtualStore(mapInterface).AddRule(ctx, spec)
 }
 
 func addVirtualRule(ctx context.Context, v []*xds.Virtual, spec envoyRuleSpec) []*xds.Virtual {
@@ -197,70 +157,15 @@ func addVirtualRule(ctx context.Context, v []*xds.Virtual, spec envoyRuleSpec) [
 }
 
 func removeEnvoyConfig(ctx context.Context, mapInterface v12.ConfigMapInterface, namespace string, nodeID string, ownerID string) (empty bool, found bool, err error) {
-	err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-		// Reset per-attempt state so retries start clean.
-		empty = false
-		found = false
-
-		configMap, getErr := mapInterface.Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
-		if k8serrors.IsNotFound(getErr) {
-			empty = true
-			return nil
-		}
-		if getErr != nil {
-			return getErr
-		}
-		str, ok := configMap.Data[config.KeyEnvoy]
-		if !ok {
-			return fmt.Errorf("cannot find value for key: envoy-config.yaml: %w", config.ErrCleanupFailed)
-		}
-		var v []*xds.Virtual
-		if unmarshalErr := yaml.Unmarshal([]byte(str), &v); unmarshalErr != nil {
-			return unmarshalErr
-		}
-		for _, virtual := range v {
-			if nodeID == virtual.UID && namespace == virtual.Namespace {
-				for i := 0; i < len(virtual.Rules); i++ {
-					if ownerID == virtual.Rules[i].OwnerID {
-						found = true
-						virtual.Rules = append(virtual.Rules[:i], virtual.Rules[i+1:]...)
-						i--
-					}
-				}
-			}
-		}
-		if !found {
-			// Surface ownership mismatches: a rule that cannot be removed because no rule
-			// for this workload carries our ownerID is how stale rules accumulate (and how
-			// an empty/IP-valued OwnerID anomaly manifests). List the owners that ARE present.
-			var owners []string
-			for _, virtual := range v {
-				if nodeID == virtual.UID && namespace == virtual.Namespace {
-					for _, r := range virtual.Rules {
-						owners = append(owners, fmt.Sprintf("%q(headers=%v)", r.OwnerID, r.Headers))
-					}
-				}
-			}
-			plog.G(ctx).Warnf("[Envoy] removeEnvoyConfig: ownerID %q not found for %s/%s; existing rule owners=%v",
-				ownerID, namespace, nodeID, owners)
-			return nil
-		}
-
-		// remove default
-		for i := 0; i < len(v); i++ {
-			if nodeID == v[i].UID && namespace == v[i].Namespace && len(v[i].Rules) == 0 {
-				v = append(v[:i], v[i+1:]...)
-				i--
-				empty = true
-			}
-		}
-		b, marshalErr := yaml.Marshal(v)
-		if marshalErr != nil {
-			return marshalErr
-		}
-		configMap.Data[config.KeyEnvoy] = string(b)
-		_, updateErr := mapInterface.Update(ctx, configMap, metav1.UpdateOptions{})
-		return updateErr
-	})
-	return empty, found, err
+	configMap, getErr := mapInterface.Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if k8serrors.IsNotFound(getErr) {
+		return true, false, nil
+	}
+	if getErr != nil {
+		return false, false, getErr
+	}
+	if _, ok := configMap.Data[config.KeyEnvoy]; !ok {
+		return false, false, fmt.Errorf("cannot find value for key: envoy-config.yaml: %w", config.ErrCleanupFailed)
+	}
+	return NewVirtualStore(mapInterface).RemoveRule(ctx, namespace, nodeID, ownerID)
 }

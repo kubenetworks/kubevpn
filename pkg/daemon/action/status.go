@@ -13,6 +13,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	netutil "github.com/wencaiwulue/kubevpn/v2/pkg/util/netutil"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/xds"
 )
 
@@ -31,7 +32,7 @@ func (svr *Server) Status(ctx context.Context, req *rpc.StatusRequest) (*rpc.Sta
 
 	if len(req.ConnectionIDs) != 0 {
 		svr.connMu.RLock()
-		var matched []*handler.ConnectOptions
+		var matched []handler.Connection
 		for _, connectionID := range req.ConnectionIDs {
 			if opt, _ := svr.findConnection(connectionID); opt != nil {
 				matched = append(matched, opt)
@@ -45,7 +46,7 @@ func (svr *Server) Status(ctx context.Context, req *rpc.StatusRequest) (*rpc.Sta
 		wg := sync.WaitGroup{}
 		for _, options := range matched {
 			wg.Add(1)
-			go func(options *handler.ConnectOptions) {
+			go func(options handler.Connection) {
 				defer wg.Done()
 				result := buildConnectionStatus(options, ips)
 				var err error
@@ -65,7 +66,7 @@ func (svr *Server) Status(ctx context.Context, req *rpc.StatusRequest) (*rpc.Sta
 	}
 
 	svr.connMu.RLock()
-	snapshot := make([]*handler.ConnectOptions, len(svr.connections))
+	snapshot := make([]handler.Connection, len(svr.connections))
 	copy(snapshot, svr.connections)
 	currentID := svr.currentConnectionID
 	svr.connMu.RUnlock()
@@ -74,7 +75,7 @@ func (svr *Server) Status(ctx context.Context, req *rpc.StatusRequest) (*rpc.Sta
 	wg.Add(len(snapshot))
 	list := make([]*rpc.Status, len(snapshot))
 	for i, options := range snapshot {
-		go func(i int, options *handler.ConnectOptions) {
+		go func(i int, options handler.Connection) {
 			defer wg.Done()
 			result := buildConnectionStatus(options, ips)
 			var err error
@@ -90,7 +91,7 @@ func (svr *Server) Status(ctx context.Context, req *rpc.StatusRequest) (*rpc.Sta
 	return &rpc.StatusResponse{List: list, CurrentConnectionID: currentID}, nil
 }
 
-func resolveTunIP(connect *handler.ConnectOptions, ips map[string]tunIP) (v4, v6 string) {
+func resolveTunIP(connect handler.Connection, ips map[string]tunIP) (v4, v6 string) {
 	if ips != nil {
 		if ip, ok := ips[connect.GetConnectionID()]; ok {
 			return ip.v4, ip.v6
@@ -122,18 +123,25 @@ func deriveConnectionStatus(tunUp bool, lastHeartbeat time.Time) string {
 // resolveStatus returns the data-plane status verdict. The user daemon reuses the verdict the
 // sudo daemon already computed (carried in the Status string via getSudoTunIPs); the sudo daemon
 // computes it locally from its TUN + heartbeat. Mirrors resolveTunIP's user/sudo split.
-func resolveStatus(connect *handler.ConnectOptions, ips map[string]tunIP, tunUp bool) string {
+func resolveStatus(connect handler.Connection, ips map[string]tunIP, tunUp bool) string {
+	var connectionID string
+	if connect != nil {
+		connectionID = connect.GetConnectionID()
+	}
 	if ips != nil {
-		if ip, ok := ips[connect.GetConnectionID()]; ok {
+		if ip, ok := ips[connectionID]; ok {
 			return ip.status
 		}
 		// User daemon, but the sudo daemon has no such connection: data plane is down.
 		return StatusFailed
 	}
+	if connect == nil {
+		return deriveConnectionStatus(tunUp, time.Time{})
+	}
 	return deriveConnectionStatus(tunUp, connect.GetLastHeartbeat())
 }
 
-func buildConnectionStatus(connect *handler.ConnectOptions, ips map[string]tunIP) *rpc.Status {
+func buildConnectionStatus(connect handler.Connection, ips map[string]tunIP) *rpc.Status {
 	v4, v6 := resolveTunIP(connect, ips)
 	tunName := ""
 	var tunIPs []net.IP
@@ -144,7 +152,7 @@ func buildConnectionStatus(connect *handler.ConnectOptions, ips map[string]tunIP
 		tunIPs = append(tunIPs, net.ParseIP(v6))
 	}
 	if len(tunIPs) > 0 {
-		if dev, err := util.GetTunDevice(tunIPs...); err == nil {
+		if dev, err := netutil.GetTunDevice(tunIPs...); err == nil {
 			tunName = dev.Name
 		}
 	}
@@ -152,8 +160,8 @@ func buildConnectionStatus(connect *handler.ConnectOptions, ips map[string]tunIP
 	info := rpc.Status{
 		ConnectionID: connect.GetConnectionID(),
 		Cluster:      util.GetKubeconfigCluster(connect.GetFactory()),
-		Kubeconfig:   connect.OriginKubeconfigPath,
-		Namespace:    connect.WorkloadNamespace,
+		Kubeconfig:   connect.GetOriginKubeconfigPath(),
+		Namespace:    connect.GetWorkloadNamespace(),
 		Status:       resolveStatus(connect, ips, tunName != ""),
 		Netif:        tunName,
 		IPv4:         v4,
@@ -162,7 +170,7 @@ func buildConnectionStatus(connect *handler.ConnectOptions, ips map[string]tunIP
 	return &info
 }
 
-func buildProxyAndSyncStatus(ctx context.Context, connect *handler.ConnectOptions, sync *handler.SyncOptions) ([]*rpc.Proxy, []*rpc.Sync, error) {
+func buildProxyAndSyncStatus(ctx context.Context, connect handler.Connection, sync *handler.SyncOptions) ([]*rpc.Proxy, []*rpc.Sync, error) {
 	var proxyList []*rpc.Proxy
 	// Read the ConfigMap straight from the informer cache (near-real-time, zero API cost).
 	configMap, cmErr := connect.GetTrafficManagerConfigMap(ctx)
@@ -185,14 +193,14 @@ func buildProxyAndSyncStatus(ctx context.Context, connect *handler.ConnectOption
 					Headers:       rule.Headers,
 					LocalTunIPv4:  rule.LocalTunIPv4,
 					LocalTunIPv6:  rule.LocalTunIPv6,
-					CurrentDevice: rule.OwnerID == connect.OwnerID,
+					CurrentDevice: rule.OwnerID == connect.GetOwnerID(),
 					PortMap:       portMapToLocalPorts(rule),
 				})
 			}
 			proxyList = append(proxyList, &rpc.Proxy{
 				ConnectionID: connect.GetConnectionID(),
 				Cluster:      util.GetKubeconfigCluster(connect.GetFactory()),
-				Kubeconfig:   connect.OriginKubeconfigPath,
+				Kubeconfig:   connect.GetOriginKubeconfigPath(),
 				Namespace:    virtual.Namespace,
 				Workload:     virtual.UID,
 				RuleList:     proxyRule,
@@ -206,8 +214,8 @@ func buildProxyAndSyncStatus(ctx context.Context, connect *handler.ConnectOption
 			if connect != nil {
 				connectionID = connect.GetConnectionID()
 				cluster = util.GetKubeconfigCluster(connect.GetFactory())
-				kubeconfig = connect.OriginKubeconfigPath
-				namespace = connect.WorkloadNamespace
+				kubeconfig = connect.GetOriginKubeconfigPath()
+				namespace = connect.GetWorkloadNamespace()
 			}
 			syncList = append(syncList, &rpc.Sync{
 				ConnectionID:     connectionID,

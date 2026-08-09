@@ -13,7 +13,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	netutil "github.com/wencaiwulue/kubevpn/v2/pkg/util/netutil"
 )
 
 func Once(ctx context.Context, f cmdutil.Factory) error {
@@ -69,7 +69,7 @@ func labelNs(ctx context.Context, namespace string, clientset kubernetes.Interfa
 
 func genTLS(ctx context.Context, namespace string, clientset kubernetes.Interface) error {
 	plog.G(ctx).Infof("Generating TLS for Namespace %s", namespace)
-	crt, key, host, err := util.GenTLSCert(ctx, namespace)
+	crt, key, host, err := netutil.GenTLSCert(ctx, namespace)
 	if err != nil {
 		return err
 	}
@@ -110,14 +110,14 @@ func restartDeploy(ctx context.Context, f cmdutil.Factory) error {
 
 func getCIDR(ctx context.Context, factory cmdutil.Factory) error {
 	plog.G(ctx).Infof("Getting CIDR")
-	c := &ConnectOptions{
+	ds := &DataSession{
 		Image: config.Image,
 	}
-	err := c.InitClient(factory)
+	err := ds.InitClient(factory)
 	if err != nil {
 		return err
 	}
-	cidrs, _, err := c.getCIDR(ctx)
+	cidrs, _, err := ds.getCIDR(ctx)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to get CIDR: %v", err)
 		return err

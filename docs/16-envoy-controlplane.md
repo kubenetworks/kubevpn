@@ -187,7 +187,67 @@ Starts a gRPC server on port 9002 that registers:
 
 Server parameters: max concurrent streams = 1,000,000, keepalive = 15s.
 
-## 5. Startup Flow
+## 5. ENVOY_CONFIG Write Path — `inject.VirtualStore`
+
+All mutations to the `ENVOY_CONFIG` key of the `kubevpn-traffic-manager` ConfigMap go through a
+single read-modify-write abstraction: `inject.VirtualStore` (in `pkg/inject/virtual_store.go`).
+
+### Design
+
+```go
+// VirtualStore wraps a ConfigMapInterface and provides one optimistic
+// read-modify-write loop for the ENVOY_CONFIG key.
+type VirtualStore struct { mapInterface v12.ConfigMapInterface }
+
+// Mutate performs RetryOnConflict(DefaultBackoff, Get → decode → fn → encode → Update).
+// fn returns nil to signal a no-op (Update skipped).
+func (s *VirtualStore) Mutate(ctx context.Context, fn MutationFunc) error
+```
+
+`Mutate` wraps `retry.RetryOnConflict(retry.DefaultBackoff, ...)`. On each attempt it:
+1. GETs the ConfigMap (preserving `ResourceVersion`)
+2. Unmarshals the YAML in `cm.Data[ENVOY_CONFIG]` → `[]*xds.Virtual`
+3. Calls `fn` (the mutation)
+4. Marshals back to YAML and calls `Update` (optimistic concurrency via `ResourceVersion`)
+
+If the Update returns a 409 Conflict (concurrent writer bumped `ResourceVersion`), `RetryOnConflict`
+retries from the Get. If `fn` returns `nil, nil`, the Update is skipped (idempotent no-op).
+
+### Methods
+
+| Method | Replaces | Called from |
+|--------|----------|-------------|
+| `VirtualStore.AddRule(ctx, envoyRuleSpec)` | `addEnvoyConfig` standalone func | `pkg/inject/envoy.go:addEnvoyConfig` (thin wrapper) |
+| `VirtualStore.RemoveRule(ctx, ns, nodeID, ownerID)` | `removeEnvoyConfig` standalone func | `pkg/inject/envoy.go:removeEnvoyConfig` (thin wrapper) |
+
+`addEnvoyConfig` and `removeEnvoyConfig` in `envoy.go` remain as the call-site names (callers in
+`mesh.go` and `fargate.go` are unchanged) but their bodies now delegate to `VirtualStore`.
+
+### syncEnvoyRuleIP — Get+Update (not Patch)
+
+`pkg/xds/tun_config.go:syncEnvoyRuleIP` (called when a client's TUN IP changes) was previously
+implemented with a JSON Patch (`k8stypes.JSONPatchType`). It has been rewritten to use the same
+Get→decode→mutate→encode→Update loop with `retry.RetryOnConflict(retry.DefaultBackoff, ...)`,
+matching the approach used by `addEnvoyConfig` and `removeEnvoyConfig`.
+
+This matters because JSON Patch bypasses ResourceVersion-based optimistic locking at the field
+level: two concurrent JSON Patches on the same key can silently overwrite each other (the
+`retry.RetryOnConflict` wrapper had no practical effect since JSON Patch on a data field never
+returns a 409). With Get+Update all three writers share the same ResourceVersion conflict-detection
+mechanism.
+
+`syncEnvoyRuleIP` does NOT import `pkg/inject` (that would create an import cycle since
+`pkg/inject` already imports `pkg/xds`). It inlines the same Get→YAML→Update pattern rather than
+calling through `VirtualStore`.
+
+### Concurrency Model
+
+`VirtualStore` does not use a serializing mutex — it relies on optimistic concurrency. Two
+concurrent `Mutate` calls that both Get the same `ResourceVersion` will race to Update; one
+succeeds, the other gets a 409 and retries with a fresh Get. `retry.DefaultBackoff` (exponential,
+~5 retries) handles transient conflicts.
+
+## 6. Startup Flow
 
 `Main()` orchestrates everything:
 
@@ -201,7 +261,7 @@ Main(ctx, factory, port, logger):
   6. Main loop: receive from notifyCh → proc.ProcessFile()
 ```
 
-## 6. Multi-User Traffic Splitting
+## 7. Multi-User Traffic Splitting
 
 When multiple users proxy the same workload with different headers:
 
@@ -226,7 +286,7 @@ When multiple users proxy the same workload with different headers:
 
 Envoy routes requests with `x-user: alice` to `198.18.0.5:9080` (Alice's local machine) and `x-user: bob` to `198.18.0.6:9080` (Bob's). Unmatched requests go to `origin_cluster` (the real application).
 
-## 7. Related Files
+## 8. Related Files
 
 | File | Purpose |
 |------|---------|
@@ -236,5 +296,6 @@ Envoy routes requests with `x-user: alice` to `198.18.0.5:9080` (Alice's local m
 | `pkg/xds/watcher.go` | ConfigMap watcher with informer |
 | `pkg/xds/server.go` | gRPC server setup |
 | `pkg/xds/tun_config.go` | TunConfigServer (see `03-dhcp-ip-allocation.md`) |
-| `pkg/inject/envoy.go` | Writes Virtual/Rule to ConfigMap (producer side) |
+| `pkg/inject/envoy.go` | Writes Virtual/Rule to ConfigMap (producer side); `addEnvoyConfig`/`removeEnvoyConfig` delegate to `VirtualStore` |
+| `pkg/inject/virtual_store.go` | `VirtualStore` — single read-modify-write path for `ENVOY_CONFIG` (`Mutate`, `AddRule`, `RemoveRule`) |
 | `pkg/config/config.go` | ConfigMap key names (`KeyEnvoy`, etc.) |

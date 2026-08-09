@@ -6,7 +6,7 @@ import (
 	"sync"
 
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	netutil "github.com/wencaiwulue/kubevpn/v2/pkg/util/netutil"
 )
 
 // transport is the role-specific half of the symmetric tunDevice: how outbound packets (read
@@ -52,7 +52,7 @@ func TunHandler(forward *Forwarder, hub *RouteHub, stats *HeartbeatStats) Handle
 }
 
 func (h *tunHandler) Handle(ctx context.Context, tun net.Conn) {
-	tunIfi, err := util.GetTunDeviceByConn(tun)
+	tunIfi, err := netutil.GetTunDeviceByConn(tun)
 	if err != nil {
 		plog.G(ctx).Errorf("[TUN] Failed to get tun device: %v", err)
 		return
@@ -86,7 +86,7 @@ func serve(ctx context.Context, dev *tunDevice) {
 		wg.Add(1)
 		go func(r namedRoutine) {
 			defer wg.Done()
-			defer util.HandleCrash()
+			defer netutil.HandleCrash()
 			plog.G(ctx).Debugf("[TUN] routine %q started", r.name)
 			r.fn(ctx)
 			plog.G(ctx).Debugf("[TUN] routine %q stopped", r.name)

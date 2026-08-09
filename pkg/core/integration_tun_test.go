@@ -25,7 +25,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/tun"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	netutil "github.com/wencaiwulue/kubevpn/v2/pkg/util/netutil"
 
 	"github.com/containernetworking/cni/pkg/types"
 )
@@ -540,7 +540,7 @@ func TestTUN_InterClient_Routing(t *testing.T) {
 
 	// Client A pings Client B's TUN IP
 	t.Log("Testing inter-client: A (198.18.0.2) → B (198.18.0.3)")
-	ok, err := util.Ping(ctx, "198.18.0.2", "198.18.0.3")
+	ok, err := netutil.Ping(ctx, "198.18.0.2", "198.18.0.3")
 	if err != nil {
 		t.Logf("⚠️ Ping A→B error (may be expected without full ICMP): %v", err)
 	} else if ok {

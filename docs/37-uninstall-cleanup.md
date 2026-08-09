@@ -46,29 +46,40 @@ Uninstall(ctx, clientset, ns)                          pkg/daemon/action/uninsta
 This is the inverse of the deployment described in
 [24-traffic-manager-deployment.md](24-traffic-manager-deployment.md).
 
-## 3. Exit Cleanup (`ConnectOptions.Cleanup`)
+## 3. Exit Cleanup (`Cleanup`)
 
-`Cleanup` runs from two triggers, both wired in `pkg/handler/cleaner.go`:
+`Cleanup` runs from two triggers:
 
-1. **Signal handler** — `setupSignalHandler` (started by `DoConnect`) waits on
-   `SIGHUP/SIGINT/SIGTERM/SIGQUIT` (`SIGKILL`/`SIGSTOP` are uncatchable and omitted) or `ctx.Done()`.
+1. **Signal handler** — `DataSession.setupSignalHandler` (started by `DoConnect` in the root
+   daemon) waits on `SIGHUP/SIGINT/SIGTERM/SIGQUIT` (`SIGKILL`/`SIGSTOP` are uncatchable and
+   omitted) or `ctx.Done()`.
 2. **Explicit disconnect/quit** call paths in `daemon/action`.
 
+Cleanup dispatches by **type identity** — no `isDataPlane` flag or nil-check:
+
 ```
-Cleanup(logCtx)                                         pkg/handler/cleaner.go
-  ├── cleanupMu.Lock; if cleanedUp ⇒ return            ── idempotent, but RETRYABLE (see below)
-  ├── stop ConfigMapStore informer
-  ├── ctx = WithTimeout(10s)
-  ├── if !isDataPlane ⇒ cleanupControlPlane(ctx)        ── user daemon
-  │        ├── delete helper pod + Jobs (grace=0)
-  │        ├── LeaveAllProxyResources(ctx)              ── owner-scoped leave (see doc 36)
-  │        ├── executeRollbackFuncs(...)
-  │        └── on error: UNLOCK without setting cleanedUp ⇒ retried on next call
-  └── else ⇒ cleanupDataPlane(ctx)                      ── root daemon
-           ├── executeRollbackFuncs(...)
-           ├── network.Stop()                           ── tear down TUN/routes/DNS/port-forward
-           └── cancel()
-  └── cleanedUp = true; UNLOCK
+ConnectOptions.Cleanup(logCtx)                          pkg/handler/cleaner.go (user daemon)
+  └── SessionBase.cleanup(logCtx, cleanupControlPlane)
+        ├── cleanupMu.Lock; if cleanedUp ⇒ return      ── idempotent, but RETRYABLE
+        ├── stop ConfigMapStore informer
+        ├── ctx = WithTimeout(10s)
+        ├── cleanupControlPlane(ctx)
+        │        ├── delete helper pod + Jobs (grace=0)
+        │        ├── LeaveAllProxyResources(ctx)        ── owner-scoped leave (see doc 36)
+        │        ├── executeRollbackFuncs(...)
+        │        └── on error: UNLOCK without setting cleanedUp ⇒ retried on next call
+        └── cleanedUp = true; UNLOCK
+
+DataSession.Cleanup(logCtx)                             pkg/handler/data_session.go (root daemon)
+  └── SessionBase.cleanup(logCtx, cleanupDataPlane)
+        ├── cleanupMu.Lock; if cleanedUp ⇒ return
+        ├── stop ConfigMapStore informer
+        ├── ctx = WithTimeout(10s)
+        ├── cleanupDataPlane()
+        │        ├── executeRollbackFuncs(...)
+        │        ├── nm.Stop()                          ── tear down TUN/routes/DNS/port-forward
+        │        └── cancel()
+        └── cleanedUp = true; UNLOCK
 ```
 
 ### Why mutex + flag, not `sync.Once`
@@ -83,11 +94,14 @@ attempt.
 
 This split mirrors the dual-daemon model ([02-dual-daemon.md](02-dual-daemon.md)):
 
-| | Control plane (user daemon) | Data plane (root daemon) |
+| | Control plane (user daemon, `ConnectOptions`) | Data plane (root daemon, `DataSession`) |
 |---|---|---|
-| `isDataPlane` | false | true |
+| Type | `*ConnectOptions` (= `*ControlSession`) | `*DataSession` |
 | Removes | helper pod, Jobs, proxy injections, rollbacks | rollbacks, NetworkManager, context |
 | TUN IP | not its concern | **not explicitly released** — DHCP lease expiry reclaims it |
+
+The type IS the discriminant — there is no `isDataPlane` field. Both types embed `SessionBase`
+which provides the shared mutex-gated `cleanup` mechanics.
 
 Note the TUN IP is intentionally *not* freed on cleanup; per the DHCP protocol the lease simply
 expires and the reaper reclaims it — see [03-dhcp-ip-allocation.md](03-dhcp-ip-allocation.md).
@@ -105,8 +119,9 @@ generic "undo what I did" hook (e.g. restoring a Service targetPort, removing an
 |---|---|
 | `pkg/daemon/action/uninstall.go` | `Uninstall` RPC + package `Uninstall` + `cleanupLocalContainer` |
 | `cmd/kubevpn/cmds/uninstall.go` | CLI: disconnect then uninstall |
-| `pkg/handler/cleaner.go` | `Cleanup`, `cleanupControlPlane`, `cleanupDataPlane`, signal handler, `executeRollbackFuncs` |
-| `pkg/handler/connect.go` | `AddRollbackFunc`, `getRollbackFuncs` |
+| `pkg/handler/cleaner.go` | `ConnectOptions.Cleanup`, `cleanupControlPlane`, `executeRollbackFuncs` |
+| `pkg/handler/data_session.go` | `DataSession.Cleanup`, `cleanupDataPlane`, `setupSignalHandler` |
+| `pkg/handler/session_base.go` | `SessionBase.cleanup` (shared mutex gate), `AddRollbackFunc`, `getRollbackFuncs` |
 
 ## 6. Related Docs
 

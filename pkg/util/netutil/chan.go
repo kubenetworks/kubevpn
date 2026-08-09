@@ -1,4 +1,4 @@
-package util
+package netutil
 
 // SafeWrite attempts a non-blocking send to a channel. Returns false if the channel is full.
 func SafeWrite[T any](c chan<- T, value T, fallback ...func(v T)) bool {

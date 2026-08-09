@@ -23,7 +23,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	netutil "github.com/wencaiwulue/kubevpn/v2/pkg/util/netutil"
 )
 
 // Config holds DNS configuration for setting up cluster DNS resolution on the local machine.
@@ -61,7 +61,7 @@ func (c *Config) AddServiceNameToHosts(ctx context.Context, hosts ...Entry) (int
 }
 
 func (c *Config) watchServiceToAddHosts(ctx context.Context, hosts []Entry) {
-	defer util.HandleCrash()
+	defer netutil.HandleCrash()
 	ticker := time.NewTicker(config.DNSRouteRefreshInterval)
 	defer ticker.Stop()
 	_, err := c.SvcInformer.AddEventHandler(cache.FilteringResourceEventHandler{

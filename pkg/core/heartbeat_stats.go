@@ -5,14 +5,14 @@ import (
 	"time"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	netutil "github.com/wencaiwulue/kubevpn/v2/pkg/util/netutil"
 )
 
 // isHeartbeatEchoReply reports whether ipPacket is an ICMP echo reply from the server
 // gateway (RouterIP / RouterIP6) — i.e. a reply to one of our keepalive heartbeats.
 func isHeartbeatEchoReply(ipPacket []byte) bool {
-	return util.IsICMPEchoReplyFrom(ipPacket, config.RouterIP) ||
-		util.IsICMPEchoReplyFrom(ipPacket, config.RouterIP6)
+	return netutil.IsICMPEchoReplyFrom(ipPacket, config.RouterIP) ||
+		netutil.IsICMPEchoReplyFrom(ipPacket, config.RouterIP6)
 }
 
 // HeartbeatStats records the last time an ICMP echo reply from the server gateway

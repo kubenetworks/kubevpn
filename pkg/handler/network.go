@@ -33,6 +33,7 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/tun"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	netutil "github.com/wencaiwulue/kubevpn/v2/pkg/util/netutil"
 )
 
 // NetworkConfig holds immutable configuration for NetworkManager.
@@ -594,7 +595,7 @@ func (nm *NetworkManager) portForward(ctx context.Context, portPair []string) er
 			sessionDuration := time.Since(sessionStart)
 			if first {
 				if err != nil {
-					util.SafeWrite(errChan, err)
+					netutil.SafeWrite(errChan, err)
 					return
 				}
 			} else {
@@ -724,7 +725,7 @@ func (nm *NetworkManager) startTUN(ctx context.Context, forwardAddress string) e
 		Routes: routes,
 		MTU:    config.DefaultMTU,
 	}
-	if enable, _ := util.IsIPv6Enabled(); enable && nm.localTunIPv6 != nil {
+	if enable, _ := netutil.IsIPv6Enabled(); enable && nm.localTunIPv6 != nil {
 		tunConfig.Addr6 = (&net.IPNet{IP: nm.localTunIPv6.IP, Mask: net.CIDRMask(128, 128)}).String()
 	}
 
@@ -773,7 +774,7 @@ func (nm *NetworkManager) getTunDeviceName() (string, error) {
 	if nm.localTunIPv6 != nil {
 		ips = append(ips, nm.localTunIPv6.IP)
 	}
-	device, err := util.GetTunDevice(ips...)
+	device, err := netutil.GetTunDevice(ips...)
 	if err != nil {
 		return "", err
 	}

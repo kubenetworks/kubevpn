@@ -34,13 +34,10 @@ func newUpgradeTestConnectOptions(t *testing.T, objects ...metav1.Object) *Conne
 		}
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
 	return &ConnectOptions{
+		SessionBase:       SessionBase{K8sClient: K8sClient{clientset: clientset}},
 		ManagerNamespace:  "test-ns",
 		WorkloadNamespace: "default",
-		K8sClient:         K8sClient{clientset: clientset},
-		ctx:               ctx,
-		cancel:            cancel,
 	}
 }
 
@@ -179,14 +176,11 @@ func TestUpgradeDeploy_DeploymentNotFound(t *testing.T) {
 
 	// Create ConnectOptions with NO deployment in the fake clientset
 	clientset := fake.NewSimpleClientset()
-	ctx, cancel := context.WithCancel(context.Background())
 	c := &ConnectOptions{
+		SessionBase:       SessionBase{K8sClient: K8sClient{clientset: clientset}},
 		ManagerNamespace:  "test-ns",
 		WorkloadNamespace: "default",
-		K8sClient:         K8sClient{clientset: clientset},
 		Image:             "ghcr.io/kubenetworks/kubevpn:v2.3.0",
-		ctx:               ctx,
-		cancel:            cancel,
 	}
 
 	err := c.UpgradeDeploy(context.Background())

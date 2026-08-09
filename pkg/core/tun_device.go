@@ -7,7 +7,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	netutil "github.com/wencaiwulue/kubevpn/v2/pkg/util/netutil"
 )
 
 const (
@@ -62,7 +62,7 @@ func (d *tunDevice) readFromTun(ctx context.Context) {
 // Both transports share this loop via tunDevice.readFromTun; only their routeOutbound dispatch
 // (debug label, framing, routing) differs.
 func (d *tunDevice) pumpTun(ctx context.Context, errLabel string, dispatch func(buf []byte, n int, src, dst net.IP)) {
-	defer util.HandleCrash()
+	defer netutil.HandleCrash()
 	consecutiveErrors := 0
 	for ctx.Err() == nil {
 		buf := config.LPool.Get().([]byte)[:]
@@ -75,7 +75,7 @@ func (d *tunDevice) pumpTun(ctx context.Context, errLabel string, dispatch func(
 			consecutiveErrors++
 			if consecutiveErrors >= maxConsecutiveTunReadErrors {
 				plog.G(ctx).Errorf("%s TUN read failed %d times in a row, giving up: %v", errLabel, consecutiveErrors, err)
-				util.SafeWrite(d.errChan, err)
+				netutil.SafeWrite(d.errChan, err)
 				return
 			}
 			// Likely transient (e.g. macOS route-listener ENOBUFS surfaced once); the fd usually
@@ -85,7 +85,7 @@ func (d *tunDevice) pumpTun(ctx context.Context, errLabel string, dispatch func(
 			continue
 		}
 		consecutiveErrors = 0
-		src, dst, _, parseErr := util.ParseIPFast(buf[tunReserve : tunReserve+n])
+		src, dst, _, parseErr := netutil.ParseIPFast(buf[tunReserve : tunReserve+n])
 		if parseErr != nil {
 			plog.G(ctx).Errorf("%s Unknown packet, dropping: %v", errLabel, parseErr)
 			config.LPool.Put(buf[:])
@@ -96,7 +96,7 @@ func (d *tunDevice) pumpTun(ctx context.Context, errLabel string, dispatch func(
 }
 
 func (d *tunDevice) writeToTun(ctx context.Context) {
-	defer util.HandleCrash()
+	defer netutil.HandleCrash()
 	defer drainPacketChan(d.tunOutbound)
 	for {
 		select {
@@ -108,7 +108,7 @@ func (d *tunDevice) writeToTun(ctx context.Context) {
 			packet.release()
 			if err != nil {
 				plog.G(ctx).Errorf("[TUN] Failed to write to tun device: %v", err)
-				util.SafeWrite(d.errChan, err)
+				netutil.SafeWrite(d.errChan, err)
 				return
 			}
 		case <-ctx.Done():

@@ -73,7 +73,7 @@ func TestQuit_StepEmittedOnlyByUserDaemon(t *testing.T) {
 		svr := &Server{
 			IsSudo:      isSudo,
 			LogFile:     logFile,
-			connections: []*handler.ConnectOptions{conn},
+			connections: []handler.Connection{conn},
 		}
 		resp := &fakeQuitServer{ctx: context.Background()}
 

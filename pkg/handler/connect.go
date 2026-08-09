@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -19,57 +18,179 @@ import (
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/dns"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/inject"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-// ConnectOptions holds all state for a kubevpn connection session.
+// ConnectOptions holds all state for a user-daemon (control-plane) kubevpn connection session.
+// It is the type stored in svr.connections when IsSudo=false.
+//
+// Type alias ControlSession = ConnectOptions is provided for semantic clarity.
+// All existing code that uses ConnectOptions continues to compile unchanged.
 type ConnectOptions struct {
-	K8sClient
+	SessionBase
 
-	ManagerNamespace     string
-	ExtraRouteInfo       ExtraRouteInfo
-	OriginKubeconfigPath string
-	WorkloadNamespace    string
-	Lock                 *sync.Mutex
-	Image                string
-	ImagePullSecretName  string
-	// RequestRaw stores the protobuf-serialized ConnectRequest for daemon restart replay.
+	// Persisted for daemon restart replay (json tag required).
 	RequestRaw []byte `json:"RequestRaw,omitempty"`
 
-	ctx          context.Context
-	cancel       context.CancelFunc
-	isDataPlane  bool
-	OwnerID      string `json:"OwnerID,omitempty"`
-	ConnectionID string
+	// Identity: set from the incoming ConnectRequest and persisted (json tags).
+	ManagerNamespace     string
+	WorkloadNamespace    string
+	ExtraRouteInfo       ExtraRouteInfo
+	OriginKubeconfigPath string
+	Image                string
+	ImagePullSecretName  string
+	OwnerID              string `json:"OwnerID,omitempty"`
+	ConnectionID         string
 
-	rollbackMu       sync.Mutex
-	rollbackFuncList []func() error
+	// Control-plane only: SSH jump host IPs (added to API server IPs at CIDR detection).
+	SshHosts []net.IP `json:"-"`
 
-	SshHosts  []net.IP `json:"-"`
-	cleanupMu sync.Mutex
-	cleanedUp bool
-	network   *NetworkManager
+	// Control-plane only: sidecar injection lifecycle.
+	proxyManager *ProxyManager
 
-	// ReservedTunIPs returns TUN IPs held by sibling connections in the same
-	// daemon, excluded from this connection's allocation to avoid cross-cluster
-	// local IP collisions. Set by the daemon (data-plane only); not persisted.
-	ReservedTunIPs   func() []net.IP `json:"-"`
-	proxyManager     *ProxyManager
-	configMapStore   *ConfigMapStore
-	configMapStoreMu sync.Mutex
-
-	// syncMu guards the Sync pointer, which is read by the Status RPC while
-	// concurrently written by the Sync/Unsync RPCs. Always access Sync through
-	// GetSync/SetSync rather than touching the field directly.
+	// Control-plane only: file sync.
 	syncMu sync.RWMutex
 	Sync   *SyncOptions
 }
 
-// Context returns the connection session's context.
+// InitClient initializes the Kubernetes clientset, REST client, and config from the given factory.
+func (c *ConnectOptions) InitClient(f cmdutil.Factory) error {
+	var err error
+	c.ManagerNamespace, err = c.K8sClient.InitClient(f)
+	return err
+}
+
+// Context is a stub on the control-plane session (ConnectOptions/ControlSession).
+// The data-plane context lives in DataSession; this returns nil for all user-daemon instances.
 func (c *ConnectOptions) Context() context.Context {
-	return c.ctx
+	return nil
+}
+
+// DoConnect is not available on the control-plane session (ConnectOptions/ControlSession).
+// It exists only to satisfy the Connection interface. The data-plane DoConnect
+// runs on DataSession in the root daemon.
+func (c *ConnectOptions) DoConnect(_ context.Context) error {
+	return fmt.Errorf("DoConnect is not available on a control-plane session")
+}
+
+// GetLocalTunIP is a stub on the control-plane session.
+// TUN IP allocation is performed by DataSession (root daemon).
+func (c *ConnectOptions) GetLocalTunIP() (v4 string, v6 string) {
+	return "", ""
+}
+
+// GetLastHeartbeat is a stub on the control-plane session.
+// The user daemon obtains heartbeat info via the sudo Status RPC, not from a local NetworkManager.
+func (c *ConnectOptions) GetLastHeartbeat() time.Time {
+	return time.Time{}
+}
+
+// GetAPIServerIPs is a stub on the control-plane session.
+// API server IPs are held by DataSession's NetworkManager in the root daemon.
+func (c *ConnectOptions) GetAPIServerIPs() []net.IP {
+	return nil
+}
+
+// GetNetworkExtraHost is a stub on the control-plane session.
+// Extra hosts are accumulated by DataSession's NetworkManager in the root daemon.
+func (c *ConnectOptions) GetNetworkExtraHost() []dns.Entry {
+	return nil
+}
+
+// GetConnectionID returns the connection identifier (namespace UID suffix) for this session.
+func (c *ConnectOptions) GetConnectionID() string {
+	if c == nil {
+		return ""
+	}
+	return c.ConnectionID
+}
+
+// GetManagerNamespace returns the namespace where the traffic manager is deployed.
+func (c *ConnectOptions) GetManagerNamespace() string {
+	return c.ManagerNamespace
+}
+
+// GetWorkloadNamespace returns the user workload namespace for this connection.
+func (c *ConnectOptions) GetWorkloadNamespace() string {
+	return c.WorkloadNamespace
+}
+
+// GetOwnerID returns the OwnerID field.
+func (c *ConnectOptions) GetOwnerID() string {
+	if c == nil {
+		return ""
+	}
+	return c.OwnerID
+}
+
+// GetOriginKubeconfigPath returns the original kubeconfig file path.
+func (c *ConnectOptions) GetOriginKubeconfigPath() string {
+	return c.OriginKubeconfigPath
+}
+
+// GetExtraCIDR returns the extra CIDR strings configured for this connection.
+func (c *ConnectOptions) GetExtraCIDR() []string {
+	return c.ExtraRouteInfo.ExtraCIDR
+}
+
+// GetRunningPodList returns the running traffic manager pods in the manager namespace.
+func (c *ConnectOptions) GetRunningPodList(ctx context.Context) ([]v1.Pod, error) {
+	return c.SessionBase.GetRunningPodList(ctx, c.ManagerNamespace)
+}
+
+// getConfigMapStore returns the ConfigMapStore, creating it lazily on first access.
+// This must be lazy because ManagerNamespace may be updated by detectAndSetManagerNamespace
+// after InitClient returns (user daemon path).
+func (c *ConnectOptions) getConfigMapStore() *ConfigMapStore {
+	return c.SessionBase.getConfigMapStore(c.ManagerNamespace)
+}
+
+// Set updates a key-value pair in the traffic manager ConfigMap.
+func (c *ConnectOptions) Set(ctx context.Context, key, value string) error {
+	return c.getConfigMapStore().Set(ctx, key, value)
+}
+
+// Get retrieves a value by key from the traffic manager ConfigMap, using the informer cache first.
+func (c *ConnectOptions) Get(ctx context.Context, key string) (string, error) {
+	return c.getConfigMapStore().Get(ctx, key)
+}
+
+// GetTrafficManagerConfigMap returns the traffic manager ConfigMap from the informer cache
+// (GET fallback when cold). Use this for read paths that want near-real-time state.
+func (c *ConnectOptions) GetTrafficManagerConfigMap(ctx context.Context) (*v1.ConfigMap, error) {
+	return c.getConfigMapStore().GetConfigMap(ctx)
+}
+
+// GetConfigMapInformer returns a shared informer for the traffic manager ConfigMap.
+// Created once on first call, then reused. Thread-safe via sync.Once.
+// Must be called after InitClient.
+func (c *ConnectOptions) GetConfigMapInformer() cache.SharedInformer {
+	return c.getConfigMapStore().GetInformer()
+}
+
+// ProxyResources returns the list of workloads currently being proxied by this connection.
+func (c *ConnectOptions) ProxyResources() ProxyList {
+	if c.proxyManager == nil {
+		return nil
+	}
+	return c.proxyManager.Resources()
+}
+
+// GetSync returns the SyncOptions associated with this connection, or nil.
+func (c *ConnectOptions) GetSync() *SyncOptions {
+	c.syncMu.RLock()
+	defer c.syncMu.RUnlock()
+	return c.Sync
+}
+
+// SetSync stores the SyncOptions associated with this connection.
+func (c *ConnectOptions) SetSync(s *SyncOptions) {
+	c.syncMu.Lock()
+	defer c.syncMu.Unlock()
+	c.Sync = s
 }
 
 // CreateRemoteInboundPod injects Envoy sidecar proxies into the specified workloads for inbound traffic interception.
@@ -155,69 +276,6 @@ func (c *ConnectOptions) CreateOutboundPod(ctx context.Context) error {
 	return nil
 }
 
-// DoConnect establishes the full VPN connection: CIDR detection, port forwarding, TUN device, routing, and DNS.
-// Control-plane setup (CreateOutboundPod, UpgradeDeploy) must be done before this call.
-func (c *ConnectOptions) DoConnect(ctx context.Context) (err error) {
-	c.ctx, c.cancel = context.WithCancel(ctx)
-	c.isDataPlane = true
-	plog.G(ctx).Debug("Starting connect to cluster")
-	go c.setupSignalHandler()
-	var cidrs []*net.IPNet
-	var apiServerIPs []net.IP
-	if cidrs, apiServerIPs, err = c.getCIDR(c.ctx); err != nil {
-		plog.G(ctx).Errorf("Failed to get network CIDR: %v", err)
-		return
-	}
-
-	hostname, _ := os.Hostname() // best-effort; empty on failure is fine (omitted from TUN_ALLOCS)
-	c.network = newNetworkManager(NetworkConfig{
-		Clientset:         c.clientset,
-		RESTClient:        c.restclient,
-		Config:            c.config,
-		ManagerNamespace:  c.ManagerNamespace,
-		WorkloadNamespace: c.WorkloadNamespace,
-		CIDRs:             cidrs,
-		APIServerIPs:      apiServerIPs,
-		ExtraRouteInfo:    &c.ExtraRouteInfo,
-		Image:             c.Image,
-		Lock:              c.Lock,
-		OwnerID:           c.OwnerID,
-		Hostname:          hostname,
-		GetRunningPodList: c.GetRunningPodList,
-		ReservedTunIPs:    c.ReservedTunIPs,
-	})
-	if err = c.network.Start(c.ctx); err != nil {
-		return
-	}
-	c.network.StartIPWatcher(c.ctx)
-	return
-}
-
-// InitClient initializes the Kubernetes clientset, REST client, and config from the given factory.
-func (c *ConnectOptions) InitClient(f cmdutil.Factory) error {
-	var err error
-	c.ManagerNamespace, err = c.K8sClient.InitClient(f)
-	return err
-}
-
-// getConfigMapStore returns the ConfigMapStore, creating it lazily on first access.
-// This must be lazy because ManagerNamespace may be updated by detectAndSetManagerNamespace
-// after InitClient returns (user daemon path).
-func (c *ConnectOptions) getConfigMapStore() *ConfigMapStore {
-	c.configMapStoreMu.Lock()
-	defer c.configMapStoreMu.Unlock()
-	if c.configMapStore == nil {
-		c.configMapStore = newConfigMapStore(c.clientset, c.ManagerNamespace)
-	}
-	return c.configMapStore
-}
-
-// GetRunningPodList returns the running traffic manager pods in the manager namespace.
-func (c *ConnectOptions) GetRunningPodList(ctx context.Context) ([]v1.Pod, error) {
-	label := "app=" + config.ConfigMapPodTrafficManager
-	return util.GetRunningPodList(ctx, c.clientset, c.ManagerNamespace, label)
-}
-
 func dedupAndFilterCIDRs(cidrs []*net.IPNet, apiServerIPs []net.IP) []*net.IPNet {
 	return util.RemoveCIDRsContainingIPs(util.RemoveLargerOverlappingCIDRs(cidrs), apiServerIPs)
 }
@@ -242,145 +300,4 @@ func encodeCIDRs(cidrs []*net.IPNet) string {
 		s.Insert(cidr.String())
 	}
 	return strings.Join(s.UnsortedList(), " ")
-}
-
-// getAPIServerIPs resolves the API server IPs from the kubeconfig host, appending SSH jump host IPs.
-func (c *ConnectOptions) getAPIServerIPs() ([]net.IP, error) {
-	ips, err := util.GetAPIServerIP(c.config.Host)
-	if err != nil {
-		return nil, err
-	}
-	return append(ips, c.SshHosts...), nil
-}
-
-// getCIDR detects cluster Pod/Service CIDRs and API server IPs.
-func (c *ConnectOptions) getCIDR(ctx context.Context) ([]*net.IPNet, []net.IP, error) {
-	plog.G(ctx).Debug("Detecting cluster CIDRs")
-	apiServerIPs, err := c.getAPIServerIPs()
-	if err != nil {
-		return nil, nil, err
-	}
-
-	ipPoolStr, err := c.Get(ctx, config.KeyClusterCIDRs)
-	if err != nil {
-		return nil, nil, err
-	}
-	if strings.TrimSpace(ipPoolStr) != "" {
-		cidrs := parseCachedCIDRs(ipPoolStr, apiServerIPs)
-		plog.StepDone(ctx, "Detected cluster CIDRs: %s (cached)", util.CIDRsToString(cidrs))
-		return cidrs, apiServerIPs, nil
-	}
-
-	raw := util.GetCIDR(ctx, c.clientset, c.config, c.ManagerNamespace, c.Image)
-	cidrs := dedupAndFilterCIDRs(raw, apiServerIPs)
-	if len(cidrs) == 0 {
-		plog.G(ctx).Debugf("No cluster CIDRs detected (raw=%d, all filtered by API server IPs %v)", len(raw), apiServerIPs)
-		return cidrs, apiServerIPs, nil
-	}
-	encoded := encodeCIDRs(cidrs)
-	plog.G(ctx).Debugf("Saving %d cluster CIDRs to cache: %s", len(cidrs), encoded)
-	err = c.Set(ctx, config.KeyClusterCIDRs, encoded)
-	return cidrs, apiServerIPs, err
-}
-
-// Set updates a key-value pair in the traffic manager ConfigMap.
-func (c *ConnectOptions) Set(ctx context.Context, key, value string) error {
-	return c.getConfigMapStore().Set(ctx, key, value)
-}
-
-// Get retrieves a value by key from the traffic manager ConfigMap, using the informer cache first.
-func (c *ConnectOptions) Get(ctx context.Context, key string) (string, error) {
-	return c.getConfigMapStore().Get(ctx, key)
-}
-
-// GetTrafficManagerConfigMap returns the traffic manager ConfigMap from the informer cache
-// (GET fallback when cold). Use this for read paths that want near-real-time state.
-func (c *ConnectOptions) GetTrafficManagerConfigMap(ctx context.Context) (*v1.ConfigMap, error) {
-	return c.getConfigMapStore().GetConfigMap(ctx)
-}
-
-// GetConfigMapInformer returns a shared informer for the traffic manager ConfigMap.
-// Created once on first call, then reused. Thread-safe via sync.Once.
-// Must be called after InitClient.
-func (c *ConnectOptions) GetConfigMapInformer() cache.SharedInformer {
-	return c.getConfigMapStore().GetInformer()
-}
-
-// GetLocalTunIP returns the local TUN device IPv4 and IPv6 addresses as strings.
-// Only meaningful in the data-plane (sudo daemon) where NetworkManager holds the allocated IP.
-func (c *ConnectOptions) GetLocalTunIP() (v4 string, v6 string) {
-	if c.network != nil {
-		if ip := c.network.LocalTunIPv4(); ip != nil {
-			v4 = ip.IP.String()
-		}
-		if ip := c.network.LocalTunIPv6(); ip != nil {
-			v6 = ip.IP.String()
-		}
-	}
-	return
-}
-
-// GetLastHeartbeat returns the time of the last observed data-plane heartbeat echo reply,
-// or the zero time if none. Only meaningful in the data-plane (sudo daemon) where
-// NetworkManager owns the TUN client; the user daemon obtains it via the sudo Status RPC.
-func (c *ConnectOptions) GetLastHeartbeat() time.Time {
-	if c.network != nil {
-		return c.network.LastHeartbeat()
-	}
-	return time.Time{}
-}
-
-// GetConnectionID returns the connection identifier (namespace UID suffix) for this session.
-func (c *ConnectOptions) GetConnectionID() string {
-	if c == nil {
-		return ""
-	}
-	return c.ConnectionID
-}
-
-// AddRollbackFunc registers a cleanup function to be called when the connection is torn down.
-func (c *ConnectOptions) AddRollbackFunc(f func() error) {
-	c.rollbackMu.Lock()
-	defer c.rollbackMu.Unlock()
-	c.rollbackFuncList = append(c.rollbackFuncList, f)
-}
-
-func (c *ConnectOptions) getRollbackFuncs() []func() error {
-	c.rollbackMu.Lock()
-	defer c.rollbackMu.Unlock()
-	fns := make([]func() error, len(c.rollbackFuncList))
-	copy(fns, c.rollbackFuncList)
-	return fns
-}
-
-// ProxyResources returns the list of workloads currently being proxied by this connection.
-func (c *ConnectOptions) ProxyResources() ProxyList {
-	if c.proxyManager == nil {
-		return nil
-	}
-	return c.proxyManager.Resources()
-}
-
-// GetManagerNamespace returns the namespace where the traffic manager is deployed.
-func (c *ConnectOptions) GetManagerNamespace() string {
-	return c.ManagerNamespace
-}
-
-// GetOriginKubeconfigPath returns the original kubeconfig file path.
-func (c *ConnectOptions) GetOriginKubeconfigPath() string {
-	return c.OriginKubeconfigPath
-}
-
-// GetSync returns the SyncOptions associated with this connection, or nil.
-func (c *ConnectOptions) GetSync() *SyncOptions {
-	c.syncMu.RLock()
-	defer c.syncMu.RUnlock()
-	return c.Sync
-}
-
-// SetSync stores the SyncOptions associated with this connection.
-func (c *ConnectOptions) SetSync(s *SyncOptions) {
-	c.syncMu.Lock()
-	defer c.syncMu.Unlock()
-	c.Sync = s
 }

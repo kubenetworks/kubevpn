@@ -17,6 +17,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	netutil "github.com/wencaiwulue/kubevpn/v2/pkg/util/netutil"
 )
 
 func (c *ConnectOptions) UpgradeDeploy(ctx context.Context) error {
@@ -149,7 +150,7 @@ func upgradeDeploySpec(ctx context.Context, f cmdutil.Factory, ns, name, image s
 }
 
 func upgradeSecretSpec(ctx context.Context, f cmdutil.Factory, ns string) error {
-	crt, key, host, err := util.GenTLSCert(ctx, ns)
+	crt, key, host, err := netutil.GenTLSCert(ctx, ns)
 	if err != nil {
 		return err
 	}

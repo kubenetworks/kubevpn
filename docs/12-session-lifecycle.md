@@ -58,17 +58,17 @@ No SSH tunnel. Direct kubeconfig file.
 session := NewSessionLifecycle(logger)
 
 session.AddTempFile(&file)                    ← remove kubeconfig on cleanup
-connect.AddRollbackFunc(session.RunCleanups)  ← cleanup on disconnect
+ds.AddRollbackFunc(session.RunCleanups)       ← cleanup on disconnect
 go grpcutil.ListenCancel(resp, session.Cancel)    ← client cancel → session cancel
 
-connect.DoConnect(session.Ctx)
-    └── c.ctx = WithCancel(session.Ctx)       ← internal lifecycle
-           ├── portForward(c.ctx)
-           ├── startLocalTunServer(c.ctx)
-           ├── addRouteDynamic(c.ctx)
-           └── setupDNS(c.ctx)
+ds.DoConnect(session.Ctx)                     ← DataSession, root daemon
+    └── ds.ctx = WithCancel(session.Ctx)      ← internal lifecycle
+           ├── portForward(ds.ctx)
+           ├── startLocalTunServer(ds.ctx)
+           ├── addRouteDynamic(ds.ctx)
+           └── setupDNS(ds.ctx)
 
-Teardown: session.Cancel() → c.ctx cancelled → TUN/DNS/routes stop
+Teardown: session.Cancel() → ds.ctx cancelled → TUN/DNS/routes stop
 ```
 
 ### 2. Connect — User Daemon (Control Plane + SSH)
@@ -118,10 +118,20 @@ Teardown (on error): session.Cancel() → SSH closes, BUT VPN stays alive
 
 ## Cleanup Two-Path Design
 
-`ConnectOptions.Cleanup()` distinguishes user vs root daemon. Cleanup uses a `cleanupMu sync.Mutex` + `cleanedUp bool` (not `sync.Once`) so that failed cleanups can be retried. `rollbackFuncList` is also protected by `rollbackMu sync.Mutex` since `AddRollbackFunc` and `getRollbackFuncs` may run in different goroutines.
+Cleanup dispatches by type identity — no flag or nil-check needed:
+
+- **`ConnectOptions.Cleanup()`** is always the control-plane path (user daemon). It calls
+  `cleanupControlPlane` directly.
+- **`DataSession.Cleanup()`** is always the data-plane path (root daemon). It calls
+  `cleanupDataPlane` directly.
+
+Both delegate common mechanics (mutex gate, ConfigMapStore stop, 10 s timeout) to
+`SessionBase.cleanup`. Cleanup uses a `cleanupMu sync.Mutex` + `cleanedUp bool` (not `sync.Once`)
+so that failed cleanups can be retried on the next call. `rollbackFuncList` is protected by
+`rollbackMu sync.Mutex` since `AddRollbackFunc` and `getRollbackFuncs` may run concurrently.
 
 ```
-User daemon (!c.isDataPlane):
+ConnectOptions.Cleanup() — user daemon (ControlSession), ALWAYS control-plane:
     1. Delete CNI pod/job
     2. Leave all proxy resources (LeaveAllProxyResources)
     3. Execute rollback funcs → session.RunCleanups()
@@ -130,9 +140,9 @@ User daemon (!c.isDataPlane):
         → detaches logger
     Note: TUN IP is NOT explicitly released — DHCP lease expiry handles reclaim
 
-Root daemon (c.isDataPlane):
+DataSession.Cleanup() — root daemon, ALWAYS data-plane:
     1. Execute rollback funcs
-    2. network.Stop() → cancel DNS, cancel context
+    2. nm.Stop() → cancel DNS, cancel context
     3. Context cancellation → stops TUN, port-forward, routes
 ```
 

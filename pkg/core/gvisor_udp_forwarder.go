@@ -14,7 +14,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	netutil "github.com/wencaiwulue/kubevpn/v2/pkg/util/netutil"
 )
 
 type udpAddrResolver func(id stack.TransportEndpointID) *net.UDPAddr
@@ -83,7 +83,7 @@ func relayUDP(ctx context.Context, conn *gonet.UDPConn, remote *net.UDPConn, src
 }
 
 func pipeUDPFromConn(ctx context.Context, conn *gonet.UDPConn, remote *net.UDPConn, src, dst *net.UDPAddr, errChan chan<- error) {
-	defer util.HandleCrash()
+	defer netutil.HandleCrash()
 	buf := config.LPool.Get().([]byte)[:]
 	defer config.LPool.Put(buf[:])
 	var written int
@@ -110,7 +110,7 @@ func pipeUDPFromConn(ctx context.Context, conn *gonet.UDPConn, remote *net.UDPCo
 }
 
 func pipeUDPToConn(ctx context.Context, conn *gonet.UDPConn, remote *net.UDPConn, src, dst *net.UDPAddr, errChan chan<- error) {
-	defer util.HandleCrash()
+	defer netutil.HandleCrash()
 	buf := config.LPool.Get().([]byte)[:]
 	defer config.LPool.Put(buf[:])
 	var written int

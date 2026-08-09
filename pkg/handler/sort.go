@@ -5,8 +5,8 @@ import (
 	"sort"
 )
 
-// Connects is a sortable slice of ConnectOptions ordered by cross-cluster dependency.
-type Connects []*ConnectOptions
+// Connects is a sortable slice of Connection ordered by cross-cluster dependency.
+type Connects []Connection
 
 func (s Connects) Len() int {
 	return len(s)
@@ -16,8 +16,8 @@ func (s Connects) Swap(i, j int) {
 	s[i], s[j] = s[j], s[i]
 }
 
-// Append adds a non-nil ConnectOptions to the slice and returns the result.
-func (s Connects) Append(options *ConnectOptions) Connects {
+// Append adds a non-nil Connection to the slice and returns the result.
+func (s Connects) Append(options Connection) Connects {
 	if options != nil {
 		return append(s, options)
 	}
@@ -51,11 +51,8 @@ func (s Connects) Less(i, j int) bool {
 		}
 		return false
 	}
-	var aAPIServerIPs []net.IP
-	if a.network != nil {
-		aAPIServerIPs = a.network.cfg.APIServerIPs
-	}
-	for _, extraCIDR := range b.ExtraRouteInfo.ExtraCIDR {
+	aAPIServerIPs := a.GetAPIServerIPs()
+	for _, extraCIDR := range b.GetExtraCIDR() {
 		ip, cidr, err := net.ParseCIDR(extraCIDR)
 		if err != nil {
 			continue
@@ -69,16 +66,14 @@ func (s Connects) Less(i, j int) bool {
 			}
 		}
 	}
-	if b.network != nil {
-		for _, entry := range b.network.GetExtraHost() {
-			ip := net.ParseIP(entry.IP)
-			if ip == nil || ip.IsLoopback() {
-				continue
-			}
-			for _, p := range aAPIServerIPs {
-				if ip.Equal(p) {
-					return true
-				}
+	for _, entry := range b.GetNetworkExtraHost() {
+		ip := net.ParseIP(entry.IP)
+		if ip == nil || ip.IsLoopback() {
+			continue
+		}
+		for _, p := range aAPIServerIPs {
+			if ip.Equal(p) {
+				return true
 			}
 		}
 	}

@@ -18,6 +18,7 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	pkgssh "github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	netutil "github.com/wencaiwulue/kubevpn/v2/pkg/util/netutil"
 )
 
 func (w *wsHandler) createTunnel(ctx context.Context, cli *ssh.Client) error {
@@ -25,7 +26,7 @@ func (w *wsHandler) createTunnel(ctx context.Context, cli *ssh.Client) error {
 		return err
 	}
 
-	clientIP, err := util.GetLocalIPNet()
+	clientIP, err := netutil.GetLocalIPNet()
 	if err != nil {
 		w.log("Get client IP error: %v", err)
 		return err
@@ -79,7 +80,7 @@ func (w *wsHandler) createTunnel(ctx context.Context, cli *ssh.Client) error {
 	// running a separate, more aggressive keepalive loop.
 	go func() {
 		for ctx.Err() == nil {
-			_, _ = util.Ping(ctx, clientIP.IP.String(), ip.String())
+			_, _ = netutil.Ping(ctx, clientIP.IP.String(), ip.String())
 			time.Sleep(config.KeepAliveTime)
 		}
 	}()

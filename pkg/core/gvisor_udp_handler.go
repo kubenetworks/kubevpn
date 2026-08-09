@@ -10,7 +10,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	netutil "github.com/wencaiwulue/kubevpn/v2/pkg/util/netutil"
 )
 
 type gvisorUDPHandler struct{}
@@ -24,7 +24,7 @@ func (h *gvisorUDPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 	defer tcpConn.Close()
 	plog.G(ctx).Debugf("[UDP] New connection: %s -> %s", tcpConn.RemoteAddr(), tcpConn.LocalAddr())
 
-	id, err := util.ParseProxyInfo(tcpConn)
+	id, err := netutil.ParseProxyInfo(tcpConn)
 	if err != nil {
 		if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) {
 			plog.G(ctx).Debugf("[UDP] Connection closed: %v", err)
@@ -77,14 +77,14 @@ func relayUDPOverTCP(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn
 	errChan := make(chan error, 2)
 
 	go func() {
-		defer util.HandleCrash()
+		defer netutil.HandleCrash()
 		buf := config.LPool.Get().([]byte)
 		defer config.LPool.Put(buf)
 		errChan <- pipeUDPFromTCP(ctx, tcpConn, udpConn, buf)
 	}()
 
 	go func() {
-		defer util.HandleCrash()
+		defer netutil.HandleCrash()
 		buf := config.LPool.Get().([]byte)
 		defer config.LPool.Put(buf)
 		errChan <- pipeUDPToTCP(ctx, udpConn, tcpConn, buf)

@@ -31,7 +31,7 @@ type Server struct {
 	// Use RLock for read-only access, Lock for mutations.
 	connMu              sync.RWMutex
 	currentConnectionID string
-	connections         []*handler.ConnectOptions
+	connections         []handler.Connection
 
 	// connectMu serializes the connect (TUN IP allocation) phase so two
 	// concurrent connects to different clusters cannot race and receive the same
@@ -110,8 +110,12 @@ func (svr *Server) LoadFromConfig(ctx context.Context) error {
 // OffloadToConfig persists the current connection state to disk for later restoration.
 func (svr *Server) OffloadToConfig() error {
 	svr.connMu.RLock()
-	conns := make([]*handler.ConnectOptions, len(svr.connections))
-	copy(conns, svr.connections)
+	conns := make([]*handler.ConnectOptions, 0, len(svr.connections))
+	for _, c := range svr.connections {
+		if co, ok := c.(*handler.ConnectOptions); ok {
+			conns = append(conns, co)
+		}
+	}
 	svr.connMu.RUnlock()
 
 	conf := &Config{

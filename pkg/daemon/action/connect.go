@@ -3,8 +3,6 @@ package action
 import (
 	"context"
 
-	"google.golang.org/protobuf/proto"
-
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
@@ -34,8 +32,9 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 		return svr.redirectConnectToSudoDaemon(req, resp, logger)
 	}
 
-	reqBytes, _ := proto.Marshal(req)
-	connect := &handler.ConnectOptions{
+	// RequestRaw / proto.Marshal(req) is intentionally NOT done here: it is a control-plane
+	// persistence field (user daemon only). The root daemon's DataSession is never persisted.
+	ds := &handler.DataSession{
 		ManagerNamespace:     req.ManagerNamespace,
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
@@ -43,7 +42,9 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 		Lock:                 &svr.Lock,
 		Image:                req.Image,
 		ImagePullSecretName:  req.ImagePullSecretName,
-		RequestRaw:           reqBytes,
+		OwnerID:              req.OwnerID,
+		ConnectionID:         req.ConnectionID,
+		ReservedTunIPs:       svr.siblingTunIPs,
 	}
 	file, err := util.ConvertToTempKubeconfigFile([]byte(req.KubeconfigBytes), "")
 	if err != nil {
@@ -51,35 +52,30 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 	}
 	session := NewSessionLifecycle(logger)
 	session.AddTempFile(&file)
-	connect.AddRollbackFunc(func() error {
+	ds.AddRollbackFunc(func() error {
 		session.RunCleanups()
 		return nil
 	})
 	go grpcutil.ListenCancel(resp, session.Cancel)
 	defer func() {
 		if err != nil {
-			connect.Cleanup(plog.WithLogger(context.Background(), logger))
+			ds.Cleanup(plog.WithLogger(context.Background(), logger))
 			session.Cancel()
 		}
 	}()
 
-	err = connect.InitClient(util.InitFactoryByPath(file, req.ManagerNamespace))
+	err = ds.InitClient(util.InitFactoryByPath(file, req.ManagerNamespace))
 	if err != nil {
 		return err
 	}
-	connect.OwnerID = req.OwnerID
-	connect.ConnectionID = req.ConnectionID
 	// Tag all downstream logs with the connection ID so concurrent connects can
 	// be told apart in the shared root daemon log file.
-	session.Ctx = plog.WithField(session.Ctx, LogFieldConnID, connect.ConnectionID)
-	// Exclude TUN IPs already held by sibling connections (other clusters) so two
-	// clusters never assign the same local TUN IP.
-	connect.ReservedTunIPs = svr.siblingTunIPs
+	session.Ctx = plog.WithField(session.Ctx, LogFieldConnID, ds.ConnectionID)
 
 	// Serialize the allocation phase: two concurrent connects must not race their
 	// TUN IP allocation with empty sibling snapshots.
 	svr.connectMu.Lock()
-	err = connect.DoConnect(session.Ctx)
+	err = ds.DoConnect(session.Ctx)
 	svr.connectMu.Unlock()
 	if err != nil {
 		logger.Errorf("Failed to connect...")
@@ -90,7 +86,7 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 		return resp.Context().Err()
 	}
 	svr.connMu.Lock()
-	svr.connections = append(svr.connections, connect)
+	svr.connections = append(svr.connections, ds)
 	svr.connMu.Unlock()
 	return nil
 }

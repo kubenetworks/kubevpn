@@ -37,8 +37,8 @@ func TestLeaveAllProxyResources_EmptyConfigMap(t *testing.T) {
 		},
 	)
 	c := &ConnectOptions{
+		SessionBase:      SessionBase{K8sClient: K8sClient{clientset: clientset}},
 		ManagerNamespace: "test-ns",
-		K8sClient:        K8sClient{clientset: clientset},
 		proxyManager:     newProxyManager(nil, clientset, "test-ns"),
 	}
 	err := c.LeaveAllProxyResources(context.Background())
@@ -50,8 +50,8 @@ func TestLeaveAllProxyResources_EmptyConfigMap(t *testing.T) {
 func TestLeaveAllProxyResources_ConfigMapNotFound(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
 	c := &ConnectOptions{
+		SessionBase:      SessionBase{K8sClient: K8sClient{clientset: clientset}},
 		ManagerNamespace: "test-ns",
-		K8sClient:        K8sClient{clientset: clientset},
 		proxyManager:     newProxyManager(nil, clientset, "test-ns"),
 	}
 	err := c.LeaveAllProxyResources(context.Background())
@@ -143,15 +143,16 @@ func TestCleanup_NoRollbackFuncs(t *testing.T) {
 		},
 	)
 
-	c := &ConnectOptions{
+	// Test data-plane cleanup path: use DataSession with a real cancel func.
+	ds := &DataSession{
+		SessionBase:      SessionBase{K8sClient: K8sClient{clientset: clientset}},
 		ManagerNamespace: "test-ns",
-		K8sClient:        K8sClient{clientset: clientset},
 		ctx:              ctx,
 		cancel:           cancel,
 	}
 
-	// Cleanup as root daemon (ctx != nil) with no rollback funcs — should not panic
-	c.Cleanup(context.Background())
+	// Cleanup as root daemon with no rollback funcs — should not panic.
+	ds.Cleanup(context.Background())
 }
 
 func TestCleanup_WithRollbackFuncs(t *testing.T) {
@@ -167,16 +168,17 @@ func TestCleanup_WithRollbackFuncs(t *testing.T) {
 	)
 
 	var called []int
-	c := &ConnectOptions{
+	// Test data-plane cleanup path with rollback funcs: use DataSession.
+	ds := &DataSession{
+		SessionBase:      SessionBase{K8sClient: K8sClient{clientset: clientset}},
 		ManagerNamespace: "test-ns",
-		K8sClient:        K8sClient{clientset: clientset},
 		ctx:              ctx,
 		cancel:           cancel,
 	}
-	c.AddRollbackFunc(func() error { called = append(called, 1); return nil })
-	c.AddRollbackFunc(func() error { called = append(called, 2); return nil })
+	ds.AddRollbackFunc(func() error { called = append(called, 1); return nil })
+	ds.AddRollbackFunc(func() error { called = append(called, 2); return nil })
 
-	c.Cleanup(context.Background())
+	ds.Cleanup(context.Background())
 
 	if len(called) != 2 {
 		t.Fatalf("expected 2 rollback funcs called, got %d", len(called))
@@ -187,7 +189,7 @@ func TestCleanup_WithRollbackFuncs(t *testing.T) {
 }
 
 func TestCleanup_UserDaemon_WithRollbackFuncs(t *testing.T) {
-	// User daemon: ctx is nil
+	// User daemon (ControlSession/ConnectOptions): cleanupControlPlane path.
 	clientset := fake.NewSimpleClientset(
 		&v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "test-ns"}},
 		&v1.ConfigMap{
@@ -198,9 +200,8 @@ func TestCleanup_UserDaemon_WithRollbackFuncs(t *testing.T) {
 
 	var called []int
 	c := &ConnectOptions{
+		SessionBase:      SessionBase{K8sClient: K8sClient{clientset: clientset}},
 		ManagerNamespace: "test-ns",
-		K8sClient:        K8sClient{clientset: clientset},
-		// ctx is nil => userDaemon = true
 	}
 	c.AddRollbackFunc(func() error { called = append(called, 1); return nil })
 	c.AddRollbackFunc(func() error { called = append(called, 2); return nil })
@@ -227,20 +228,21 @@ func TestCleanup_OnlyRunsOnce(t *testing.T) {
 	)
 
 	callCount := 0
-	c := &ConnectOptions{
+	// Test idempotency using DataSession (data-plane path).
+	ds := &DataSession{
+		SessionBase:      SessionBase{K8sClient: K8sClient{clientset: clientset}},
 		ManagerNamespace: "test-ns",
-		K8sClient:        K8sClient{clientset: clientset},
 		ctx:              ctx,
 		cancel:           cancel,
 	}
-	c.AddRollbackFunc(func() error { callCount++; return nil })
+	ds.AddRollbackFunc(func() error { callCount++; return nil })
 
-	c.Cleanup(context.Background())
-	c.Cleanup(context.Background())
-	c.Cleanup(context.Background())
+	ds.Cleanup(context.Background())
+	ds.Cleanup(context.Background())
+	ds.Cleanup(context.Background())
 
 	if callCount != 1 {
-		t.Fatalf("expected rollback called once due to sync.Once, got %d", callCount)
+		t.Fatalf("expected rollback called once due to cleanedUp flag, got %d", callCount)
 	}
 }
 
@@ -260,12 +262,12 @@ func TestLeaveAllProxyResources_WithProxyWorkloads(t *testing.T) {
 	pm.Add(&Proxy{workload: "deployments.apps/web", namespace: "default"})
 	pm.Add(&Proxy{workload: "deployments.apps/api", namespace: "default"})
 	c := &ConnectOptions{
-		ManagerNamespace: "test-ns",
-		K8sClient: K8sClient{
+		SessionBase: SessionBase{K8sClient: K8sClient{
 			clientset: clientset,
 			factory:   factory,
-		},
-		proxyManager: pm,
+		}},
+		ManagerNamespace: "test-ns",
+		proxyManager:     pm,
 	}
 	// proxyManager has entries, so LeaveAll will be called, which calls GetTopOwnerObject.
 	// With a bad kubeconfig, GetTopOwnerObject returns an error for each workload.
@@ -283,12 +285,12 @@ func TestLeaveResource_ErrorPropagationFromGetTopOwnerObject(t *testing.T) {
 
 	clientset := fake.NewSimpleClientset()
 	c := &ConnectOptions{
-		ManagerNamespace: "test-ns",
-		K8sClient: K8sClient{
+		SessionBase: SessionBase{K8sClient: K8sClient{
 			clientset: clientset,
 			factory:   factory,
-		},
-		proxyManager: newProxyManager(factory, clientset, "test-ns"),
+		}},
+		ManagerNamespace: "test-ns",
+		proxyManager:     newProxyManager(factory, clientset, "test-ns"),
 	}
 	resources := []Resources{
 		{Namespace: "default", Workload: "deployments.apps/nonexistent"},
@@ -307,12 +309,12 @@ func TestLeaveResource_MultipleErrorsAggregated(t *testing.T) {
 
 	clientset := fake.NewSimpleClientset()
 	c := &ConnectOptions{
-		ManagerNamespace: "test-ns",
-		K8sClient: K8sClient{
+		SessionBase: SessionBase{K8sClient: K8sClient{
 			clientset: clientset,
 			factory:   factory,
-		},
-		proxyManager: newProxyManager(factory, clientset, "test-ns"),
+		}},
+		ManagerNamespace: "test-ns",
+		proxyManager:     newProxyManager(factory, clientset, "test-ns"),
 	}
 	resources := []Resources{
 		{Namespace: "default", Workload: "deployments.apps/app1"},

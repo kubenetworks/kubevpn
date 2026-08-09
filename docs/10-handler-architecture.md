@@ -12,39 +12,47 @@ ConnectOptions (session orchestrator)
 └── K8sClient           — Kubernetes access (embedded)
 ```
 
-## ConnectOptions — Session Orchestrator
+## Session Types — C2-A Split
 
-```go
-type ConnectOptions struct {
-    K8sClient                       // embedded: clientset, config, factory
+After the C2-A refactoring, two distinct session types implement the `Connection` interface:
 
-    // Configuration (set during daemon layer creation)
-    ManagerNamespace     string     // namespace where traffic manager resides
-    WorkloadNamespace    string     // user workload namespace
-    ExtraRouteInfo       ExtraRouteInfo
-    Image                string
-    OriginKubeconfigPath string
-    OwnerID              string     // UUID, uniquely identifies this connection (used by TunConfigService)
-    RequestRaw           []byte     // serialized ConnectRequest (used for daemon restart replay)
+```
+SessionBase (shared base)
+├── K8sClient              — embedded: clientset, restclient, config, factory
+├── rollbackMu             — rollback list lifecycle
+├── rollbackFuncList
+├── cleanupMu / cleanedUp  — idempotent cleanup gate
+└── configMapStore *ConfigMapStore  — lazily initialized
 
-    // Session lifecycle
-    ctx, cancel          context.Context, context.CancelFunc
-    rollbackFuncList     []func() error
-
-    // Sub-managers
-    network              *NetworkManager
-    proxyManager         *ProxyManager
-    configMapStore       *ConfigMapStore
-}
+ConnectOptions (= ControlSession)     DataSession
+├── SessionBase (embedded)            ├── SessionBase (embedded)
+├── ManagerNamespace     string       ├── ManagerNamespace     string
+├── WorkloadNamespace    string       ├── WorkloadNamespace    string
+├── ExtraRouteInfo                    ├── ExtraRouteInfo
+├── OriginKubeconfigPath string       ├── OriginKubeconfigPath string
+├── Image                string       ├── Image                string
+├── ImagePullSecretName  string       ├── ImagePullSecretName  string
+├── OwnerID              string       ├── OwnerID              string
+├── ConnectionID         string       ├── ConnectionID         string
+├── RequestRaw           []byte       ├── Lock  *sync.Mutex
+├── SshHosts             []net.IP     ├── ReservedTunIPs func() []net.IP
+├── proxyManager *ProxyManager        ├── ctx    context.Context    (set at start of DoConnect)
+├── syncMu + Sync                     ├── cancel context.CancelFunc
+└── 6 data-plane STUBS                ├── nm     *NetworkManager
+                                      └── 6 control-plane STUBS
 ```
 
-### Dual-Daemon Roles
+`ControlSession = ConnectOptions` is a type alias for semantic clarity. Both names compile identically.
 
-| | User Daemon (control plane) | Root Daemon (data plane) |
+### Dual-Daemon Session Roles
+
+| | User Daemon (ConnectOptions/ControlSession) | Root Daemon (DataSession) |
 |---|---|---|
-| Entry point | `redirectConnectToSudoDaemon` | `Connect` → `DoConnect` |
+| Entry point | `redirectConnectToSudoDaemon` | `Connect` → `ds.DoConnect` |
 | IP acquisition | queries sudo daemon via `getSudoTunIPs` | `NetworkManager.rentIP` (in startTUN) |
-| Sub-managers | proxyManager, configMapStore | network, configMapStore |
+| Sub-managers | proxyManager, configMapStore | nm (*NetworkManager), configMapStore |
+| Cleanup path | always `cleanupControlPlane` | always `cleanupDataPlane` |
+| Persistence | ✅ OffloadToConfig (json tags) | ❌ never persisted |
 
 ### IP Allocation Flow
 
@@ -214,16 +222,38 @@ pkg/xds   → pkg/dhcp, pkg/daemon/rpc (server-side DHCP + TunConfigService)
 
 **Known reverse dependency:** `pkg/handler` imports `pkg/daemon/rpc` (gRPC client for TunConfigService). A medium-term improvement is to define an `IPAllocator` interface in `pkg/handler` and inject the implementation from the daemon layer.
 
+## Completed Refactoring
+
+- **C1: Connection interface migration** (DONE): `Server.connections` is now typed
+  `[]handler.Connection` (not `[]*handler.ConnectOptions`). `handler.Connects` is also
+  `[]Connection`. The `Connection` interface gained five methods (`GetOwnerID`,
+  `GetWorkloadNamespace`, `GetAPIServerIPs`, `GetExtraCIDR`, `GetNetworkExtraHost`) so the daemon
+  layer talks to sessions exclusively through the interface — no raw struct field accesses remain
+  in `daemon/action`.
+- **C2-A: Full type split** (DONE): The dual-role `ConnectOptions` god struct was split into two
+  types by role. An interim step (`dataPlaneState` pointer + `isDataPlane` bool) was explored and
+  then superseded by the full split: `ConnectOptions` (= `ControlSession`, user daemon) and
+  `DataSession` (root daemon). Both implement `Connection` and embed `SessionBase`. Cleanup routes
+  by type identity — no nil-check or flag needed. `DoConnect` is a real method on `DataSession`
+  and a stub on `ConnectOptions`. All interim types (`dataPlaneState`, `isDataPlane`) are gone.
+
 ## Future Refactoring Direction
 
-- **ConnectOptions split**: Separate into `ControlPlaneSession` (user daemon: K8s client, proxy management, health checks) and `DataPlaneSession` (root daemon: NetworkManager, TUN), sharing a `ConnectionIdentity` (OwnerID, ConnectionID, Namespace)
-- **Connection interface migration**: Change `Server.connections` to `[]Connection` type with persistence via interface methods (`MarshalConfig()`/`UnmarshalConfig()`)
+- **Connection interface split**: Split `Connection` into `ControlConnection` and `DataConnection`
+  to eliminate the 6 stubs on each type. Requires updating all consumers of `[]Connection`
+  (persistence, quit, disconnect, status). Out of scope for C2-A.
 
 ## File Layout
 
 ```
 pkg/handler/
-├── connect.go            ConnectOptions, DoConnect, getCIDR
+├── session_base.go       SessionBase (shared base for ConnectOptions + DataSession)
+├── connect.go            ConnectOptions (ControlSession) — control-plane methods + 6 stubs
+├── control_session.go    type ControlSession = ConnectOptions (alias)
+├── data_session.go       DataSession — data-plane methods, DoConnect, cleanupDataPlane
+├── connection.go         Connection interface + compile-time assertions for both types
+├── connection_impl.go    (placeholder; methods now in connect.go and data_session.go)
+├── cleaner.go            ConnectOptions.Cleanup + cleanupControlPlane + executeRollbackFuncs
 ├── connect_tun.go        Run() server runner, healthCheck helpers
 ├── connect_dns.go        detectNameserver helpers
 ├── connect_route.go      newTickerResetHandler
@@ -234,8 +264,6 @@ pkg/handler/
 ├── proxy.go              Proxy/ProxyList data types
 ├── proxy_mapper.go       Mapper (port-forward config watcher)
 ├── k8s_client.go         K8sClient embedded struct
-├── connection.go         Connection interface definition
-├── cleaner.go            Cleanup, signal handling
 ├── sync.go               SyncOptions, DoSync
 ├── traffmgr.go           Traffic manager pod creation
 ├── traffmgr_resources.go K8s resource generators

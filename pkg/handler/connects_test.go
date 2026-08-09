@@ -7,6 +7,26 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dns"
 )
 
+// newDataSessionWithNetwork creates a DataSession with a pre-populated NetworkManager
+// for testing sort/dependency logic via the Connection interface.
+func newDataSessionWithNetwork(ns string, extraCIDR []string, apiServerIPs []net.IP, extraHost []dns.Entry) *DataSession {
+	ds := &DataSession{
+		WorkloadNamespace: ns,
+		ExtraRouteInfo: ExtraRouteInfo{
+			ExtraCIDR: extraCIDR,
+		},
+	}
+	if len(apiServerIPs) > 0 || len(extraHost) > 0 {
+		ds.nm = &NetworkManager{
+			cfg: NetworkConfig{
+				APIServerIPs: apiServerIPs,
+			},
+			extraHost: extraHost,
+		}
+	}
+	return ds
+}
+
 // --- Connects.Sort edge cases (basic dependency cases are in sort_test.go) ---
 
 func TestConnects_Sort_Empty(t *testing.T) {
@@ -19,17 +39,17 @@ func TestConnects_Sort_Empty(t *testing.T) {
 
 func TestConnects_Sort_SingleElement(t *testing.T) {
 	connects := Connects{
-		{WorkloadNamespace: "only"},
+		&ConnectOptions{WorkloadNamespace: "only"},
 	}
 	sorted := connects.Sort()
-	if len(sorted) != 1 || sorted[0].WorkloadNamespace != "only" {
+	if len(sorted) != 1 || sorted[0].GetWorkloadNamespace() != "only" {
 		t.Errorf("single-element sort failed")
 	}
 }
 
 func TestConnects_Less_NilA(t *testing.T) {
 	// When a (left side) is nil, Less returns true.
-	connects := Connects{nil, {WorkloadNamespace: "clusterA"}}
+	connects := Connects{nil, &ConnectOptions{WorkloadNamespace: "clusterA"}}
 	if !connects.Less(0, 1) {
 		t.Error("expected Less to return true when a is nil")
 	}
@@ -38,14 +58,8 @@ func TestConnects_Less_NilA(t *testing.T) {
 func TestConnects_Sort_NoDependency(t *testing.T) {
 	// Two independent clusters. Sort should not panic.
 	connects := Connects{
-		{
-			WorkloadNamespace: "clusterA",
-			network:           &NetworkManager{cfg: NetworkConfig{APIServerIPs: []net.IP{net.ParseIP("10.0.0.1")}}},
-		},
-		{
-			WorkloadNamespace: "clusterB",
-			network:           &NetworkManager{cfg: NetworkConfig{APIServerIPs: []net.IP{net.ParseIP("10.0.0.2")}}},
-		},
+		newDataSessionWithNetwork("clusterA", nil, []net.IP{net.ParseIP("10.0.0.1")}, nil),
+		newDataSessionWithNetwork("clusterB", nil, []net.IP{net.ParseIP("10.0.0.2")}, nil),
 	}
 	sorted := connects.Sort()
 	if len(sorted) != 2 {
@@ -56,17 +70,8 @@ func TestConnects_Sort_NoDependency(t *testing.T) {
 func TestConnects_Sort_LoopbackIPIgnored(t *testing.T) {
 	// Loopback IPs in ExtraCIDR should not create a dependency.
 	connects := Connects{
-		{
-			WorkloadNamespace: "clusterA",
-			network:           &NetworkManager{cfg: NetworkConfig{APIServerIPs: []net.IP{net.ParseIP("127.0.0.1")}}},
-		},
-		{
-			WorkloadNamespace: "clusterB",
-			ExtraRouteInfo: ExtraRouteInfo{
-				ExtraCIDR: []string{"127.0.0.0/8"},
-			},
-			network: &NetworkManager{cfg: NetworkConfig{APIServerIPs: []net.IP{net.ParseIP("10.0.0.2")}}},
-		},
+		newDataSessionWithNetwork("clusterA", nil, []net.IP{net.ParseIP("127.0.0.1")}, nil),
+		newDataSessionWithNetwork("clusterB", []string{"127.0.0.0/8"}, []net.IP{net.ParseIP("10.0.0.2")}, nil),
 	}
 
 	sorted := connects.Sort()
@@ -78,17 +83,8 @@ func TestConnects_Sort_LoopbackIPIgnored(t *testing.T) {
 func TestConnects_Sort_InvalidCIDRSkipped(t *testing.T) {
 	// Invalid CIDR strings should be skipped without panic.
 	connects := Connects{
-		{
-			WorkloadNamespace: "clusterA",
-			network:           &NetworkManager{cfg: NetworkConfig{APIServerIPs: []net.IP{net.ParseIP("10.0.0.1")}}},
-		},
-		{
-			WorkloadNamespace: "clusterB",
-			ExtraRouteInfo: ExtraRouteInfo{
-				ExtraCIDR: []string{"not-a-cidr", "also-bad"},
-			},
-			network: &NetworkManager{cfg: NetworkConfig{APIServerIPs: []net.IP{net.ParseIP("10.0.0.2")}}},
-		},
+		newDataSessionWithNetwork("clusterA", nil, []net.IP{net.ParseIP("10.0.0.1")}, nil),
+		newDataSessionWithNetwork("clusterB", []string{"not-a-cidr", "also-bad"}, []net.IP{net.ParseIP("10.0.0.2")}, nil),
 	}
 
 	sorted := connects.Sort()
@@ -99,18 +95,9 @@ func TestConnects_Sort_InvalidCIDRSkipped(t *testing.T) {
 
 func TestConnects_Sort_ExtraHostLoopbackIgnored(t *testing.T) {
 	// Loopback IPs in extraHost should not create a dependency.
-	nmB := &NetworkManager{}
-	nmB.extraHost = []dns.Entry{{IP: "127.0.0.1"}}
 	connects := Connects{
-		{
-			WorkloadNamespace: "clusterA",
-			network:           &NetworkManager{cfg: NetworkConfig{APIServerIPs: []net.IP{net.ParseIP("127.0.0.1")}}},
-		},
-		{
-			WorkloadNamespace: "clusterB",
-
-			network: nmB,
-		},
+		newDataSessionWithNetwork("clusterA", nil, []net.IP{net.ParseIP("127.0.0.1")}, nil),
+		newDataSessionWithNetwork("clusterB", nil, nil, []dns.Entry{{IP: "127.0.0.1"}}),
 	}
 
 	sorted := connects.Sort()
@@ -122,18 +109,9 @@ func TestConnects_Sort_ExtraHostLoopbackIgnored(t *testing.T) {
 
 func TestConnects_Sort_ExtraHostInvalidIPIgnored(t *testing.T) {
 	// Invalid IP strings in extraHost should be skipped without panic.
-	nmB := &NetworkManager{}
-	nmB.extraHost = []dns.Entry{{IP: "not-an-ip"}}
 	connects := Connects{
-		{
-			WorkloadNamespace: "clusterA",
-			network:           &NetworkManager{cfg: NetworkConfig{APIServerIPs: []net.IP{net.ParseIP("10.0.0.1")}}},
-		},
-		{
-			WorkloadNamespace: "clusterB",
-
-			network: nmB,
-		},
+		newDataSessionWithNetwork("clusterA", nil, []net.IP{net.ParseIP("10.0.0.1")}, nil),
+		newDataSessionWithNetwork("clusterB", nil, nil, []dns.Entry{{IP: "not-an-ip"}}),
 	}
 
 	sorted := connects.Sort()
@@ -145,22 +123,13 @@ func TestConnects_Sort_ExtraHostInvalidIPIgnored(t *testing.T) {
 func TestConnects_Sort_ExactIPMatchInExtraCIDR(t *testing.T) {
 	// ExtraCIDR IP exactly matches an API server IP (ip.Equal path in Less).
 	connects := Connects{
-		{
-			WorkloadNamespace: "clusterA",
-			network:           &NetworkManager{cfg: NetworkConfig{APIServerIPs: []net.IP{net.ParseIP("10.1.2.3")}}},
-		},
-		{
-			WorkloadNamespace: "clusterB",
-			ExtraRouteInfo: ExtraRouteInfo{
-				ExtraCIDR: []string{"10.1.2.3/32"},
-			},
-			network: &NetworkManager{cfg: NetworkConfig{APIServerIPs: []net.IP{net.ParseIP("172.16.0.1")}}},
-		},
+		newDataSessionWithNetwork("clusterA", nil, []net.IP{net.ParseIP("10.1.2.3")}, nil),
+		newDataSessionWithNetwork("clusterB", []string{"10.1.2.3/32"}, []net.IP{net.ParseIP("172.16.0.1")}, nil),
 	}
 
 	sorted := connects.Sort()
-	if sorted[0].WorkloadNamespace != "clusterA" {
-		t.Errorf("expected clusterA first (dependent on clusterB), got %s", sorted[0].WorkloadNamespace)
+	if sorted[0].GetWorkloadNamespace() != "clusterA" {
+		t.Errorf("expected clusterA first (dependent on clusterB), got %s", sorted[0].GetWorkloadNamespace())
 	}
 }
 
@@ -173,14 +142,14 @@ func TestConnects_Append_NonNil(t *testing.T) {
 	if len(result) != 1 {
 		t.Fatalf("expected 1, got %d", len(result))
 	}
-	if result[0].WorkloadNamespace != "ns1" {
-		t.Errorf("expected ns1, got %s", result[0].WorkloadNamespace)
+	if result[0].GetWorkloadNamespace() != "ns1" {
+		t.Errorf("expected ns1, got %s", result[0].GetWorkloadNamespace())
 	}
 }
 
 func TestConnects_Append_Nil(t *testing.T) {
 	connects := Connects{
-		{WorkloadNamespace: "existing"},
+		&ConnectOptions{WorkloadNamespace: "existing"},
 	}
 	result := connects.Append(nil)
 	if len(result) != 1 {
@@ -212,8 +181,8 @@ func TestConnects_Append_EmptyToEmpty(t *testing.T) {
 
 func TestConnects_Len(t *testing.T) {
 	connects := Connects{
-		{WorkloadNamespace: "a"},
-		{WorkloadNamespace: "b"},
+		&ConnectOptions{WorkloadNamespace: "a"},
+		&ConnectOptions{WorkloadNamespace: "b"},
 	}
 	if connects.Len() != 2 {
 		t.Errorf("expected Len() == 2, got %d", connects.Len())
@@ -231,8 +200,8 @@ func TestConnects_Swap(t *testing.T) {
 	connects := Connects{a, b}
 
 	connects.Swap(0, 1)
-	if connects[0].WorkloadNamespace != "b" || connects[1].WorkloadNamespace != "a" {
-		t.Errorf("Swap failed: got [%s, %s]", connects[0].WorkloadNamespace, connects[1].WorkloadNamespace)
+	if connects[0].GetWorkloadNamespace() != "b" || connects[1].GetWorkloadNamespace() != "a" {
+		t.Errorf("Swap failed: got [%s, %s]", connects[0].GetWorkloadNamespace(), connects[1].GetWorkloadNamespace())
 	}
 }
 

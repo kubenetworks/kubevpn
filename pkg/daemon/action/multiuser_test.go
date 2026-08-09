@@ -24,7 +24,7 @@ func TestMultiUser_SameCluster_DedupByConnectionID(t *testing.T) {
 		t.Fatal("should find existing connection for same cluster")
 	}
 	// In production: returns immediately with existing connectionID, no duplicate
-	if existing.OwnerID != "user-1" {
+	if existing.GetOwnerID() != "user-1" {
 		t.Fatal("existing connection should be the first user's")
 	}
 }
@@ -53,7 +53,7 @@ func TestMultiUser_DifferentClusters_Independent(t *testing.T) {
 	// Each cluster connection should be independently findable
 	for _, c := range clusters {
 		found, _ := svr.findConnection(c.connID)
-		if found == nil || found.OwnerID != c.owner {
+		if found == nil || found.GetOwnerID() != c.owner {
 			t.Fatalf("connection %s not found or wrong owner", c.connID)
 		}
 	}
@@ -62,7 +62,7 @@ func TestMultiUser_DifferentClusters_Independent(t *testing.T) {
 	removed := svr.removeConnection("cluster-b-5678")
 	svr.resetCurrentConnection("cluster-b-5678")
 
-	if len(removed) != 1 || removed[0].OwnerID != "user-bob" {
+	if len(removed) != 1 || removed[0].GetOwnerID() != "user-bob" {
 		t.Fatal("should remove only bob's connection")
 	}
 	if len(svr.connections) != 2 {
@@ -80,10 +80,10 @@ func TestMultiUser_DifferentClusters_Independent(t *testing.T) {
 
 func TestMultiUser_SwitchConnection(t *testing.T) {
 	svr := &Server{}
-	svr.connections = []*handler.ConnectOptions{
-		{ConnectionID: "prod-12345678", OwnerID: "o1"},
-		{ConnectionID: "staging-12345", OwnerID: "o2"},
-		{ConnectionID: "dev-123456789", OwnerID: "o3"},
+	svr.connections = []handler.Connection{
+		&handler.ConnectOptions{ConnectionID: "prod-12345678", OwnerID: "o1"},
+		&handler.ConnectOptions{ConnectionID: "staging-12345", OwnerID: "o2"},
+		&handler.ConnectOptions{ConnectionID: "dev-123456789", OwnerID: "o3"},
 	}
 	svr.currentConnectionID = "prod-12345678"
 
@@ -154,10 +154,10 @@ func TestMultiUser_ConcurrentConnectDisconnect(t *testing.T) {
 
 func TestMultiUser_DisconnectCurrent_AutoSelectNext(t *testing.T) {
 	svr := &Server{}
-	svr.connections = []*handler.ConnectOptions{
-		{ConnectionID: "first-1234567"},
-		{ConnectionID: "second-123456"},
-		{ConnectionID: "third-1234567"},
+	svr.connections = []handler.Connection{
+		&handler.ConnectOptions{ConnectionID: "first-1234567"},
+		&handler.ConnectOptions{ConnectionID: "second-123456"},
+		&handler.ConnectOptions{ConnectionID: "third-1234567"},
 	}
 	svr.currentConnectionID = "second-123456"
 

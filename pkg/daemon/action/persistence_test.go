@@ -37,14 +37,14 @@ func TestServer_OffloadToConfig(t *testing.T) {
 	})
 
 	svr := &Server{
-		connections: []*handler.ConnectOptions{
-			{
+		connections: []handler.Connection{
+			&handler.ConnectOptions{
 				RequestRaw: mustMarshalConnectRequest(&rpc.ConnectRequest{
 					Namespace:            "default",
 					OriginKubeconfigPath: "/home/user/.kube/config",
 				}),
 			},
-			{
+			&handler.ConnectOptions{
 				RequestRaw: mustMarshalConnectRequest(&rpc.ConnectRequest{
 					Namespace: "staging",
 					Image:     "ghcr.io/kubenetworks/kubevpn:v2.0.0",
@@ -368,7 +368,7 @@ current-context: test-context
 
 	svr := &Server{
 		currentConnectionID: "conn-abc",
-		connections:         []*handler.ConnectOptions{conn1, conn2},
+		connections:         []handler.Connection{conn1, conn2},
 	}
 
 	resp, err := svr.ConnectionList(context.Background(), &rpc.ConnectionListRequest{})
@@ -402,8 +402,8 @@ current-context: test-context
 
 func TestServer_ConnectionUse_NotFound(t *testing.T) {
 	svr := &Server{
-		connections: []*handler.ConnectOptions{
-			{ManagerNamespace: "ns1"},
+		connections: []handler.Connection{
+			&handler.ConnectOptions{ManagerNamespace: "ns1"},
 		},
 	}
 
@@ -455,8 +455,8 @@ func TestServer_OffloadToConfig_RoundTrip(t *testing.T) {
 	})
 
 	svr := &Server{
-		connections: []*handler.ConnectOptions{
-			{
+		connections: []handler.Connection{
+			&handler.ConnectOptions{
 				RequestRaw: mustMarshalConnectRequest(&rpc.ConnectRequest{
 					Namespace:            "production",
 					OriginKubeconfigPath: "/tmp/kubeconfig",

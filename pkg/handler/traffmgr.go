@@ -20,6 +20,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	netutil "github.com/wencaiwulue/kubevpn/v2/pkg/util/netutil"
 )
 
 func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, namespace, image, imagePullSecretName string) (err error) {
@@ -214,7 +215,7 @@ func WaitPodReady(ctx context.Context, clientset corev1.PodInterface, labelSelec
 // environment variable names, and the secret is mounted as env vars.
 func createTLSSecret(ctx context.Context, clientset kubernetes.Interface, namespace string) (crt []byte, err error) {
 	var key, host []byte
-	crt, key, host, err = util.GenTLSCert(ctx, namespace)
+	crt, key, host, err = netutil.GenTLSCert(ctx, namespace)
 	if err != nil {
 		return nil, err
 	}

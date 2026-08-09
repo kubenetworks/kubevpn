@@ -10,7 +10,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	netutil "github.com/wencaiwulue/kubevpn/v2/pkg/util/netutil"
 )
 
 const (
@@ -128,7 +128,7 @@ func logIPPacket(ctx context.Context, label string, data []byte) {
 	if !config.Debug {
 		return
 	}
-	if src, dst, proto, err := util.ParseIPFast(data); err == nil {
+	if src, dst, proto, err := netutil.ParseIPFast(data); err == nil {
 		plog.G(ctx).Debugf("%s SRC: %s, DST: %s, Protocol: %s, Length: %d",
 			label, src, dst, layers.IPProtocol(proto).String(), len(data))
 	}

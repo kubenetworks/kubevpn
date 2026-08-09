@@ -17,6 +17,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	netutil "github.com/wencaiwulue/kubevpn/v2/pkg/util/netutil"
 )
 
 // snapshotCacheTTL is how long a generated xDS snapshot stays cached before expiry.
@@ -59,7 +60,7 @@ func (p *Processor) ProcessFile(file NotifyMessage) error {
 
 	activeUIDs := make(map[string]bool)
 
-	enableIPv6, _ := util.DetectSupportIPv6()
+	enableIPv6, _ := netutil.DetectSupportIPv6()
 	for _, config := range configList {
 		if len(config.UID) == 0 {
 			continue

@@ -10,7 +10,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	netutil "github.com/wencaiwulue/kubevpn/v2/pkg/util/netutil"
 )
 
 const (
@@ -104,7 +104,7 @@ func (t *clientTransport) runConnPool(ctx context.Context) {
 		wg.Add(1)
 		go func(s *connSlot) {
 			defer wg.Done()
-			defer util.HandleCrash()
+			defer netutil.HandleCrash()
 			s.run(ctx)
 		}(slot)
 	}
@@ -228,7 +228,7 @@ func (s *connSlot) run(ctx context.Context) {
 // and gvisor-prefixed packets to this slot's local gvisor stack. conn is the framed
 // *UDPConnOverTCP in production (typed as net.Conn so tests can drive it with a raw pipe).
 func (s *connSlot) readFromConn(ctx context.Context, conn net.Conn, errChan chan error) {
-	defer util.HandleCrash()
+	defer netutil.HandleCrash()
 	gvisorInbound := make(chan *Packet, MaxSize)
 	go handleGvisorPacket(gvisorInbound, s.inbound, datagramHeaderLen).Run(ctx)
 	dl := &periodicDeadline{timeout: config.KeepAliveTime * 3, set: conn.SetReadDeadline}
@@ -237,7 +237,7 @@ func (s *connSlot) readFromConn(ctx context.Context, conn net.Conn, errChan chan
 		if err := dl.refresh(); err != nil {
 			config.LPool.Put(buf[:])
 			plog.G(ctx).Errorf("[Client-%d] Failed to set read deadline: %v", s.id, err)
-			util.SafeWrite(errChan, fmt.Errorf("failed to set read deadline: %w", err))
+			netutil.SafeWrite(errChan, fmt.Errorf("failed to set read deadline: %w", err))
 			return
 		}
 		// Read into buf[datagramHeaderLen:] so the stripped datagram payload lands in canonical
@@ -246,7 +246,7 @@ func (s *connSlot) readFromConn(ctx context.Context, conn net.Conn, errChan chan
 		if err != nil {
 			config.LPool.Put(buf[:])
 			plog.G(ctx).Errorf("[Client-%d] Failed to read from remote: %v", s.id, err)
-			util.SafeWrite(errChan, fmt.Errorf("failed to read packet from remote %s: %w", conn.RemoteAddr(), err))
+			netutil.SafeWrite(errChan, fmt.Errorf("failed to read packet from remote %s: %w", conn.RemoteAddr(), err))
 			return
 		}
 		if n < 1 {
@@ -273,7 +273,7 @@ func (s *connSlot) readFromConn(ctx context.Context, conn net.Conn, errChan chan
 // writeToConn writes packets from this slot's inbound channel to the raw TCP conn with
 // datagram framing.
 func (s *connSlot) writeToConn(ctx context.Context, rawConn net.Conn, errChan chan error) {
-	defer util.HandleCrash()
+	defer netutil.HandleCrash()
 	dl := &periodicDeadline{timeout: config.KeepAliveTime, set: rawConn.SetWriteDeadline}
 	for {
 		select {
@@ -283,7 +283,7 @@ func (s *connSlot) writeToConn(ctx context.Context, rawConn net.Conn, errChan ch
 			}
 			if err := dl.refresh(); err != nil {
 				plog.G(ctx).Errorf("[Client-%d] Failed to set write deadline: %v", s.id, err)
-				util.SafeWrite(errChan, fmt.Errorf("failed to set write deadline: %w", err))
+				netutil.SafeWrite(errChan, fmt.Errorf("failed to set write deadline: %w", err))
 				return
 			}
 			// Write datagram frame in-place: [2-byte length header][prefix+IP data]
@@ -292,7 +292,7 @@ func (s *connSlot) writeToConn(ctx context.Context, rawConn net.Conn, errChan ch
 			packet.release()
 			if err != nil {
 				plog.G(ctx).Errorf("[Client-%d] Failed to write to remote: %v", s.id, err)
-				util.SafeWrite(errChan, fmt.Errorf("failed to write packet to remote: %w", err))
+				netutil.SafeWrite(errChan, fmt.Errorf("failed to write packet to remote: %w", err))
 				return
 			}
 		case <-ctx.Done():
@@ -319,7 +319,7 @@ func (p *periodicDeadline) refresh() error {
 }
 
 func (t *clientTransport) heartbeats(ctx context.Context) {
-	tunIfi, err := util.GetTunDeviceByConn(t.dev.tun)
+	tunIfi, err := netutil.GetTunDeviceByConn(t.dev.tun)
 	if err != nil {
 		plog.G(ctx).Errorf("[Client] Failed to get tun device: %v", err)
 		return
@@ -336,24 +336,24 @@ func (t *clientTransport) heartbeats(ctx context.Context) {
 	}
 
 	sendAll := func(reason string) {
-		srcIPv4, srcIPv6, dockerSrcIPv4, _ := util.GetTunDeviceIP(tunIfi.Name)
+		srcIPv4, srcIPv6, dockerSrcIPv4, _ := netutil.GetTunDeviceIP(tunIfi.Name)
 		plog.G(ctx).Debugf("[Client] Sending heartbeat (%s)", reason)
 		if srcIPv4 != nil {
-			if icmp, e := util.GenICMPPacket(srcIPv4, config.RouterIP); e != nil {
+			if icmp, e := netutil.GenICMPPacket(srcIPv4, config.RouterIP); e != nil {
 				plog.G(ctx).Errorf("[Client] Failed to generate IPv4 heartbeat: %v", e)
 			} else {
 				sendHeartbeat(icmp)
 			}
 		}
 		if srcIPv6 != nil {
-			if icmp, e := util.GenICMPPacketIPv6(srcIPv6, config.RouterIP6); e != nil {
+			if icmp, e := netutil.GenICMPPacketIPv6(srcIPv6, config.RouterIP6); e != nil {
 				plog.G(ctx).Errorf("[Client] Failed to generate IPv6 heartbeat: %v", e)
 			} else {
 				sendHeartbeat(icmp)
 			}
 		}
 		if dockerSrcIPv4 != nil {
-			_, _ = util.Ping(ctx, dockerSrcIPv4.String(), config.DockerRouterIP.String())
+			_, _ = netutil.Ping(ctx, dockerSrcIPv4.String(), config.DockerRouterIP.String())
 		}
 	}
 

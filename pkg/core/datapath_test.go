@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	netutil "github.com/wencaiwulue/kubevpn/v2/pkg/util/netutil"
 )
 
 // =============================================================================
@@ -119,7 +119,7 @@ func TestDataPath_ClientToService(t *testing.T) {
 	}
 
 	// Verify src/dst in received packet
-	src, dst, _, _ := util.ParseIPFast(received)
+	src, dst, _, _ := netutil.ParseIPFast(received)
 	if !src.Equal(clientIP) {
 		t.Fatalf("expected src=%s, got %s", clientIP, src)
 	}
@@ -143,7 +143,7 @@ func TestDataPath_ClientToService(t *testing.T) {
 	if respPrefix != 0 {
 		t.Fatalf("expected response prefix=0, got %d", respPrefix)
 	}
-	respSrc, respDst, _, _ := util.ParseIPFast(respPkt)
+	respSrc, respDst, _, _ := netutil.ParseIPFast(respPkt)
 	if !respSrc.Equal(serviceIP) {
 		t.Fatalf("response src should be service")
 	}
@@ -784,7 +784,7 @@ func TestDataPath_ProxyResource_ResponsePath(t *testing.T) {
 
 	// The response goes through gvisor (not RouteHub), so we just verify
 	// the packet structure is correct for gvisor injection
-	src, dst, _, parseErr := util.ParseIPFast(responsePkt)
+	src, dst, _, parseErr := netutil.ParseIPFast(responsePkt)
 	if parseErr != nil {
 		t.Fatalf("response packet parse failed: %v", parseErr)
 	}
@@ -985,7 +985,7 @@ func TestPipeline_WriteToTun_StripPrefix(t *testing.T) {
 			t.Fatalf("expected %d bytes written to TUN, got %d", len(ipPkt), len(written))
 		}
 		// Verify it's the actual IP packet
-		src, dst, _, err := util.ParseIPFast(written)
+		src, dst, _, err := netutil.ParseIPFast(written)
 		if err != nil {
 			t.Fatalf("written data is not valid IP: %v", err)
 		}
@@ -1039,7 +1039,7 @@ func TestPipeline_WriteToConn_FrameFormat(t *testing.T) {
 	if len(received) != len(ipPkt) {
 		t.Fatalf("expected %d IP bytes, got %d", len(ipPkt), len(received))
 	}
-	src, dst, _, _ := util.ParseIPFast(received)
+	src, dst, _, _ := netutil.ParseIPFast(received)
 	if !src.Equal(srcIP.To4()) || !dst.Equal(dstIP.To4()) {
 		t.Fatal("IP packet corrupted through framing")
 	}
@@ -1164,7 +1164,7 @@ func TestPipeline_FullRoundTrip(t *testing.T) {
 		if len(written) != len(responsePkt) {
 			t.Fatalf("TUN received %d bytes, expected %d", len(written), len(responsePkt))
 		}
-		src, dst, _, parseErr := util.ParseIPFast(written)
+		src, dst, _, parseErr := netutil.ParseIPFast(written)
 		if parseErr != nil {
 			t.Fatalf("TUN data not valid IP: %v", parseErr)
 		}
