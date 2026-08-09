@@ -104,6 +104,7 @@ func teardownRunProxy(cli rpc.DaemonClient, noProxy bool, ns, workload string, k
 		KubeconfigBytes: ptr.To(string(kubeconfigBytes)),
 		Namespace:       ptr.To(ns),
 		SshJump:         handler.SshConfigToRPC(sshConfig),
+		Level:           int32(util.If(config.Debug, log.DebugLevel, log.InfoLevel)),
 	}); err != nil {
 		return err
 	}
@@ -116,7 +117,7 @@ func leaveRunProxy(cli rpc.DaemonClient, ns, workload string) error {
 	if err != nil {
 		return err
 	}
-	if err = resp.Send(&rpc.LeaveRequest{Namespace: ns, Workloads: []string{workload}}); err != nil {
+	if err = resp.Send(&rpc.LeaveRequest{Namespace: ns, Workloads: []string{workload}, Level: int32(util.If(config.Debug, log.DebugLevel, log.InfoLevel))}); err != nil {
 		return err
 	}
 	return grpcutil.RenderGRPCStream[rpc.LeaveResponse](context.Background(), resp, os.Stdout)

@@ -44,6 +44,16 @@ func getLogger(ctx context.Context) *log.Logger {
 	return L
 }
 
+// IsDebugEnabled reports whether the logger bound to ctx records at Debug level. Use this to
+// guard expensive debug-only work (e.g. per-packet parsing) instead of the global config.Debug
+// flag: the daemon's per-RPC logger always writes the file at Debug regardless of the CLI's
+// --debug, so this stays true in the daemon (the file is a full record) while the StreamHook
+// independently decides what reaches the CLI. In the CLI/server process the logger level follows
+// --debug, so the guard still skips the work when debug is off.
+func IsDebugEnabled(ctx context.Context) bool {
+	return getLogger(ctx).IsLevelEnabled(log.DebugLevel)
+}
+
 type fieldsKey struct{}
 
 // WithFields 将指定的字段添加到 context 中，这些字段会在后续从 context 获取 logger 时自动添加

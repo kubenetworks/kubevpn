@@ -121,11 +121,14 @@ func copyPacketToPool(pkt *stack.PacketBuffer, prefix byte, headroom int) (buf [
 }
 
 // logIPPacket logs one bare IP packet (no framing prefix) at Debug with a direction label
-// (e.g. "[Client] OUTBOUND", "[Client-2] INBOUND", "[TUN]"), when config.Debug is on. It is
-// the single place these data-plane files render a packet for logging, confining the
-// gopacket/layers dependency here.
+// (e.g. "[Client] OUTBOUND", "[Client-2] INBOUND", "[TUN]"). It is gated on the ctx logger's
+// level (not the global config.Debug flag): the daemon log file is always Debug, so packets are
+// always recorded there and show up in `kubevpn logs`, while req.Level governs only what the
+// StreamHook forwards to the CLI. The level check also skips the parse when debug is off in the
+// CLI/server process. It is the single place these data-plane files render a packet for logging,
+// confining the gopacket/layers dependency here.
 func logIPPacket(ctx context.Context, label string, data []byte) {
-	if !config.Debug {
+	if !plog.IsDebugEnabled(ctx) {
 		return
 	}
 	if src, dst, proto, err := netutil.ParseIPFast(data); err == nil {

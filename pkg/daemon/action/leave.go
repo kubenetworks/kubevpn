@@ -1,8 +1,6 @@
 package action
 
 import (
-	log "github.com/sirupsen/logrus"
-
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
@@ -15,7 +13,7 @@ func (svr *Server) Leave(resp rpc.Daemon_LeaveServer) error {
 		return err
 	}
 
-	logger, ctx := svr.initStreamLogger(resp, int32(log.InfoLevel), func(msg string) error {
+	logger, ctx := svr.initStreamLogger(resp, req.Level, func(msg string) error {
 		return resp.Send(&rpc.LeaveResponse{Message: msg})
 	})
 

@@ -41,6 +41,12 @@ const LogFieldConnID = "connID"
 // post-mortem debugging; the CLI sees Info by default and Debug only when the
 // client passed --debug (streamLevel carries that intent).
 func newServerStreamLogger(out io.Writer, streamLevel int32, sendMsg func(string) error) *log.Logger {
+	// A zero streamLevel is logrus PanicLevel, which would suppress almost everything streamed to
+	// the CLI. Treat it as Info — it means the caller's request carried no Level (e.g. an older
+	// client, or an RPC whose request predates the Level field). The file side stays full Debug.
+	if streamLevel == 0 {
+		streamLevel = int32(log.InfoLevel)
+	}
 	logger := plog.GetLoggerForServer(int32(log.DebugLevel), out)
 	logger.AddHook(&plog.StreamHook{
 		Writer: newStreamWriter(sendMsg),

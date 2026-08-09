@@ -177,6 +177,7 @@ func disconnect(cli rpc.DaemonClient, bytes []byte, ns string, sshConf *pkgssh.S
 		KubeconfigBytes: ptr.To(string(bytes)),
 		Namespace:       ptr.To(ns),
 		SshJump:         handler.SshConfigToRPC(sshConf),
+		Level:           plog.GetLogLevel(),
 	})
 	if err != nil {
 		plog.G(context.Background()).Errorf("Disconnect error: %v", err)
