@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -120,12 +121,12 @@ func TestIntegration_UDP_EnvoyEndToEnd(t *testing.T) {
 
 	bootstrap := envoyBootstrap(hostIP, xdsPort, envoyAdminPort)
 	udpSpec := fmt.Sprintf("%d/udp", listenPort)
-	dockerHost, adminBase, hostPorts, logs := startTestEnvoy(t, ctx, nodeID, bootstrap, udpSpec)
+	dockerHost, adminBase, hostPorts, logs, name := startTestEnvoy(t, ctx, nodeID, bootstrap, udpSpec)
 
 	// --- Phase 5: assert the UDP round-trip ----------------------------------------------
 	const payload = "hello"
 	const want = "HELLO"
-	got := udpRoundTrip(t, net.JoinHostPort(dockerHost, hostPorts[udpSpec]), payload, 10)
+	got := udpProbe(t, ctx, name, net.JoinHostPort(dockerHost, hostPorts[udpSpec]), listenPort, payload, 10)
 	if got != want {
 		t.Logf("envoy /listeners:\n%s", httpGet(adminBase+"/listeners?format=json"))
 		t.Logf("envoy /clusters:\n%s", httpGet(adminBase+"/clusters?format=json"))
@@ -200,7 +201,7 @@ func TestIntegration_TCP_EnvoyEndToEnd(t *testing.T) {
 
 	bootstrap := envoyBootstrap(hostIP, xdsPort, envoyAdminPort)
 	tcpSpec := fmt.Sprintf("%d/tcp", envoyBindPort)
-	dockerHost, adminBase, hostPorts, logs := startTestEnvoy(t, ctx, nodeID, bootstrap, tcpSpec)
+	dockerHost, adminBase, hostPorts, logs, _ := startTestEnvoy(t, ctx, nodeID, bootstrap, tcpSpec)
 
 	// --- Phase 5: assert the HTTP request is routed through Envoy to the upstream ---------
 	url := fmt.Sprintf("http://%s/", net.JoinHostPort(dockerHost, hostPorts[tcpSpec]))
@@ -262,7 +263,7 @@ func TestIntegration_MeshInboundCapture_EnvoyEndToEnd(t *testing.T) {
 	xdsPort := startXDSServer(t, ctx, snapshotCache)
 	bootstrap := envoyBootstrap(hostIP, xdsPort, envoyAdminPort)
 	capSpec := fmt.Sprintf("%d/tcp", config.PortEnvoyInbound)
-	dockerHost, adminBase, hostPorts, logs := startTestEnvoy(t, ctx, nodeID, bootstrap, capSpec)
+	dockerHost, adminBase, hostPorts, logs, _ := startTestEnvoy(t, ctx, nodeID, bootstrap, capSpec)
 
 	// Core assertion: Envoy must bind :15006 and accept connections.
 	addr := net.JoinHostPort(dockerHost, hostPorts[capSpec])
@@ -348,7 +349,7 @@ func TestIntegration_TCP_HeaderSplit_EnvoyEndToEnd(t *testing.T) {
 	xdsPort := startXDSServer(t, ctx, snapshotCache)
 	bootstrap := envoyBootstrap(hostIP, xdsPort, envoyAdminPort)
 	tcpSpec := fmt.Sprintf("%d/tcp", bind)
-	dockerHost, adminBase, hostPorts, logs := startTestEnvoy(t, ctx, nodeID, bootstrap, tcpSpec)
+	dockerHost, adminBase, hostPorts, logs, _ := startTestEnvoy(t, ctx, nodeID, bootstrap, tcpSpec)
 	url := fmt.Sprintf("http://%s/", net.JoinHostPort(dockerHost, hostPorts[tcpSpec]))
 
 	// Each upstream echoes the routing header, so the body identifies which one answered.
@@ -401,7 +402,7 @@ func TestIntegration_TCP_EndpointHotUpdate_EnvoyEndToEnd(t *testing.T) {
 	xdsPort := startXDSServer(t, ctx, snapshotCache)
 	bootstrap := envoyBootstrap(hostIP, xdsPort, envoyAdminPort)
 	tcpSpec := fmt.Sprintf("%d/tcp", bind)
-	dockerHost, adminBase, hostPorts, logs := startTestEnvoy(t, ctx, nodeID, bootstrap, tcpSpec)
+	dockerHost, adminBase, hostPorts, logs, _ := startTestEnvoy(t, ctx, nodeID, bootstrap, tcpSpec)
 	url := fmt.Sprintf("http://%s/", net.JoinHostPort(dockerHost, hostPorts[tcpSpec]))
 
 	// Before update: routes to upstream A.
@@ -459,7 +460,7 @@ func TestIntegration_TCP_RuleTeardown_EnvoyEndToEnd(t *testing.T) {
 	xdsPort := startXDSServer(t, ctx, snapshotCache)
 	bootstrap := envoyBootstrap(hostIP, xdsPort, envoyAdminPort)
 	tcpSpec := fmt.Sprintf("%d/tcp", bind)
-	dockerHost, adminBase, hostPorts, logs := startTestEnvoy(t, ctx, nodeID, bootstrap, tcpSpec)
+	dockerHost, adminBase, hostPorts, logs, _ := startTestEnvoy(t, ctx, nodeID, bootstrap, tcpSpec)
 	url := fmt.Sprintf("http://%s/", net.JoinHostPort(dockerHost, hostPorts[tcpSpec]))
 
 	// Both rules active.
@@ -534,7 +535,7 @@ func TestIntegration_MixedTCPUDP_EnvoyEndToEnd(t *testing.T) {
 	bootstrap := envoyBootstrap(hostIP, xdsPort, envoyAdminPort)
 	tcpSpec := fmt.Sprintf("%d/tcp", bindTCP)
 	udpSpec := fmt.Sprintf("%d/udp", bindUDP)
-	dockerHost, adminBase, hostPorts, logs := startTestEnvoy(t, ctx, nodeID, bootstrap, tcpSpec, udpSpec)
+	dockerHost, adminBase, hostPorts, logs, name := startTestEnvoy(t, ctx, nodeID, bootstrap, tcpSpec, udpSpec)
 
 	// TCP/HTTP through Envoy.
 	url := fmt.Sprintf("http://%s/", net.JoinHostPort(dockerHost, hostPorts[tcpSpec]))
@@ -546,7 +547,7 @@ func TestIntegration_MixedTCPUDP_EnvoyEndToEnd(t *testing.T) {
 	t.Logf("✓ mixed workload TCP/HTTP succeeded")
 
 	// UDP through Envoy.
-	if got := udpRoundTrip(t, net.JoinHostPort(dockerHost, hostPorts[udpSpec]), "ping", 10); got != "PING" {
+	if got := udpProbe(t, ctx, name, net.JoinHostPort(dockerHost, hostPorts[udpSpec]), bindUDP, "ping", 10); got != "PING" {
 		t.Logf("envoy udp stats:\n%s", httpGet(adminBase+"/stats?filter=udp"))
 		t.Logf("envoy logs:\n%s", logs.String())
 		t.Fatalf("mixed UDP: got %q (want %q)", got, "PING")
@@ -601,8 +602,8 @@ func TestIntegration_BootstrapFiles_EnvoyEndToEnd(t *testing.T) {
 				sc := newXDSSnapshotCache(t, logger, nodeID, v)
 				startXDSServerOn(t, ctx, sc, config.PortXDS) // :9002, as hardcoded in the bootstrap
 				udpSpec := fmt.Sprintf("%d/udp", listenPort)
-				dockerHost, adminBase, hostPorts, logs := startTestEnvoyAdmin(t, ctx, nodeID, bootstrap, adminPort, udpSpec)
-				if got := udpRoundTrip(t, net.JoinHostPort(dockerHost, hostPorts[udpSpec]), "hello", 10); got != "HELLO" {
+				dockerHost, adminBase, hostPorts, logs, name := startTestEnvoyAdmin(t, ctx, nodeID, bootstrap, adminPort, udpSpec)
+				if got := udpProbe(t, ctx, name, net.JoinHostPort(dockerHost, hostPorts[udpSpec]), listenPort, "hello", 10); got != "HELLO" {
 					t.Logf("envoy udp stats:\n%s", httpGet(adminBase+"/stats?filter=udp"))
 					t.Logf("envoy logs:\n%s", logs.String())
 					t.Fatalf("%s: UDP round-trip got %q (want %q)", c.file, got, "HELLO")
@@ -623,7 +624,7 @@ func TestIntegration_BootstrapFiles_EnvoyEndToEnd(t *testing.T) {
 				sc := newXDSSnapshotCache(t, logger, nodeID, v)
 				startXDSServerOn(t, ctx, sc, config.PortXDS) // :9002
 				tcpSpec := fmt.Sprintf("%d/tcp", bind)
-				dockerHost, adminBase, hostPorts, logs := startTestEnvoyAdmin(t, ctx, nodeID, bootstrap, adminPort, tcpSpec)
+				dockerHost, adminBase, hostPorts, logs, _ := startTestEnvoyAdmin(t, ctx, nodeID, bootstrap, adminPort, tcpSpec)
 				url := fmt.Sprintf("http://%s/", net.JoinHostPort(dockerHost, hostPorts[tcpSpec]))
 				if status, got := pollRouteGet(url, "go", "B:go", 20); got != "B:go" {
 					t.Logf("envoy /listeners:\n%s", httpGet(adminBase+"/listeners?format=json"))
@@ -707,17 +708,18 @@ func startXDSServerOn(t *testing.T, ctx context.Context, snapshotCache cache.Sna
 // / default gateway / loopback). It waits until admin /ready is reachable and returns the
 // chosen host, the admin base URL, a map of containerPortSpec→hostPort, and the Envoy logs.
 // Skips (never fails) on any setup/reachability problem.
-func startTestEnvoy(t *testing.T, ctx context.Context, nodeID, bootstrap string, publish ...string) (dockerHost, adminBase string, hostPorts map[string]string, logs *bytes.Buffer) {
+func startTestEnvoy(t *testing.T, ctx context.Context, nodeID, bootstrap string, publish ...string) (dockerHost, adminBase string, hostPorts map[string]string, logs *bytes.Buffer, name string) {
 	return startTestEnvoyAdmin(t, ctx, nodeID, bootstrap, envoyAdminPort, publish...)
 }
 
 // startTestEnvoyAdmin is startTestEnvoy with a configurable admin container port — needed for
-// the production bootstrap files, whose admin server is hardcoded to :9003.
-func startTestEnvoyAdmin(t *testing.T, ctx context.Context, nodeID, bootstrap string, adminPort int, publish ...string) (dockerHost, adminBase string, hostPorts map[string]string, logs *bytes.Buffer) {
+// the production bootstrap files, whose admin server is hardcoded to :9003. It returns the
+// Envoy container name so UDP tests can attach a client to its network namespace (see udpProbe).
+func startTestEnvoyAdmin(t *testing.T, ctx context.Context, nodeID, bootstrap string, adminPort int, publish ...string) (dockerHost, adminBase string, hostPorts map[string]string, logs *bytes.Buffer, name string) {
 	t.Helper()
 	adminSpec := fmt.Sprintf("%d/tcp", adminPort)
 	specs := append([]string{adminSpec}, publish...)
-	name := "kubevpn-e2e-" + strings.NewReplacer("/", "-").Replace(publish[0])
+	name = "kubevpn-e2e-" + strings.NewReplacer("/", "-").Replace(publish[0])
 
 	_ = exec.Command("docker", "rm", "-f", name).Run() // best-effort pre-clean
 	args := []string{"run", "--rm", "--name", name}
@@ -767,7 +769,7 @@ func startTestEnvoyAdmin(t *testing.T, ctx context.Context, nodeID, bootstrap st
 		t.Skipf("envoy admin /ready unreachable via any docker host candidate %v on port %s", candidates, hostPorts[adminSpec])
 	}
 	t.Logf("envoy ready via docker host %s (%s)", dockerHost, adminBase)
-	return dockerHost, adminBase, hostPorts, logs
+	return dockerHost, adminBase, hostPorts, logs, name
 }
 
 // ensureEnvoyImage makes sure the Envoy image is present locally, pulling it if needed.
@@ -1083,6 +1085,70 @@ func udpRoundTrip(t *testing.T, addr, payload string, attempts int) string {
 		return string(buf[:n])
 	}
 	return ""
+}
+
+// defaultUDPClientImage is a tiny image with a UDP-capable netcat (busybox `nc -u`),
+// used only on macOS to send a datagram from inside Envoy's network namespace.
+const defaultUDPClientImage = "busybox:stable"
+
+// udpClientImage returns the image udpRoundTripInContainer runs, overridable for
+// offline/mirrored environments via KUBEVPN_E2E_UDP_CLIENT_IMAGE.
+func udpClientImage() string {
+	if img := os.Getenv("KUBEVPN_E2E_UDP_CLIENT_IMAGE"); img != "" {
+		return img
+	}
+	return defaultUDPClientImage
+}
+
+// ensureUDPClientImage makes sure the UDP-client image is present locally, pulling it if
+// needed. Skips the test if it is absent and cannot be pulled (mirrors ensureEnvoyImage).
+func ensureUDPClientImage(t *testing.T) {
+	t.Helper()
+	img := udpClientImage()
+	if exec.Command("docker", "image", "inspect", img).Run() == nil {
+		return
+	}
+	t.Logf("pulling %s (first run)…", img)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "docker", "pull", img).CombinedOutput()
+	if err != nil {
+		t.Skipf("cannot pull %s (offline?): %v\n%s", img, err, out)
+	}
+}
+
+// udpProbe performs the UDP round-trip against Envoy's listener, choosing a transport that
+// works on the host OS. On Linux the listener's published host port is reachable directly.
+// On macOS the docker daemon runs in a VM (colima/lima) whose port-forwarder is TCP-only, so
+// published UDP ports never reach the container from the host; we instead send from a sidecar
+// container sharing Envoy's network namespace, reaching the listener on localhost inside the VM.
+func udpProbe(t *testing.T, ctx context.Context, envoyName, hostUDPAddr string, containerPort int, payload string, attempts int) string {
+	t.Helper()
+	if runtime.GOOS == "darwin" {
+		return udpRoundTripInContainer(t, ctx, envoyName, containerPort, payload, attempts)
+	}
+	return udpRoundTrip(t, hostUDPAddr, payload, attempts)
+}
+
+// udpRoundTripInContainer sends payload to Envoy's UDP listener from a throwaway container
+// attached to Envoy's network namespace (so Envoy is reachable at 127.0.0.1:containerPort,
+// since its listener binds 0.0.0.0), returning the reply ("" if none). UDP is lossy, so the
+// send/receive is retried inside the container shell. Used on macOS where the docker VM does
+// not forward UDP host ports (see udpProbe).
+func udpRoundTripInContainer(t *testing.T, ctx context.Context, envoyName string, containerPort int, payload string, attempts int) string {
+	t.Helper()
+	ensureUDPClientImage(t)
+	// busybox `nc -u -w1`: send stdin as one datagram, wait up to 1s for the reply, print it.
+	script := fmt.Sprintf(
+		`for i in $(seq %d); do r=$(printf '%s' | nc -u -w1 127.0.0.1 %d); [ -n "$r" ] && { printf '%%s' "$r"; exit 0; }; done`,
+		attempts, payload, containerPort)
+	out, err := exec.CommandContext(ctx, "docker", "run", "--rm",
+		"--network", "container:"+envoyName, udpClientImage(), "sh", "-c", script).Output()
+	if err != nil {
+		t.Logf("in-container udp client error: %v", err)
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // renderBootstrap reads a production Envoy bootstrap file from pkg/inject and renders its

@@ -281,48 +281,6 @@ func TestTunConnLocalRemoteAddr(t *testing.T) {
 	}
 }
 
-func TestListenerRequiresRoot(t *testing.T) {
-	t.Skip("requires root/CAP_NET_ADMIN to create TUN device")
-
-	cfg := Config{
-		Name: "utun-test",
-		Addr: "198.18.0.100/16",
-		MTU:  config.DefaultMTU,
-	}
-	ln, err := Listener(cfg)
-	if err != nil {
-		t.Fatalf("Listener() error = %v", err)
-	}
-	defer ln.Close()
-}
-
-func TestAddRoutesRequiresRoot(t *testing.T) {
-	t.Skip("requires root/CAP_NET_ADMIN to modify routes")
-
-	routes := []types.Route{
-		{
-			Dst: net.IPNet{
-				IP:   net.ParseIP("192.168.99.0"),
-				Mask: net.CIDRMask(24, 32),
-			},
-		},
-	}
-	_ = AddRoutes("utun-test", routes...)
-}
-
-func TestDeleteRoutesRequiresRoot(t *testing.T) {
-	t.Skip("requires root/CAP_NET_ADMIN to modify routes")
-
-	routes := []types.Route{
-		{
-			Dst: net.IPNet{
-				IP:   net.ParseIP("192.168.99.0"),
-				Mask: net.CIDRMask(24, 32),
-			},
-		},
-	}
-	_ = DeleteRoutes("utun-test", routes...)
-}
 
 // mockConn is a minimal net.Conn implementation for testing the listener logic.
 type mockConn struct {

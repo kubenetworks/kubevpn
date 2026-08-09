@@ -1,15 +1,9 @@
-package handler
+//go:build tun
 
-// Real-device end-to-end tests for the dry-run manual-IP feature: they stand up a
-// REAL TunConfigService gRPC server (backed by a fake clientset) + a REAL local TUN
-// device + the client IPWatcher, then edit TUN_ALLOCS and assert the actual TUN
-// device IP changes (confirm) or stays (decline), across single/multi-user edits
-// and disconnect / xds-restart / client-restart.
-//
-// These require CAP_NET_ADMIN to create TUN devices, so each test probe-skips when
-// it cannot. No build tag: under root (e.g. CI `make ut` via sudo) they run for
-// real; otherwise they Skip. Run directly:
-//   sudo -E env PATH=$PATH go test ./pkg/handler/ -run TestRealTUNManualIP -v -timeout=300s
+// Real-device end-to-end tests for the dry-run manual-IP feature.
+// These require CAP_NET_ADMIN to create TUN devices; they are gated behind
+// the `tun` build tag and run via `make ut-tun`.
+package handler
 
 import (
 	"context"
@@ -33,15 +27,6 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/xds"
 )
 
-// requireTUN skips the test if a TUN device cannot be created (no CAP_NET_ADMIN).
-func requireTUN(t *testing.T) {
-	t.Helper()
-	ln, err := tun.Listener(tun.Config{Addr: "198.18.254.254/32", MTU: config.DefaultMTU})
-	if err != nil {
-		t.Skipf("real-TUN E2E needs CAP_NET_ADMIN: %v", err)
-	}
-	_ = ln.Close()
-}
 
 // cpEnv is a real in-process xds: TunConfigServer + gRPC on a fixed port,
 // backed by a fake clientset whose ConfigMap is the editable TUN_ALLOCS store.
@@ -151,7 +136,7 @@ func createDevice(t *testing.T, v4, v6 net.IP) (string, func()) {
 	}
 	ln, err := tun.Listener(cfg)
 	if err != nil {
-		t.Skipf("cannot create TUN device (need CAP_NET_ADMIN): %v", err)
+		t.Fatalf("cannot create TUN device (need CAP_NET_ADMIN): %v", err)
 	}
 	conn, err := ln.Accept()
 	if err != nil {
@@ -298,7 +283,7 @@ func cidrPool(ip net.IP) string { return ip.String() + "/16" }
 
 // 1. Single user edits TUN_ALLOCS → the real TUN device IP changes.
 func TestRealTUNManualIP_SingleChange(t *testing.T) {
-	requireTUN(t)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	env := newCPEnv(t)
@@ -323,7 +308,7 @@ func TestRealTUNManualIP_SingleChange(t *testing.T) {
 //  2. Edit to an IP that conflicts with another local TUN device → client declines,
 //     device unchanged, ConfigMap annotated.
 func TestRealTUNManualIP_DeclineConflict(t *testing.T) {
-	requireTUN(t)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	env := newCPEnv(t)
@@ -365,7 +350,7 @@ func TestRealTUNManualIP_DeclineConflict(t *testing.T) {
 
 // 3. Multiple users edited to DIFFERENT IPs → each device changes independently.
 func TestRealTUNManualIP_MultiUserDifferentIP(t *testing.T) {
-	requireTUN(t)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	env := newCPEnv(t)
@@ -390,7 +375,7 @@ func TestRealTUNManualIP_MultiUserDifferentIP(t *testing.T) {
 
 // 4. Multiple users edited to the SAME IP → exactly one wins, no two devices share it.
 func TestRealTUNManualIP_MultiUserSameIP(t *testing.T) {
-	requireTUN(t)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	env := newCPEnv(t)
@@ -433,7 +418,7 @@ func TestRealTUNManualIP_MultiUserSameIP(t *testing.T) {
 //  5. Transient disconnect: xds drops then returns on the same port; the
 //     watcher reconnects and a subsequent edit still takes effect.
 func TestRealTUNManualIP_Disconnect(t *testing.T) {
-	requireTUN(t)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	env := newCPEnv(t)
@@ -458,7 +443,7 @@ func TestRealTUNManualIP_Disconnect(t *testing.T) {
 //  6. Control-plane restart: committed IP (persisted in TUN_ALLOCS) survives a fresh
 //     server; a new edit after restart still works.
 func TestRealTUNManualIP_XDSRestart(t *testing.T) {
-	requireTUN(t)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	env := newCPEnv(t)
@@ -487,7 +472,7 @@ func TestRealTUNManualIP_XDSRestart(t *testing.T) {
 //  7. Client (machine) restart: a confirmed manual IP persists; the restarted client
 //     (same OwnerID) reclaims it.
 func TestRealTUNManualIP_ClientRestart(t *testing.T) {
-	requireTUN(t)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	env := newCPEnv(t)
@@ -565,7 +550,7 @@ func editTunAllocsDual(t *testing.T, env *cpEnv, m map[string][2]string) {
 
 // 8. Edit only ipv6 → device's v6 changes, v4 untouched.
 func TestRealTUNManualIP_V6Change(t *testing.T) {
-	requireTUN(t)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	env := newCPEnv(t)
@@ -593,7 +578,7 @@ func TestRealTUNManualIP_V6Change(t *testing.T) {
 
 // 9. Edit both ipv4 and ipv6 → both change on the device.
 func TestRealTUNManualIP_BothChange(t *testing.T) {
-	requireTUN(t)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	env := newCPEnv(t)

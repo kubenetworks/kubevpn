@@ -117,12 +117,10 @@ jobs:
             lscr.io/linuxserver/openssh-server:latest
 
       - name: Test
-        # Run as root for TUN/route setup, but preserve the runner's kubeconfig.
-        # Plain `sudo` resets HOME/KUBECONFIG, so client-go falls back to its
-        # default server http://localhost:8080 (which collides with the test's
-        # own dummy HTTP server) and every API call fails with
-        # "serializer for text/plain; charset=utf-8 doesn't exist".
-        run: sudo -E env HOME="$HOME" KUBECONFIG="$HOME/.kube/config" VERSION="$VERSION" make ut
+        run: make ut
+
+      - name: Test (TUN)
+        run: sudo -E env HOME="$HOME" PATH="$PATH" make ut-tun
 
   macos:
     runs-on:  macos-15-intel
@@ -204,15 +202,14 @@ jobs:
             lscr.io/linuxserver/openssh-server:latest
 
       - name: Test
-        # for docker mount
         env:
           TMPDIR: .
-        # Run as root for TUN/route setup, but preserve the runner's kubeconfig.
-        # Plain `sudo` resets HOME/KUBECONFIG, so client-go falls back to its
-        # default server http://localhost:8080 (which collides with the test's
-        # own dummy HTTP server) and every API call fails with
-        # "serializer for text/plain; charset=utf-8 doesn't exist".
-        run: sudo -E env HOME="$HOME" KUBECONFIG="$HOME/.kube/config" TMPDIR="$TMPDIR" VERSION="$VERSION" make ut
+        run: make ut
+
+      - name: Test (TUN)
+        env:
+          TMPDIR: .
+        run: sudo -E env HOME="$HOME" PATH="$PATH" TMPDIR="$TMPDIR" make ut-tun
 
   windows:
     runs-on: windows-latest
@@ -250,3 +247,5 @@ jobs:
         # Runs `make ut-no-cluster` = `go test` WITHOUT `-tags=integration`, so only
         # the tests that need no kubeconfig / real cluster are compiled and run.
         run: make ut-no-cluster
+        # No TUN step: Windows CI runners don't run as Administrator, and the
+        # wintun driver needs elevation. TUN tests run on Linux/macOS instead.
