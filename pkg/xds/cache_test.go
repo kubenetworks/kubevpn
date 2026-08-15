@@ -1,12 +1,14 @@
 package xds
 
 import (
+	"strings"
 	"testing"
 
 	cluster "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
 	core "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	endpoint "github.com/envoyproxy/go-control-plane/envoy/config/endpoint/v3"
 	listener "github.com/envoyproxy/go-control-plane/envoy/config/listener/v3"
+	route "github.com/envoyproxy/go-control-plane/envoy/config/route/v3"
 	httpconnectionmanager "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/http_connection_manager/v3"
 	tcpproxy "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/tcp_proxy/v3"
 	"github.com/envoyproxy/go-control-plane/pkg/cache/types"
@@ -298,11 +300,13 @@ func TestVirtual_To_SkipsEmptyTunIP_TCP(t *testing.T) {
 	if bad := emptyEndpointAddrs(endpoints); len(bad) != 0 {
 		t.Fatalf("empty-address endpoints generated for empty TUN IP: %v", bad)
 	}
-	// The only cluster left should be origin_cluster (the mesh default route target); no
-	// per-rule TUN cluster is created for the empty IP.
+	// No per-rule TUN cluster is created for the empty IP. The only clusters left are the
+	// shared origin_cluster (capture passthrough) and the per-port loopback_<port> cluster
+	// (the mesh default route target) — neither routes to a broken empty address.
 	for _, res := range clusters {
-		if name := res.(*cluster.Cluster).GetName(); name != originClusterName {
-			t.Fatalf("unexpected cluster %q for empty TUN IP (want only %q)", name, originClusterName)
+		name := res.(*cluster.Cluster).GetName()
+		if name != originClusterName && !strings.HasPrefix(name, "loopback_") {
+			t.Fatalf("unexpected cluster %q for empty TUN IP (want only origin_cluster / loopback_*)", name)
 		}
 	}
 }
@@ -346,9 +350,17 @@ func TestVirtual_To_EmptyRules(t *testing.T) {
 	if got := len(nonCaptureListeners(listeners)); got != 1 {
 		t.Fatalf("expected 1 listener even with empty rules, got %d", got)
 	}
-	// Should still have origin cluster for default route
-	if len(clusters) != 1 {
-		t.Fatalf("expected 1 origin cluster, got %d", len(clusters))
+	// Even with no rules: origin_cluster (capture passthrough) + the per-port
+	// loopback_8080 cluster (the mesh default route target for declared port 8080).
+	names := map[string]bool{}
+	for _, res := range clusters {
+		names[res.(*cluster.Cluster).GetName()] = true
+	}
+	if !names[originClusterName] {
+		t.Fatalf("expected origin_cluster present, got %v", names)
+	}
+	if !names[loopbackClusterName(8080)] {
+		t.Fatalf("expected %s present, got %v", loopbackClusterName(8080), names)
 	}
 	if len(routes) != 1 {
 		t.Fatalf("expected 1 route config, got %d", len(routes))
@@ -612,7 +624,8 @@ func TestVirtual_To_MultiplePortsTCP(t *testing.T) {
 		t.Fatal("missing listener on port 9090")
 	}
 
-	// 1 rule cluster per port (2) + 1 shared origin_cluster (created once per Virtual) = 3
+	// 1 rule cluster per port (2) + 1 loopback cluster per port (2) + 1 shared
+	// origin_cluster (created once per Virtual) = 5
 	if len(clusters) < 3 {
 		t.Fatalf("expected at least 3 clusters for 2 ports with 1 rule, got %d", len(clusters))
 	}
@@ -725,9 +738,113 @@ func TestVirtual_To_FargateDefaultRoute(t *testing.T) {
 	}
 }
 
+// TestVirtual_To_MeshDefaultRouteLoopback locks in the loopback origin回源 for mesh
+// declared ports: the no-header-match default route and the per-port loopback cluster must
+// target the real app over 127.0.0.1:<containerPort> (not origin_cluster/ORIGINAL_DST), so
+// the return path goes through lo and never re-enters the sidecar PREROUTING DNAT. The
+// shared origin_cluster must still exist for the capture listener's undeclared-port passthrough.
+func TestVirtual_To_MeshDefaultRouteLoopback(t *testing.T) {
+	v := &Virtual{
+		Namespace: "default",
+		UID:       "deployments.apps.reviews",
+		Ports: []ContainerPort{
+			{ContainerPort: 9080, Protocol: corev1.ProtocolTCP},
+		},
+		Rules: []*Rule{
+			{Headers: map[string]string{"env": "test"}, LocalTunIPv4: "198.18.0.1", PortMap: map[int32]string{9080: "9080"}},
+		},
+	}
+
+	logger := log.NewEntry(log.New())
+	_, clusters, routes, _ := v.To(false, logger)
+
+	// loopback_9080 must exist, be STATIC, and point at 127.0.0.1:9080.
+	var lb *cluster.Cluster
+	var hasOrigin bool
+	for _, res := range clusters {
+		c := res.(*cluster.Cluster)
+		switch c.GetName() {
+		case loopbackClusterName(9080):
+			lb = c
+		case originClusterName:
+			hasOrigin = true
+		}
+	}
+	if lb == nil {
+		t.Fatal("expected loopback_9080 cluster for mesh declared port")
+	}
+	if lb.GetType() != cluster.Cluster_STATIC {
+		t.Fatalf("loopback cluster must be STATIC, got %v", lb.GetType())
+	}
+	ep := lb.GetLoadAssignment().GetEndpoints()[0].GetLbEndpoints()[0].GetEndpoint()
+	addr := ep.GetAddress().GetSocketAddress()
+	if addr.GetAddress() != "127.0.0.1" || addr.GetPortValue() != 9080 {
+		t.Fatalf("loopback endpoint: want 127.0.0.1:9080, got %s:%d", addr.GetAddress(), addr.GetPortValue())
+	}
+	// IPv6 disabled: no ::1 happy-eyeballs additional address.
+	if n := len(ep.GetAdditionalAddresses()); n != 0 {
+		t.Fatalf("expected no additional addresses with IPv6 disabled, got %d", n)
+	}
+	if !hasOrigin {
+		t.Error("origin_cluster must still exist for the capture passthrough (undeclared ports)")
+	}
+
+	// The default route (no header match) must target loopback_9080.
+	rc := routes[0].(*route.RouteConfiguration)
+	var defaultCluster string
+	for _, r := range rc.GetVirtualHosts()[0].GetRoutes() {
+		if len(r.GetMatch().GetHeaders()) == 0 {
+			defaultCluster = r.GetRoute().GetCluster()
+		}
+	}
+	if defaultCluster != loopbackClusterName(9080) {
+		t.Fatalf("mesh default route: want %s, got %q", loopbackClusterName(9080), defaultCluster)
+	}
+}
+
+// TestVirtual_To_MeshLoopbackDualStack verifies that with IPv6 enabled the loopback cluster
+// carries both 127.0.0.1 (primary) and ::1 (additional address) so envoy's happy-eyeballs
+// reaches the app whether it listens on v4, v6, or dual-stack.
+func TestVirtual_To_MeshLoopbackDualStack(t *testing.T) {
+	v := &Virtual{
+		Namespace: "default",
+		UID:       "deployments.apps.reviews",
+		Ports: []ContainerPort{
+			{ContainerPort: 9080, Protocol: corev1.ProtocolTCP},
+		},
+		Rules: []*Rule{
+			{Headers: map[string]string{"env": "test"}, LocalTunIPv4: "198.18.0.1", LocalTunIPv6: "2001:2::1", PortMap: map[int32]string{9080: "9080"}},
+		},
+	}
+
+	logger := log.NewEntry(log.New())
+	_, clusters, _, _ := v.To(true, logger)
+
+	var lb *cluster.Cluster
+	for _, res := range clusters {
+		if c := res.(*cluster.Cluster); c.GetName() == loopbackClusterName(9080) {
+			lb = c
+		}
+	}
+	if lb == nil {
+		t.Fatal("expected loopback_9080 cluster")
+	}
+	ep := lb.GetLoadAssignment().GetEndpoints()[0].GetLbEndpoints()[0].GetEndpoint()
+	if a := ep.GetAddress().GetSocketAddress(); a.GetAddress() != "127.0.0.1" || a.GetPortValue() != 9080 {
+		t.Fatalf("primary loopback addr: want 127.0.0.1:9080, got %s:%d", a.GetAddress(), a.GetPortValue())
+	}
+	add := ep.GetAdditionalAddresses()
+	if len(add) != 1 {
+		t.Fatalf("expected 1 additional (::1) address with IPv6 enabled, got %d", len(add))
+	}
+	if a := add[0].GetAddress().GetSocketAddress(); a.GetAddress() != "::1" || a.GetPortValue() != 9080 {
+		t.Fatalf("additional loopback addr: want [::1]:9080, got %s:%d", a.GetAddress(), a.GetPortValue())
+	}
+}
+
 func TestBuildFilterChains_NonEmptyRouteName(t *testing.T) {
 	routeName := "default_deployments.apps.reviews_9080_TCP"
-	chains := buildFilterChains(routeName)
+	chains := buildFilterChains(routeName, loopbackClusterName(9080))
 
 	if len(chains) != 2 {
 		t.Fatalf("expected 2 filter chains (HTTP + TCP fallback), got %d", len(chains))
@@ -786,13 +903,13 @@ func TestBuildFilterChains_NonEmptyRouteName(t *testing.T) {
 	if err := tcpChain.Filters[0].GetTypedConfig().UnmarshalTo(&tcp); err != nil {
 		t.Fatalf("failed to unmarshal TcpProxy: %v", err)
 	}
-	if tcp.GetCluster() != "origin_cluster" {
-		t.Fatalf("TCP proxy cluster: want %q, got %q", "origin_cluster", tcp.GetCluster())
+	if want := loopbackClusterName(9080); tcp.GetCluster() != want {
+		t.Fatalf("TCP proxy cluster: want %q, got %q", want, tcp.GetCluster())
 	}
 }
 
 func TestBuildFilterChains_EmptyRouteName(t *testing.T) {
-	chains := buildFilterChains("")
+	chains := buildFilterChains("", originClusterName)
 	if len(chains) != 2 {
 		t.Fatalf("expected 2 filter chains even with empty route name, got %d", len(chains))
 	}
@@ -807,7 +924,7 @@ func TestBuildFilterChains_EmptyRouteName(t *testing.T) {
 }
 
 func TestBuildFilterChains_HTTPManagerConfig(t *testing.T) {
-	chains := buildFilterChains("test-route")
+	chains := buildFilterChains("test-route", originClusterName)
 
 	var hcm httpconnectionmanager.HttpConnectionManager
 	if err := chains[0].Filters[0].GetTypedConfig().UnmarshalTo(&hcm); err != nil {

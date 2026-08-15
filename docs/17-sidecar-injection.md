@@ -123,6 +123,13 @@ inbound TCP to a single virtual-inbound capture listener on `:15006`
 - **declared port** → redirect to its per-port listener → empty-headers catch-all route → your TUN IP;
 - **undeclared port** → passthrough filter chain → `origin_cluster` (`ORIGINAL_DST`) → the real app.
 
+Within a declared port's per-port listener, a request matching **no** header rule (the origin return
+path) goes to `loopback_<containerPort>` (`127.0.0.1:<containerPort>`, a STATIC cluster), not
+`origin_cluster`/`ORIGINAL_DST`. Loopback never re-enters `PREROUTING`, avoiding the ORIGINAL_DST loop
+on lima/colima kernels and reliably reaching the local app — see
+[41-origin-loopback-cluster.md](41-origin-loopback-cluster.md). Option C below stays relevant only for
+**undeclared** ports, which still use `ORIGINAL_DST`.
+
 See [16-envoy-controlplane.md](16-envoy-controlplane.md) ("Mesh-mode inbound capture listener" and
 "Routing logic") for the xDS detail.
 

@@ -311,7 +311,14 @@ the existing path this design leverages.
 envoy routing:
 - `x-user: alice` → `198.18.0.5:9080` (Alice's machine)
 - `x-user: bob` → `198.18.0.6:9080` (Bob's machine)
-- no match → `origin_cluster` (ORIGINAL_DST, back to the origin service)
+- no match → back to the origin app (for a **declared** port now via `loopback_<port>` =
+  `127.0.0.1:<port>`; **undeclared** ports still via `origin_cluster`/ORIGINAL_DST — see
+  [41-origin-loopback-cluster.md](41-origin-loopback-cluster.md))
+
+> Throughout this doc, "no match → `origin_cluster`" refers to the origin return path; as of
+> [41-origin-loopback-cluster.md](41-origin-loopback-cluster.md) that path is `loopback_<port>`
+> for declared ports, with `origin_cluster` retained for undeclared-port passthrough. The
+> IP-hot-update behavior described here is unchanged (it only touches header-matched rule clusters).
 
 After Alice's machine wakes and its IP becomes `198.18.0.7`: `syncEnvoyRuleIP` updates
 `Rule[0].LocalTunIPv4 = "198.18.0.7"` → xDS push → envoy automatically routes to the new IP. Bob is unaffected.

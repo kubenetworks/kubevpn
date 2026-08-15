@@ -171,10 +171,12 @@ The TCP tests use Fargate mode because the mesh-mode TCP listener sets `BindToPo
 
 **Routing logic (TCP):**
 - Header-matched routes → specific cluster (user's TUN IP + envoy port)
-- Default route → `origin_cluster` (ORIGINAL_DST, forwards to the real container) in mesh mode
+- Default route → `loopback_<containerPort>` (STATIC, `127.0.0.1:<containerPort>`, forwards to the real app) in mesh mode
 - Default route → user's TUN IP + container port in fargate mode (no ORIGINAL_DST available)
 
-**Origin cluster**: A special `ORIGINAL_DST` cluster used in mesh mode. Envoy forwards unmatched traffic to the original destination (the real application), enabling transparent proxying.
+**Loopback cluster (mesh declared ports)**: the no-header-match return path for a declared port goes to `127.0.0.1:<containerPort>` via a per-port STATIC cluster, not `ORIGINAL_DST → podIP`. Loopback is hard-routed to `lo` by every kernel, so the return connection never re-enters the sidecar's `PREROUTING` DNAT — this avoids the ORIGINAL_DST loop on lima/colima kernels and aligns with Istio. See [41-origin-loopback-cluster.md](41-origin-loopback-cluster.md).
+
+**Origin cluster**: A shared `ORIGINAL_DST` cluster, still used in mesh mode for the `:15006` capture listener's **undeclared-port** passthrough (their port is unknown, so no static loopback cluster can be pre-built). Envoy forwards such traffic to the original destination.
 
 > **Port-coverage difference vs. the old VPN-only sidecar.** Because per-port listeners are emitted only for declared container ports (`a.Ports`), a full-proxy (empty-headers) rule intercepts **only declared ports**. Traffic to an undeclared port reaches the `:15006` capture listener but has no per-port listener to redirect to, so it falls through the passthrough chain to `origin_cluster` — the real app, not the user's machine. The old VPN-only sidecar tunneled **all** ports. See [17-sidecar-injection.md](17-sidecar-injection.md) ("Full-proxy port coverage") for the implications and restore options.
 

@@ -31,9 +31,27 @@ On Linux, the kernel recognizes that `pod_IP → pod_IP` is a local connection a
 
 On colima's VM kernel, the same connection is routed through `eth0`. Traffic on `eth0` traverses the full netfilter PREROUTING chain, hits the DNAT rule again, and redirects back to envoy — creating an infinite loop.
 
-### 2.3 Why this was not seen on master
+### 2.3 Which macOS Docker backend triggers this
 
-The master branch uses **Docker Desktop** (`docker/setup-docker-action@v4`) whose linuxkit kernel routes local-to-local traffic through loopback, matching native Linux behavior. The refactor branch switched to **colima** for bind-mount flexibility, which exposed this kernel difference.
+The trigger is the **lima** VM kernel (QEMU guest), which routes a pod's connection to its own IP
+through `eth0` instead of `lo`. This affects both `colima` (lima + docker) and — importantly —
+`docker/setup-docker-action@v4` on the `macos-15-intel` runner: that action does **not** provide a
+Docker Desktop linuxkit daemon there; it `brew install lima` and runs docker inside a lima VM
+(`docker-actions-toolkit`). So switching the workflow back to `setup-docker-action` does **not**
+escape this kernel difference — it is still lima. Only a true linuxkit/Docker-Desktop or native
+Linux kernel routes pod→own-IP through `lo`.
+
+> Earlier revisions of this doc claimed `setup-docker-action@v4` == Docker Desktop linuxkit (safe);
+> CI logs show it is lima on the macOS runner, i.e. same kernel family as colima.
+
+### 2.4 Preferred fix for declared ports: loopback return path
+
+The loop guard below breaks the loop but still relies on `ORIGINAL_DST → podIP`. For **declared
+ports**, the cleaner fix is to send the origin return path to `127.0.0.1:<containerPort>` (a STATIC
+cluster) instead — loopback is hard-routed to `lo` on every kernel, so it never re-enters
+`PREROUTING` and the loop cannot form regardless of backend. See
+[41-origin-loopback-cluster.md](41-origin-loopback-cluster.md). The loop guard is retained for the
+**undeclared-port** `ORIGINAL_DST` passthrough (and is a no-op on native Linux).
 
 ## 3. Fix
 

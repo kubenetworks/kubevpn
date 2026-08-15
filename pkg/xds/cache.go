@@ -359,8 +359,14 @@ func (a *Virtual) addTCPPort(res *xdsResources, port ContainerPort, listenPort i
 			rr = append(rr, defaultRouteToCluster(res.addTunCluster(ip, port.ContainerPort)))
 		}
 	} else {
-		// Mesh: no header match falls back to origin_cluster (created once in To()).
-		rr = append(rr, defaultRouteToCluster(originClusterName))
+		// Mesh: no header match falls back to the real app over loopback
+		// (127.0.0.1:containerPort) via a per-port STATIC cluster, not origin_cluster
+		// (ORIGINAL_DST -> pod IP). Loopback never re-enters PREROUTING, so it avoids
+		// the ORIGINAL_DST loop on lima/colima kernels and fixes origin回源 503 on
+		// ServiceIP paths. Undeclared ports still fall through the capture listener's
+		// origin_cluster passthrough. See docs/41-origin-loopback-cluster.md.
+		res.clusters = append(res.clusters, loopbackCluster(port.ContainerPort, enableIPv6))
+		rr = append(rr, defaultRouteToCluster(loopbackClusterName(port.ContainerPort)))
 	}
 
 	res.routes = append(res.routes, &route.RouteConfiguration{
@@ -459,6 +465,72 @@ func originCluster() *cluster.Cluster {
 	}
 }
 
+// loopbackClusterName is the per-declared-port STATIC cluster that forwards a
+// port's origin (no-header-match) traffic to the real app over loopback
+// (127.0.0.1:<containerPort>, plus [::1] via happy-eyeballs when IPv6 is enabled),
+// instead of origin_cluster (ORIGINAL_DST -> pod IP). Loopback (127.0.0.0/8, ::1)
+// is hard-routed to lo by every kernel, so the connection never re-enters the
+// sidecar's PREROUTING DNAT — this avoids the ORIGINAL_DST loop on lima/colima VM
+// kernels and aligns with how Istio routes inbound traffic for declared ports.
+// See docs/41-origin-loopback-cluster.md.
+func loopbackClusterName(port int32) string {
+	return fmt.Sprintf("loopback_%d", port)
+}
+
+func loopbackSocketAddr(ip string, port int32) *core.Address {
+	return &core.Address{
+		Address: &core.Address_SocketAddress{
+			SocketAddress: &core.SocketAddress{
+				Address:       ip,
+				PortSpecifier: &core.SocketAddress_PortValue{PortValue: uint32(port)},
+			},
+		},
+	}
+}
+
+func loopbackCluster(port int32, enableIPv6 bool) *cluster.Cluster {
+	name := loopbackClusterName(port)
+	ep := &endpoint.Endpoint{Address: loopbackSocketAddr("127.0.0.1", port)}
+	if enableIPv6 {
+		// happy-eyeballs: with an IPv6 additional address, envoy attempts 127.0.0.1 and
+		// [::1] concurrently and uses whichever connects first — so the origin return path
+		// reaches the app whether it listens on v4 (0.0.0.0), v6 (::), or dual-stack, and
+		// never fails half the requests the way a round-robin over both families would.
+		ep.AdditionalAddresses = []*endpoint.Endpoint_AdditionalAddress{
+			{Address: loopbackSocketAddr("::1", port)},
+		}
+	}
+	return &cluster.Cluster{
+		Name:                 name,
+		ConnectTimeout:       durationpb.New(envoyClusterConnectTimeout),
+		LbPolicy:             cluster.Cluster_ROUND_ROBIN,
+		ClusterDiscoveryType: &cluster.Cluster_Type{Type: cluster.Cluster_STATIC},
+		LoadAssignment: &endpoint.ClusterLoadAssignment{
+			ClusterName: name,
+			Endpoints: []*endpoint.LocalityLbEndpoints{{
+				LbEndpoints: []*endpoint.LbEndpoint{{
+					HostIdentifier: &endpoint.LbEndpoint_Endpoint{Endpoint: ep},
+				}},
+			}},
+		},
+		TypedExtensionProtocolOptions: map[string]*anypb.Any{
+			"envoy.extensions.upstreams.http.v3.HttpProtocolOptions": mustMarshalAny(&httpv3.HttpProtocolOptions{
+				UpstreamProtocolOptions: &httpv3.HttpProtocolOptions_UseDownstreamProtocolConfig{
+					UseDownstreamProtocolConfig: &httpv3.HttpProtocolOptions_UseDownstreamHttpConfig{
+						HttpProtocolOptions: &core.Http1ProtocolOptions{
+							HeaderKeyFormat: &core.Http1ProtocolOptions_HeaderKeyFormat{
+								HeaderFormat: &core.Http1ProtocolOptions_HeaderKeyFormat_StatefulFormatter{
+									StatefulFormatter: createPreserveCaseConfig(),
+								},
+							},
+						},
+					},
+				},
+			}),
+		},
+	}
+}
+
 func toRoute(clusterName string, headers map[string]string) *route.Route {
 	var r []*route.HeaderMatcher
 	for k, v := range headers {
@@ -521,8 +593,10 @@ func defaultRouteToCluster(clusterName string) *route.Route {
 }
 
 // buildFilterChains creates the HTTP connection manager filter chain and a TCP proxy
-// fallback filter chain. Used for all protocol types (TCP, UDP, SCTP).
-func buildFilterChains(routeName string) []*listener.FilterChain {
+// fallback filter chain. Used for all protocol types (TCP, UDP, SCTP). tcpFallbackCluster
+// is the cluster the non-HTTP (raw TCP) fallback chain proxies to — loopback_<port> for
+// mesh declared ports, origin_cluster for fargate.
+func buildFilterChains(routeName string, tcpFallbackCluster string) []*listener.FilterChain {
 	httpManager := &httpconnectionmanager.HttpConnectionManager{
 		CodecType:  httpconnectionmanager.HttpConnectionManager_AUTO,
 		StatPrefix: "http",
@@ -605,7 +679,7 @@ func buildFilterChains(routeName string) []*listener.FilterChain {
 	tcpConfig := &tcpproxy.TcpProxy{
 		StatPrefix: "tcp",
 		ClusterSpecifier: &tcpproxy.TcpProxy_Cluster{
-			Cluster: originClusterName,
+			Cluster: tcpFallbackCluster,
 		},
 	}
 
@@ -647,6 +721,13 @@ func toListener(listenerName string, routeName string, port int32, p corev1.Prot
 		protocol = core.SocketAddress_TCP
 	}
 
+	// The raw-TCP fallback chain forwards to the real app: mesh declared ports use the
+	// per-port loopback cluster (127.0.0.1:port); fargate keeps origin_cluster.
+	tcpFallbackCluster := loopbackClusterName(port)
+	if isFargateMode {
+		tcpFallbackCluster = originClusterName
+	}
+
 	return &listener.Listener{
 		Name:             listenerName,
 		TrafficDirection: core.TrafficDirection_INBOUND,
@@ -663,7 +744,7 @@ func toListener(listenerName string, routeName string, port int32, p corev1.Prot
 				},
 			},
 		},
-		FilterChains: buildFilterChains(routeName),
+		FilterChains: buildFilterChains(routeName, tcpFallbackCluster),
 		ListenerFilters: []*listener.ListenerFilter{
 			{
 				Name: wellknown.HttpInspector,
