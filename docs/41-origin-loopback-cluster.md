@@ -14,10 +14,10 @@ loopback call and never re-enters the sidecar's `PREROUTING` DNAT. But on the li
 kernel used by the macOS CI runner, `pod → own-IP` is routed through `eth0`, which re-enters
 `PREROUTING`, re-matches the `DNAT … --to :15006` rule, and loops back into envoy — surfacing
 as `503 upstream connect error` / `connection refused` (see
-[40-envoy-original-dst-loop.md](40-envoy-original-dst-loop.md)). The `-s $POD_IP -j ACCEPT`
-loop guard in `pkg/inject/container.go` was added to break that loop, but `ORIGINAL_DST →
-podIP` also failed to reach the app in some ServiceIP paths (envoy access log
-`cluster=origin_cluster upstream=<podIP>:9080 flags=UF`).
+[40-envoy-original-dst-loop.md](40-envoy-original-dst-loop.md)). A `-s $POD_IP -j ACCEPT`
+loop guard in `pkg/inject/container.go` was originally added to break that loop (since removed —
+see §3), but `ORIGINAL_DST → podIP` also failed to reach the app in some ServiceIP paths (envoy
+access log `cluster=origin_cluster upstream=<podIP>:9080 flags=UF`).
 
 ## 2. Fix
 
@@ -56,10 +56,11 @@ Unchanged:
 - `origin_cluster` (ORIGINAL_DST) and the `:15006` capture listener's **passthrough** still use it —
   it handles **undeclared ports**, whose port number is unknown so a static loopback cluster cannot
   be pre-built.
-- The `-s $POD_IP -j ACCEPT` loop guard (`pkg/inject/container.go`) is **kept**: declared ports no
-  longer depend on it, but the undeclared-port `ORIGINAL_DST` passthrough still can loop on
-  lima/colima, and the rule is a harmless no-op on native Linux. Removing it can be evaluated
-  separately once undeclared-port passthrough is handled (or deemed out of scope).
+- The `-s $POD_IP -j ACCEPT` loop guard (`pkg/inject/container.go`) has been **removed** (along with
+  the now-orphaned `POD_IP` downward-API env). Declared ports no longer depend on it, and on native
+  Linux it was always a no-op (pod→own-IP routes through `lo`). Its only remaining beneficiary was
+  the undeclared-port `ORIGINAL_DST` passthrough, whose residual loop risk on lima/colima was
+  accepted as out of scope (§6) in exchange for a simpler sidecar script.
 
 ## 4. Data path (declared port, no header match)
 
@@ -91,8 +92,10 @@ requests when the app only binds one family. With IPv6 disabled, only `127.0.0.1
 - **App bind address**: assumes the app listens on `0.0.0.0`/`127.0.0.1` (or `::`/`::1`), i.e. a
   loopback-reachable address — the default for virtually all servers. An app bound only to a
   specific pod IP is not reachable over loopback.
-- **Undeclared ports**: still use `origin_cluster` (ORIGINAL_DST) passthrough, so they retain the
-  old behavior (fine on Linux; relies on the loop guard on lima/colima).
+- **Undeclared ports**: still use `origin_cluster` (ORIGINAL_DST) passthrough (fine on native Linux).
+  With the loop guard removed (§3), they retain a residual loop risk on lima/colima — accepted as
+  out of scope. Covering them would need `set_filter_state` (not vendored) or a route-layer
+  `ip route replace local ${POD_IP} dev lo` (needs `iproute2`, unverified on colima); see §7.
 
 ## 7. Alternatives considered (and how Istio does it)
 
@@ -100,12 +103,12 @@ requests when the app only binds one family. With IPv6 disabled, only `127.0.0.1
 |---|---|---|
 | **Istio's model** | Declared ports → inbound cluster to `127.0.0.1:<targetPort>`; undeclared → `InboundPassthroughCluster` (`ORIGINAL_DST`). Envoy runs as uid `1337` and an OUTPUT rule `-m owner --uid-owner 1337 -j RETURN` exempts envoy's own traffic; envoy→app goes over **loopback**, never re-entering PREROUTING. | This is exactly what we mirror — the chosen fix is Istio's "declared port → loopback" half. We don't adopt the uid-owner half (next row). |
 | **uid-owner exemption (like Istio)** | Run envoy under a fixed uid, `iptables -m owner --uid-owner <uid> -j ACCEPT`. | iptables `owner` match is **only valid in OUTPUT/POSTROUTING**. KubeVPN's loop happens in **PREROUTING** (colima routes `pod→own-IP` via `eth0`, re-entering PREROUTING), where there is no socket owner to match. Istio escapes this only because its envoy→app stays on loopback (OUTPUT) and never reaches PREROUTING. |
-| **`src==dst` loop guard** | Tighten the existing `-s $POD_IP -j ACCEPT` to `-s $POD_IP -d $POD_IP -j ACCEPT` (pod talking to itself). | More precise and covers all ports, but stays in PREROUTING. If colima RSTs/SNATs the hairpin *before* it returns to the pod, the guard never matches (consistent with the observed `connection refused`, not a loop `timeout`). Kept as the existing `-s $POD_IP` fallback for **undeclared-port** passthrough; not the primary fix. |
+| **`src==dst` loop guard** | Tighten the existing `-s $POD_IP -j ACCEPT` to `-s $POD_IP -d $POD_IP -j ACCEPT` (pod talking to itself). | More precise and covers all ports, but stays in PREROUTING. If colima RSTs/SNATs the hairpin *before* it returns to the pod, the guard never matches (consistent with the observed `connection refused`, not a loop `timeout`). Originally retained as the `-s $POD_IP` fallback for **undeclared-port** passthrough, then **removed** (effectiveness on colima was uncertain; undeclared-port risk accepted as out of scope). |
 | **Route-layer force-to-lo** | Startup `ip route replace local ${POD_IP} dev lo` so `pod→own-IP` returns to `lo`, never hitting PREROUTING — covers all ports, no envoy change. | Needs `iproute2` added to the image, and whether it overrides colima's anomalous `local` route is unverified (CI-only). A candidate for undeclared ports if needed. |
 | **`set_filter_state` rewrite** | A network filter rewrites `ORIGINAL_DST` to `127.0.0.1:%DOWNSTREAM_LOCAL_PORT%` (keep port, force loopback). | The `set_filter_state` proto is **not vendored** (go-control-plane v0.13.4); hand-rolling a raw `Any` or bumping the dep is fragile. |
-| **Chosen: per-declared-port STATIC loopback cluster** | `loopback_<port>` → `127.0.0.1:port` (+ `::1` happy-eyeballs). | No image change; `127.0.0.0/8`/`::1` hard-route to `lo` on **any** kernel; aligns with Istio's declared-port path. Undeclared ports keep `ORIGINAL_DST` + the loop guard. |
+| **Chosen: per-declared-port STATIC loopback cluster** | `loopback_<port>` → `127.0.0.1:port` (+ `::1` happy-eyeballs). | No image change; `127.0.0.0/8`/`::1` hard-route to `lo` on **any** kernel; aligns with Istio's declared-port path. Undeclared ports keep `ORIGINAL_DST` passthrough (loop guard removed; residual lima/colima risk accepted). |
 
-**Why not just touch the DNAT rule.** The envoy return connection and a genuine inbound request share the **same destination** (the pod IP), so no `-d`-based DNAT predicate can tell them apart — only the **source** can (hence the `-s $POD_IP` guard). And any PREROUTING-level exemption only helps if the hairpin actually comes back into the pod; routing it to `lo` (loopback cluster, or route-layer fix) sidesteps PREROUTING entirely, which is why it is the more robust direction.
+**Why not just touch the DNAT rule.** The envoy return connection and a genuine inbound request share the **same destination** (the pod IP), so no `-d`-based DNAT predicate can tell them apart — only the **source** can (hence the former `-s $POD_IP` guard). And any PREROUTING-level exemption only helps if the hairpin actually comes back into the pod; routing it to `lo` (loopback cluster, or route-layer fix) sidesteps PREROUTING entirely, which is why it is the more robust direction.
 
 ## 8. Tests
 

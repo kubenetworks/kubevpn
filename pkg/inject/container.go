@@ -62,12 +62,6 @@ func commonEnvVars(managerNamespace string) []v1.EnvVar {
 		{Name: "CIDR6", Value: config.CIDR6.String()},
 		{Name: "TrafficManagerService", Value: trafficManagerAddr(managerNamespace)},
 		{
-			Name: config.EnvPodIP,
-			ValueFrom: &v1.EnvVarSource{
-				FieldRef: &v1.ObjectFieldSelector{FieldPath: "status.podIP"},
-			},
-		},
-		{
 			Name: config.EnvPodNamespace,
 			ValueFrom: &v1.EnvVarSource{
 				FieldRef: &v1.ObjectFieldSelector{FieldPath: "metadata.namespace"},
@@ -144,14 +138,6 @@ iptables -P INPUT ACCEPT
 ip6tables -P INPUT ACCEPT
 iptables -P FORWARD ACCEPT
 ip6tables -P FORWARD ACCEPT
-# Let traffic from the pod's own IP bypass DNAT so envoy's ORIGINAL_DST
-# connections to the app container do not loop back through PREROUTING.
-# On some kernels (notably the colima VM on macOS), locally-originated
-# connections to the pod's own IP are routed through the physical interface
-# (eth0) instead of loopback, which would re-match the DNAT rule below and
-# create an infinite redirect -> 503 "upstream connect error". On kernels
-# that correctly route through lo, this is a no-op (source is 127.0.0.1).
-iptables -t nat -I PREROUTING 1 -p tcp -s ${POD_IP} -j ACCEPT
 iptables -t nat -A PREROUTING -p tcp ! -s 127.0.0.1 ! -d ${CIDR4} -j DNAT --to :%d
 ip6tables -t nat -A PREROUTING -p tcp ! -s 0:0:0:0:0:0:0:1 ! -d ${CIDR6} -j DNAT --to :%d
 kubevpn server --debug -l "tun:/tcp://${TrafficManagerService}:%d?route=${CIDR4}"`, config.PortEnvoyInbound, config.PortEnvoyInbound, config.PortTCP),

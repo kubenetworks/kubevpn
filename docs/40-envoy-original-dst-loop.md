@@ -44,70 +44,49 @@ Linux kernel routes pod→own-IP through `lo`.
 > Earlier revisions of this doc claimed `setup-docker-action@v4` == Docker Desktop linuxkit (safe);
 > CI logs show it is lima on the macOS runner, i.e. same kernel family as colima.
 
-### 2.4 Preferred fix for declared ports: loopback return path
+### 2.4 Fix for declared ports: loopback return path
 
-The loop guard below breaks the loop but still relies on `ORIGINAL_DST → podIP`. For **declared
-ports**, the cleaner fix is to send the origin return path to `127.0.0.1:<containerPort>` (a STATIC
-cluster) instead — loopback is hard-routed to `lo` on every kernel, so it never re-enters
-`PREROUTING` and the loop cannot form regardless of backend. See
-[41-origin-loopback-cluster.md](41-origin-loopback-cluster.md). The loop guard is retained for the
-**undeclared-port** `ORIGINAL_DST` passthrough (and is a no-op on native Linux).
+For **declared ports**, the origin (no-header-match) return path is sent to
+`127.0.0.1:<containerPort>` via a per-port STATIC cluster instead of `ORIGINAL_DST → podIP`.
+Loopback is hard-routed to `lo` on every kernel, so it never re-enters `PREROUTING` and the loop
+cannot form regardless of backend. See [41-origin-loopback-cluster.md](41-origin-loopback-cluster.md).
 
 ## 3. Fix
 
-### 3.1 iptables rule
+### 3.1 Loopback cluster (declared ports)
 
-A single iptables rule inserted **before** the DNAT rule in the VPN sidecar startup script:
+The fix lives entirely in the xDS control plane (`pkg/xds/cache.go`): the per-port listener's
+default route and raw-TCP fallback target a per-port STATIC `loopback_<port>` cluster whose endpoint
+is `127.0.0.1:<containerPort>`. No iptables change and no image change are required — `127.0.0.0/8`
+(and `::1`) hard-route to `lo` on any kernel, so the return connection sidesteps `PREROUTING`
+entirely. Details, IPv6 happy-eyeballs, and the alternatives considered are in
+[41-origin-loopback-cluster.md](41-origin-loopback-cluster.md).
 
-```bash
-iptables -t nat -I PREROUTING 1 -p tcp -s $(hostname -i) -j ACCEPT
-```
+### 3.2 Historical iptables loop guard (removed)
 
-- `-t nat` — operates on the NAT table
-- `-I PREROUTING 1` — inserts at position 1 (before the DNAT rule)
-- `-p tcp` — only TCP (UDP does not use `origin_cluster`)
-- `-s $(hostname -i)` — matches traffic whose source IP is the pod's own IP
-- `-j ACCEPT` — accepts the packet without NAT, skipping subsequent PREROUTING rules
+Earlier revisions broke the loop with a PREROUTING source-match guard in the VPN sidecar startup
+script (`iptables -t nat -I PREROUTING 1 -p tcp -s ${POD_IP} -j ACCEPT`, before the DNAT rule). It
+let envoy's `ORIGINAL_DST → podIP` return connection bypass DNAT by matching its source = pod IP.
 
-### 3.2 Resulting rule order
+That guard has been **removed**. Once declared ports return over the loopback cluster they no longer
+depend on it, and on native Linux it was always a no-op (pod→own-IP routes through `lo`, never
+entering PREROUTING). Its only remaining beneficiary was the **undeclared-port** passthrough
+(§3.3) — a niche case whose residual risk was accepted in exchange for a simpler sidecar script and
+removing the now-orphaned `POD_IP` downward-API env. The guard's effectiveness on colima was itself
+uncertain (see [41-origin-loopback-cluster.md](41-origin-loopback-cluster.md) §7).
 
-```
-PREROUTING chain (nat table):
-  1. ACCEPT  -p tcp -s <pod_IP>              ← NEW: bypass DNAT for own traffic
-  2. DNAT    -p tcp ! -s 127.0.0.1 ! -d ${CIDR4} --to :15006
-```
+### 3.3 Residual risk: undeclared ports
 
-### 3.3 Why it is safe
+Ports the app listens on but does **not** declare in the pod spec have no per-port loopback cluster
+(the port is unknown at config-build time). They fall through the `:15006` capture listener to the
+`origin_cluster` (`ORIGINAL_DST → podIP`) passthrough, which can still loop on lima/colima kernels.
+Covering them would require either `set_filter_state` (rewrite ORIGINAL_DST to
+`127.0.0.1:%DOWNSTREAM_LOCAL_PORT%` — proto not vendored in go-control-plane v0.13.4) or a
+route-layer `ip route replace local ${POD_IP} dev lo` (needs `iproute2` in the image, unverified on
+colima). Both are out of scope; see [41-origin-loopback-cluster.md](41-origin-loopback-cluster.md)
+§7. On native Linux there is no residual risk.
 
-| Traffic | Source IP | Matches rule 1? | Matches rule 2? | Outcome |
-|---|---|---|---|---|
-| Envoy → app (origin_cluster) | pod_IP | **Yes → ACCEPT** | — | Reaches app directly |
-| User → app (external) | TUN IP | No | Yes → DNAT | Redirected to envoy |
-| Other pod → app | other pod_IP | No | Yes → DNAT | Redirected to envoy |
-| Container curl localhost:9080 | 127.0.0.1 | No (TCP but wrong src) | No (`! -s 127.0.0.1`) | Reaches app directly |
-| Container curl pod_IP:9080 (Linux) | pod_IP via loopback | — | — | Loopback bypasses PREROUTING entirely |
-
-The rule only affects traffic whose **source IP** matches the pod's own IP — envoy's origin_cluster connections. All external traffic (users, other pods, traffic-manager) has a different source IP and continues to be DNAT'd to envoy. Container self-access (`curl localhost:9080`) is handled by the existing `! -s 127.0.0.1` exclusion.
-
-This is consistent with how Istio handles the same scenario — sidecars should not intercept their own communication with the application container in the same pod.
-
-## 4. Implementation
-
-Modified in `pkg/inject/container.go`, the VPN sidecar startup script in `AddVPNAndEnvoyContainer`.
-
-```go
-Args: []string{fmt.Sprintf(`
-echo 1 > /proc/sys/net/ipv4/ip_forward
-...
-# Let traffic from the pod's own IP bypass DNAT so envoy's ORIGINAL_DST
-# connections to the app container do not loop back through PREROUTING.
-iptables -t nat -I PREROUTING 1 -p tcp -s $(hostname -i) -j ACCEPT
-iptables -t nat -A PREROUTING -p tcp ! -s 127.0.0.1 ! -d ${CIDR4} -j DNAT --to :%d
-ip6tables -t nat -A PREROUTING -p tcp ! -s 0:0:0:0:0:0:0:1 ! -d ${CIDR6} -j DNAT --to :%d
-kubevpn server --debug -l "tun:/tcp://...:10801?route=${CIDR4}"`, ...)},
-```
-
-## 5. Related
+## 4. Related
 
 - [17-sidecar-injection.md](17-sidecar-injection.md) — sidecar injection strategies and iptables rules
 - [16-envoy-controlplane.md](16-envoy-controlplane.md) — envoy xDS control plane, origin_cluster, and inbound capture listener

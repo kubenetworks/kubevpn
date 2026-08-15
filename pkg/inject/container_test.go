@@ -163,6 +163,19 @@ func TestAddVPNAndEnvoyContainer(t *testing.T) {
 		t.Errorf("expected TLSPrivateKeyKey env 'fake-key-data', got %q", envMap[config.TLSPrivateKeyKey])
 	}
 
+	// The `-s $POD_IP -j ACCEPT` PREROUTING loop guard was removed once declared
+	// ports started returning origin traffic over a 127.0.0.1 loopback cluster
+	// (docs/41). Guard against it silently coming back, along with its now-unused
+	// POD_IP downward-API env.
+	if strings.Contains(vpnContainer.Args[0], "${POD_IP}") || strings.Contains(vpnContainer.Args[0], "PREROUTING 1") {
+		t.Error("vpn container args should not contain the removed -s ${POD_IP} PREROUTING loop guard")
+	}
+	for _, e := range vpnContainer.Env {
+		if e.Name == "POD_IP" {
+			t.Error("vpn container should not inject the orphaned POD_IP env var")
+		}
+	}
+
 	// Envoy container checks
 	if envoyContainer.Image != image {
 		t.Errorf("envoy container image: got %q, want %q", envoyContainer.Image, image)

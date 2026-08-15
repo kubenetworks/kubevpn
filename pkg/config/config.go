@@ -121,8 +121,6 @@ const (
 	EnvPodName = "POD_NAME"
 	// EnvPodNamespace is the env var name populated with the Kubernetes pod namespace.
 	EnvPodNamespace = "POD_NAMESPACE"
-	// EnvPodIP is the env var name populated with the pod's IP via downward API.
-	EnvPodIP = "POD_IP"
 
 	// KUBECONFIG is the key name used when storing kubeconfig data.
 	KUBECONFIG = "kubeconfig"
