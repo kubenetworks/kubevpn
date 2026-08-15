@@ -11,7 +11,7 @@ RUN make kubevpn
 FROM debian:bookworm-slim
 ARG BASE=github.com/wencaiwulue/kubevpn
 
-RUN apt-get update && apt-get install -y iptables dnsutils \
+RUN apt-get update && apt-get install -y iptables \
     && apt-get autoremove -y \
     && apt-get clean -y \
     && rm -rf /var/lib/apt/lists/*

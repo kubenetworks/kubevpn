@@ -113,6 +113,18 @@ type NetworkConfig struct {
 | `StartIPWatcher(ctx)` | Background listener for TunConfigService IP change pushes |
 | `TunName()` | Returns the TUN device name |
 
+### Extra-Domain / ExternalName Resolution
+
+`--extra-domain` entries (`AddExtraRoute`) and `ExternalName` services (the DNS
+`HowToGetExternalName` callback) resolve to IPs by querying the in-cluster
+kubevpn DNS forward server directly over the TUN (`resolveDomainViaClusterDNS`
+in `connect_dns.go`, a plain miekg/dns A/AAAA query to `<server>:53`), not by
+shelling `dig` inside the sidecar pod. The forward server handles search-list
+expansion and upstream forwarding, so cluster-internal names (private-link,
+ExternalName) resolve correctly. `AddExtraRoute` falls back to ingress
+load-balancer records when DNS yields no answer. Because nothing execs `dig`
+anymore, the sidecar image no longer depends on `dnsutils`.
+
 ### IP Hot-Reload Flow
 
 ```

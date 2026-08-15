@@ -810,7 +810,7 @@ func (nm *NetworkManager) setupDNS(ctx context.Context, svcInformer cache.Shared
 	}
 
 	plog.G(ctx).Debugf("Adding extra domains to hosts...")
-	if err = nm.AddExtraRoute(ctx, pod.GetName()); err != nil {
+	if err = nm.AddExtraRoute(ctx, relovConf.Servers); err != nil {
 		plog.G(ctx).Errorf("Add extra route failed: %v", err)
 		return err
 	}
@@ -835,20 +835,11 @@ func (nm *NetworkManager) setupDNS(ctx context.Context, svcInformer cache.Shared
 		Hosts:       nm.extraHost,
 		Lock:        nm.cfg.Lock,
 		HowToGetExternalName: func(domain string) (string, error) {
-			podList, err := nm.cfg.GetRunningPodList(ctx)
+			ip, err := resolveDomainViaClusterDNS(ctx, relovConf.Servers, domain)
 			if err != nil {
 				return "", err
 			}
-			pod := podList[0]
-			return util.Shell(
-				ctx,
-				nm.cfg.Clientset,
-				nm.cfg.Config,
-				pod.GetName(),
-				config.ContainerSidecarVPN,
-				nm.cfg.ManagerNamespace,
-				[]string{"dig", "+short", domain},
-			)
+			return ip.String(), nil
 		},
 	}
 	plog.G(ctx).Debugf("Setting up DNS resolver on device %s...", nm.tunName)
@@ -993,45 +984,26 @@ func (nm *NetworkManager) watchAndRoute(ctx context.Context, informer cache.Shar
 	return nil
 }
 
-// AddExtraRoute resolves extra domain names via dig on the traffic manager pod
-// and adds their IPs to the route table.
-func (nm *NetworkManager) AddExtraRoute(ctx context.Context, name string) error {
+// AddExtraRoute resolves extra domain names by querying the in-cluster DNS
+// forward server (servers, populated by detectNameserver) and adds their IPs to
+// the route table. It falls back to ingress records when DNS yields no answer.
+func (nm *NetworkManager) AddExtraRoute(ctx context.Context, servers []string) error {
 	if len(nm.cfg.ExtraRouteInfo.ExtraDomain) == 0 {
 		return nil
 	}
 
-	// parse cname
-	//dig +short db-name.postgres.database.azure.com
-	//1234567.privatelink.db-name.postgres.database.azure.com.
-	//10.0.100.1
-	var parseIP = func(cmdDigOutput string) net.IP {
-		for _, s := range strings.Split(cmdDigOutput, "\n") {
-			ip := net.ParseIP(strings.TrimSpace(s))
-			if ip != nil {
-				return ip
-			}
-		}
-		return nil
-	}
-
-	// 1) use dig +short query, if ok, just return
 	for _, domain := range nm.cfg.ExtraRouteInfo.ExtraDomain {
-		output, err := util.Shell(ctx, nm.cfg.Clientset, nm.cfg.Config, name, config.ContainerSidecarVPN, nm.cfg.ManagerNamespace, []string{"dig", "+short", domain})
-		if err != nil {
-			return fmt.Errorf("failed to resolve DNS for domain by command dig: %w", err)
-		}
 		var ip string
-		if parseIP(output) == nil {
-			// try to get ingress record
-			ip = getIngressRecord(ctx, nm.cfg.Clientset.NetworkingV1(), []string{v1.NamespaceAll, nm.cfg.ManagerNamespace}, domain)
+		if resolved, err := resolveDomainViaClusterDNS(ctx, servers, domain); err == nil {
+			ip = resolved.String()
 		} else {
-			ip = parseIP(output).String()
+			// fall back to ingress record
+			ip = getIngressRecord(ctx, nm.cfg.Clientset.NetworkingV1(), []string{v1.NamespaceAll, nm.cfg.ManagerNamespace}, domain)
 		}
 		if net.ParseIP(ip) == nil {
-			return fmt.Errorf("failed to resolve DNS for domain %s by command dig, output: %s", domain, output)
+			return fmt.Errorf("failed to resolve DNS for domain %s via cluster DNS", domain)
 		}
-		err = nm.AddRoute(ip)
-		if err != nil {
+		if err := nm.AddRoute(ip); err != nil {
 			plog.G(ctx).Errorf("Failed to add IP: %s to route table: %v", ip, err)
 			return err
 		}
