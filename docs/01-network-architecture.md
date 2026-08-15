@@ -100,9 +100,9 @@ The client maintains a pool of N parallel TCP connections to reduce head-of-line
                         ┌── slot[0] ──▶ conn[0] ──▶ port-forward ──▶ gvisor stack[0]
 TUN read                │
   ↓                     │
-ParseIPFast(dst) ───────┼── slot[1] ──▶ conn[1] ──▶ port-forward ──▶ gvisor stack[1]
+parseFiveTuple ─────────┼── slot[1] ──▶ conn[1] ──▶ port-forward ──▶ gvisor stack[1]
   ↓                     │
-hash(dst IP) % N ───────┼── slot[2] ──▶ conn[2] ──▶ port-forward ──▶ gvisor stack[2]
+flowHash(5-tuple) % N ──┼── slot[2] ──▶ conn[2] ──▶ port-forward ──▶ gvisor stack[2]
                         │
                         └── slot[3] ──▶ conn[3] ──▶ port-forward ──▶ gvisor stack[3]
 
@@ -117,27 +117,36 @@ conn[3] ──▶ readFromConn ──┘
 
 ### Hash Function
 
-FNV-1a hash of destination IP bytes, mod N:
+A stateless FNV-1a hash of the flow's **five-tuple** — `(proto, dst IP, src port, dst port)`
+— mod N. Distinct connections to the same destination IP differ in source port, so they
+spread across slots instead of collapsing onto one. Packets with no usable L4 ports (ICMP,
+IP fragments, unparsed IPv6 extension headers) fall back to hashing the destination IP only
+(`ipHash`), preserving legacy behavior and keeping all fragments of one datagram together.
+
+The source IP is omitted (a client has a single TUN IP, so it adds nothing — the IPVS
+source-hashing idea). See [41-five-tuple-pool-dispatch.md](41-five-tuple-pool-dispatch.md)
+for the full design and the rationale for stateless hashing over conntrack.
 
 ```go
-func ipHash(ip net.IP, slots int) int {
-    var h uint32 = 2166136261  // FNV offset basis
-    for _, b := range ip {
-        h ^= uint32(b)
-        h *= 16777619  // FNV prime
+func flowHash(key flowKey, dstIP net.IP, slots int) int {
+    if !key.hasPorts {
+        return ipHash(dstIP, slots)   // ICMP / fragments / unparsed → legacy dst-IP hash
     }
+    var h uint32 = 2166136261  // FNV offset basis
+    // mix proto, dstIP bytes, srcPort, dstPort (FNV prime 16777619)
+    ...
     return int(h % uint32(slots))
 }
 ```
 
 **Properties:**
-- Deterministic: same dst IP → same slot (flow consistency)
-- Well-distributed: spreads traffic evenly across slots
-- Zero-allocation: operates on raw IP byte slice
+- Deterministic: same five-tuple → same slot (per-flow consistency)
+- Well-distributed: spreads many flows to one hot dst IP evenly across slots
+- Zero-allocation: operates on the raw IP byte slice
 
 ### Why This Works
 
-1. **Same-flow guarantee**: All packets to the same destination IP hash to the same slot → same TCP connection → same server-side gvisor stack. The gvisor stack correctly tracks TCP connection state.
+1. **Same-flow guarantee**: All packets of one L4 flow (same five-tuple) hash to the same slot → same TCP connection → same server-side gvisor stack. This is a correctness requirement, not just ordering: the server runs an independent gvisor stack per pool connection, so splitting a flow across slots would land its SYN and data on different stacks and break the connection.
 
 2. **Independent reconnect**: Each slot manages its own connection lifecycle. If slot[2] disconnects, only 1/4 of traffic is affected while it reconnects.
 

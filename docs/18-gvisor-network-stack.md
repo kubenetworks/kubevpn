@@ -12,7 +12,7 @@ The core package (`pkg/core`) implements the VPN tunnel network layer using Goog
 │                                             │     │                                          │
 │  App ──► TUN Device ──► ClientDevice        │     │      Device ◄── TUN Device               │
 │               ▲            │                │     │        │           ▲                      │
-│               │            │ ipHash(dst)    │     │        │           │                      │
+│               │            │ flowHash(5tup) │     │        │           │                      │
 │               │            ▼                │     │        ▼           │                      │
 │          tunOutbound    slots[0..3]          │     │     RouteHub ──► tunOutbound              │
 │               ▲            │                │     │        ▲                                  │
@@ -91,7 +91,7 @@ parse error → drop + continue), then hands each packet to a per-side `dispatch
 
 ```
 HandleClient:
-  readFromTun ──► tunInbound ──► runConnPool ──► slots[hash(dst)] ──► writeToConn ──► server
+  readFromTun ──► tunInbound ──► runConnPool ──► slots[flowHash(5tup)] ──► writeToConn ──► server
                                                                                         │
   writeToTun  ◄── tunOutbound ◄──────────────── readFromConn ◄──────────────────────────┘
 ```
@@ -100,13 +100,13 @@ HandleClient:
 type prefix and either forwards locally (when `src == dst`, via the gvisor handler) or pushes
 to `tunInbound` for the pool to distribute.
 
-**Connection pool**: The client maintains `ConnPoolSize=4` parallel TCP connections to the server. Packets are distributed by `ipHash(dst)` — a FNV-1a hash of the destination IP, ensuring all packets for the same destination use the same connection (preserving ordering).
+**Connection pool**: The client maintains `ConnPoolSize=4` parallel TCP connections to the server. Packets are distributed by `flowHash` — a stateless FNV-1a hash of the flow's five-tuple `(proto, dst IP, src port, dst port)` — so distinct connections to the same hot destination IP spread across slots, while every packet of one flow stays on the same connection (a correctness requirement: the server runs one gvisor stack per conn). Packets with no usable ports (ICMP, IP fragments, unparsed IPv6 extension headers) fall back to `ipHash(dst)`. See [41-five-tuple-pool-dispatch.md](41-five-tuple-pool-dispatch.md).
 
 **`connSlot`**: each of the `ConnPoolSize` slots is a `connSlot` value that owns its inbound
 channel and connection lifecycle — `run` (dial + reconnect loop), `readFromConn`, and
 `writeToConn` are methods on it (rather than free functions threading a `slotID`). `runConnPool`
 builds the `[]*connSlot`, starts each `go slot.run(ctx)`, and routes inbound packets:
-`dst != nil → trySendToSlot(slots[ipHash(dst)], pkt)`, else `broadcastToSlots(slots, pkt)` for
+`dst != nil → trySendToSlot(slots[flowHash(5-tuple)], pkt)`, else `broadcastToSlots(slots, pkt)` for
 heartbeats. Both `readFromConn` and `writeToConn` refresh their conn deadline lazily via a
 shared `periodicDeadline` (one `SetDeadline` syscall per half-timeout instead of per packet).
 
@@ -120,7 +120,7 @@ shared `periodicDeadline` (one `SetDeadline` syscall per half-timeout instead of
 |------|----------------|
 | `packet.go` | The `Packet` value type (`NewPacket`/`Data`/`Length`), the gvisor `copyPacketToPool` helper, and `logIPPacket` (the debug packet-log helper — the only `gopacket/layers` user among these files) |
 | `tun_device.go` | Shared `tunDevice` base (`tun`, the inbound/outbound channels, `errChan`), `writeToTun`, `Close`, the generic `pumpTun` read loop, and `drainPacketChan` |
-| `tun_client.go` | `ClientDevice`, the connection pool (`runConnPool`, `ipHash`, `trySendToSlot`/`broadcastToSlots`, `periodicDeadline`), and the `connSlot` type |
+| `tun_client.go` | `ClientDevice`, the connection pool (`runConnPool`, `flowHash`/`parseFiveTupleInline`/`ipHash`, `trySendToSlot`/`broadcastToSlots`, `periodicDeadline`), and the `connSlot` type |
 | `tun_server.go` | `Device`, `Peer` routing (`routeTun`/`routeTCPToTun`), and `tunHandler` dispatch |
 
 ## 6. RouteHub — Packet Routing
