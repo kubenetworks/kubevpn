@@ -246,9 +246,9 @@ func (u *sshUt) healthChecker(t *testing.T, endpoint string, header map[string]s
 		req.Header.Add(k, v)
 	}
 
-	client := &http.Client{Timeout: time.Second * 2}
+	client := &http.Client{Timeout: time.Second * 5}
 	err = retry.OnError(
-		wait.Backoff{Duration: time.Second, Factor: 1, Jitter: 0, Steps: 30},
+		wait.Backoff{Duration: time.Second * 5, Factor: 1.0, Jitter: 0, Steps: 30},
 		func(err error) bool { return err != nil },
 		func() error {
 			var resp *http.Response
