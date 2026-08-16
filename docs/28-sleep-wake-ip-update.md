@@ -313,10 +313,10 @@ envoy routing:
 - `x-user: bob` → `198.18.0.6:9080` (Bob's machine)
 - no match → back to the origin app (for a **declared** port now via `loopback_<port>` =
   `127.0.0.1:<port>`; **undeclared** ports still via `origin_cluster`/ORIGINAL_DST — see
-  [41-origin-loopback-cluster.md](41-origin-loopback-cluster.md))
+  [42-origin-loopback-cluster.md](42-origin-loopback-cluster.md))
 
 > Throughout this doc, "no match → `origin_cluster`" refers to the origin return path; as of
-> [41-origin-loopback-cluster.md](41-origin-loopback-cluster.md) that path is `loopback_<port>`
+> [42-origin-loopback-cluster.md](42-origin-loopback-cluster.md) that path is `loopback_<port>`
 > for declared ports, with `origin_cluster` retained for undeclared-port passthrough. The
 > IP-hot-update behavior described here is unchanged (it only touches header-matched rule clusters).
 

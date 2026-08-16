@@ -49,7 +49,7 @@ Linux kernel routes pod→own-IP through `lo`.
 For **declared ports**, the origin (no-header-match) return path is sent to
 `127.0.0.1:<containerPort>` via a per-port STATIC cluster instead of `ORIGINAL_DST → podIP`.
 Loopback is hard-routed to `lo` on every kernel, so it never re-enters `PREROUTING` and the loop
-cannot form regardless of backend. See [41-origin-loopback-cluster.md](41-origin-loopback-cluster.md).
+cannot form regardless of backend. See [42-origin-loopback-cluster.md](42-origin-loopback-cluster.md).
 
 ## 3. Fix
 
@@ -60,7 +60,7 @@ default route and raw-TCP fallback target a per-port STATIC `loopback_<port>` cl
 is `127.0.0.1:<containerPort>`. No iptables change and no image change are required — `127.0.0.0/8`
 (and `::1`) hard-route to `lo` on any kernel, so the return connection sidesteps `PREROUTING`
 entirely. Details, IPv6 happy-eyeballs, and the alternatives considered are in
-[41-origin-loopback-cluster.md](41-origin-loopback-cluster.md).
+[42-origin-loopback-cluster.md](42-origin-loopback-cluster.md).
 
 ### 3.2 Historical iptables loop guard (removed)
 
@@ -73,7 +73,7 @@ depend on it, and on native Linux it was always a no-op (pod→own-IP routes thr
 entering PREROUTING). Its only remaining beneficiary was the **undeclared-port** passthrough
 (§3.3) — a niche case whose residual risk was accepted in exchange for a simpler sidecar script and
 removing the now-orphaned `POD_IP` downward-API env. The guard's effectiveness on colima was itself
-uncertain (see [41-origin-loopback-cluster.md](41-origin-loopback-cluster.md) §7).
+uncertain (see [42-origin-loopback-cluster.md](42-origin-loopback-cluster.md) §7).
 
 ### 3.3 Residual risk: undeclared ports
 
@@ -83,7 +83,7 @@ Ports the app listens on but does **not** declare in the pod spec have no per-po
 Covering them would require either `set_filter_state` (rewrite ORIGINAL_DST to
 `127.0.0.1:%DOWNSTREAM_LOCAL_PORT%` — proto not vendored in go-control-plane v0.13.4) or a
 route-layer `ip route replace local ${POD_IP} dev lo` (needs `iproute2` in the image, unverified on
-colima). Both are out of scope; see [41-origin-loopback-cluster.md](41-origin-loopback-cluster.md)
+colima). Both are out of scope; see [42-origin-loopback-cluster.md](42-origin-loopback-cluster.md)
 §7. On native Linux there is no residual risk.
 
 ## 4. Related

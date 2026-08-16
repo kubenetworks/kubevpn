@@ -364,7 +364,7 @@ func (a *Virtual) addTCPPort(res *xdsResources, port ContainerPort, listenPort i
 		// (ORIGINAL_DST -> pod IP). Loopback never re-enters PREROUTING, so it avoids
 		// the ORIGINAL_DST loop on lima/colima kernels and fixes origin回源 503 on
 		// ServiceIP paths. Undeclared ports still fall through the capture listener's
-		// origin_cluster passthrough. See docs/41-origin-loopback-cluster.md.
+		// origin_cluster passthrough. See docs/42-origin-loopback-cluster.md.
 		res.clusters = append(res.clusters, loopbackCluster(port.ContainerPort, enableIPv6))
 		rr = append(rr, defaultRouteToCluster(loopbackClusterName(port.ContainerPort)))
 	}
@@ -472,7 +472,7 @@ func originCluster() *cluster.Cluster {
 // is hard-routed to lo by every kernel, so the connection never re-enters the
 // sidecar's PREROUTING DNAT — this avoids the ORIGINAL_DST loop on lima/colima VM
 // kernels and aligns with how Istio routes inbound traffic for declared ports.
-// See docs/41-origin-loopback-cluster.md.
+// See docs/42-origin-loopback-cluster.md.
 func loopbackClusterName(port int32) string {
 	return fmt.Sprintf("loopback_%d", port)
 }
