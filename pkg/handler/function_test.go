@@ -165,6 +165,11 @@ func TestFunctions(t *testing.T) {
 }
 
 func (u *ut) commonTest(t *testing.T) {
+	// Fail fast if the cluster connection never came up. Without this a broken
+	// connect cascades into the networked subtests below, each of which retries
+	// for 5-12 minutes (pingPodIP: 60 pings/pod; healthChecker: 30x10s), so a
+	// handful of them can exhaust the 2h CI budget and mask the real failure.
+	u.requireConnected(t)
 	// 1) test domain access
 	t.Run("kubevpnStatus", u.kubevpnStatus)
 	t.Run("pingPodIP", u.pingPodIP)
@@ -172,6 +177,27 @@ func (u *ut) commonTest(t *testing.T) {
 	t.Run("healthCheckServiceDetails", u.healthCheckServiceDetails)
 	t.Run("shortDomainDetails", u.shortDomainDetails)
 	t.Run("fullDomainDetails", u.fullDomainDetails)
+}
+
+// requireConnected asserts there is at least one active ("connected") connection,
+// failing the current test immediately otherwise. Used as a precondition gate so a
+// failed connect surfaces fast instead of hanging the networked subtests.
+func (u *ut) requireConnected(t *testing.T) {
+	t.Helper()
+	output, err := exec.Command("kubevpn", "status", "-o", "json").Output()
+	if err != nil {
+		t.Fatalf("kubevpn status failed, cannot verify connection: %v", err)
+	}
+	var statuses status
+	if err = json.Unmarshal(output, &statuses); err != nil {
+		t.Fatalf("no active connection (status output=%q): %v", string(output), err)
+	}
+	for _, c := range statuses.List {
+		if c != nil && c.Status == "connected" {
+			return
+		}
+	}
+	t.Fatalf("no active connection before running networked tests; status=%s", string(output))
 }
 
 func (u *ut) pingPodIP(t *testing.T) {
