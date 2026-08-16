@@ -9,6 +9,7 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/yaml"
@@ -97,13 +98,33 @@ type persistedAlloc struct {
 	Hostname  string `json:"hostname,omitempty"`
 }
 
+// initDHCPBackoff controls how NewTunConfigServer retries a transient InitDHCP
+// failure. A freshly created traffic-manager pod may reach its xds container
+// before the pod network / kube-proxy is ready, so the very first ConfigMap read
+// can hit "connect: connection refused" to the API server ClusterIP. That window
+// closes within seconds, so a bounded backoff (~1 minute total) lets init succeed
+// on retry instead of the server coming up permanently without TunConfigService.
+// Package-level so tests can shrink it.
+var initDHCPBackoff = wait.Backoff{
+	Duration: 1 * time.Second,
+	Factor:   1.5,
+	Steps:    8,
+	Cap:      15 * time.Second,
+}
+
 // NewTunConfigServer creates and initializes a TunConfigServer.
 // Performs DHCP init and loads persisted allocations from ConfigMap.
 // Server restart does not affect clients — they keep their same IPs.
+//
+// InitDHCP is a hard prerequisite for the data plane: without it the caller must
+// NOT register TunConfigService (clients would get "unknown service" forever).
+// A transient API-connectivity error at fresh-pod startup is therefore retried,
+// and only a persistent failure is returned — the caller treats that as fatal so
+// the container restarts and retries from a clean state.
 func NewTunConfigServer(ctx context.Context, clientset kubernetes.Interface, namespace string) (*TunConfigServer, error) {
 	mgr := dhcp.NewDHCPManager(clientset, namespace)
-	if err := mgr.InitDHCP(ctx); err != nil {
-		return nil, err
+	if err := initDHCPWithRetry(ctx, mgr); err != nil {
+		return nil, fmt.Errorf("init DHCP: %w", err)
 	}
 	s := &TunConfigServer{
 		clientset:       clientset,
@@ -118,6 +139,29 @@ func NewTunConfigServer(ctx context.Context, clientset kubernetes.Interface, nam
 	// Reclaim any bitmap bits left orphaned by a prior crash before serving.
 	s.scrubOrphanBits(ctx)
 	return s, nil
+}
+
+// initDHCPWithRetry runs mgr.InitDHCP with a bounded exponential backoff, so a
+// transient API-server connectivity blip at fresh-pod startup does not leave the
+// xds server permanently without TunConfigService. It returns the last InitDHCP
+// error (not the generic backoff-timeout) so the caller can log why it gave up.
+func initDHCPWithRetry(ctx context.Context, mgr *dhcp.Manager) error {
+	var lastErr error
+	err := wait.ExponentialBackoffWithContext(ctx, initDHCPBackoff, func(ctx context.Context) (bool, error) {
+		if err := mgr.InitDHCP(ctx); err != nil {
+			lastErr = err
+			plog.G(ctx).Warnf("[TunConfig] InitDHCP failed, will retry: %v", err)
+			return false, nil
+		}
+		return true, nil
+	})
+	if err != nil {
+		if lastErr != nil {
+			return lastErr
+		}
+		return err
+	}
+	return nil
 }
 
 // loadAllocs reads the persisted ownerID→IP mapping from the ConfigMap.

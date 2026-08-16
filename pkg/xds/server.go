@@ -61,10 +61,10 @@ func runServer(ctx context.Context, server serverv3.Server, tunConfig *TunConfig
 	secretservice.RegisterSecretDiscoveryServiceServer(grpcServer, server)
 	runtimeservice.RegisterRuntimeDiscoveryServiceServer(grpcServer, server)
 
-	if tunConfig != nil {
-		rpc.RegisterTunConfigServiceServer(grpcServer, tunConfig)
-		plog.G(ctx).Infof("TunConfigService registered on port %d", port)
-	}
+	// tunConfig is guaranteed non-nil: Main treats its init failure as fatal, so
+	// the server never comes up without TunConfigService.
+	rpc.RegisterTunConfigServiceServer(grpcServer, tunConfig)
+	plog.G(ctx).Infof("TunConfigService registered on port %d", port)
 
 	plog.G(ctx).Infof("Management server listening on %d", port)
 	return grpcServer.Serve(listener)

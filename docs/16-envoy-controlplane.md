@@ -256,12 +256,22 @@ succeeds, the other gets a 409 and retries with a fresh Get. `retry.DefaultBacko
 ```
 Main(ctx, factory, port, logger):
   1. Create SnapshotCache + Processor
-  2. Create TunConfigServer + start LeaseReaper
+  2. Create TunConfigServer (fatal on failure) + start LeaseReaper
   3. Start gRPC server (goroutine)
   4. Start ConfigMap watcher (goroutine) → sends to notifyCh
   5. Send initial empty NotifyMessage to trigger first snapshot
   6. Main loop: receive from notifyCh → proc.ProcessFile()
 ```
+
+**TunConfigServer init is a hard prerequisite, not best-effort.** `NewTunConfigServer`
+runs `InitDHCP` (a ConfigMap read/create), which can transiently fail on a freshly
+created traffic-manager pod whose network is not yet ready (`connect: connection refused`
+to the API server ClusterIP). It therefore retries with a bounded exponential backoff
+(`initDHCPBackoff`, ~1 min). If init still fails, `Main` returns the error — **fatal**,
+so the xds container exits non-zero and Kubernetes restarts it. This avoids the failure
+mode where the gRPC server comes up **without** `TunConfigService` registered: that
+endpoint is otherwise healthy and never restarts, so every client's TUN setup fails
+permanently with `unknown service rpc.TunConfigService`.
 
 ## 7. Multi-User Traffic Splitting
 
@@ -292,7 +302,7 @@ Envoy routes requests with `x-user: alice` to `198.18.0.5:9080` (Alice's local m
 
 | File | Purpose |
 |------|---------|
-| `pkg/xds/controlplane.go` | `Main()` — startup orchestration |
+| `pkg/xds/xds.go` | `Main()` — startup orchestration (TunConfigServer init is fatal on failure) |
 | `pkg/xds/cache.go` | Virtual/Rule types, xDS resource generation |
 | `pkg/xds/processor.go` | Processor — YAML → xDS snapshot pipeline |
 | `pkg/xds/watcher.go` | ConfigMap watcher with informer |

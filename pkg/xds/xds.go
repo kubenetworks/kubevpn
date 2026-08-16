@@ -2,6 +2,7 @@ package xds
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/envoyproxy/go-control-plane/pkg/cache/v3"
 	serverv3 "github.com/envoyproxy/go-control-plane/pkg/server/v3"
@@ -33,13 +34,16 @@ func Main(ctx context.Context, factory cmdutil.Factory, port uint, logger *log.E
 	restConfig, _ := factory.ToRESTConfig()
 	clientset, _ := kubernetes.NewForConfig(restConfig)
 
+	// TunConfigServer is a hard prerequisite for the data plane. Its init retries
+	// transient API blips internally; a returned error is fatal so the container
+	// exits non-zero and K8s restarts it, rather than serving an xDS endpoint that
+	// silently lacks TunConfigService (which would fail every client's TUN setup
+	// with "unknown service rpc.TunConfigService" for the pod's whole lifetime).
 	tunConfig, err := NewTunConfigServer(ctx, clientset, namespace)
 	if err != nil {
-		plog.G(ctx).Warnf("TunConfigServer init failed (non-fatal): %v", err)
-		tunConfig = nil
-	} else {
-		tunConfig.StartLeaseReaper(ctx)
+		return fmt.Errorf("start TunConfigServer: %w", err)
 	}
+	tunConfig.StartLeaseReaper(ctx)
 
 	errChan := make(chan error, 2)
 
@@ -52,13 +56,7 @@ func Main(ctx context.Context, factory cmdutil.Factory, port uint, logger *log.E
 
 	notifyCh <- NotifyMessage{}
 	go func() {
-		// tunConfig may be nil when its init failed (non-fatal above); only wire
-		// the DHCP reconcile callback when it is available to avoid a nil deref.
-		if tunConfig != nil {
-			errChan <- Watch(ctx, factory, notifyCh, tunConfig.ReconcileDHCP, tunConfig.ReconcileAllocsFromConfigMap)
-		} else {
-			errChan <- Watch(ctx, factory, notifyCh)
-		}
+		errChan <- Watch(ctx, factory, notifyCh, tunConfig.ReconcileDHCP, tunConfig.ReconcileAllocsFromConfigMap)
 	}()
 
 	for {
