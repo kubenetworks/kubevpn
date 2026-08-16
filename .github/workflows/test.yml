@@ -54,7 +54,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: '1.26'
           check-latest: true
       - name: Setup Minikube
         id: minikube
@@ -144,7 +144,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: '1.26'
           check-latest: true
 
       - name: Set up Docker
@@ -248,7 +248,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: '1.26'
 
       - name: Install make
         run: choco install -y make

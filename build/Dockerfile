@@ -1,5 +1,5 @@
 FROM envoyproxy/envoy:v1.36.2 AS envoy
-FROM golang:1.23 AS builder
+FROM golang:1.26 AS builder
 ARG BASE=github.com/wencaiwulue/kubevpn
 
 COPY . /go/src/$BASE

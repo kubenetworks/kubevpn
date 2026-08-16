@@ -55,7 +55,7 @@ func (w *wsHandler) createTunnel(ctx context.Context, cli *ssh.Client) error {
 		w.log("Failed to parse server IP %s, stderr: %s: %v", string(serverIP), string(stderr), err)
 		return err
 	}
-	w.log(util.FormatBanner(fmt.Sprintf("You can use client: %s to communicate with server: %s", clientIP.IP.String(), ip.String())))
+	w.log("%s", util.FormatBanner(fmt.Sprintf("You can use client: %s to communicate with server: %s", clientIP.IP.String(), ip.String())))
 	w.cidr = append(w.cidr, string(serverIP))
 
 	nodes := []*core.Node{

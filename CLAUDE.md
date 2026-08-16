@@ -5,7 +5,7 @@
 KubeVPN is a CLI tool that connects local development environments to Kubernetes cluster networks. It creates TUN
 devices, manages DHCP IP allocation, injects Envoy sidecar proxies, and supports SSH jump hosts.
 
-- **Language:** Go 1.23+
+- **Language:** Go 1.26+
 - **Module:** `github.com/wencaiwulue/kubevpn/v2`
 - **Entry point:** `cmd/kubevpn/main.go`
 
