@@ -108,9 +108,16 @@ gen:
 # ut runs the FULL suite, including tests that need a real Kubernetes cluster
 # (and therefore a kubeconfig). Those live behind the `integration` build tag.
 # The linux/macos CI jobs provision a cluster before running this.
+#
+# E2E_RUN is a `go test -run` regexp filter, default `.` (everything). The macOS
+# CI job overrides it (e.g. E2E_RUN='^TestFunctions$') to split the two heavy
+# handler e2e suites across separate minikube clusters — halving each cluster's
+# sustained load so its apiserver does not degrade under the ~90m single run.
+# See docs/43-macos-ci-apiserver-flakiness.md.
+E2E_RUN ?= .
 .PHONY: ut
 ut:
-	go test -p=1 -v -tags=integration -timeout=120m ${LDFLAGS} -coverprofile=coverage.txt -coverpkg=./... ./...
+	go test -p=1 -v -tags=integration -timeout=120m ${LDFLAGS} -coverprofile=coverage.txt -coverpkg=./... -run '${E2E_RUN}' ./...
 
 # ut-no-cluster runs ONLY the tests that need no kubeconfig / real cluster, i.e.
 # everything NOT behind the `integration` build tag. Used by the Windows CI job,

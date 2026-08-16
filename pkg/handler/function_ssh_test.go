@@ -29,6 +29,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/retry"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
+	"k8s.io/kubectl/pkg/util/podutils"
 
 	pkgconfig "github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
@@ -226,6 +227,18 @@ func (u *sshUt) healthCheckPodDetails(t *testing.T) {
 func (u *sshUt) healthChecker(t *testing.T, endpoint string, header map[string]string, keyword string) {
 	// 0 = this frame.
 	_, file, line, ok := runtime.Caller(1)
+	u.healthCheckWithBackoff(t, file, line, ok, endpoint, header, keyword, healthCheckBackoff())
+}
+
+// meshHealthChecker is healthChecker with the extended mesh retry budget
+// (meshHealthCheckBackoff) — see docs/43-macos-ci-apiserver-flakiness.md.
+func (u *sshUt) meshHealthChecker(t *testing.T, endpoint string, header map[string]string, keyword string) {
+	// 0 = this frame.
+	_, file, line, ok := runtime.Caller(1)
+	u.healthCheckWithBackoff(t, file, line, ok, endpoint, header, keyword, meshHealthCheckBackoff())
+}
+
+func (u *sshUt) healthCheckWithBackoff(t *testing.T, file string, line int, ok bool, endpoint string, header map[string]string, keyword string, backoff wait.Backoff) {
 	if ok {
 		// Trim any directory path from the file.
 		slash := strings.LastIndexByte(file, byte('/'))
@@ -248,7 +261,7 @@ func (u *sshUt) healthChecker(t *testing.T, endpoint string, header map[string]s
 
 	client := &http.Client{Timeout: time.Second * 5}
 	err = retry.OnError(
-		wait.Backoff{Duration: time.Second * 5, Factor: 1.0, Jitter: 0, Steps: 30},
+		backoff,
 		func(err error) bool { return err != nil },
 		func() error {
 			var resp *http.Response
@@ -322,9 +335,10 @@ func (u *sshUt) serviceMeshReviewsPodIP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	u.waitManagerReady(t)
 	endpoint := fmt.Sprintf("http://%s:%v/health", ip, 9080)
-	u.healthChecker(t, endpoint, nil, remote)
-	u.healthChecker(t, endpoint, map[string]string{"env": "test"}, local)
+	u.meshHealthChecker(t, endpoint, nil, remote)
+	u.meshHealthChecker(t, endpoint, map[string]string{"env": "test"}, local)
 }
 
 func (u *sshUt) serviceMeshReviewsServiceIP(t *testing.T) {
@@ -333,9 +347,10 @@ func (u *sshUt) serviceMeshReviewsServiceIP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	u.waitManagerReady(t)
 	endpoint := fmt.Sprintf("http://%s:%v/health", ip, 9080)
-	u.healthChecker(t, endpoint, nil, remote)
-	u.healthChecker(t, endpoint, map[string]string{"env": "test"}, local)
+	u.meshHealthChecker(t, endpoint, nil, remote)
+	u.meshHealthChecker(t, endpoint, map[string]string{"env": "test"}, local)
 }
 
 func (u *sshUt) serviceMeshReviewsServiceIPPortMap(t *testing.T) {
@@ -344,9 +359,36 @@ func (u *sshUt) serviceMeshReviewsServiceIPPortMap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	u.waitManagerReady(t)
 	endpoint := fmt.Sprintf("http://%s:%v/health", ip, 9080)
-	u.healthChecker(t, endpoint, nil, remote)
-	u.healthChecker(t, endpoint, map[string]string{"env": "test"}, local8080)
+	u.meshHealthChecker(t, endpoint, nil, remote)
+	u.meshHealthChecker(t, endpoint, map[string]string{"env": "test"}, local8080)
+}
+
+// waitManagerReady mirrors (*ut).waitManagerReady for the SSH suite: best-effort
+// wait (~2m) for a Ready kubevpn-traffic-manager pod in any namespace before mesh
+// assertions, so they do not begin against a blacked-out xDS control plane. On
+// timeout it only logs — the extended mesh health-check budget is the backstop.
+// See docs/43-macos-ci-apiserver-flakiness.md.
+func (u *sshUt) waitManagerReady(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	label := fields.OneTermEqualSelector("app", pkgconfig.ConfigMapPodTrafficManager).String()
+	err := wait.PollUntilContextCancel(ctx, 3*time.Second, true, func(ctx context.Context) (bool, error) {
+		pods, err := u.clientset.CoreV1().Pods("").List(ctx, v1.ListOptions{LabelSelector: label})
+		if err != nil {
+			return false, nil
+		}
+		for i := range pods.Items {
+			if podutils.IsPodReady(&pods.Items[i]) && pods.Items[i].DeletionTimestamp == nil {
+				return true, nil
+			}
+		}
+		return false, nil
+	})
+	if err != nil {
+		t.Logf("%s traffic-manager not observed Ready before mesh assertions: %v", time.Now().Format(time.DateTime), err)
+	}
 }
 
 func (u *sshUt) getServiceIP(app string) (string, error) {

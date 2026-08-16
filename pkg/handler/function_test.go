@@ -29,6 +29,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/retry"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
+	"k8s.io/kubectl/pkg/util/podutils"
 
 	pkgconfig "github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
@@ -242,9 +243,38 @@ func (u *ut) healthCheckPodDetails(t *testing.T) {
 	u.healthChecker(t, endpoint, nil, "")
 }
 
+// healthCheckBackoff is the default retry budget for a health check:
+// 30 × 5s = 150s.
+func healthCheckBackoff() wait.Backoff {
+	return wait.Backoff{Duration: time.Second * 5, Factor: 1.0, Jitter: 0, Steps: 30}
+}
+
+// meshHealthCheckBackoff is the extended budget for mesh-mode checks:
+// ~60 × 5s ≈ 300s+. Mesh assertions depend on a live envoy xDS/ADS stream to the
+// traffic-manager pod. On the macOS CI runner the apiserver can stall for several
+// minutes (TLS handshake timeouts), blacking out the traffic-manager pod and
+// breaking the ADS stream until it recovers; the default 150s budget expires
+// mid-outage and the assertion fails on infra flakiness rather than a real bug.
+// The wider, jittered budget rides out that window.
+// See docs/43-macos-ci-apiserver-flakiness.md.
+func meshHealthCheckBackoff() wait.Backoff {
+	return wait.Backoff{Duration: time.Second * 5, Factor: 1.0, Jitter: 0.1, Steps: 60}
+}
+
 func (u *ut) healthChecker(t *testing.T, endpoint string, header map[string]string, keyword string) {
 	// 0 = this frame.
 	_, file, line, ok := runtime.Caller(1)
+	u.healthCheckWithBackoff(t, file, line, ok, endpoint, header, keyword, healthCheckBackoff())
+}
+
+// meshHealthChecker is healthChecker with the extended mesh retry budget.
+func (u *ut) meshHealthChecker(t *testing.T, endpoint string, header map[string]string, keyword string) {
+	// 0 = this frame.
+	_, file, line, ok := runtime.Caller(1)
+	u.healthCheckWithBackoff(t, file, line, ok, endpoint, header, keyword, meshHealthCheckBackoff())
+}
+
+func (u *ut) healthCheckWithBackoff(t *testing.T, file string, line int, ok bool, endpoint string, header map[string]string, keyword string, backoff wait.Backoff) {
 	if ok {
 		// Trim any directory path from the file.
 		slash := strings.LastIndexByte(file, byte('/'))
@@ -267,7 +297,7 @@ func (u *ut) healthChecker(t *testing.T, endpoint string, header map[string]stri
 
 	client := &http.Client{Timeout: time.Second * 5}
 	err = retry.OnError(
-		wait.Backoff{Duration: time.Second * 5, Factor: 1.0, Jitter: 0, Steps: 30},
+		backoff,
 		func(err error) bool { return err != nil },
 		func() error {
 			var resp *http.Response
@@ -341,9 +371,10 @@ func (u *ut) serviceMeshReviewsPodIP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	u.waitManagerReady(t)
 	endpoint := fmt.Sprintf("http://%s:%v/health", ip, 9080)
-	u.healthChecker(t, endpoint, nil, remote)
-	u.healthChecker(t, endpoint, map[string]string{"env": "test"}, local)
+	u.meshHealthChecker(t, endpoint, nil, remote)
+	u.meshHealthChecker(t, endpoint, map[string]string{"env": "test"}, local)
 }
 
 func (u *ut) serviceMeshReviewsServiceIP(t *testing.T) {
@@ -352,9 +383,10 @@ func (u *ut) serviceMeshReviewsServiceIP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	u.waitManagerReady(t)
 	endpoint := fmt.Sprintf("http://%s:%v/health", ip, 9080)
-	u.healthChecker(t, endpoint, nil, remote)
-	u.healthChecker(t, endpoint, map[string]string{"env": "test"}, local)
+	u.meshHealthChecker(t, endpoint, nil, remote)
+	u.meshHealthChecker(t, endpoint, map[string]string{"env": "test"}, local)
 }
 
 func (u *ut) serviceMeshReviewsServiceIPPortMap(t *testing.T) {
@@ -363,9 +395,40 @@ func (u *ut) serviceMeshReviewsServiceIPPortMap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	u.waitManagerReady(t)
 	endpoint := fmt.Sprintf("http://%s:%v/health", ip, 9080)
-	u.healthChecker(t, endpoint, nil, remote)
-	u.healthChecker(t, endpoint, map[string]string{"env": "test"}, local8080)
+	u.meshHealthChecker(t, endpoint, nil, remote)
+	u.meshHealthChecker(t, endpoint, map[string]string{"env": "test"}, local8080)
+}
+
+// waitManagerReady blocks (best-effort, ~2m) until a kubevpn-traffic-manager pod
+// is Ready in any namespace, so mesh assertions do not begin against a blacked-out
+// xDS control plane. It lists across all namespaces because the manager lives in
+// the workload namespace for per-namespace installs but in "kubevpn" for the
+// central-mode tests. Best-effort: on timeout it only logs — the extended mesh
+// health-check budget (meshHealthCheckBackoff) is the real backstop, so a
+// transient apiserver stall in this gate never turns into a false failure.
+// See docs/43-macos-ci-apiserver-flakiness.md.
+func (u *ut) waitManagerReady(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	label := fields.OneTermEqualSelector("app", pkgconfig.ConfigMapPodTrafficManager).String()
+	err := wait.PollUntilContextCancel(ctx, 3*time.Second, true, func(ctx context.Context) (bool, error) {
+		pods, err := u.clientset.CoreV1().Pods("").List(ctx, v1.ListOptions{LabelSelector: label})
+		if err != nil {
+			// Transient apiserver error — keep polling within the timeout.
+			return false, nil
+		}
+		for i := range pods.Items {
+			if podutils.IsPodReady(&pods.Items[i]) && pods.Items[i].DeletionTimestamp == nil {
+				return true, nil
+			}
+		}
+		return false, nil
+	})
+	if err != nil {
+		t.Logf("%s traffic-manager not observed Ready before mesh assertions: %v", time.Now().Format(time.DateTime), err)
+	}
 }
 
 func (u *ut) getServiceIP(app string) (string, error) {

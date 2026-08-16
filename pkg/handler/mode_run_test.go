@@ -211,9 +211,10 @@ func (u *ut) kubevpnRunWithServiceMesh(t *testing.T) {
 	u.healthChecker(t, endpoint, map[string]string{"env": "test"}, remoteSyncPod)
 	u.healthChecker(t, endpoint, nil, remoteSyncPod)
 
+	u.waitManagerReady(t)
 	endpoint = fmt.Sprintf("http://%s:%v/health", ip, 9080)
-	u.healthChecker(t, endpoint, nil, remoteSyncOrigin)
-	u.healthChecker(t, endpoint, map[string]string{"env": "test"}, local)
+	u.meshHealthChecker(t, endpoint, nil, remoteSyncOrigin)
+	u.meshHealthChecker(t, endpoint, map[string]string{"env": "test"}, local)
 
 	t.Run("kubevpnRunWithServiceMeshStatus", u.checkRunWithServiceMeshStatus)
 	t.Run("commonTest", u.commonTest)

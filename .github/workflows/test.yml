@@ -125,6 +125,16 @@ jobs:
   macos:
     runs-on:  macos-15-intel
     needs: [ "image" ]
+    # Split the two heavy handler e2e suites across separate jobs, each on its own
+    # minikube cluster. A single ~90m run overloads the macOS runner's nested-VM
+    # apiserver into multi-minute TLS-handshake-timeout stalls, which blackout the
+    # traffic-manager pod and permanently break the mesh sidecar xDS stream — the
+    # mesh subtests then fail on infra flakiness, not code. Halving each cluster's
+    # sustained load avoids the degradation. See docs/43-macos-ci-apiserver-flakiness.md.
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [ '^TestFunctions$', '^TestSSHFunctions$' ]
     env:
       # Same VERSION as the image job (see linux job).
       VERSION: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -204,9 +214,14 @@ jobs:
       - name: Test
         env:
           TMPDIR: .
+          E2E_RUN: ${{ matrix.suite }}
         run: make ut
 
+      # The TUN suite (tun build tag, CAP_NET_ADMIN) is independent of the e2e
+      # split; run it once — on the TestFunctions leg only — to avoid duplicating
+      # the same root-privileged run across both matrix jobs.
       - name: Test (TUN)
+        if: matrix.suite == '^TestFunctions$'
         env:
           TMPDIR: .
         run: sudo -E env HOME="$HOME" PATH="$PATH" TMPDIR="$TMPDIR" make ut-tun
