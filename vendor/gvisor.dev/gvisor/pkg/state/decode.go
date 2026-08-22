@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"math"
 	"reflect"
 
@@ -33,7 +32,7 @@ type internalCallback interface {
 	source() *objectDecodeState
 
 	// callbackRun executes the callback.
-	callbackRun()
+	callbackRun(ds *decodeState)
 }
 
 // userCallback is an implementation of internalCallback.
@@ -45,7 +44,7 @@ func (userCallback) source() *objectDecodeState {
 }
 
 // callbackRun implements internalCallback.callbackRun.
-func (uc userCallback) callbackRun() {
+func (uc userCallback) callbackRun(*decodeState) {
 	uc()
 }
 
@@ -85,7 +84,13 @@ type objectDecodeState struct {
 	// callbacks is a set of callbacks to execute on load.
 	callbacks []internalCallback
 
-	completeEntry
+	pendingEntry odsListElem
+	leafEntry    odsListElem
+}
+
+type odsListElem struct {
+	ods *objectDecodeState
+	odsEntry
 }
 
 // addCallback adds a callback to the objectDecodeState.
@@ -123,8 +128,13 @@ func (ods *objectDecodeState) source() *objectDecodeState {
 }
 
 // callbackRun implements internalCallback.callbackRun.
-func (ods *objectDecodeState) callbackRun() {
+func (ods *objectDecodeState) callbackRun(ds *decodeState) {
 	ods.blockedBy--
+	if ods.blockedBy == 0 {
+		ds.leaves.PushBack(&ods.leafEntry)
+	} else if ods.blockedBy < 0 {
+		Failf("object %d has negative blockedBy: %d", ods.id, ods.blockedBy)
+	}
 }
 
 // decodeState is a graph of objects in the process of being decoded.
@@ -143,7 +153,7 @@ type decodeState struct {
 	ctx context.Context
 
 	// r is the input stream.
-	r io.Reader
+	r wire.Reader
 
 	// types is the type database.
 	types typeDecodeDatabase
@@ -156,7 +166,11 @@ type decodeState struct {
 	deferred map[objectID]wire.Object
 
 	// pending is the set of objects that are not yet complete.
-	pending completeList
+	pending odsList
+
+	// leaves is the set of objects that have no dependencies (blockedBy == 0).
+	// leaves are consumed from the front and appended to the back.
+	leaves odsList
 
 	// stats tracks time data.
 	stats Stats
@@ -186,20 +200,12 @@ func (ds *decodeState) checkComplete(ods *objectDecodeState) bool {
 
 	// Fire all callbacks.
 	for _, ic := range ods.callbacks {
-		ic.callbackRun()
+		ic.callbackRun(ds)
 	}
 
 	// Mark completed.
-	cbs := ods.callbacks
 	ods.callbacks = nil
-	ds.pending.Remove(ods)
-
-	// Recursively check others.
-	for _, ic := range cbs {
-		if other := ic.source(); other != nil && other.blockedBy == 0 {
-			ds.checkComplete(other)
-		}
-	}
+	ds.pending.Remove(&ods.pendingEntry)
 
 	return true // All set.
 }
@@ -224,6 +230,9 @@ func (ds *decodeState) wait(waiter *objectDecodeState, id objectID, callback fun
 
 	// Mark as blocked.
 	waiter.blockedBy++
+	if waiter.blockedBy == 1 {
+		ds.leaves.Remove(&waiter.leafEntry)
+	}
 
 	// No nil can be returned here.
 	other := ds.lookup(id)
@@ -281,6 +290,26 @@ func walkChild(path []wire.Dot, obj reflect.Value) reflect.Value {
 	return obj
 }
 
+func (ds *decodeState) growObjectsByID(id objectID) {
+	if len(ds.objectsByID) < int(id) {
+		ds.objectsByID = append(ds.objectsByID, make([]*objectDecodeState, int(id)-len(ds.objectsByID))...)
+	}
+}
+
+func (ds *decodeState) addObject(id objectID, obj reflect.Value) *objectDecodeState {
+	ods := &objectDecodeState{
+		id:  id,
+		obj: obj,
+	}
+	ods.pendingEntry.ods = ods
+	ods.leafEntry.ods = ods
+	ds.growObjectsByID(id)
+	ds.objectsByID[id-1] = ods
+	ds.pending.PushBack(&ods.pendingEntry)
+	ds.leaves.PushBack(&ods.leafEntry)
+	return ods
+}
+
 // register registers a decode with a type.
 //
 // This type is only used to instantiate a new object if it has not been
@@ -289,11 +318,9 @@ func walkChild(path []wire.Dot, obj reflect.Value) reflect.Value {
 func (ds *decodeState) register(r *wire.Ref, typ reflect.Type) reflect.Value {
 	// Grow the objectsByID slice.
 	id := objectID(r.Root)
-	if len(ds.objectsByID) < int(id) {
-		ds.objectsByID = append(ds.objectsByID, make([]*objectDecodeState, int(id)-len(ds.objectsByID))...)
-	}
 
 	// Does this object already exist?
+	ds.growObjectsByID(id)
 	ods := ds.objectsByID[id-1]
 	if ods != nil {
 		return walkChild(r.Dots, ods.obj)
@@ -304,12 +331,7 @@ func (ds *decodeState) register(r *wire.Ref, typ reflect.Type) reflect.Value {
 		typ = ds.findType(r.Type)
 	}
 	v := reflect.New(typ)
-	ods = &objectDecodeState{
-		id:  id,
-		obj: v.Elem(),
-	}
-	ds.objectsByID[id-1] = ods
-	ds.pending.PushBack(ods)
+	ods = ds.addObject(id, v.Elem())
 
 	// Process any deferred objects & callbacks.
 	if encoded, ok := ds.deferred[id]; ok {
@@ -582,16 +604,11 @@ func (ds *decodeState) Load(obj reflect.Value) {
 		return ds.types.LookupName(id)
 	})
 
-	// Create the root object.
-	rootOds := &objectDecodeState{
-		id:  1,
-		obj: obj,
-	}
-	ds.objectsByID = append(ds.objectsByID, rootOds)
-	ds.pending.PushBack(rootOds)
+	// Add the root object with ID 1.
+	_ = ds.addObject(1, obj)
 
 	// Read the number of objects.
-	numObjects, object, err := ReadHeader(ds.r)
+	numObjects, object, err := ReadHeader(&ds.r)
 	if err != nil {
 		Failf("header error: %w", err)
 	}
@@ -604,7 +621,6 @@ func (ds *decodeState) Load(obj reflect.Value) {
 		encoded wire.Object
 		ods     *objectDecodeState
 		id      objectID
-		tid     = typeID(1)
 	)
 	if err := safely(func() {
 		// Decode all objects in the stream.
@@ -613,18 +629,17 @@ func (ds *decodeState) Load(obj reflect.Value) {
 		// decoding loop in state/pretty/pretty.printer.printStream().
 		for i := uint64(0); i < numObjects; {
 			// Unmarshal either a type object or object ID.
-			encoded = wire.Load(ds.r)
+			encoded = wire.Load(&ds.r)
 			switch we := encoded.(type) {
 			case *wire.Type:
 				ds.types.Register(we)
-				tid++
 				encoded = nil
 				continue
 			case wire.Uint:
 				id = objectID(we)
 				i++
 				// Unmarshal and resolve the actual object.
-				encoded = wire.Load(ds.r)
+				encoded = wire.Load(&ds.r)
 				ods = ds.lookup(id)
 				if ods != nil {
 					// Decode the object.
@@ -674,22 +689,13 @@ func (ds *decodeState) Load(obj reflect.Value) {
 	// objects become complete (there is a dependency cycle).
 	//
 	// Note that we iterate backwards here, because there will be a strong
-	// tendendcy for blocking relationships to go from earlier objects to
+	// tendency for blocking relationships to go from earlier objects to
 	// later (deeper) objects in the graph. This will reduce the number of
 	// iterations required to finish all objects.
 	if err := safely(func() {
-		for ds.pending.Back() != nil {
-			thisCycle := false
-			for ods = ds.pending.Back(); ods != nil; {
-				if ds.checkComplete(ods) {
-					thisCycle = true
-					break
-				}
-				ods = ods.Prev()
-			}
-			if !thisCycle {
-				break
-			}
+		for elem := ds.leaves.Front(); elem != nil; elem = elem.Next() {
+			ods = elem.ods
+			ds.checkComplete(elem.ods)
 		}
 	}); err != nil {
 		Failf("error executing callbacks: %w\nfor object %#v", err, ods.obj.Interface())
@@ -697,9 +703,9 @@ func (ds *decodeState) Load(obj reflect.Value) {
 
 	// Check if we have any remaining dependency cycles. If there are any
 	// objects left in the pending list, then it must be due to a cycle.
-	if ods := ds.pending.Front(); ods != nil {
+	if elem := ds.pending.Front(); elem != nil {
 		// This must be the result of a dependency cycle.
-		cycle := ods.findCycle()
+		cycle := elem.ods.findCycle()
 		var buf bytes.Buffer
 		buf.WriteString("dependency cycle: {")
 		for i, cycleOS := range cycle {
@@ -709,7 +715,7 @@ func (ds *decodeState) Load(obj reflect.Value) {
 			fmt.Fprintf(&buf, "%q", cycleOS.obj.Type())
 		}
 		buf.WriteString("}")
-		Failf("incomplete graph: %s", string(buf.Bytes()))
+		Failf("incomplete graph: %s", buf.String())
 	}
 }
 
@@ -718,7 +724,7 @@ func (ds *decodeState) Load(obj reflect.Value) {
 // Each object written to the statefile is prefixed with a header. See
 // WriteHeader for more information; these functions are exported to allow
 // non-state writes to the file to play nice with debugging tools.
-func ReadHeader(r io.Reader) (length uint64, object bool, err error) {
+func ReadHeader(r *wire.Reader) (length uint64, object bool, err error) {
 	// Read the header.
 	err = safely(func() {
 		length = wire.LoadUint(r)

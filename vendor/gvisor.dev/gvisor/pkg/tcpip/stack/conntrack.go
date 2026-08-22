@@ -18,7 +18,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
-	"math/rand"
 	"sync"
 	"time"
 
@@ -206,6 +205,10 @@ func (cn *conn) update(pkt *PacketBuffer, reply bool) {
 	}
 }
 
+type connTrackRNG interface {
+	Uint32() uint32
+}
+
 // ConnTrack tracks all connections created for NAT rules. Most users are
 // expected to only call handlePacket, insertRedirectConn, and maybeInsertNoop.
 //
@@ -225,12 +228,21 @@ type ConnTrack struct {
 	// seed is a one-time random value initialized at stack startup
 	// and is used in the calculation of hash keys for the list of buckets.
 	// It is immutable.
+	//
+	// TODO(gvisor.dev/issue/4595): When Stack.tables becomes savable and
+	// ConnTrack flows into checkpoint state, this seed must be redrawn
+	// from secureRNG during restore AND the entries in buckets must be
+	// rehashed under the new seed. bucket_index = jenkins.Sum32(seed) %
+	// len(buckets) couples the seed value to bucket layout; redrawing the
+	// seed without rehashing leaves restored entries unreachable by
+	// Lookup. Persisting the pre-checkpoint seed extends the brute-force
+	// window across save boundaries.
 	seed uint32
 
 	// clock provides timing used to determine conntrack reapings.
 	clock tcpip.Clock
 	// TODO(b/341946753): Restore when netstack is savable.
-	rand *rand.Rand `state:"nosave"`
+	rng connTrackRNG `state:"nosave"`
 
 	mu connTrackRWMutex `state:"nosave"`
 	// mu protects the buckets slice, but not buckets' contents. Only take
@@ -271,99 +283,6 @@ func v6NetAndTransHdr(icmpPayload []byte, minTransHdrLen int) (header.Network, [
 	return netHdr, transHdr[:minTransHdrLen]
 }
 
-func getEmbeddedNetAndTransHeaders(pkt *PacketBuffer, netHdrLength int, getNetAndTransHdr netAndTransHeadersFunc, transProto tcpip.TransportProtocolNumber) (header.Network, header.ChecksummableTransport, bool) {
-	switch transProto {
-	case header.TCPProtocolNumber:
-		if netAndTransHeader, ok := pkt.Data().PullUp(netHdrLength + header.TCPMinimumSize); ok {
-			netHeader, transHeaderBytes := getNetAndTransHdr(netAndTransHeader, header.TCPMinimumSize)
-			return netHeader, header.TCP(transHeaderBytes), true
-		}
-	case header.UDPProtocolNumber:
-		if netAndTransHeader, ok := pkt.Data().PullUp(netHdrLength + header.UDPMinimumSize); ok {
-			netHeader, transHeaderBytes := getNetAndTransHdr(netAndTransHeader, header.UDPMinimumSize)
-			return netHeader, header.UDP(transHeaderBytes), true
-		}
-	}
-	return nil, nil, false
-}
-
-func getHeaders(pkt *PacketBuffer) (netHdr header.Network, transHdr header.Transport, isICMPError bool, ok bool) {
-	switch pkt.TransportProtocolNumber {
-	case header.TCPProtocolNumber:
-		if tcpHeader := header.TCP(pkt.TransportHeader().Slice()); len(tcpHeader) >= header.TCPMinimumSize {
-			return pkt.Network(), tcpHeader, false, true
-		}
-		return nil, nil, false, false
-	case header.UDPProtocolNumber:
-		if udpHeader := header.UDP(pkt.TransportHeader().Slice()); len(udpHeader) >= header.UDPMinimumSize {
-			return pkt.Network(), udpHeader, false, true
-		}
-		return nil, nil, false, false
-	case header.ICMPv4ProtocolNumber:
-		icmpHeader := header.ICMPv4(pkt.TransportHeader().Slice())
-		if len(icmpHeader) < header.ICMPv4MinimumSize {
-			return nil, nil, false, false
-		}
-
-		switch icmpType := icmpHeader.Type(); icmpType {
-		case header.ICMPv4Echo, header.ICMPv4EchoReply:
-			return pkt.Network(), icmpHeader, false, true
-		case header.ICMPv4DstUnreachable, header.ICMPv4TimeExceeded, header.ICMPv4ParamProblem:
-		default:
-			panic(fmt.Sprintf("unexpected ICMPv4 type = %d", icmpType))
-		}
-
-		h, ok := pkt.Data().PullUp(header.IPv4MinimumSize)
-		if !ok {
-			panic(fmt.Sprintf("should have a valid IPv4 packet; only have %d bytes, want at least %d bytes", pkt.Data().Size(), header.IPv4MinimumSize))
-		}
-
-		if header.IPv4(h).HeaderLength() > header.IPv4MinimumSize {
-			// TODO(https://gvisor.dev/issue/6765): Handle IPv4 options.
-			panic("should have dropped packets with IPv4 options")
-		}
-
-		if netHdr, transHdr, ok := getEmbeddedNetAndTransHeaders(pkt, header.IPv4MinimumSize, v4NetAndTransHdr, pkt.tuple.tupleID.transProto); ok {
-			return netHdr, transHdr, true, true
-		}
-		return nil, nil, false, false
-	case header.ICMPv6ProtocolNumber:
-		icmpHeader := header.ICMPv6(pkt.TransportHeader().Slice())
-		if len(icmpHeader) < header.ICMPv6MinimumSize {
-			return nil, nil, false, false
-		}
-
-		switch icmpType := icmpHeader.Type(); icmpType {
-		case header.ICMPv6EchoRequest, header.ICMPv6EchoReply:
-			return pkt.Network(), icmpHeader, false, true
-		case header.ICMPv6DstUnreachable, header.ICMPv6PacketTooBig, header.ICMPv6TimeExceeded, header.ICMPv6ParamProblem:
-		default:
-			panic(fmt.Sprintf("unexpected ICMPv6 type = %d", icmpType))
-		}
-
-		h, ok := pkt.Data().PullUp(header.IPv6MinimumSize)
-		if !ok {
-			panic(fmt.Sprintf("should have a valid IPv6 packet; only have %d bytes, want at least %d bytes", pkt.Data().Size(), header.IPv6MinimumSize))
-		}
-
-		// We do not support extension headers in ICMP errors so the next header
-		// in the IPv6 packet should be a tracked protocol if we reach this point.
-		//
-		// TODO(https://gvisor.dev/issue/6789): Support extension headers.
-		transProto := pkt.tuple.tupleID.transProto
-		if got := header.IPv6(h).TransportProtocol(); got != transProto {
-			panic(fmt.Sprintf("got TransportProtocol() = %d, want = %d", got, transProto))
-		}
-
-		if netHdr, transHdr, ok := getEmbeddedNetAndTransHeaders(pkt, header.IPv6MinimumSize, v6NetAndTransHdr, transProto); ok {
-			return netHdr, transHdr, true, true
-		}
-		return nil, nil, false, false
-	default:
-		panic(fmt.Sprintf("unexpected transport protocol = %d", pkt.TransportProtocolNumber))
-	}
-}
-
 func getTupleIDForRegularPacket(netHdr header.Network, netProto tcpip.NetworkProtocolNumber, transHdr header.Transport, transProto tcpip.TransportProtocolNumber) tupleID {
 	return tupleID{
 		srcAddr:                   netHdr.SourceAddress(),
@@ -376,7 +295,7 @@ func getTupleIDForRegularPacket(netHdr header.Network, netProto tcpip.NetworkPro
 }
 
 func getTupleIDForPacketInICMPError(pkt *PacketBuffer, getNetAndTransHdr netAndTransHeadersFunc, netProto tcpip.NetworkProtocolNumber, netLen int, transProto tcpip.TransportProtocolNumber) (tupleID, bool) {
-	if netHdr, transHdr, ok := getEmbeddedNetAndTransHeaders(pkt, netLen, getNetAndTransHdr, transProto); ok {
+	if netHdr, transHdr, ok := pkt.GetEmbeddedNetAndTransHeaders(netLen, getNetAndTransHdr, transProto); ok {
 		return tupleID{
 			srcAddr:                   netHdr.DestinationAddress(),
 			srcPortOrEchoRequestIdent: transHdr.DestinationPort(),
@@ -602,6 +521,11 @@ func (ct *ConnTrack) getConnAndUpdate(pkt *PacketBuffer, skipChecksumValidation 
 	return t
 }
 
+// GetConnAndUpdatePkt gets the connection for the packet and also sets the packet's tuple.
+func (ct *ConnTrack) GetConnAndUpdatePkt(pkt *PacketBuffer, skipChecksumValidation bool) {
+	pkt.tuple = ct.getConnAndUpdate(pkt, skipChecksumValidation)
+}
+
 func (ct *ConnTrack) connForTID(tid tupleID) *tuple {
 	ct.mu.RLock()
 	bkt := &ct.buckets[ct.bucket(tid)]
@@ -695,317 +619,6 @@ func (cn *conn) finalize() bool {
 	default:
 		panic(fmt.Sprintf("unhandled result = %d", res))
 	}
-}
-
-// If NAT has not been configured for this connection, either mark the
-// connection as configured for "no-op NAT", in the case of DNAT, or, in the
-// case of SNAT, perform source port remapping so that source ports used by
-// locally-generated traffic do not conflict with ports occupied by existing NAT
-// bindings.
-//
-// Note that in the typical case this is also a no-op, because `snatAction`
-// will do nothing if the original tuple is already unique.
-func (cn *conn) maybePerformNoopNAT(pkt *PacketBuffer, hook Hook, r *Route, dnat bool) {
-	cn.mu.Lock()
-	var manip *manipType
-	if dnat {
-		manip = &cn.destinationManip
-	} else {
-		manip = &cn.sourceManip
-	}
-	if *manip != manipNotPerformed {
-		cn.mu.Unlock()
-		_ = cn.handlePacket(pkt, hook, r)
-		return
-	}
-	if dnat {
-		*manip = manipPerformedNoop
-		cn.mu.Unlock()
-		_ = cn.handlePacket(pkt, hook, r)
-		return
-	}
-	cn.mu.Unlock()
-
-	// At this point, we know that NAT has not yet been performed on this
-	// connection, and the DNAT case has been handled with a no-op. For SNAT, we
-	// simply perform source port remapping to ensure that source ports for
-	// locally generated traffic do not clash with ports used by existing NAT
-	// bindings.
-	_, _ = snatAction(pkt, hook, r, 0, tcpip.Address{}, true /* changePort */, false /* changeAddress */)
-}
-
-type portOrIdentRange struct {
-	start uint16
-	size  uint32
-}
-
-// performNAT setups up the connection for the specified NAT and rewrites the
-// packet.
-//
-// If NAT has already been performed on the connection, then the packet will
-// be rewritten with the NAT performed on the connection, ignoring the passed
-// address and port range.
-//
-// Generally, only the first packet of a connection reaches this method; other
-// packets will be manipulated without needing to modify the connection.
-func (cn *conn) performNAT(pkt *PacketBuffer, hook Hook, r *Route, portsOrIdents portOrIdentRange, natAddress tcpip.Address, dnat, changePort, changeAddress bool) {
-	lastPortOrIdent := func() uint16 {
-		lastPortOrIdent := uint32(portsOrIdents.start) + portsOrIdents.size - 1
-		if lastPortOrIdent > math.MaxUint16 {
-			panic(fmt.Sprintf("got lastPortOrIdent = %d, want <= MaxUint16(=%d); portsOrIdents=%#v", lastPortOrIdent, math.MaxUint16, portsOrIdents))
-		}
-		return uint16(lastPortOrIdent)
-	}()
-
-	// Make sure the packet is re-written after performing NAT.
-	defer func() {
-		// handlePacket returns true if the packet may skip the NAT table as the
-		// connection is already NATed, but if we reach this point we must be in the
-		// NAT table, so the return value is useless for us.
-		_ = cn.handlePacket(pkt, hook, r)
-	}()
-
-	cn.mu.Lock()
-	defer cn.mu.Unlock()
-
-	var manip *manipType
-	var address *tcpip.Address
-	var portOrIdent *uint16
-	if dnat {
-		manip = &cn.destinationManip
-		address = &cn.reply.tupleID.srcAddr
-		portOrIdent = &cn.reply.tupleID.srcPortOrEchoRequestIdent
-	} else {
-		manip = &cn.sourceManip
-		address = &cn.reply.tupleID.dstAddr
-		portOrIdent = &cn.reply.tupleID.dstPortOrEchoReplyIdent
-	}
-
-	if *manip != manipNotPerformed {
-		return
-	}
-	*manip = manipPerformed
-	if changeAddress {
-		*address = natAddress
-	}
-
-	// Everything below here is port-fiddling.
-	if !changePort {
-		return
-	}
-
-	// Does the current port/ident fit in the range?
-	if portsOrIdents.start <= *portOrIdent && *portOrIdent <= lastPortOrIdent {
-		// Yes, is the current reply tuple unique?
-		//
-		// Or, does the reply tuple refer to the same connection as the current one that
-		// we are NATing? This would apply, for example, to a self-connected socket,
-		// where the original and reply tuples are identical.
-		other := cn.ct.connForTID(cn.reply.tupleID)
-		if other == nil || other.conn == cn {
-			// Yes! No need to change the port.
-			return
-		}
-	}
-
-	// Try our best to find a port/ident that results in a unique reply tuple.
-	//
-	// We limit the number of attempts to find a unique tuple to not waste a lot
-	// of time looking for a unique tuple.
-	//
-	// Matches linux behaviour introduced in
-	// https://github.com/torvalds/linux/commit/a504b703bb1da526a01593da0e4be2af9d9f5fa8.
-	const maxAttemptsForInitialRound uint32 = 128
-	const minAttemptsToContinue = 16
-
-	allowedInitialAttempts := maxAttemptsForInitialRound
-	if allowedInitialAttempts > portsOrIdents.size {
-		allowedInitialAttempts = portsOrIdents.size
-	}
-
-	for maxAttempts := allowedInitialAttempts; ; maxAttempts /= 2 {
-		// Start reach round with a random initial port/ident offset.
-		randOffset := cn.ct.rand.Uint32()
-
-		for i := uint32(0); i < maxAttempts; i++ {
-			newPortOrIdentU32 := uint32(portsOrIdents.start) + (randOffset+i)%portsOrIdents.size
-			if newPortOrIdentU32 > math.MaxUint16 {
-				panic(fmt.Sprintf("got newPortOrIdentU32 = %d, want <= MaxUint16(=%d); portsOrIdents=%#v, randOffset=%d", newPortOrIdentU32, math.MaxUint16, portsOrIdents, randOffset))
-			}
-
-			*portOrIdent = uint16(newPortOrIdentU32)
-
-			if other := cn.ct.connForTID(cn.reply.tupleID); other == nil {
-				// We found a unique tuple!
-				return
-			}
-		}
-
-		if maxAttempts == portsOrIdents.size {
-			// We already tried all the ports/idents in the range so no need to keep
-			// trying.
-			return
-		}
-
-		if maxAttempts < minAttemptsToContinue {
-			return
-		}
-	}
-
-	// We did not find a unique tuple, use the last used port anyways.
-	// TODO(https://gvisor.dev/issue/6850): Handle not finding a unique tuple
-	// better (e.g. remove the connection and drop the packet).
-}
-
-// handlePacket attempts to handle a packet and perform NAT if the connection
-// has had NAT performed on it.
-//
-// Returns true if the packet can skip the NAT table.
-func (cn *conn) handlePacket(pkt *PacketBuffer, hook Hook, rt *Route) bool {
-	netHdr, transHdr, isICMPError, ok := getHeaders(pkt)
-	if !ok {
-		return false
-	}
-
-	fullChecksum := false
-	updatePseudoHeader := false
-	natDone := &pkt.snatDone
-	dnat := false
-	switch hook {
-	case Prerouting:
-		// Packet came from outside the stack so it must have a checksum set
-		// already.
-		fullChecksum = true
-		updatePseudoHeader = true
-
-		natDone = &pkt.dnatDone
-		dnat = true
-	case Input:
-	case Forward:
-		panic("should not handle packet in the forwarding hook")
-	case Output:
-		natDone = &pkt.dnatDone
-		dnat = true
-		fallthrough
-	case Postrouting:
-		if pkt.TransportProtocolNumber == header.TCPProtocolNumber && pkt.GSOOptions.Type != GSONone && pkt.GSOOptions.NeedsCsum {
-			updatePseudoHeader = true
-		} else if rt.RequiresTXTransportChecksum() {
-			fullChecksum = true
-			updatePseudoHeader = true
-		}
-	default:
-		panic(fmt.Sprintf("unrecognized hook = %d", hook))
-	}
-
-	if *natDone {
-		panic(fmt.Sprintf("packet already had NAT(dnat=%t) performed at hook=%s; pkt=%#v", dnat, hook, pkt))
-	}
-
-	// TODO(gvisor.dev/issue/5748): TCP checksums on inbound packets should be
-	// validated if checksum offloading is off. It may require IP defrag if the
-	// packets are fragmented.
-
-	reply := pkt.tuple.reply
-
-	tid, manip := func() (tupleID, manipType) {
-		cn.mu.RLock()
-		defer cn.mu.RUnlock()
-
-		if reply {
-			tid := cn.original.tupleID
-
-			if dnat {
-				return tid, cn.sourceManip
-			}
-			return tid, cn.destinationManip
-		}
-
-		tid := cn.reply.tupleID
-		if dnat {
-			return tid, cn.destinationManip
-		}
-		return tid, cn.sourceManip
-	}()
-	switch manip {
-	case manipNotPerformed:
-		return false
-	case manipPerformedNoop:
-		*natDone = true
-		return true
-	case manipPerformed:
-	default:
-		panic(fmt.Sprintf("unhandled manip = %d", manip))
-	}
-
-	newPort := tid.dstPortOrEchoReplyIdent
-	newAddr := tid.dstAddr
-	if dnat {
-		newPort = tid.srcPortOrEchoRequestIdent
-		newAddr = tid.srcAddr
-	}
-
-	rewritePacket(
-		netHdr,
-		transHdr,
-		!dnat != isICMPError,
-		fullChecksum,
-		updatePseudoHeader,
-		newPort,
-		newAddr,
-	)
-
-	*natDone = true
-
-	if !isICMPError {
-		return true
-	}
-
-	// We performed NAT on (erroneous) packet that triggered an ICMP response, but
-	// not the ICMP packet itself.
-	switch pkt.TransportProtocolNumber {
-	case header.ICMPv4ProtocolNumber:
-		icmp := header.ICMPv4(pkt.TransportHeader().Slice())
-		// TODO(https://gvisor.dev/issue/6788): Incrementally update ICMP checksum.
-		icmp.SetChecksum(0)
-		icmp.SetChecksum(header.ICMPv4Checksum(icmp, pkt.Data().Checksum()))
-
-		network := header.IPv4(pkt.NetworkHeader().Slice())
-		if dnat {
-			network.SetDestinationAddressWithChecksumUpdate(tid.srcAddr)
-		} else {
-			network.SetSourceAddressWithChecksumUpdate(tid.dstAddr)
-		}
-	case header.ICMPv6ProtocolNumber:
-		network := header.IPv6(pkt.NetworkHeader().Slice())
-		srcAddr := network.SourceAddress()
-		dstAddr := network.DestinationAddress()
-		if dnat {
-			dstAddr = tid.srcAddr
-		} else {
-			srcAddr = tid.dstAddr
-		}
-
-		icmp := header.ICMPv6(pkt.TransportHeader().Slice())
-		// TODO(https://gvisor.dev/issue/6788): Incrementally update ICMP checksum.
-		icmp.SetChecksum(0)
-		payload := pkt.Data()
-		icmp.SetChecksum(header.ICMPv6Checksum(header.ICMPv6ChecksumParams{
-			Header:      icmp,
-			Src:         srcAddr,
-			Dst:         dstAddr,
-			PayloadCsum: payload.Checksum(),
-			PayloadLen:  payload.Size(),
-		}))
-
-		if dnat {
-			network.SetDestinationAddress(dstAddr)
-		} else {
-			network.SetSourceAddress(srcAddr)
-		}
-	}
-
-	return true
 }
 
 // bucket gets the conntrack bucket for a tupleID.
@@ -1166,4 +779,53 @@ func (ct *ConnTrack) originalDst(epID TransportEndpointID, netProto tcpip.Networ
 
 	id := t.conn.original.tupleID
 	return id.dstAddr, id.dstPortOrEchoReplyIdent, nil
+}
+
+// NewConnTrack creates and initializes a  new ConnTrack object.
+func NewConnTrack(clock tcpip.Clock, rng connTrackRNG, seed *uint32) *ConnTrack {
+	if seed == nil {
+		r := rng.Uint32()
+		seed = &r
+	}
+	ct := &ConnTrack{
+		clock: clock,
+		rng:   rng,
+		seed:  *seed,
+	}
+	ct.init()
+	return ct
+}
+
+// NewConnTrackWithReaper creates and initializes a new ConnTrack and reaper.
+// Reaper garbage collects unused connections.
+func NewConnTrackWithReaper(clock tcpip.Clock, rng connTrackRNG, seed *uint32) (*ConnTrack, tcpip.Timer) {
+	ct := NewConnTrack(clock, rng, seed)
+	var reaper tcpip.Timer
+	bucket := 0
+	interval := 1 * time.Second
+	reaper = ct.clock.AfterFunc(interval, func() {
+		bucket, interval = ct.reapUnused(bucket, interval)
+		reaper.Reset(interval)
+	})
+	return ct, reaper
+}
+
+// NfConnTrackPriority returns the priority of the conntrack hook.
+// Check `ipv4/ipv6_conntrack_ops` in nf_conntrack_proto.c.
+func NfConnTrackPriority(hook NFHook) (int, bool) {
+	switch hook {
+	case NFPrerouting:
+		// NF_IP_PRI_CONNTRACK
+		return -200, true
+	case NFInput:
+		// NF_IP_PRI_CONNTRACK_CONFIRM
+		return math.MaxInt32, true
+	case NFPostrouting:
+		// NF_IP_PRI_CONNTRACK_CONFIRM
+		return math.MaxInt32, true
+	case NFOutput:
+		// NF_IP_PRI_CONNTRACK
+		return -200, true
+	}
+	return 0, false
 }

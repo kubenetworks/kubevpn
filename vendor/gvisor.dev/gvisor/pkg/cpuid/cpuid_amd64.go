@@ -308,7 +308,7 @@ func (fs FeatureSet) HasFeature(feature Feature) bool {
 
 // WriteCPUInfoTo is to generate a section of one cpu in /proc/cpuinfo. This is
 // a minimal /proc/cpuinfo, it is missing some fields like "microcode" that are
-// not always printed in Linux. The bogomips field is simply made up.
+// not always printed in Linux. Several fields are simply made up.
 func (fs FeatureSet) WriteCPUInfoTo(cpu, numCPU uint, w io.Writer) {
 	// Avoid many redundant calls here, since this can occasionally appear
 	// in the hot path. Read all basic information up front, see above.
@@ -322,6 +322,13 @@ func (fs FeatureSet) WriteCPUInfoTo(cpu, numCPU uint, w io.Writer) {
 	fmt.Fprintf(w, "model name\t: %s\n", "unknown") // Unknown for now.
 	fmt.Fprintf(w, "stepping\t: %s\n", "unknown")   // Unknown for now.
 	fmt.Fprintf(w, "cpu MHz\t\t: %.3f\n", cpuFreqMHz)
+	// Pretend the CPU has 8192 KB of cache. Note that real /proc/cpuinfo exposes total L3 cache
+	// size on Intel and per-core L2 cache size on AMD (as of Linux 6.1.0), so the value of this
+	// field is not really important in practice. Any value that is chosen here will be wrong
+	// by an order of magnitude on a significant chunk of x86 machines.
+	// 8192 KB is selected because it is a reasonable size that will be effectively usable on
+	// lightly loaded machines - most machines have 1-4MB of L3 cache per core.
+	fmt.Fprintf(w, "cache size\t: 8192 KB\n")
 	fmt.Fprintf(w, "physical id\t: 0\n") // Pretend all CPUs are in the same socket.
 	fmt.Fprintf(w, "siblings\t: %d\n", numCPU)
 	fmt.Fprintf(w, "core id\t\t: %d\n", cpu)
@@ -375,15 +382,16 @@ var (
 )
 
 const (
-	// XCR0AMXMask are the bits that enable xsave to operate on AMX TILECFG
-	// and TILEDATA.
-	//
-	// Note: TILECFG and TILEDATA are always either both enabled or both
-	//       disabled.
+	// XCR0AmxCfgMask is the bits that enable xsave to operate on
+	// AMX TILECFG.
 	//
 	// See Intel® 64 and IA-32 Architectures Software Developer’s Manual Vol.1
 	// section 13.3 for details.
-	XCR0AMXMask = uint64((1 << 17) | (1 << 18))
+	XCR0AmxCfgMask = uint64(1 << 17)
+
+	// XCR0AmxDataMask is the bits that enable xsave to operate on
+	// AMX TILEDATA.
+	XCR0AmxDataMask = uint64(1 << 18)
 )
 
 // ExtendedStateSize returns the number of bytes needed to save the "extended
@@ -408,13 +416,15 @@ func (fs FeatureSet) ExtendedStateSize() (size, align uint) {
 // AMXExtendedStateSize returns the number of bytes within the "extended state"
 // area that is used for AMX.
 func (fs FeatureSet) AMXExtendedStateSize() uint {
+	total := uint(0)
 	if fs.UseXsave() {
 		xcr0 := xgetbv(0)
-		if (xcr0 & XCR0AMXMask) != 0 {
-			return uint(amxTileCfgSize + amxTileDataSize)
+		// TILECFG is not part of AMX extended state, only TILEDATA.
+		if (xcr0 & XCR0AmxDataMask) != 0 {
+			total += uint(amxTileDataSize)
 		}
 	}
-	return 0
+	return total
 }
 
 // ValidXCR0Mask returns the valid bits in control register XCR0.
@@ -428,7 +438,7 @@ func (fs FeatureSet) ValidXCR0Mask() uint64 {
 		return 0
 	}
 	ax, _, _, dx := fs.query(xSaveInfo)
-	return (uint64(dx)<<32 | uint64(ax)) &^ XCR0AMXMask
+	return (uint64(dx)<<32 | uint64(ax)) &^ (XCR0AmxCfgMask | XCR0AmxDataMask)
 }
 
 // UseXsave returns the choice of fp state saving instruction.
@@ -472,4 +482,18 @@ func (fs FeatureSet) archCheckHostCompatible(hfs FeatureSet) error {
 	}
 
 	return nil
+}
+
+// AllowedHWCap1 returns the HWCAP1 bits that the guest is allowed to depend
+// on.
+func (fs FeatureSet) AllowedHWCap1() uint64 {
+	// HWCAPS are not supported on amd64.
+	return 0
+}
+
+// AllowedHWCap2 returns the HWCAP2 bits that the guest is allowed to depend
+// on.
+func (fs FeatureSet) AllowedHWCap2() uint64 {
+	// HWCAPS are not supported on amd64.
+	return 0
 }

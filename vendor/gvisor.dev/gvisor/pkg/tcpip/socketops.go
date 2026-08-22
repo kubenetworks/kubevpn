@@ -253,16 +253,23 @@ type SocketOptions struct {
 	// receiveBufferSize determines the receive buffer size for this socket.
 	receiveBufferSize atomicbitops.Int64
 
+	// rcvlowat specifies the minimum number of bytes which should be
+	// received to indicate the socket as readable.
+	rcvlowat atomicbitops.Int32
+
+	// experimentOptionValue is the value set for the IP option experiment header
+	// if it is not zero.
+	experimentOptionValue atomicbitops.Uint32
+
+	// mark is the mark value set for the socket.
+	mark atomicbitops.Uint32
+
 	// mu protects the access to the below fields.
 	mu sync.Mutex `state:"nosave"`
 
 	// linger determines the amount of time the socket should linger before
 	// close. We currently implement this option for TCP socket only.
 	linger LingerOption
-
-	// rcvlowat specifies the minimum number of bytes which should be
-	// received to indicate the socket as readable.
-	rcvlowat atomicbitops.Int32
 }
 
 // InitHandler initializes the handler. This must be called before using the
@@ -539,6 +546,17 @@ func (so *SocketOptions) SetLinger(linger LingerOption) {
 	so.mu.Unlock()
 }
 
+// GetExperimentOptionValue gets value for the experiment IP option header.
+func (so *SocketOptions) GetExperimentOptionValue() uint16 {
+	v := so.experimentOptionValue.Load()
+	return uint16(v)
+}
+
+// SetExperimentOptionValue sets the value for the experiment IP option header.
+func (so *SocketOptions) SetExperimentOptionValue(v uint16) {
+	so.experimentOptionValue.Store(uint32(v))
+}
+
 // SockErrOrigin represents the constants for error origin.
 type SockErrOrigin uint8
 
@@ -755,4 +773,14 @@ func (so *SocketOptions) SetRcvlowat(rcvlowat int32) Error {
 // GetAcceptConn gets value for SO_ACCEPTCONN option.
 func (so *SocketOptions) GetAcceptConn() bool {
 	return so.handler.GetAcceptConn()
+}
+
+// GetMark gets value for SO_MARK option.
+func (so *SocketOptions) GetMark() uint32 {
+	return so.mark.Load()
+}
+
+// SetMark sets value for SO_MARK option.
+func (so *SocketOptions) SetMark(v uint32) {
+	so.mark.Store(v)
 }

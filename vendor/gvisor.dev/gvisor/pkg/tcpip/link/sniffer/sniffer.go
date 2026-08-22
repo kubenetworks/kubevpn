@@ -39,22 +39,19 @@ import (
 // package. Valid values are 0 or 1.
 var LogPackets atomicbitops.Uint32 = atomicbitops.FromUint32(1)
 
-// LogPacketsToPCAP is a flag used to enable or disable logging packets to a
-// pcap writer. Valid values are 0 or 1. A writer must have been specified when the
-// sniffer was created for this flag to have effect.
-var LogPacketsToPCAP atomicbitops.Uint32 = atomicbitops.FromUint32(1)
-
+// Endpoint is used to sniff and log network traffic.
+//
 // +stateify savable
-type endpoint struct {
+type Endpoint struct {
 	nested.Endpoint
 	writer     io.Writer
 	maxPCAPLen uint32
 	logPrefix  string
 }
 
-var _ stack.GSOEndpoint = (*endpoint)(nil)
-var _ stack.LinkEndpoint = (*endpoint)(nil)
-var _ stack.NetworkDispatcher = (*endpoint)(nil)
+var _ stack.GSOEndpoint = (*Endpoint)(nil)
+var _ stack.LinkEndpoint = (*Endpoint)(nil)
+var _ stack.NetworkDispatcher = (*Endpoint)(nil)
 
 // A Direction indicates whether the packing is being sent or received.
 type Direction int
@@ -66,9 +63,20 @@ const (
 	DirectionRecv
 )
 
+func (dr Direction) String() string {
+	switch dr {
+	case DirectionSend:
+		return "send"
+	case DirectionRecv:
+		return "recv"
+	default:
+		panic(fmt.Sprintf("invalid Direction %d", dr))
+	}
+}
+
 // New creates a new sniffer link-layer endpoint. It wraps around another
 // endpoint and logs packets and they traverse the endpoint.
-func New(lower stack.LinkEndpoint) stack.LinkEndpoint {
+func New(lower stack.LinkEndpoint) *Endpoint {
 	return NewWithPrefix(lower, "")
 }
 
@@ -79,8 +87,8 @@ func New(lower stack.LinkEndpoint) stack.LinkEndpoint {
 // logPrefix is prepended to the log line without any separators.
 // E.g. logPrefix = "NIC:en0/" will produce log lines like
 // "NIC:en0/send udp [...]".
-func NewWithPrefix(lower stack.LinkEndpoint, logPrefix string) stack.LinkEndpoint {
-	sniffer := &endpoint{logPrefix: logPrefix}
+func NewWithPrefix(lower stack.LinkEndpoint, logPrefix string) *Endpoint {
+	sniffer := &Endpoint{logPrefix: logPrefix}
 	sniffer.Endpoint.Init(lower, sniffer)
 	return sniffer
 }
@@ -119,11 +127,11 @@ func writePCAPHeader(w io.Writer, maxLen uint32) error {
 // snapLen is the maximum amount of a packet to be saved. Packets with a length
 // less than or equal to snapLen will be saved in their entirety. Longer
 // packets will be truncated to snapLen.
-func NewWithWriter(lower stack.LinkEndpoint, writer io.Writer, snapLen uint32) (stack.LinkEndpoint, error) {
+func NewWithWriter(lower stack.LinkEndpoint, writer io.Writer, snapLen uint32) (*Endpoint, error) {
 	if err := writePCAPHeader(writer, snapLen); err != nil {
 		return nil, err
 	}
-	sniffer := &endpoint{
+	sniffer := &Endpoint{
 		writer:     writer,
 		maxPCAPLen: snapLen,
 	}
@@ -134,27 +142,32 @@ func NewWithWriter(lower stack.LinkEndpoint, writer io.Writer, snapLen uint32) (
 // DeliverNetworkPacket implements the stack.NetworkDispatcher interface. It is
 // called by the link-layer endpoint being wrapped when a packet arrives, and
 // logs the packet before forwarding to the actual dispatcher.
-func (e *endpoint) DeliverNetworkPacket(protocol tcpip.NetworkProtocolNumber, pkt *stack.PacketBuffer) {
-	e.dumpPacket(DirectionRecv, protocol, pkt)
+func (e *Endpoint) DeliverNetworkPacket(protocol tcpip.NetworkProtocolNumber, pkt *stack.PacketBuffer) {
+	e.DumpPacket(DirectionRecv, protocol, pkt, nil)
 	e.Endpoint.DeliverNetworkPacket(protocol, pkt)
 }
 
-func (e *endpoint) dumpPacket(dir Direction, protocol tcpip.NetworkProtocolNumber, pkt *stack.PacketBuffer) {
-	writer := e.writer
+// DumpPacket logs a packet, depending on configuration, to stderr and/or a
+// pcap file. ts is an optional timestamp for the packet.
+func (e *Endpoint) DumpPacket(dir Direction, protocol tcpip.NetworkProtocolNumber, pkt *stack.PacketBuffer, ts *time.Time) {
 	if LogPackets.Load() == 1 {
 		LogPacket(e.logPrefix, dir, protocol, pkt)
 	}
-	if writer != nil && LogPacketsToPCAP.Load() == 1 {
+	if e.writer != nil {
 		packet := pcapPacket{
-			timestamp:     time.Now(),
 			packet:        pkt,
 			maxCaptureLen: int(e.maxPCAPLen),
+		}
+		if ts == nil {
+			packet.timestamp = time.Now()
+		} else {
+			packet.timestamp = *ts
 		}
 		b, err := packet.MarshalBinary()
 		if err != nil {
 			panic(err)
 		}
-		if _, err := writer.Write(b); err != nil {
+		if _, err := e.writer.Write(b); err != nil {
 			panic(err)
 		}
 	}
@@ -163,9 +176,9 @@ func (e *endpoint) dumpPacket(dir Direction, protocol tcpip.NetworkProtocolNumbe
 // WritePackets implements the stack.LinkEndpoint interface. It is called by
 // higher-level protocols to write packets; it just logs the packet and
 // forwards the request to the lower endpoint.
-func (e *endpoint) WritePackets(pkts stack.PacketBufferList) (int, tcpip.Error) {
+func (e *Endpoint) WritePackets(pkts stack.PacketBufferList) (int, tcpip.Error) {
 	for _, pkt := range pkts.AsSlice() {
-		e.dumpPacket(DirectionSend, pkt.NetworkProtocolNumber, pkt)
+		e.DumpPacket(DirectionSend, pkt.NetworkProtocolNumber, pkt, nil)
 	}
 	return e.Endpoint.WritePackets(pkts)
 }
@@ -180,16 +193,6 @@ func LogPacket(prefix string, dir Direction, protocol tcpip.NetworkProtocolNumbe
 	var id uint32
 	var fragmentOffset uint16
 	var moreFragments bool
-
-	var directionPrefix string
-	switch dir {
-	case DirectionSend:
-		directionPrefix = "send"
-	case DirectionRecv:
-		directionPrefix = "recv"
-	default:
-		panic(fmt.Sprintf("unrecognized direction: %d", dir))
-	}
 
 	clone := trimmedClone(pkt)
 	defer clone.DecRef()
@@ -232,14 +235,14 @@ func LogPacket(prefix string, dir Direction, protocol tcpip.NetworkProtocolNumbe
 		log.Infof(
 			"%s%s arp %s (%s) -> %s (%s) valid:%t",
 			prefix,
-			directionPrefix,
+			dir,
 			tcpip.AddrFromSlice(arp.ProtocolAddressSender()), tcpip.LinkAddress(arp.HardwareAddressSender()),
 			tcpip.AddrFromSlice(arp.ProtocolAddressTarget()), tcpip.LinkAddress(arp.HardwareAddressTarget()),
 			arp.IsValid(),
 		)
 		return
 	default:
-		log.Infof("%s%s unknown network protocol: %d", prefix, directionPrefix, protocol)
+		log.Infof("%s%s unknown network protocol: %d", prefix, dir, protocol)
 		return
 	}
 
@@ -283,7 +286,7 @@ func LogPacket(prefix string, dir Direction, protocol tcpip.NetworkProtocolNumbe
 				icmpType = "info reply"
 			}
 		}
-		log.Infof("%s%s %s %s -> %s %s len:%d id:%04x code:%d", prefix, directionPrefix, transName, src, dst, icmpType, size, id, icmp.Code())
+		log.Infof("%s%s %s %s -> %s %s len:%d id:%04x code:%d", prefix, dir, transName, src, dst, icmpType, size, id, icmp.Code())
 		return
 
 	case header.ICMPv6ProtocolNumber:
@@ -318,7 +321,7 @@ func LogPacket(prefix string, dir Direction, protocol tcpip.NetworkProtocolNumbe
 		case header.ICMPv6RedirectMsg:
 			icmpType = "redirect message"
 		}
-		log.Infof("%s%s %s %s -> %s %s len:%d id:%04x code:%d", prefix, directionPrefix, transName, src, dst, icmpType, size, id, icmp.Code())
+		log.Infof("%s%s %s %s -> %s %s len:%d id:%04x code:%d", prefix, dir, transName, src, dst, icmpType, size, id, icmp.Code())
 		return
 
 	case header.UDPProtocolNumber:
@@ -348,8 +351,13 @@ func LogPacket(prefix string, dir Direction, protocol tcpip.NetworkProtocolNumbe
 				details += fmt.Sprintf("invalid packet: tcp data offset too small %d", offset)
 				break
 			}
-			if size := clone.Data().Size() + len(tcp); offset > size && !moreFragments {
-				details += fmt.Sprintf("invalid packet: tcp data offset %d larger than tcp packet length %d", offset, size)
+
+			if size := clone.Data().Size() + len(tcp); offset > size {
+				if !moreFragments {
+					details += fmt.Sprintf("invalid packet: tcp data offset %d larger than tcp packet length %d", offset, size)
+				} else {
+					details += fmt.Sprintf("truncated options (tcp data offset %d, tcp packet length %d)", offset, size)
+				}
 				break
 			}
 
@@ -359,24 +367,24 @@ func LogPacket(prefix string, dir Direction, protocol tcpip.NetworkProtocolNumbe
 
 			// Initialize the TCP flags.
 			flags := tcp.Flags()
-			details = fmt.Sprintf("flags: %s seqnum: %d ack: %d win: %d xsum:0x%x", flags, tcp.SequenceNumber(), tcp.AckNumber(), tcp.WindowSize(), tcp.Checksum())
+			details = fmt.Sprintf("flags:%s seqnum:%d ack:%d win:%d xsum:0x%x", flags, tcp.SequenceNumber(), tcp.AckNumber(), tcp.WindowSize(), tcp.Checksum())
 			if flags&header.TCPFlagSyn != 0 {
-				details += fmt.Sprintf(" options: %+v", header.ParseSynOptions(tcp.Options(), flags&header.TCPFlagAck != 0))
+				details += fmt.Sprintf(" options:%+v", header.ParseSynOptions(tcp.Options(), flags&header.TCPFlagAck != 0))
 			} else {
-				details += fmt.Sprintf(" options: %+v", tcp.ParsedOptions())
+				details += fmt.Sprintf(" options:%+v", tcp.ParsedOptions())
 			}
 		}
 
 	default:
-		log.Infof("%s%s %s -> %s unknown transport protocol: %d", prefix, directionPrefix, src, dst, transProto)
+		log.Infof("%s%s %s -> %s unknown transport protocol: %d", prefix, dir, src, dst, transProto)
 		return
 	}
 
 	if pkt.GSOOptions.Type != stack.GSONone {
-		details += fmt.Sprintf(" gso: %#v", pkt.GSOOptions)
+		details += fmt.Sprintf(" gso:%#v", pkt.GSOOptions)
 	}
 
-	log.Infof("%s%s %s %s:%d -> %s:%d len:%d id:%04x %s", prefix, directionPrefix, transName, src, srcPort, dst, dstPort, size, id, details)
+	log.Infof("%s%s %s %s:%d -> %s:%d len:%d id:0x%04x %s", prefix, dir, transName, src, srcPort, dst, dstPort, size, id, details)
 }
 
 // trimmedClone clones the packet buffer to not modify the original. It trims

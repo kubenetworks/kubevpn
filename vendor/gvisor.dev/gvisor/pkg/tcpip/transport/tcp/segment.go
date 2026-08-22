@@ -130,7 +130,7 @@ func newIncomingSegment(id stack.TransportEndpointID, clock tcpip.Clock, pkt *st
 	s.window = seqnum.Size(hdr.WindowSize())
 	s.rcvdTime = clock.NowMonotonic()
 	s.dataMemSize = pkt.MemSize()
-	s.pkt = pkt.IncRef()
+	s.pkt = pkt.Clone()
 	s.csumValid = csumValid
 
 	if !s.pkt.RXChecksumValidated {
@@ -139,11 +139,14 @@ func newIncomingSegment(id stack.TransportEndpointID, clock tcpip.Clock, pkt *st
 	return s, nil
 }
 
-func newOutgoingSegment(id stack.TransportEndpointID, clock tcpip.Clock, buf buffer.Buffer) *segment {
+func newOutgoingSegment(id stack.TransportEndpointID, clock tcpip.Clock, buf buffer.Buffer, mark uint32) *segment {
 	s := newSegment()
 	s.id = id
 	s.rcvdTime = clock.NowMonotonic()
-	s.pkt = stack.NewPacketBuffer(stack.PacketBufferOptions{Payload: buf})
+	s.pkt = stack.NewPacketBuffer(stack.PacketBufferOptions{
+		Payload: buf,
+		Mark:    mark,
+	})
 	s.dataMemSize = s.pkt.MemSize()
 	return s
 }

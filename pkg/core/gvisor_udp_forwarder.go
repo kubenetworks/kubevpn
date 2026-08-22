@@ -42,7 +42,7 @@ func LocalUDPForwarder(ctx context.Context, s *stack.Stack) func(id stack.Transp
 }
 
 func newUDPForwarder(ctx context.Context, s *stack.Stack, resolve udpAddrResolver) func(id stack.TransportEndpointID, pkt *stack.PacketBuffer) bool {
-	return udp.NewForwarder(s, func(request *udp.ForwarderRequest) {
+	return udp.NewForwarder(s, func(request *udp.ForwarderRequest) bool {
 		id := request.ID()
 		plog.G(ctx).Infof("[Gvisor-UDP] LocalPort: %d, LocalAddress: %s, RemotePort: %d, RemoteAddress: %s",
 			id.LocalPort, id.LocalAddress.String(), id.RemotePort, id.RemoteAddress.String(),
@@ -57,17 +57,19 @@ func newUDPForwarder(ctx context.Context, s *stack.Stack, resolve udpAddrResolve
 		endpoint, tErr := request.CreateEndpoint(w)
 		if tErr != nil {
 			plog.G(ctx).Errorf("[Gvisor-UDP] Failed to create endpoint to dst: %s: %v", dst.String(), tErr)
-			return
+			return false
 		}
 
 		remote, err := net.DialUDP("udp", nil, dst)
 		if err != nil {
 			plog.G(ctx).Errorf("[Gvisor-UDP] Failed to connect dst: %s: %v", dst.String(), err)
-			return
+			endpoint.Close()
+			return true
 		}
 
 		conn := gonet.NewUDPConn(w, endpoint)
 		go relayUDP(ctx, conn, remote, src, dst)
+		return true
 	}).HandlePacket
 }
 

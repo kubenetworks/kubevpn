@@ -33,6 +33,7 @@ const (
 	NATID TableID = iota
 	MangleID
 	FilterID
+	RawID
 	NumTables
 )
 
@@ -111,6 +112,27 @@ func DefaultTables(clock tcpip.Clock, rand *rand.Rand) *IPTables {
 					Postrouting: HookUnset,
 				},
 			},
+			RawID: {
+				Rules: []Rule{
+					{Filter: EmptyFilter4(), Target: &AcceptTarget{NetworkProtocol: header.IPv4ProtocolNumber}},
+					{Filter: EmptyFilter4(), Target: &AcceptTarget{NetworkProtocol: header.IPv4ProtocolNumber}},
+					{Filter: EmptyFilter4(), Target: &ErrorTarget{NetworkProtocol: header.IPv4ProtocolNumber}},
+				},
+				BuiltinChains: [NumHooks]int{
+					Prerouting:  0,
+					Input:       HookUnset,
+					Forward:     HookUnset,
+					Output:      1,
+					Postrouting: HookUnset,
+				},
+				Underflows: [NumHooks]int{
+					Prerouting:  0,
+					Input:       HookUnset,
+					Forward:     HookUnset,
+					Output:      1,
+					Postrouting: HookUnset,
+				},
+			},
 		},
 		v6Tables: [NumTables]Table{
 			NATID: {
@@ -176,11 +198,32 @@ func DefaultTables(clock tcpip.Clock, rand *rand.Rand) *IPTables {
 					Postrouting: HookUnset,
 				},
 			},
+			RawID: {
+				Rules: []Rule{
+					{Filter: EmptyFilter6(), Target: &AcceptTarget{NetworkProtocol: header.IPv6ProtocolNumber}},
+					{Filter: EmptyFilter6(), Target: &AcceptTarget{NetworkProtocol: header.IPv6ProtocolNumber}},
+					{Filter: EmptyFilter6(), Target: &ErrorTarget{NetworkProtocol: header.IPv6ProtocolNumber}},
+				},
+				BuiltinChains: [NumHooks]int{
+					Prerouting:  0,
+					Input:       HookUnset,
+					Forward:     HookUnset,
+					Output:      1,
+					Postrouting: HookUnset,
+				},
+				Underflows: [NumHooks]int{
+					Prerouting:  0,
+					Input:       HookUnset,
+					Forward:     HookUnset,
+					Output:      1,
+					Postrouting: HookUnset,
+				},
+			},
 		},
 		connections: ConnTrack{
 			seed:  rand.Uint32(),
 			clock: clock,
-			rand:  rand,
+			rng:   rand,
 		},
 	}
 }
@@ -211,6 +254,24 @@ func EmptyNATTable() Table {
 		},
 		Underflows: [NumHooks]int{
 			Forward: HookUnset,
+		},
+	}
+}
+
+// EmptyRawTable returns a Table with no rules and only the Prerouting and
+// Output hooks set, matching the Linux raw table's valid hooks.
+func EmptyRawTable() Table {
+	return Table{
+		Rules: []Rule{},
+		BuiltinChains: [NumHooks]int{
+			Input:       HookUnset,
+			Forward:     HookUnset,
+			Postrouting: HookUnset,
+		},
+		Underflows: [NumHooks]int{
+			Input:       HookUnset,
+			Forward:     HookUnset,
+			Postrouting: HookUnset,
 		},
 	}
 }
@@ -335,9 +396,13 @@ func (it *IPTables) shouldSkipOrPopulateTables(tables []checkTable, pkt *PacketB
 // This is called in the hot path even when iptables are disabled, so we ensure
 // that it does not allocate. Note that called functions (e.g.
 // getConnAndUpdate) can allocate.
-// TODO(b/233951539): checkescape fails on arm sometimes. Fix and re-add.
+// +checkescape
 func (it *IPTables) CheckPrerouting(pkt *PacketBuffer, addressEP AddressableEndpoint, inNicName string) bool {
-	tables := [...]checkTable{
+	tables := [...]checkTable{ // escapes: on arm this causes an allocation.
+		{
+			fn:      check,
+			tableID: RawID,
+		},
 		{
 			fn:      check,
 			tableID: MangleID,
@@ -373,9 +438,9 @@ func (it *IPTables) CheckPrerouting(pkt *PacketBuffer, addressEP AddressableEndp
 // This is called in the hot path even when iptables are disabled, so we ensure
 // that it does not allocate. Note that called functions (e.g.
 // getConnAndUpdate) can allocate.
-// TODO(b/233951539): checkescape fails on arm sometimes. Fix and re-add.
+// +checkescape
 func (it *IPTables) CheckInput(pkt *PacketBuffer, inNicName string) bool {
-	tables := [...]checkTable{
+	tables := [...]checkTable{ // escapes: on arm this causes an allocation.
 		{
 			fn:      checkNAT,
 			tableID: NATID,
@@ -413,9 +478,9 @@ func (it *IPTables) CheckInput(pkt *PacketBuffer, inNicName string) bool {
 // This is called in the hot path even when iptables are disabled, so we ensure
 // that it does not allocate. Note that called functions (e.g.
 // getConnAndUpdate) can allocate.
-// TODO(b/233951539): checkescape fails on arm sometimes. Fix and re-add.
+// +checkescape
 func (it *IPTables) CheckForward(pkt *PacketBuffer, inNicName, outNicName string) bool {
-	tables := [...]checkTable{
+	tables := [...]checkTable{ // escapes: on arm this causes an allocation.
 		{
 			fn:      check,
 			tableID: FilterID,
@@ -445,9 +510,13 @@ func (it *IPTables) CheckForward(pkt *PacketBuffer, inNicName, outNicName string
 // This is called in the hot path even when iptables are disabled, so we ensure
 // that it does not allocate. Note that called functions (e.g.
 // getConnAndUpdate) can allocate.
-// TODO(b/233951539): checkescape fails on arm sometimes. Fix and re-add.
+// +checkescape
 func (it *IPTables) CheckOutput(pkt *PacketBuffer, r *Route, outNicName string) bool {
-	tables := [...]checkTable{
+	tables := [...]checkTable{ // escapes: on arm this causes an allocation.
+		{
+			fn:      check,
+			tableID: RawID,
+		},
 		{
 			fn:      check,
 			tableID: MangleID,
@@ -489,9 +558,9 @@ func (it *IPTables) CheckOutput(pkt *PacketBuffer, r *Route, outNicName string) 
 // This is called in the hot path even when iptables are disabled, so we ensure
 // that it does not allocate. Note that called functions (e.g.
 // getConnAndUpdate) can allocate.
-// TODO(b/233951539): checkescape fails on arm sometimes. Fix and re-add.
+// +checkescape
 func (it *IPTables) CheckPostrouting(pkt *PacketBuffer, r *Route, addressEP AddressableEndpoint, outNicName string) bool {
-	tables := [...]checkTable{
+	tables := [...]checkTable{ // escapes: on arm this causes an allocation.
 		{
 			fn:      check,
 			tableID: MangleID,
@@ -532,7 +601,7 @@ func checkNAT(it *IPTables, table Table, hook Hook, pkt *PacketBuffer, r *Route,
 // See check.
 func (it *IPTables) checkNAT(table Table, hook Hook, pkt *PacketBuffer, r *Route, addressEP AddressableEndpoint, inNicName, outNicName string) bool {
 	t := pkt.tuple
-	if t != nil && t.conn.handlePacket(pkt, hook, r) {
+	if t != nil && IPTHandlePacket(pkt, hook, r) {
 		return true
 	}
 
@@ -561,7 +630,7 @@ func (it *IPTables) checkNAT(table Table, hook Hook, pkt *PacketBuffer, r *Route
 	//
 	// If the packet was already NATed, the connection must be NATed.
 	if !natDone {
-		t.conn.maybePerformNoopNAT(pkt, hook, r, dnat)
+		IPTMaybePerformNoopNAT(pkt, hook, r, dnat)
 	}
 
 	return true
