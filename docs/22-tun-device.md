@@ -32,15 +32,79 @@ type Config struct {
 }
 ```
 
-## 4. tunConn — net.Conn Adapter
+## 4. tunConn — net.Conn Adapter + Batched IO
 
-`tunConn` wraps a `wireguard/tun.Device` as `net.Conn`:
-- **Read**: Reads from TUN device at `MessageTransportHeaderSize` offset (wireguard internal header), copies payload to caller's buffer
-- **Write**: Copies data after the transport header offset, writes to TUN device
+`tunConn` (and `winTunConn` on Windows) wraps a `wireguard/tun.Device`. Since wireguard-go
+v0.0.20230223 the device API is **batched and vectorized** (to support GSO/GRO offload):
+
+```go
+Read(bufs [][]byte, sizes []int, offset int) (n int, err error)
+Write(bufs [][]byte, offset int) (int, error)
+BatchSize() int
+```
+
+The shared adapter logic lives in `pkg/tun/batch.go` (`batchDevice`), embedded by both
+`tunConn` and `winTunConn`. It provides:
+
+- **`net.Conn` compatibility** (`Read`/`Write`) so `Listener.Accept()` keeps returning a
+  `net.Conn`. Write copies one IP packet into scratch with the required header room and
+  issues a single-packet batched write. Read hands out one packet per call, refilling from a
+  batched read — this is only the non-batch fallback (e.g. `net.Pipe` in tests).
+- **`ReadPackets(bufs, sizes, off)`** — the segment-aware read hot path used by `pkg/core`
+  `tunDevice.pumpTunBatch`. One syscall fills up to `BatchSize()` packets; packet i is copied
+  into `bufs[i][off:off+sizes[i]]`, with `off` = the data plane's `tunReserve`.
+- **`BatchSize()`** — max packets per read/write.
+
+### 4.1 Offset bridge (wireguard headroom vs data-plane layout)
+
+wireguard-go places each packet at `buf[offset:]` and, on the Linux write path, needs at
+least `virtioNetHdrLen` (10) bytes of headroom before the packet to encode the virtio-net
+(GSO) header in place. The adapter uses `tunOffset = MessageTransportOffsetContent` (16),
+which satisfies both. The data plane wants the IP packet at `buf[tunReserve:]` (offset 3,
+reserving `[2 len][1 type]` — see `pkg/core/DATA_FLOW.md`). These offsets differ, and GRO
+coalescing may `append`-reallocate `bufs[i]` mid-read, so the adapter keeps its own scratch
+buffers and performs a single copy between scratch and the caller's pooled buffer — the same
+single copy the pre-batch code already did.
+
+### 4.2 GRO/GSO offload is Linux-only
+
+| Platform | `BatchSize()` | Offload (GRO/GSO) | One `Read` yields |
+|---|---|---|---|
+| Linux | `IdealBatchSize` (128) when `TUNSETOFFLOAD` succeeds, else `1` | ✅ (`offload_linux.go`) | up to 128 packets, incl. GRO-coalesced |
+| macOS | `1` (hardcoded) | ❌ | 1 packet |
+| Windows | `1` (hardcoded) | ❌ | 1 packet |
+
+The batching/GRO performance win (fewer syscalls; coalesced packets amortizing per-packet
+framing and gvisor-injection cost) therefore applies to the **Linux** data plane — most
+importantly the server / traffic-manager pod, which forwards every client's traffic. On
+macOS/Windows `BatchSize()==1`, so `pumpTunBatch` degrades to one packet per read,
+functionally identical to the single-packet path; the segment-aware machinery is inert but
+harmless. On restricted Linux (older kernel / container where `TUNSETOFFLOAD` fails)
+wireguard-go also falls back to `BatchSize()==1`.
+
+### 4.3 Frame-boundary guard
+
+The tunnel frames each packet as `[2-byte length][1-byte type][IP]` into a
+`config.LargeBufferSize` (64 KB) pooled buffer. A GRO-coalesced IP packet can approach
+`MaxSegmentSize` (~64 KB); one that would not fit the destination buffer at `off` (and thus
+cannot be encoded in the 2-byte length header) is **dropped with a warning** in
+`ReadPackets` — TCP recovers via retransmission. `ErrTooManySegments` is likewise non-fatal:
+the packets that were read are delivered and the error is swallowed.
+
+### 4.4 Read-error resilience
+
+The core read loop (`pkg/core` `tunDevice.pumpTun`, which dispatches to `pumpTunBatch` for
+batched devices or `pumpTunSingle` for plain `net.Conn`) tolerates transient read errors
+instead of tearing down the data plane. On a read error: if the context is cancelled it
+returns cleanly (normal shutdown, no noise); otherwise it logs a warning, backs off briefly
+(`tunReadErrorBackoff`, 100ms) and retries. Only after `maxConsecutiveTunReadErrors` (10)
+consecutive failures is the device declared dead (reported on `errChan`, which tears down the
+device and connection pool). A single successful read resets the counter. This keeps a
+one-off, recoverable error from killing the tunnel while still detecting a genuinely broken
+device. See §5.2 for the macOS case that motivated it.
+
 - **Deadlines**: Not supported (returns OpError)
 - **LocalAddr**: Returns the TUN device's IP address
-
-**Read-error resilience:** The core read loop that drives `tunConn.Read` (`pkg/core` `tunDevice.pumpTun`) tolerates transient read errors instead of tearing down the data plane. On a read error: if the context is cancelled it returns cleanly (normal shutdown, no noise); otherwise it logs a warning, backs off briefly (`tunReadErrorBackoff`, 100ms) and retries. Only after `maxConsecutiveTunReadErrors` (10) consecutive failures is the device declared dead (reported on `errChan`, which tears down the device and connection pool). A single successful read resets the counter. This keeps a one-off, recoverable error from killing the tunnel while still detecting a genuinely broken device. See §5.2 for the macOS case that motivated it.
 
 ## 5. Platform-Specific Implementation
 
@@ -50,6 +114,7 @@ type Config struct {
 - **IP assignment**: `netlink.NetworkLinkAddIp(ifce, ipv4, ipNet)` — uses netlink directly
 - **Route addition**: `netlink.AddRoute(route.String(), "", "", tunName)` via libcontainer/netlink
 - **Interface up**: `netlink.NetworkLinkUp(ifce)`
+- **Offload**: wireguard-go negotiates `TUNSETOFFLOAD` (TCP/UDP GRO/GSO); on success `BatchSize()` becomes 128 and reads may return GRO-coalesced packets (see §4.2). This is the only platform where batched TUN IO yields a performance benefit.
 
 ### 5.2 macOS (`tun_darwin.go`)
 
@@ -133,6 +198,7 @@ exe/tap-windows-9.21.2.exe`). `Install()` writes it to a temp `.exe`, chmods it,
 | File | Purpose |
 |------|---------|
 | `pkg/tun/tun.go` | Config, Listener, tunConn adapter |
+| `pkg/tun/batch.go` | `batchDevice` — batched/offload TUN IO, offset bridge, frame-boundary guard, net.Conn shims |
 | `pkg/tun/tun_linux.go` | Linux TUN creation (netlink) |
 | `pkg/tun/tun_darwin.go` | macOS TUN creation (ioctl + route cmd) |
 | `pkg/tun/tun_windows.go` | Windows TUN creation (wintun + winipcfg) |

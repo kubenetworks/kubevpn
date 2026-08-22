@@ -19,7 +19,9 @@ raw IP        = data[tunReserve : datagramHeaderLen+length]
 ```
 
 `pumpTun` reads the TUN into `data[3:]`, reserving the 3-byte head so the datagram
-length and type prefix can be written in place — no shifting on the way out.
+length and type prefix can be written in place — no shifting on the way out. See
+[Batched / segment-aware TUN reads](#batched--segment-aware-tun-reads) for how one syscall
+may deliver several packets (wireguard-go GRO offload) into a batch of these buffers.
 
 ### Type prefix
 
@@ -30,6 +32,30 @@ extensible discriminator — values `2..255` are reserved for future packet type
 |--------|----------|---------|--------------------|
 | `0` | `packetTypeToTUN` | Gvisor-processed packet (response from real network) | Write to TUN device directly |
 | `1` | `packetTypeToGvisor` | Raw IP packet (needs gvisor processing) | Inject into gvisor stack |
+
+## Batched / segment-aware TUN reads
+
+The TUN device is a wireguard-go `tun.Device`, whose API reads/writes **multiple packets per
+syscall**: `Read(bufs [][]byte, sizes []int, offset int)`. `tunDevice.pumpTun` picks the loop
+based on the device:
+
+- **`pumpTunBatch`** (real TUN devices) — grabs `BatchSize()` pooled buffers, issues one
+  batched `ReadPackets`, then parses and dispatches **each** returned packet individually into
+  the canonical `[2 len][1 type][IP]` layout. Unused buffers from a short batch go back to the
+  pool. This is the segment-aware path.
+- **`pumpTunSingle`** (plain `net.Conn`, e.g. `net.Pipe` in tests) — the original one-packet
+  loop.
+
+**Why "segment-aware" matters:** on Linux, wireguard-go negotiates GRO/GSO offload, so a
+single read can return **GRO-coalesced** packets (up to ~64 KB) and up to 128 of them per
+call. `pumpTunBatch` treats each as its own IP packet. The offset bridge, the Linux-only
+nature of offload (macOS/Windows have `BatchSize()==1`, so this path degrades to one packet
+per read), and the 64 KB frame-boundary guard (oversized coalesced packets are dropped; TCP
+recovers) all live in the `pkg/tun` adapter — see `docs/22-tun-device.md` §4.
+
+The per-packet copy out of wireguard's scratch into the pooled buffer is the **same single
+copy** the pre-batch code already performed (offsets differ and GRO may reallocate wireguard's
+buffers, so the buffer cannot be shared) — batching does not add copies, it amortizes syscalls.
 
 ## Datagram Protocol (UDP-over-TCP)
 

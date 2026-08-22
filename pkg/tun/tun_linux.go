@@ -103,9 +103,9 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	}
 
 	conn = &tunConn{
-		ifce:  device,
-		addr:  &net.IPAddr{IP: ipv4},
-		addr6: &net.IPAddr{IP: ipv6},
+		batchDevice: newBatchDevice(device),
+		addr:        &net.IPAddr{IP: ipv4},
+		addr6:       &net.IPAddr{IP: ipv6},
 	}
 	return
 }

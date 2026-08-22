@@ -23,6 +23,17 @@ const (
 	tunReadErrorBackoff = 100 * time.Millisecond
 )
 
+// batchTUN is implemented by TUN connections that can read multiple IP packets per syscall
+// (wireguard-go offload/GRO). pumpTun uses it for the segment-aware read path — one syscall
+// yields up to BatchSize() packets, each dispatched individually — and falls back to plain
+// net.Conn single-packet reads when a device does not implement it (e.g. net.Pipe in tests).
+type batchTUN interface {
+	BatchSize() int
+	// ReadPackets reads up to len(bufs) IP packets, writing packet i into bufs[i][off:] and
+	// its length into sizes[i]; it returns the number of packets placed into bufs.
+	ReadPackets(bufs [][]byte, sizes []int, off int) (int, error)
+}
+
 // tunDevice is the single, symmetric TUN engine for both the client and server roles. It runs
 // the universal read-tun / write-tun loops; the role-specific routing and goroutines live behind
 // the transport strategy (clientTransport dials a conn pool; serverTransport uses RouteHub).
@@ -62,6 +73,16 @@ func (d *tunDevice) readFromTun(ctx context.Context) {
 // Both transports share this loop via tunDevice.readFromTun; only their routeOutbound dispatch
 // (debug label, framing, routing) differs.
 func (d *tunDevice) pumpTun(ctx context.Context, errLabel string, dispatch func(buf []byte, n int, src, dst net.IP)) {
+	if bt, ok := d.tun.(batchTUN); ok {
+		d.pumpTunBatch(ctx, errLabel, bt, dispatch)
+		return
+	}
+	d.pumpTunSingle(ctx, errLabel, dispatch)
+}
+
+// pumpTunSingle is the single-packet read loop used for plain net.Conn TUN devices (e.g.
+// net.Pipe in tests). Real TUN devices take the batched pumpTunBatch path.
+func (d *tunDevice) pumpTunSingle(ctx context.Context, errLabel string, dispatch func(buf []byte, n int, src, dst net.IP)) {
 	defer netutil.HandleCrash()
 	consecutiveErrors := 0
 	for ctx.Err() == nil {
@@ -92,6 +113,60 @@ func (d *tunDevice) pumpTun(ctx context.Context, errLabel string, dispatch func(
 			continue
 		}
 		dispatch(buf, n, src, dst)
+	}
+}
+
+// pumpTunBatch is the segment-aware read loop for TUN devices that support batched IO
+// (wireguard-go offload/GRO). A single syscall yields up to BatchSize() IP packets —
+// including GRO-coalesced ones — and each is parsed and dispatched individually into the
+// canonical [2 len][1 type][IP] layout (IP at buf[tunReserve:]). Buffers handed to dispatch
+// are owned by the consumer; unused ones from a short batch are returned to the pool here.
+func (d *tunDevice) pumpTunBatch(ctx context.Context, errLabel string, bt batchTUN, dispatch func(buf []byte, n int, src, dst net.IP)) {
+	defer netutil.HandleCrash()
+	bs := bt.BatchSize()
+	if bs < 1 {
+		bs = 1
+	}
+	bufs := make([][]byte, bs)
+	sizes := make([]int, bs)
+	consecutiveErrors := 0
+	for ctx.Err() == nil {
+		for i := range bufs {
+			bufs[i] = config.LPool.Get().([]byte)[:]
+		}
+		m, err := bt.ReadPackets(bufs, sizes, tunReserve)
+		if err != nil {
+			for i := range bufs {
+				config.LPool.Put(bufs[i][:])
+			}
+			if ctx.Err() != nil {
+				return // shutting down: the read error is expected, stay quiet
+			}
+			consecutiveErrors++
+			if consecutiveErrors >= maxConsecutiveTunReadErrors {
+				plog.G(ctx).Errorf("%s TUN read failed %d times in a row, giving up: %v", errLabel, consecutiveErrors, err)
+				netutil.SafeWrite(d.errChan, err)
+				return
+			}
+			plog.G(ctx).Warnf("%s TUN read error (%d/%d), retrying: %v", errLabel, consecutiveErrors, maxConsecutiveTunReadErrors, err)
+			time.Sleep(tunReadErrorBackoff)
+			continue
+		}
+		consecutiveErrors = 0
+		for i := 0; i < m; i++ {
+			buf := bufs[i]
+			size := sizes[i]
+			src, dst, _, parseErr := netutil.ParseIPFast(buf[tunReserve : tunReserve+size])
+			if parseErr != nil {
+				plog.G(ctx).Errorf("%s Unknown packet, dropping: %v", errLabel, parseErr)
+				config.LPool.Put(buf[:])
+				continue
+			}
+			dispatch(buf, size, src, dst)
+		}
+		for i := m; i < bs; i++ {
+			config.LPool.Put(bufs[i][:])
+		}
 	}
 }
 

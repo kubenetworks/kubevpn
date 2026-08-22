@@ -133,18 +133,18 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 		}
 	}
 
-	conn = &winTunConn{ifce: tunDevice, addr: &net.IPAddr{IP: ipv4}, addr6: &net.IPAddr{IP: ipv6}}
+	conn = &winTunConn{batchDevice: newBatchDevice(tunDevice), addr: &net.IPAddr{IP: ipv4}, addr6: &net.IPAddr{IP: ipv6}}
 	return
 }
 
 type winTunConn struct {
-	ifce  wireguardtun.Device
+	*batchDevice
 	addr  net.Addr
 	addr6 net.Addr
 }
 
 func (c *winTunConn) Close() error {
-	err := c.ifce.Close()
+	err := c.dev.Close()
 	wintun.Uninstall()
 	defer func() {
 		defer func() {
@@ -152,23 +152,12 @@ func (c *winTunConn) Close() error {
 				plog.G(context.Background()).Error(err)
 			}
 		}()
-		tun := c.ifce.(*wireguardtun.NativeTun)
+		tun := c.dev.(*wireguardtun.NativeTun)
 		v := reflect.ValueOf(tun).Elem().FieldByName("wt")
 		vv := reflect.Indirect(v).FieldByName("handle")
 		err = windows.FreeLibrary(windows.Handle(vv.Uint()))
 	}()
 	return err
-}
-
-func (c *winTunConn) Read(b []byte) (n int, err error) {
-	return c.ifce.Read(b, 0)
-}
-
-func (c *winTunConn) Write(b []byte) (n int, err error) {
-	if len(b) == 0 {
-		return 0 /*errors.New("cannot write empty buffer")*/, nil
-	}
-	return c.ifce.Write(b, 0)
 }
 
 func (c *winTunConn) LocalAddr() net.Addr {

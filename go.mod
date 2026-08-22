@@ -52,7 +52,7 @@ require (
 	golang.org/x/sys v0.43.0
 	golang.org/x/term v0.42.0
 	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2
-	golang.zx2c4.com/wireguard v0.0.0-20220920152132-bb719d3a6e2c
+	golang.zx2c4.com/wireguard v0.0.0-20250521234502-f333402bd9cb
 	golang.zx2c4.com/wireguard/windows v0.5.3
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260401024825-9d38bb4040a9
 	google.golang.org/grpc v1.80.0
