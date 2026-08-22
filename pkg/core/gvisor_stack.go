@@ -76,6 +76,29 @@ func newGvisorStack(ctx context.Context, tun stack.LinkEndpoint, tcpFwd, udpFwd 
 		}
 	}
 
+	// Loosen the TCP send/receive buffer caps well above gvisor's defaults so the advertised
+	// window can grow on high bandwidth-delay-product paths (the server stack forwards every
+	// client's cluster traffic). Mirrors Tailscale's netstack tuning (RX 8MiB / TX 6MiB); the
+	// autotuner (TCPModerateReceiveBufferOption above) scales within these bounds.
+	{
+		rcv := tcpip.TCPReceiveBufferSizeRangeOption{
+			Min:     tcp.MinBufferSize,
+			Default: tcp.DefaultReceiveBufferSize,
+			Max:     8 << 20,
+		}
+		if err := s.SetTransportProtocolOption(tcp.ProtocolNumber, &rcv); err != nil {
+			plog.G(ctx).Fatalf("SetTransportProtocolOption(%d, &%T): %v", tcp.ProtocolNumber, rcv, err)
+		}
+		snd := tcpip.TCPSendBufferSizeRangeOption{
+			Min:     tcp.MinBufferSize,
+			Default: tcp.DefaultSendBufferSize,
+			Max:     6 << 20,
+		}
+		if err := s.SetTransportProtocolOption(tcp.ProtocolNumber, &snd); err != nil {
+			plog.G(ctx).Fatalf("SetTransportProtocolOption(%d, &%T): %v", tcp.ProtocolNumber, snd, err)
+		}
+	}
+
 	{
 		if err := s.SetForwardingDefaultAndAllNICs(ipv4.ProtocolNumber, true); err != nil {
 			plog.G(ctx).Fatalf("Set IPv4 forwarding: %v", err)

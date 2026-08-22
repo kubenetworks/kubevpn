@@ -47,6 +47,13 @@ func (h *gvisorTCPHandler) handle(ctx context.Context, tcpConn net.Conn) {
 	// for support ipv6 skip checksum
 	// vendor/gvisor.dev/gvisor/pkg/tcpip/stack/nic.go:763
 	endpoint.LinkEPCapabilities = stack.CapabilityRXChecksumOffload
+	// Enable GVisor (software) GSO so the TCP layer can build large segments and gvisor
+	// segments them internally before they reach this endpoint — the read side then still
+	// hands normal <=MTU packets to the tunnel. We deliberately do NOT use HostGSOSupported:
+	// this endpoint feeds a TCP tunnel, not a host NIC, so host-GSO would push up-to-32KB
+	// super-segments onto the wire that macOS/Windows clients (MTU-sized TUN, no offload)
+	// cannot write. GVisorGSO complements the TUN-side GRO (see docs/22-tun-device.md §4.2).
+	endpoint.SupportedGSOKind = stack.GVisorGSOSupported
 	done := make(chan struct{}, 2)
 	go func() {
 		defer netutil.HandleCrash()

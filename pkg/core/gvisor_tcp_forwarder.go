@@ -43,7 +43,9 @@ func LocalTCPForwarder(ctx context.Context, s *stack.Stack) func(stack.Transport
 }
 
 // tcpForwarderMaxInFlight bounds the number of in-flight TCP forwarder connection attempts.
-const tcpForwarderMaxInFlight = 100000
+// 8192 matches Tailscale's netstack limit for Linux subnet routers — high enough that real
+// workloads won't hit it, without the unbounded memory exposure of the previous 100000.
+const tcpForwarderMaxInFlight = 8192
 
 func newTCPForwarder(ctx context.Context, s *stack.Stack, resolve tcpAddrResolver, local bool) func(stack.TransportEndpointID, *stack.PacketBuffer) bool {
 	// role distinguishes the two forwarders in the logs: "local" is the reverse path
@@ -53,7 +55,11 @@ func newTCPForwarder(ctx context.Context, s *stack.Stack, resolve tcpAddrResolve
 	if local {
 		role = "local"
 	}
-	return tcp.NewForwarder(s, 0, tcpForwarderMaxInFlight, func(request *tcp.ForwarderRequest) {
+	// rcvWnd = DefaultReceiveBufferSize: seed the forwarder's receive window with gvisor's
+	// default instead of 0 (which starts at the minimum window and throttles new connections
+	// until autotuning ramps up). The window still autotunes up to the range cap set in
+	// newGvisorStack.
+	return tcp.NewForwarder(s, tcp.DefaultReceiveBufferSize, tcpForwarderMaxInFlight, func(request *tcp.ForwarderRequest) {
 		dialCtx := ctx
 		if local {
 			dialCtx = context.Background()

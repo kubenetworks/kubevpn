@@ -31,6 +31,19 @@ func (h *gvisorTCPHandler) readFromEndpointWriteToTCPConn(ctx context.Context, c
 		if pkt != nil {
 			sniffer.LogPacket("[gVISOR] ", sniffer.DirectionSend, pkt.NetworkProtocolNumber, pkt)
 			buf := config.LPool.Get().([]byte)
+			// Frame-boundary guard (symmetric with the TUN read guard in pkg/tun/batch.go):
+			// the datagram frame is [2 len][1 type][IP] in a LargeBufferSize buffer, and the
+			// length header is 2 bytes. A packet whose IP would not fit (tunReserve+size >
+			// LargeBufferSize) cannot be framed without truncation/overflow, so drop it; TCP
+			// recovers via retransmission. With GVisorGSO the endpoint only sees <=MTU packets
+			// so this never fires in practice, but it guards against any larger packet reaching
+			// this path (e.g. a future switch to HostGSO).
+			if tunReserve+pkt.Size() > config.LargeBufferSize {
+				plog.G(ctx).Warnf("[Gvisor-TCP] dropping oversized packet (%d bytes) that cannot be framed", pkt.Size())
+				config.LPool.Put(buf)
+				pkt.DecRef()
+				continue
+			}
 			// Single copy out of gvisor's section views (AsSlices aliases them) into the
 			// pooled buffer at the canonical IP offset; ToView().AsSlice() would flatten
 			// into a throwaway buffer first (a second copy).

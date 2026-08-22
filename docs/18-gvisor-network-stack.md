@@ -208,6 +208,8 @@ This is modeled on gvisor's chunk refcount (`buffer.View.Clone`/`Release`). Type
 - IPv4 + IPv6 network protocols
 - TCP + UDP transport protocols
 - SACK, TTL=64, moderate receive buffer, forwarding enabled
+- TCP send/receive buffer size ranges raised above gvisor defaults (RX max 8MiB / TX max 6MiB, mirroring Tailscale's netstack) so the window can grow on high bandwidth-delay-product paths
+- `GVisorGSOSupported` on the link endpoint — gvisor performs software segmentation internally, complementing the TUN-side GRO (`docs/22-tun-device.md` §4.2). We deliberately avoid `HostGSOSupported`: this endpoint feeds a TCP tunnel, not a host NIC, so host-GSO would push super-MTU segments onto the wire that macOS/Windows clients cannot write to their TUN
 - Promiscuous mode + spoofing enabled (accepts all packets)
 - Default routes for all IPv4 and IPv6 traffic
 
@@ -219,6 +221,7 @@ Two variants:
 
 **TCPForwarder** (`gvisor_tcp_forwarder.go`):
 - Intercepts TCP SYN from gvisor stack
+- Created with rcvWnd = `tcp.DefaultReceiveBufferSize` (not 0, which would start at the minimum window) and `tcpForwarderMaxInFlight` = 8192 (Tailscale's Linux value)
 - Dials the real destination (e.g., the actual service IP)
 - Relays data bidirectionally between gvisor gonet.Conn and the real TCP conn
 - Both relay goroutines are guaranteed to finish: after the first completes, both sides get `SetReadDeadline(1s)` to unblock the second goroutine
@@ -234,7 +237,7 @@ Two variants:
 
 ### 8.3 TUN Endpoints
 
-**gvisor_tun_endpoint.go**: Server-side, bridges between a TCP connection (from VPN client) and a gvisor `channel.Endpoint`. Reads datagram-framed packets from the TCP conn and injects them into gvisor. Reads packets from gvisor and writes them back over TCP.
+**gvisor_tun_endpoint.go**: Server-side, bridges between a TCP connection (from VPN client) and a gvisor `channel.Endpoint`. Reads datagram-framed packets from the TCP conn and injects them into gvisor. Reads packets from gvisor and writes them back over TCP. The send path (`readFromEndpointWriteToTCPConn`) carries a frame-boundary guard symmetric with the TUN read guard: a packet too large to fit the `[2 len][1 type][IP]` frame is dropped rather than truncated (TCP recovers). With `GVisorGSOSupported` the endpoint only sees ≤MTU packets, so this is defense-in-depth.
 
 **gvisor_local_tun_endpoint.go**: Client-side, bridges between the local TUN device and gvisor for local traffic (src==dst).
 
