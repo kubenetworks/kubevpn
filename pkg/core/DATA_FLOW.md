@@ -311,6 +311,12 @@ The routing hot paths (`routeTun`, inter-client) hand the framed `*Packet` to `B
 
 Both use `NewLocalStack` with `LocalTCPForwarder` (dials `127.0.0.1`) and `LocalUDPForwarder`.
 
+Stack #2 is **per-slot**: it is created inside `connSlot.readFromConn` and bound to that slot's
+`subCtx`, so it lives and dies with the slot. Its output is written back out through the *same*
+slot's `writeToConn`. This means the slot that hosts an active inter-client transfer is busy
+**sending** even while its reverse traffic (ACKs) may arrive on a different slot — see the
+slot-liveness bug fix below and `docs/08-heartbeat-health.md` §#3.
+
 ---
 
 ## Performance Characteristics
@@ -379,3 +385,14 @@ After reconnection, the server could not register the client's route until it re
 Result: route recovery after reconnect dropped from 0-58s to < 100ms.
 
 (An earlier fix used a `reconnected` channel that signalled the heartbeat goroutine to fire an immediate broadcast heartbeat — see REFACTOR.md Iteration 14. It was replaced by the direct per-conn registration above, which is drop-immune and targets the exact new conn.)
+
+**Actively-sending slot kept alive (mid-transfer disconnect):**
+A slot hosts the per-slot inter-client gvisor stack (#2 above) and writes its output via
+`writeToConn`, but the reverse traffic (that flow's ACKs) is routed to whichever slot last
+registered the client's IP on the server (`RouteMapTCP` is last-writer-wins, and the heartbeat
+broadcasts on every slot make it flap). So a slot could be busy sending a bulk transfer yet
+receive nothing, hit `readFromConn`'s 180s read-idle timeout, be torn down, and destroy the
+gvisor stack it hosts — aborting the transfer (`read i/o timeout` → forwarder `operation aborted`
+→ RST → RTO retransmit storm). Fixed by having `writeToConn` push the read (liveness) deadline
+forward on every successful write, so liveness is *active-in-either-direction*; a slot idle in
+both directions still times out. See `docs/08-heartbeat-health.md` §#3.
