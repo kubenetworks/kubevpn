@@ -390,6 +390,16 @@ func (s *connSlot) readFromConn(ctx context.Context, conn net.Conn, errChan chan
 func (s *connSlot) writeToConn(ctx context.Context, rawConn net.Conn, errChan chan error) {
 	defer netutil.HandleCrash()
 	dl := &periodicDeadline{timeout: config.KeepAliveTime, set: rawConn.SetWriteDeadline}
+	// readDL keeps this slot's read (liveness) deadline alive on write activity. A slot busy
+	// sending bulk data is not dead, even when the reverse traffic (ACKs) for the flow it carries
+	// is routed to a different pool slot (server RouteMapTCP is last-writer-wins, and heartbeats
+	// broadcast on every slot make it flap). Without this, readFromConn's KeepAliveTime*3 read
+	// timeout can tear down an actively-sending slot mid-transfer, destroying the per-slot gvisor
+	// stack it hosts (bound to subCtx) and aborting the transfer. UDPConnOverTCP embeds this same
+	// conn, so both goroutines push the one underlying read deadline forward (SetReadDeadline is
+	// safe to call concurrently with an in-flight Read). Liveness is thus "active in either
+	// direction"; a slot idle in BOTH directions still times out via readFromConn.
+	readDL := &periodicDeadline{timeout: config.KeepAliveTime * 3, set: rawConn.SetReadDeadline}
 	for {
 		select {
 		case packet := <-s.inbound:
@@ -409,6 +419,12 @@ func (s *connSlot) writeToConn(ctx context.Context, rawConn net.Conn, errChan ch
 				plog.G(ctx).Errorf("[Client-%d] Failed to write to remote: %v", s.id, err)
 				netutil.SafeWrite(errChan, fmt.Errorf("failed to write packet to remote: %w", err))
 				return
+			}
+			// A successful write proves this slot is alive: push the read/liveness deadline forward.
+			// Best-effort — the write already succeeded, so a rare SetReadDeadline hiccup should not
+			// tear down the slot; a genuinely dead conn is caught by the next write or by readFromConn.
+			if err := readDL.refresh(); err != nil {
+				plog.G(ctx).Debugf("[Client-%d] Failed to refresh read deadline after write: %v", s.id, err)
 			}
 		case <-ctx.Done():
 			return
