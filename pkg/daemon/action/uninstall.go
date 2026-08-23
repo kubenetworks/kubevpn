@@ -3,9 +3,7 @@ package action
 import (
 	"context"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/utils/ptr"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
@@ -42,11 +40,12 @@ func (svr *Server) Uninstall(resp rpc.Daemon_UninstallServer) (err error) {
 // 4) cleanup hosts
 func Uninstall(ctx context.Context, clientset kubernetes.Interface, ns string) error {
 	plog.StepStart(ctx, "Uninstalling traffic manager")
-	options := metav1.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0)}
-	// The eight namespaced traffic-manager resources, named config.ConfigMapPodTrafficManager.
-	// Shares the deletion list with handler.cleanupTrafficManagerResources so the two paths
-	// cannot drift on which resources an uninstall must remove.
-	handler.DeleteTrafficManagerCoreResources(ctx, clientset, ns, config.ConfigMapPodTrafficManager, options)
+	// Remove the full set of traffic-manager resources KubeVPN creates in this namespace:
+	// the eight core resources named config.ConfigMapPodTrafficManager plus the -route and
+	// -proxy RBAC (and the cluster-scoped proxy ClusterRole/Binding in central mode).
+	// Reuses handler.CleanupTrafficManagerResources so the daemon-layer Uninstall and the
+	// handler-layer connect cleanup cannot drift on which resources an uninstall removes.
+	handler.CleanupTrafficManagerResources(ctx, clientset, ns)
 	_ = cleanupLocalContainer(ctx)
 	plog.StepDone(ctx, "Uninstalled traffic manager from namespace %q", ns)
 	return nil

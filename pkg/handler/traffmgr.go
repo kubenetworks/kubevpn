@@ -49,10 +49,10 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 
 	defer func() {
 		if err != nil {
-			cleanupTrafficManagerResources(context.Background(), clientset, namespace)
+			CleanupTrafficManagerResources(context.Background(), clientset, namespace)
 		}
 	}()
-	cleanupTrafficManagerResources(ctx, clientset, namespace)
+	CleanupTrafficManagerResources(ctx, clientset, namespace)
 
 	// 1) label namespace
 	plog.StepStart(ctx, "Labeling namespace")
@@ -279,7 +279,14 @@ func ensureProxyRBAC(ctx context.Context, clientset kubernetes.Interface, worklo
 	}
 }
 
-func cleanupTrafficManagerResources(ctx context.Context, clientset kubernetes.Interface, namespace string) {
+// CleanupTrafficManagerResources removes every traffic-manager resource KubeVPN creates
+// in the given namespace: the route-discovery and proxy-inject RBAC (-route, -proxy),
+// the eight core resources named config.ConfigMapPodTrafficManager, and — when the
+// namespace is the central kubevpn namespace — the cluster-scoped proxy
+// ClusterRole/ClusterRoleBinding. It is the shared teardown for both the handler-layer
+// connect cleanup and the daemon-layer Uninstall RPC, so the two paths cannot drift on
+// which resources an uninstall must remove.
+func CleanupTrafficManagerResources(ctx context.Context, clientset kubernetes.Interface, namespace string) {
 	options := metav1.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0)}
 	// Route-discovery and proxy-inject RBAC (distinct names). In central mode they live
 	// in the workload namespace and are cleaned up there; here we clear the
@@ -300,9 +307,10 @@ func cleanupTrafficManagerResources(ctx context.Context, clientset kubernetes.In
 
 // DeleteTrafficManagerCoreResources deletes the eight namespaced resources that make up
 // a traffic-manager instance under the given name: Deployment, Job, Service, ConfigMap,
-// Secret, ServiceAccount, Role, RoleBinding. It is the shared teardown primitive for both
-// the handler-layer cleanup (cleanupTrafficManagerResources) and the daemon-layer Uninstall
-// RPC (pkg/daemon/action), which previously triplicated this deletion list.
+// Secret, ServiceAccount, Role, RoleBinding. It is the inner teardown primitive invoked by
+// CleanupTrafficManagerResources, which is itself the shared teardown for both the
+// handler-layer connect cleanup and the daemon-layer Uninstall RPC (pkg/daemon/action),
+// which previously triplicated this deletion list.
 //
 // Best-effort: each Delete ignores its error (the resources may not all exist; a missing
 // one is not a failure for teardown). Errors are intentionally swallowed rather than
