@@ -1485,6 +1485,7 @@ gvisor.dev/gvisor/pkg/tcpip/ports
 gvisor.dev/gvisor/pkg/tcpip/seqnum
 gvisor.dev/gvisor/pkg/tcpip/stack
 gvisor.dev/gvisor/pkg/tcpip/transport
+gvisor.dev/gvisor/pkg/tcpip/transport/icmp
 gvisor.dev/gvisor/pkg/tcpip/transport/internal/network
 gvisor.dev/gvisor/pkg/tcpip/transport/internal/noop
 gvisor.dev/gvisor/pkg/tcpip/transport/packet

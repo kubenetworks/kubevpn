@@ -23,10 +23,15 @@ func readFromEndpointWriteToTun(ctx context.Context, endpoint *channel.Endpoint,
 		if pkt != nil {
 			sniffer.LogPacket(prefix, sniffer.DirectionSend, pkt.NetworkProtocolNumber, pkt)
 			buf, length := copyPacketToPool(pkt, packetTypeToTUN, headroom)
+			// Parse src/dst so a shared server-bound consumer (runConnPool's five-tuple hash) can
+			// route this packet to a slot. Without a dst, runConnPool would treat it as a heartbeat
+			// and broadcast it to every slot. Harmless for the self-to-self stack, whose output goes
+			// straight to the TUN (writeToTun ignores dst).
+			src, dst, _, _ := netutil.ParseIPFast(buf[tunReserve : datagramHeaderLen+length])
 			// Honor cancellation so this goroutine cannot block forever on a full
 			// channel after its consumer has stopped draining (e.g. reconnect/shutdown).
 			select {
-			case out <- NewPacket(buf[:], length, nil, nil):
+			case out <- NewPacket(buf[:], length, src, dst):
 			case <-ctx.Done():
 				config.LPool.Put(buf[:])
 				return

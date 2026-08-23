@@ -304,18 +304,18 @@ The routing hot paths (`routeTun`, inter-client) hand the framed `*Packet` to `B
 
 ### Two Client Gvisor Stacks
 
-| Stack | Created in | Purpose | Output |
-|-------|-----------|---------|--------|
-| #1 | `readFromTun` | Self-to-self traffic | `tunOutbound` → TUN |
-| #2 | `readFromConn` | Inter-client traffic | `tunInbound` → server |
+| Stack | Created in | Purpose | Input | Output |
+|-------|-----------|---------|-------|--------|
+| #1 | `clientTransport.routines` (`client-gvisor`) | Self-to-self traffic | `t.gvisorInbound` (src==dst) | `tunOutbound` → TUN |
+| #2 | `clientTransport.routines` (`client-gvisor-inter`) | Inter-client traffic | `t.interClientInbound` (all slots' type==1) | `tunInbound` → runConnPool → slot → server |
 
 Both use `NewLocalStack` with `LocalTCPForwarder` (dials `127.0.0.1`) and `LocalUDPForwarder`.
 
-Stack #2 is **per-slot**: it is created inside `connSlot.readFromConn` and bound to that slot's
-`subCtx`, so it lives and dies with the slot. Its output is written back out through the *same*
-slot's `writeToConn`. This means the slot that hosts an active inter-client transfer is busy
-**sending** even while its reverse traffic (ACKs) may arrive on a different slot — see the
-slot-liveness bug fix below and `docs/08-heartbeat-health.md` §#3.
+**Both stacks are transport-level, not per-slot.** Each slot's `readFromConn` routes inter-client
+(type == `packetTypeToGvisor`) packets to the shared `t.interClientInbound`; the single stack #2
+feeds its output to the shared `tunInbound`, which `runConnPool` dispatches to a slot by five-tuple
+hash. So reconnecting or tearing down any one pool slot never destroys an in-flight inter-client
+transfer (this used to be a per-slot stack bound to the slot's `subCtx` — see the bug-fix note below).
 
 ---
 
@@ -386,13 +386,18 @@ Result: route recovery after reconnect dropped from 0-58s to < 100ms.
 
 (An earlier fix used a `reconnected` channel that signalled the heartbeat goroutine to fire an immediate broadcast heartbeat — see REFACTOR.md Iteration 14. It was replaced by the direct per-conn registration above, which is drop-immune and targets the exact new conn.)
 
-**Actively-sending slot kept alive (mid-transfer disconnect):**
-A slot hosts the per-slot inter-client gvisor stack (#2 above) and writes its output via
-`writeToConn`, but the reverse traffic (that flow's ACKs) is routed to whichever slot last
-registered the client's IP on the server (`RouteMapTCP` is last-writer-wins, and the heartbeat
-broadcasts on every slot make it flap). So a slot could be busy sending a bulk transfer yet
-receive nothing, hit `readFromConn`'s 180s read-idle timeout, be torn down, and destroy the
-gvisor stack it hosts — aborting the transfer (`read i/o timeout` → forwarder `operation aborted`
-→ RST → RTO retransmit storm). Fixed by having `writeToConn` push the read (liveness) deadline
-forward on every successful write, so liveness is *active-in-either-direction*; a slot idle in
-both directions still times out. See `docs/08-heartbeat-health.md` §#3.
+**Inter-client transfer aborted when a pool slot reconnected (mid-transfer disconnect):**
+The inter-client gvisor stack used to be **per-slot**, created in `readFromConn` bound to the
+slot's `subCtx`, with its output written through that same slot's `writeToConn`. Reverse traffic
+(the flow's ACKs) is routed to whichever slot last registered the client's IP on the server
+(`RouteMapTCP` is last-writer-wins, and the heartbeat broadcasts on every slot make it flap), so a
+slot could be busy sending a bulk transfer yet receive nothing on its own conn, hit `readFromConn`'s
+180s read-idle timeout, be torn down, and destroy the gvisor stack it hosted — aborting the transfer
+(`read i/o timeout` → forwarder `operation aborted` → RST → RTO retransmit storm). Two-part fix:
+1. **Liveness is active-in-either-direction:** `writeToConn` now pushes the read (liveness) deadline
+   forward on every successful write, so an actively-sending slot is never falsely torn down; a slot
+   idle in both directions still times out.
+2. **Stack decoupled from slots:** the inter-client stack is now transport-level (see the Two Client
+   Gvisor Stacks note above), so even a genuinely idle slot's teardown cannot destroy it.
+
+See `docs/08-heartbeat-health.md` §#3.

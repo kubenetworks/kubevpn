@@ -9,6 +9,7 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip/network/ipv4"
 	"gvisor.dev/gvisor/pkg/tcpip/network/ipv6"
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
+	"gvisor.dev/gvisor/pkg/tcpip/transport/icmp"
 	"gvisor.dev/gvisor/pkg/tcpip/transport/raw"
 	"gvisor.dev/gvisor/pkg/tcpip/transport/tcp"
 	"gvisor.dev/gvisor/pkg/tcpip/transport/udp"
@@ -28,6 +29,13 @@ func newGvisorStack(ctx context.Context, tun stack.LinkEndpoint, tcpFwd, udpFwd 
 		TransportProtocols: []stack.TransportProtocolFactory{
 			tcp.NewProtocol,
 			udp.NewProtocol,
+			// icmp must be registered for SetTransportProtocolHandler(ICMPv4/v6) below to take
+			// effect: gvisor's SetTransportProtocolHandler is a no-op for a protocol that is not
+			// in this list (it looks up transportProtocols[p] and only sets the handler if found).
+			// Without these, ICMPForwarder is never installed and echo requests (ping, and the
+			// data-plane heartbeat echo replies) get no response. Matches Tailscale's netstack.
+			icmp.NewProtocol4,
+			icmp.NewProtocol6,
 		},
 		Clock:                    tcpip.NewStdClock(),
 		AllowPacketEndpointWrite: true,

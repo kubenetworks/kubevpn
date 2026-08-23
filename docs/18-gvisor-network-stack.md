@@ -206,7 +206,7 @@ This is modeled on gvisor's chunk refcount (`buffer.View.Clone`/`Release`). Type
 
 `newGvisorStack(ctx, tun, tcpFwd, udpFwd)` creates a gvisor network stack with:
 - IPv4 + IPv6 network protocols
-- TCP + UDP transport protocols
+- TCP + UDP + **ICMP** transport protocols (`tcp`, `udp`, `icmp.NewProtocol4`, `icmp.NewProtocol6`). ICMP **must** be registered here: gvisor's `SetTransportProtocolHandler` is a no-op for a protocol that is not in this list, so without it the `ICMPForwarder` handler below is never installed and echo requests (ping, and the heartbeat echo replies in `08-heartbeat-health.md`) get no response.
 - SACK, TTL=64, moderate receive buffer, forwarding enabled
 - Stock gvisor TCP send/receive buffer ranges (autotuning up to 4MB via `ModerateReceiveBuffer`). NOTE: raising these to Tailscale's 8MiB/6MiB was tried and reverted — Tailscale assumes one UDP flow per peer, but KubeVPN multiplexes every flow over a shared TCP tunnel, where an oversized single-flow buffer causes head-of-line bloat that starves other flows (see `08-heartbeat-health.md` §#3)
 - `GVisorGSOSupported` on the link endpoint — gvisor performs software segmentation internally, complementing the TUN-side GRO (`docs/22-tun-device.md` §4.2). We deliberately avoid `HostGSOSupported`: this endpoint feeds a TCP tunnel, not a host NIC, so host-GSO would push super-MTU segments onto the wire that macOS/Windows clients cannot write to their TUN

@@ -30,8 +30,14 @@ type clientTransport struct {
 	forward *Forwarder
 	// slots holds the per-connection pool; built by runConnPool, read by routeOutbound.
 	slots []*connSlot
-	// gvisorInbound carries src == dst packets to the local loopback gvisor stack.
+	// gvisorInbound carries src == dst packets to the local loopback (self-to-self) gvisor stack.
 	gvisorInbound chan *Packet
+	// interClientInbound carries inter-client packets (type == packetTypeToGvisor, from the server)
+	// to a single transport-level gvisor stack. It is NOT per-slot: the stack's lifetime is the
+	// whole connection, so tearing down/reconnecting one pool slot never destroys an in-flight
+	// inter-client transfer. The stack's output goes to the shared tunInbound (dispatched to a slot
+	// by five-tuple hash), decoupling it from any one slot.
+	interClientInbound chan *Packet
 	// stats records data-plane liveness from observed heartbeat echo replies; may be nil.
 	stats *HeartbeatStats
 	// poolSize overrides the number of parallel connections; <=0 means use ConnPoolSize.
@@ -41,10 +47,11 @@ type clientTransport struct {
 
 func newClientTransport(dev *tunDevice, forward *Forwarder, stats *HeartbeatStats) *clientTransport {
 	return &clientTransport{
-		dev:           dev,
-		forward:       forward,
-		gvisorInbound: make(chan *Packet, MaxSize),
-		stats:         stats,
+		dev:                dev,
+		forward:            forward,
+		gvisorInbound:      make(chan *Packet, MaxSize),
+		interClientInbound: make(chan *Packet, MaxSize),
+		stats:              stats,
 	}
 }
 
@@ -54,6 +61,12 @@ func (t *clientTransport) routines() []namedRoutine {
 	return []namedRoutine{
 		{"client-gvisor", func(ctx context.Context) {
 			handleGvisorPacket(t.gvisorInbound, t.dev.tunOutbound, datagramHeaderLen).Run(ctx)
+		}},
+		{"client-gvisor-inter", func(ctx context.Context) {
+			// Inter-client stack: shared across all pool slots (not bound to any slot's lifetime).
+			// Its output goes to the shared tunInbound, which runConnPool dispatches to a slot by
+			// five-tuple hash — so reconnecting a slot never tears down an active inter-client flow.
+			handleGvisorPacket(t.interClientInbound, t.dev.tunInbound, datagramHeaderLen).Run(ctx)
 		}},
 		{"client-conn-pool", t.runConnPool},
 		{"client-heartbeat", t.heartbeats},
@@ -87,12 +100,13 @@ func (t *clientTransport) runConnPool(ctx context.Context) {
 	var wg sync.WaitGroup
 	for i := range t.slots {
 		slot := &connSlot{
-			id:            i,
-			inbound:       make(chan *Packet, MaxSize),
-			tunOutbound:   t.dev.tunOutbound,
-			forward:       t.forward,
-			stats:         t.stats,
-			registrations: t.registrationPayloads,
+			id:                 i,
+			inbound:            make(chan *Packet, MaxSize),
+			tunOutbound:        t.dev.tunOutbound,
+			forward:            t.forward,
+			stats:              t.stats,
+			registrations:      t.registrationPayloads,
+			interClientInbound: t.interClientInbound,
 		}
 		t.slots[i] = slot
 		wg.Add(1)
@@ -291,6 +305,10 @@ type connSlot struct {
 	// (re)connect, so the server registers the route immediately instead of waiting for data or a
 	// periodic heartbeat. Computed lazily (picks up the current TUN IP); may be nil in tests.
 	registrations func() [][]byte
+	// interClientInbound is the transport-level channel feeding the shared inter-client gvisor
+	// stack. readFromConn routes type == packetTypeToGvisor packets here instead of to a per-slot
+	// stack, so the stack outlives any single slot. nil in tests that drive a slot in isolation.
+	interClientInbound chan *Packet
 }
 
 // run manages this slot's single connection with reconnect logic.
@@ -339,13 +357,12 @@ func (s *connSlot) run(ctx context.Context) {
 	}
 }
 
-// readFromConn reads datagram-framed packets from the server, routing IP packets to the tun
-// and gvisor-prefixed packets to this slot's local gvisor stack. conn is the framed
-// *UDPConnOverTCP in production (typed as net.Conn so tests can drive it with a raw pipe).
+// readFromConn reads datagram-framed packets from the server, routing IP packets to the tun and
+// inter-client (gvisor-prefixed) packets to the transport-level shared gvisor stack via
+// s.interClientInbound. conn is the framed *UDPConnOverTCP in production (typed as net.Conn so
+// tests can drive it with a raw pipe).
 func (s *connSlot) readFromConn(ctx context.Context, conn net.Conn, errChan chan error) {
 	defer netutil.HandleCrash()
-	gvisorInbound := make(chan *Packet, MaxSize)
-	go handleGvisorPacket(gvisorInbound, s.inbound, datagramHeaderLen).Run(ctx)
 	dl := &periodicDeadline{timeout: config.KeepAliveTime * 3, set: conn.SetReadDeadline}
 	for ctx.Err() == nil {
 		buf := config.LPool.Get().([]byte)[:]
@@ -371,7 +388,9 @@ func (s *connSlot) readFromConn(ctx context.Context, conn net.Conn, errChan chan
 		ip := buf[tunReserve : datagramHeaderLen+n]
 		logIPPacket(ctx, fmt.Sprintf("[Client-%d] INBOUND", s.id), ip)
 		if buf[datagramHeaderLen] == packetTypeToGvisor {
-			gvisorInbound <- NewPacket(buf[:], n, nil, nil)
+			// Hand off to the transport-level inter-client stack. Drop-if-full (and nil-safe for
+			// tests that drive a slot in isolation) so a busy stack cannot stall this slot's reader.
+			trySendToSlot(s.interClientInbound, NewPacket(buf[:], n, nil, nil))
 		} else {
 			// Heartbeat echo replies from the gateway are the data-plane liveness signal:
 			// record them and drop (the OS would discard them — the echo was crafted by us).
