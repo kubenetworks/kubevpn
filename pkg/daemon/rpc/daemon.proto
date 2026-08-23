@@ -394,6 +394,14 @@ service TunConfigService {
   // whenever the owner's IP allocation changes (e.g., conflict resolution, re-allocation).
   rpc WatchTunIP(TunIPRequest) returns (stream TunIPResponse) {}
 
+  // WatchNamespaceRoutes streams pod route prefixes and service records for a
+  // namespace, discovered server-side by the traffic manager (a single shared
+  // informer per namespace) instead of a per-client cluster-wide list-watch.
+  // The first frame is a full snapshot (Snapshot=true); subsequent frames are
+  // deltas. Enabled=false means the manager lacks RBAC to watch the namespace
+  // and the client should degrade to CIDR-only routing.
+  rpc WatchNamespaceRoutes(NamespaceRoutesRequest) returns (stream NamespaceRoutesResponse) {}
+
 }
 
 message TunIPRequest {
@@ -409,4 +417,27 @@ message TunIPResponse {
   string IPv6 = 2;        // allocated IPv6 in CIDR notation, e.g. "fd11::5/128"
   int64  Version = 3;     // monotonically increasing version for change detection
   bool   DryRun = 4;      // true = a proposal: client must validate locally, then confirm or decline (do NOT apply directly)
+}
+
+message NamespaceRoutesRequest {
+  string Namespace = 1;   // workload namespace the client wants routes/DNS for
+}
+
+// ServiceRecord carries the minimal service fields the client needs for routing
+// and DNS/hosts generation (name -> ClusterIP / ExternalName).
+message ServiceRecord {
+  string Name = 1;
+  string Namespace = 2;
+  repeated string ClusterIPs = 3;  // ClusterIP + ClusterIPs (headless "None" filtered client-side)
+  string ExternalName = 4;
+}
+
+message NamespaceRoutesResponse {
+  bool Snapshot = 1;                        // true = full state (initial / reconnect / resync); false = delta
+  repeated string AddedPodCIDRs = 2;        // pod route prefixes to add (server-aggregated: IPv4 /24, IPv6 /64)
+  repeated string RemovedPodCIDRs = 3;      // prefixes no longer backed by any pod (client keeps route, updates state only)
+  repeated ServiceRecord UpsertedServices = 4; // added/changed services (for DNS)
+  repeated string RemovedServiceKeys = 5;   // "namespace/name" of deleted services (client removes hosts entry)
+  int64 Version = 6;                         // monotonically increasing version for change detection
+  bool Enabled = 7;                          // false = server not discovering (no RBAC) -> client degrades to CIDR-only
 }

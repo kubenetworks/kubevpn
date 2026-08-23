@@ -58,6 +58,10 @@ type TunConfigServer struct {
 	// reconcileMu serializes ReconcileAllocsFromConfigMap so two overlapping
 	// informer-driven reconciles never act on each other's stale snapshot.
 	reconcileMu sync.Mutex
+
+	// routes serves WatchNamespaceRoutes: server-side per-namespace pod/service
+	// discovery pushed to clients, replacing each client's cluster-wide list-watch.
+	routes *routeBroadcaster
 }
 
 // lastIPRecord is the last IPv4/IPv6 a given owner held.
@@ -135,6 +139,7 @@ func NewTunConfigServer(ctx context.Context, clientset kubernetes.Interface, nam
 		lastIPs:         make(map[string]lastIPRecord),
 		pendingProposal: make(map[string]proposal),
 	}
+	s.routes = newRouteBroadcaster(clientset)
 	s.loadAllocs(ctx)
 	// Reclaim any bitmap bits left orphaned by a prior crash before serving.
 	s.scrubOrphanBits(ctx)
@@ -1068,6 +1073,65 @@ func (s *TunConfigServer) syncEnvoyRuleIP(ctx context.Context, ownerID string, n
 	}
 }
 
+// removeEnvoyRulesForOwner deletes all envoy rules owned by ownerID from ENVOY_CONFIG
+// (and drops any Virtual left with no rules). It is called by the lease reaper when an
+// owner's TUN IP lease expires: OwnerID identifies both the TUN IP lease and the envoy
+// rule (docs/09 §5.4), so a client that vanished without a clean Leave (crash, or a
+// teardown whose apiserver call timed out) no longer leaves a stale proxy rule behind.
+// The rule's routing target (the client TUN IP) is gone anyway; a reconnecting client
+// re-adds its rule via the normal proxy path. The xDS ConfigMap watcher re-pushes the
+// envoy snapshot on the resulting ConfigMap change. This mirrors syncEnvoyRuleIP's
+// read-modify-write; it does NOT unpatch the sidecar container (that needs workload RBAC).
+func (s *TunConfigServer) removeEnvoyRulesForOwner(ctx context.Context, ownerID string) {
+	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		cm, err := s.clientset.CoreV1().ConfigMaps(s.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		virtuals, parseErr := parseYaml(cm.Data[config.KeyEnvoy])
+		if parseErr != nil {
+			// Not a valid Virtual list (empty/legacy/corrupt): nothing to remove.
+			return nil
+		}
+		changed := false
+		kept := virtuals[:0]
+		for _, v := range virtuals {
+			rules := v.Rules[:0]
+			for _, rule := range v.Rules {
+				if rule.OwnerID == ownerID {
+					changed = true
+					continue
+				}
+				rules = append(rules, rule)
+			}
+			v.Rules = rules
+			if len(v.Rules) == 0 {
+				// Drop a Virtual with no remaining rules.
+				continue
+			}
+			kept = append(kept, v)
+		}
+		if !changed {
+			return nil
+		}
+		data, marshalErr := yaml.Marshal(kept)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		if cm.Data == nil {
+			cm.Data = make(map[string]string)
+		}
+		cm.Data[config.KeyEnvoy] = string(data)
+		_, err = s.clientset.CoreV1().ConfigMaps(s.namespace).Update(ctx, cm, metav1.UpdateOptions{})
+		return err
+	})
+	if err != nil {
+		plog.G(ctx).Warnf("[TunConfig] failed to remove envoy rules for expired owner %s: %v", ownerID, err)
+	} else {
+		plog.G(ctx).Infof("[TunConfig] removed envoy rules for expired owner %s", ownerID)
+	}
+}
+
 // XDSPort is the gRPC port used by the envoy control plane and TunConfigService.
 const XDSPort uint = config.PortXDS
 
@@ -1139,6 +1203,11 @@ func (s *TunConfigServer) reapExpiredLeases(ctx context.Context) {
 			plog.G(ctx).Warnf("[TunConfig] Failed to release IP %v for expired owner %s: %v", alloc.IPv4, ownerID, err)
 		}
 		plog.G(ctx).Infof("[TunConfig] Lease expired for owner %s, reclaimed IP %v", ownerID, alloc.IPv4)
+		// The owner vanished without a clean Leave: drop its stale envoy rules too, so
+		// a failed/timed-out teardown does not leave a lingering proxy rule (which would
+		// otherwise show up in status until an explicit leave/reset). Same OwnerID keys
+		// both the TUN IP lease and the envoy rule (docs/09 §5.4).
+		s.removeEnvoyRulesForOwner(ctx, ownerID)
 	}
 
 	if len(expired) > 0 {
