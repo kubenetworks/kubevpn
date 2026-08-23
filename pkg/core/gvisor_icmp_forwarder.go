@@ -14,8 +14,12 @@ import (
 // ICMPForwarder creates a gvisor handler that replies to ICMP Echo requests inline.
 func ICMPForwarder(ctx context.Context, s *stack.Stack) func(stack.TransportEndpointID, *stack.PacketBuffer) bool {
 	return func(id stack.TransportEndpointID, pkt *stack.PacketBuffer) bool {
-		defer pkt.DecRef()
-
+		// Do NOT DecRef pkt: this is a SetTransportProtocolHandler default handler, which does
+		// not own the packet — the stack/injector retains ownership and DecRefs it (e.g.
+		// readFromTCPConnWriteToEndpoint after InjectInbound). gvisor's own tcp/udp forwarders
+		// follow the same contract (they take their own reference via newIncomingSegment/Clone
+		// and never touch the caller's pkt). DecRef'ing here drove the count to 0 before the
+		// injector's DecRef ran, panicking with "Decrementing non-positive ref count".
 		switch pkt.NetworkProtocolNumber {
 		case header.IPv4ProtocolNumber:
 			hdr := header.ICMPv4(pkt.TransportHeader().Slice())
@@ -90,12 +94,14 @@ func replyICMPv6Echo(ctx context.Context, s *stack.Stack, id stack.TransportEndp
 	defer route.Release()
 
 	replyHdr.SetChecksum(0)
+	// replyHdr already contains the payload, so PayloadCsum/PayloadLen must stay zero:
+	// ICMPv6Checksum builds the pseudo-header with len(Header)+PayloadLen, and also passing
+	// PayloadLen here double-counts the payload length, corrupting the checksum (the client
+	// then drops the echo reply).
 	replyHdr.SetChecksum(header.ICMPv6Checksum(header.ICMPv6ChecksumParams{
-		Header:      replyHdr,
-		Src:         route.LocalAddress(),
-		Dst:         route.RemoteAddress(),
-		PayloadCsum: 0,
-		PayloadLen:  len(payload),
+		Header: replyHdr,
+		Src:    route.LocalAddress(),
+		Dst:    route.RemoteAddress(),
 	}))
 
 	pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
