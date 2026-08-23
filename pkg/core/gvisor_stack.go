@@ -76,28 +76,12 @@ func newGvisorStack(ctx context.Context, tun stack.LinkEndpoint, tcpFwd, udpFwd 
 		}
 	}
 
-	// Loosen the TCP send/receive buffer caps well above gvisor's defaults so the advertised
-	// window can grow on high bandwidth-delay-product paths (the server stack forwards every
-	// client's cluster traffic). Mirrors Tailscale's netstack tuning (RX 8MiB / TX 6MiB); the
-	// autotuner (TCPModerateReceiveBufferOption above) scales within these bounds.
-	{
-		rcv := tcpip.TCPReceiveBufferSizeRangeOption{
-			Min:     tcp.MinBufferSize,
-			Default: tcp.DefaultReceiveBufferSize,
-			Max:     8 << 20,
-		}
-		if err := s.SetTransportProtocolOption(tcp.ProtocolNumber, &rcv); err != nil {
-			plog.G(ctx).Fatalf("SetTransportProtocolOption(%d, &%T): %v", tcp.ProtocolNumber, rcv, err)
-		}
-		snd := tcpip.TCPSendBufferSizeRangeOption{
-			Min:     tcp.MinBufferSize,
-			Default: tcp.DefaultSendBufferSize,
-			Max:     6 << 20,
-		}
-		if err := s.SetTransportProtocolOption(tcp.ProtocolNumber, &snd); err != nil {
-			plog.G(ctx).Fatalf("SetTransportProtocolOption(%d, &%T): %v", tcp.ProtocolNumber, snd, err)
-		}
-	}
+	// NOTE: we deliberately keep gvisor's default TCP send/receive buffer ranges (autotuning up to
+	// MaxBufferSize = 4MB). An earlier change raised the caps to Tailscale's 8MiB/6MiB, but those
+	// assume one UDP flow per peer; KubeVPN multiplexes every flow over a shared TCP tunnel, where
+	// an oversized single-flow buffer causes head-of-line bloat that starves other flows' traffic
+	// (heartbeats, reverse ACKs) — see docs/08-heartbeat-health.md §#3. Stock gvisor autotuning
+	// (ModerateReceiveBuffer above) is the right fit for the shared-tunnel model.
 
 	{
 		if err := s.SetForwardingDefaultAndAllNICs(ipv4.ProtocolNumber, true); err != nil {

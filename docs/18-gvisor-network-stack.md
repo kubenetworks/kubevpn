@@ -208,7 +208,7 @@ This is modeled on gvisor's chunk refcount (`buffer.View.Clone`/`Release`). Type
 - IPv4 + IPv6 network protocols
 - TCP + UDP transport protocols
 - SACK, TTL=64, moderate receive buffer, forwarding enabled
-- TCP send/receive buffer size ranges raised above gvisor defaults (RX max 8MiB / TX max 6MiB, mirroring Tailscale's netstack) so the window can grow on high bandwidth-delay-product paths
+- Stock gvisor TCP send/receive buffer ranges (autotuning up to 4MB via `ModerateReceiveBuffer`). NOTE: raising these to Tailscale's 8MiB/6MiB was tried and reverted — Tailscale assumes one UDP flow per peer, but KubeVPN multiplexes every flow over a shared TCP tunnel, where an oversized single-flow buffer causes head-of-line bloat that starves other flows (see `08-heartbeat-health.md` §#3)
 - `GVisorGSOSupported` on the link endpoint — gvisor performs software segmentation internally, complementing the TUN-side GRO (`docs/22-tun-device.md` §4.2). We deliberately avoid `HostGSOSupported`: this endpoint feeds a TCP tunnel, not a host NIC, so host-GSO would push super-MTU segments onto the wire that macOS/Windows clients cannot write to their TUN
 - Promiscuous mode + spoofing enabled (accepts all packets)
 - Default routes for all IPv4 and IPv6 traffic
