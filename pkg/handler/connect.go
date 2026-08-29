@@ -273,6 +273,11 @@ func (c *ConnectOptions) CreateOutboundPod(ctx context.Context) error {
 		// timeout, image pull) keeps its own, more specific code.
 		return fmt.Errorf("%w: %w", err, config.ErrTrafficManagerDeploy)
 	}
+	// Grant the manager SA list/watch on pods/services in the workload namespace so its
+	// server-side route discovery (WatchNamespaceRoutes) works. Runs every connect
+	// (idempotent), covering an already-installed / just-upgraded manager. Best-effort:
+	// if the user cannot create this RBAC, discovery degrades to CIDR-only routing.
+	ensureRouteRBAC(ctx, c.clientset, c.WorkloadNamespace, c.ManagerNamespace)
 	return nil
 }
 

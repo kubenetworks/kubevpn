@@ -227,9 +227,32 @@ func createTLSSecret(ctx context.Context, clientset kubernetes.Interface, namesp
 	return crt, nil
 }
 
+// ensureRouteRBAC creates (idempotently, best-effort) the namespaced Role + RoleBinding
+// that lets the traffic manager's ServiceAccount list/watch pods and services in the
+// workload namespace, enabling server-side route/service discovery. It never fails the
+// connect: if the RBAC cannot be created the manager returns Enabled=false and the client
+// degrades to CIDR-only routing.
+func ensureRouteRBAC(ctx context.Context, clientset kubernetes.Interface, workloadNamespace, managerNamespace string) {
+	if workloadNamespace == "" {
+		workloadNamespace = managerNamespace
+	}
+	if _, err := clientset.RbacV1().Roles(workloadNamespace).Create(ctx, genRouteRole(workloadNamespace), metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
+		plog.G(ctx).Warnf("Could not create route-discovery Role in namespace %q (server route discovery will fall back to CIDR-only): %v", workloadNamespace, err)
+		return
+	}
+	if _, err := clientset.RbacV1().RoleBindings(workloadNamespace).Create(ctx, genRouteRoleBinding(workloadNamespace, managerNamespace), metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
+		plog.G(ctx).Warnf("Could not create route-discovery RoleBinding in namespace %q: %v", workloadNamespace, err)
+	}
+}
+
 func cleanupTrafficManagerResources(ctx context.Context, clientset kubernetes.Interface, namespace string) {
 	options := metav1.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0)}
 	name := config.ConfigMapPodTrafficManager
+	// Route-discovery RBAC (distinct name). In central mode it lives in the workload
+	// namespace and is cleaned up there; here we clear the manager-namespace copy
+	// (non-central mode, where workload ns == manager ns).
+	_ = clientset.RbacV1().RoleBindings(namespace).Delete(ctx, routeRBACName, options)
+	_ = clientset.RbacV1().Roles(namespace).Delete(ctx, routeRBACName, options)
 	_ = clientset.RbacV1().RoleBindings(namespace).Delete(ctx, name, options)
 	_ = clientset.RbacV1().Roles(namespace).Delete(ctx, name, options)
 	_ = clientset.CoreV1().ServiceAccounts(namespace).Delete(ctx, name, options)

@@ -59,6 +59,52 @@ func genRoleBinding(namespace string) *rbacv1.RoleBinding {
 	}
 }
 
+// routeRBACName is the name of the Role/RoleBinding that grants the traffic manager's
+// ServiceAccount permission to list/watch pods and services in a workload namespace,
+// for server-side route/service discovery (WatchNamespaceRoutes). It is distinct from
+// the manager's own Role so it never clobbers it when workload ns == manager ns.
+var routeRBACName = config.ConfigMapPodTrafficManager + "-route"
+
+// genRouteRole grants list/watch on pods and services in the given namespace. list/watch
+// cannot be restricted by resourceNames, so this is a namespaced (not cluster) grant with
+// no resource-name filter — the least-privilege way to let the manager discover routes in
+// one namespace without any cluster-scoped RBAC object.
+func genRouteRole(namespace string) *rbacv1.Role {
+	return &rbacv1.Role{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      routeRBACName,
+			Namespace: namespace,
+		},
+		Rules: []rbacv1.PolicyRule{{
+			Verbs:     []string{"list", "watch"},
+			APIGroups: []string{""},
+			Resources: []string{"pods", "services"},
+		}},
+	}
+}
+
+// genRouteRoleBinding binds genRouteRole (in roleNamespace, a workload namespace) to the
+// traffic manager ServiceAccount living in saNamespace (the manager namespace). In the
+// non-central case the two namespaces are the same.
+func genRouteRoleBinding(roleNamespace, saNamespace string) *rbacv1.RoleBinding {
+	return &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      routeRBACName,
+			Namespace: roleNamespace,
+		},
+		Subjects: []rbacv1.Subject{{
+			Kind:      "ServiceAccount",
+			Name:      config.ConfigMapPodTrafficManager,
+			Namespace: saNamespace,
+		}},
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: "rbac.authorization.k8s.io",
+			Kind:     "Role",
+			Name:     routeRBACName,
+		},
+	}
+}
+
 func genService(namespace string) *v1.Service {
 	tcp10801 := config.PortNameTCP
 	tcp9002 := config.PortNameEnvoy

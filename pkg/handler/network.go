@@ -16,14 +16,15 @@ import (
 	apinetworkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-	informerv1 "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/kubernetes"
 	v2 "k8s.io/client-go/kubernetes/typed/networking/v1"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/cache"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/encoding/gzip"
+	"google.golang.org/grpc/status"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/core"
@@ -83,8 +84,6 @@ const (
 	portForwardPodListTimeout = 10 * time.Second
 	// portForwardReconnectDelay is the pause between port-forward reconnect attempts.
 	portForwardReconnectDelay = 200 * time.Millisecond
-	// routeWatchInterval is the debounce/refresh period for the dynamic route-table watcher.
-	routeWatchInterval = 15 * time.Second
 	// portForwardStartTimeout is how long to wait for the first port-forward session to become ready.
 	portForwardStartTimeout = 60 * time.Second
 )
@@ -164,16 +163,18 @@ func (nm *NetworkManager) Start(ctx context.Context) error {
 		return fmt.Errorf("start tun: %w: %w", err, config.ErrTunDeviceFailed)
 	}
 
-	plog.StepStart(nm.ctx, "Adding routes")
-	svcInformer, _, err := nm.AddRouteDynamic(nm.ctx)
-	if err != nil {
-		return fmt.Errorf("add routes: %w: %w", err, config.ErrRouteSetupFailed)
-	}
-	plog.StepDone(nm.ctx, "Added %d pod/service routes", len(nm.cfg.CIDRs))
+	// Cluster pod/service CIDRs are already routed by startTUN. Per-IP pod routes and
+	// service records now come from the traffic manager over WatchNamespaceRoutes
+	// (StartRouteWatcher below), instead of a client-side cluster-wide list-watch.
+	plog.StepDone(nm.ctx, "Added %d pod/service CIDR routes", len(nm.cfg.CIDRs))
 
-	if err := nm.setupDNS(nm.ctx, svcInformer); err != nil {
+	if err := nm.setupDNS(nm.ctx); err != nil {
 		return fmt.Errorf("setup dns: %w: %w", err, config.ErrDNSSetupFailed)
 	}
+
+	// Subscribe to server-side route/service discovery for the workload namespace.
+	// Runs in the background under nm.ctx; failures degrade to CIDR-only routing.
+	nm.StartRouteWatcher(nm.ctx)
 
 	return nil
 }
@@ -782,7 +783,7 @@ func (nm *NetworkManager) getTunDeviceName() (string, error) {
 }
 
 // setupDNS configures DNS resolution for the cluster.
-func (nm *NetworkManager) setupDNS(ctx context.Context, svcInformer cache.SharedIndexInformer) error {
+func (nm *NetworkManager) setupDNS(ctx context.Context) error {
 	podList, err := nm.cfg.GetRunningPodList(ctx)
 	if err != nil {
 		plog.G(ctx).Errorf("Get running pod list failed, err: %v", err)
@@ -827,13 +828,12 @@ func (nm *NetworkManager) setupDNS(ctx context.Context, svcInformer cache.Shared
 
 	plog.G(ctx).Debugf("Listing namespace %s services...", nm.cfg.WorkloadNamespace)
 	nm.dnsConfig = &dns.Config{
-		Config:      relovConf,
-		Ns:          ns,
-		Services:    []v1.Service{},
-		SvcInformer: svcInformer,
-		TunName:     nm.tunName,
-		Hosts:       nm.extraHost,
-		Lock:        nm.cfg.Lock,
+		Config:   relovConf,
+		Ns:       ns,
+		Services: []v1.Service{},
+		TunName:  nm.tunName,
+		Hosts:    nm.extraHost,
+		Lock:     nm.cfg.Lock,
 		HowToGetExternalName: func(domain string) (string, error) {
 			ip, err := resolveDomainViaClusterDNS(ctx, relovConf.Servers, domain)
 			if err != nil {
@@ -911,77 +911,146 @@ func (nm *NetworkManager) AddRoute(ipStrList ...string) error {
 	return tun.AddRoutes(nm.tunName, routes...)
 }
 
-// AddRouteDynamic starts informers that watch pods and services, adding their
-// IPs to the route table as they appear.
-func (nm *NetworkManager) AddRouteDynamic(ctx context.Context) (cache.SharedIndexInformer, cache.SharedIndexInformer, error) {
-	podNs, svcNs, err := util.GetNsForListPodAndSvc(ctx, nm.cfg.Clientset, []string{v1.NamespaceAll, nm.cfg.WorkloadNamespace})
-	if err != nil {
-		return nil, nil, err
+// AddRouteCIDR adds CIDR prefixes (e.g. server-pushed aggregated pod prefixes like
+// "10.244.3.0/24") to the route table via the TUN device, skipping any that are
+// invalid or already routed through the TUN. Unlike AddRoute (which builds /32 /128
+// host routes from single IPs), this routes whole prefixes, matching how the cluster
+// CIDRs are installed at connect.
+func (nm *NetworkManager) AddRouteCIDR(cidrs ...string) error {
+	if nm.tunName == "" {
+		return nil
 	}
-
-	conf := rest.CopyConfig(nm.cfg.Config)
-	conf.QPS = 1
-	conf.Burst = 2
-	clientSet, err := kubernetes.NewForConfig(conf)
-	if err != nil {
-		plog.G(ctx).Errorf("Failed to create clientset: %v", err)
-		return nil, nil, err
-	}
-	indexers := cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}
-	svcInformer := informerv1.NewServiceInformer(clientSet, svcNs, 0, indexers)
-	if err = nm.watchAndRoute(ctx, svcInformer, func(obj any) []string {
-		svc, ok := obj.(*v1.Service)
-		if !ok {
-			return nil
+	var routes []types.Route
+	r, _ := netroute.New()
+	for _, cidr := range cidrs {
+		_, ipNet, err := net.ParseCIDR(cidr)
+		if err != nil || ipNet == nil || ipNet.IP.IsLoopback() {
+			continue
 		}
-		return append([]string{svc.Spec.ClusterIP}, svc.Spec.ClusterIPs...)
-	}); err != nil {
-		return nil, nil, err
-	}
-
-	podInformer := informerv1.NewPodInformer(clientSet, podNs, 0, indexers)
-	if err = nm.watchAndRoute(ctx, podInformer, func(obj any) []string {
-		p, ok := obj.(*v1.Pod)
-		if !ok || p.Spec.HostNetwork {
-			return nil
-		}
-		return util.GetPodIP(*p)
-	}); err != nil {
-		return nil, nil, err
-	}
-
-	return svcInformer, podInformer, nil
-}
-
-// watchAndRoute starts an informer and a goroutine that periodically extracts
-// IPs from the cache and adds them to the route table.
-func (nm *NetworkManager) watchAndRoute(ctx context.Context, informer cache.SharedIndexInformer, extractIPs func(any) []string) error {
-	ticker := time.NewTicker(routeWatchInterval)
-	_, err := informer.AddEventHandler(newTickerResetHandler(ticker))
-	if err != nil {
-		return err
-	}
-	go informer.Run(ctx.Done())
-	go func() {
-		defer ticker.Stop()
-		for ; ctx.Err() == nil; <-ticker.C {
-			ticker.Reset(routeWatchInterval)
-			ips := sets.New[string]()
-			for _, obj := range informer.GetIndexer().List() {
-				ips.Insert(extractIPs(obj)...)
-			}
-			if ctx.Err() != nil {
-				return
-			}
-			if ips.Len() == 0 {
+		if r != nil {
+			if ifi, _, _, rerr := r.Route(ipNet.IP); rerr == nil && ifi.Name == nm.tunName {
 				continue
 			}
-			if err := nm.AddRoute(ips.UnsortedList()...); err != nil {
-				plog.G(ctx).Debugf("Add IP to route table failed: %v", err)
+		}
+		routes = append(routes, types.Route{Dst: *ipNet})
+	}
+	if len(routes) == 0 {
+		return nil
+	}
+	return tun.AddRoutes(nm.tunName, routes...)
+}
+
+// StartRouteWatcher subscribes to the traffic manager's WatchNamespaceRoutes stream
+// for the workload namespace and applies pushed pod route prefixes (to the route
+// table) and service records (to DNS), replacing the former client-side cluster-wide
+// pod/service informers. It runs in the background under ctx; on any failure it
+// degrades to CIDR-only routing (the cluster CIDRs are already routed).
+func (nm *NetworkManager) StartRouteWatcher(ctx context.Context) {
+	if nm.controlPlaneLocalPort == 0 {
+		return
+	}
+	go nm.watchNamespaceRoutes(ctx)
+}
+
+func (nm *NetworkManager) watchNamespaceRoutes(ctx context.Context) {
+	target := fmt.Sprintf("127.0.0.1:%d", nm.controlPlaneLocalPort)
+	var version int64
+	for ctx.Err() == nil {
+		err := nm.doWatchNamespaceRoutes(ctx, target, &version)
+		if err != nil && ctx.Err() == nil {
+			plog.G(ctx).Debugf("[RouteWatcher] disconnected: %v, retrying in %s", err, ipWatcherRetryInterval)
+		}
+		select {
+		case <-time.After(ipWatcherRetryInterval):
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func (nm *NetworkManager) doWatchNamespaceRoutes(ctx context.Context, target string, version *int64) error {
+	conn, err := grpc.DialContext(ctx, target,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(grpc.UseCompressor(gzip.Name)),
+		grpc.WithBlock(),
+	)
+	if err != nil {
+		return fmt.Errorf("dial %s: %w", target, err)
+	}
+	defer conn.Close()
+
+	client := rpc.NewTunConfigServiceClient(conn)
+	stream, err := client.WatchNamespaceRoutes(ctx, &rpc.NamespaceRoutesRequest{Namespace: nm.cfg.WorkloadNamespace})
+	if err != nil {
+		if status.Code(err) == codes.Unimplemented {
+			// Old traffic manager without server-side discovery: nothing to do, the
+			// cluster CIDR routes already cover routing. Do not retry-spin.
+			plog.G(ctx).Infof("[RouteWatcher] manager has no WatchNamespaceRoutes; using CIDR-only routing")
+			<-ctx.Done()
+			return nil
+		}
+		return fmt.Errorf("WatchNamespaceRoutes: %w", err)
+	}
+
+	// services accumulates the current service set across snapshot+delta frames; it is
+	// the source fed to DNS on every change.
+	services := map[string]*rpc.ServiceRecord{}
+	for {
+		resp, err := stream.Recv()
+		if err != nil {
+			return err
+		}
+		if !resp.Enabled {
+			// Manager lacks RBAC to watch this namespace. Degrade to CIDR-only routing.
+			plog.G(ctx).Warnf("[RouteWatcher] server route discovery disabled for namespace %q (no RBAC); using CIDR-only routing", nm.cfg.WorkloadNamespace)
+			<-ctx.Done()
+			return nil
+		}
+		if resp.Snapshot {
+			services = map[string]*rpc.ServiceRecord{}
+		}
+		if len(resp.AddedPodCIDRs) > 0 {
+			if err := nm.AddRouteCIDR(resp.AddedPodCIDRs...); err != nil {
+				plog.G(ctx).Debugf("[RouteWatcher] add pod CIDR routes failed: %v", err)
 			}
 		}
-	}()
-	return nil
+		// service records also carry ClusterIPs; those are already covered by the service
+		// CIDR route, so we do not add per-service routes — the records drive DNS only.
+		changed := resp.Snapshot
+		for _, rec := range resp.UpsertedServices {
+			services[rec.Namespace+"/"+rec.Name] = rec
+			changed = true
+		}
+		for _, key := range resp.RemovedServiceKeys {
+			if _, ok := services[key]; ok {
+				delete(services, key)
+				changed = true
+			}
+		}
+		if changed && nm.dnsConfig != nil {
+			nm.dnsConfig.UpdateServices(ctx, serviceRecordsToServices(services))
+		}
+		*version = resp.Version
+	}
+}
+
+// serviceRecordsToServices converts pushed ServiceRecords into the corev1.Service
+// shape the DNS layer consumes (only the fields it reads: name, namespace, ClusterIP,
+// ExternalName).
+func serviceRecordsToServices(recs map[string]*rpc.ServiceRecord) []v1.Service {
+	out := make([]v1.Service, 0, len(recs))
+	for _, rec := range recs {
+		svc := v1.Service{
+			ObjectMeta: metav1.ObjectMeta{Name: rec.Name, Namespace: rec.Namespace},
+			Spec:       v1.ServiceSpec{ExternalName: rec.ExternalName},
+		}
+		if len(rec.ClusterIPs) > 0 {
+			svc.Spec.ClusterIP = rec.ClusterIPs[0]
+			svc.Spec.ClusterIPs = rec.ClusterIPs
+		}
+		out = append(out, svc)
+	}
+	return out
 }
 
 // AddExtraRoute resolves extra domain names by querying the in-cluster DNS

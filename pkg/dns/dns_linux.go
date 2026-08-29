@@ -156,6 +156,10 @@ func (c *Config) UseLibraryDNS(ctx context.Context, tunName string, clientConfig
 	return c.OSConfigurator.SetDNS(config)
 }
 
+// applyResolvers is a no-op on Linux: DNS is configured once via the OS
+// configurator / resolv.conf; per-service resolver files are a macOS-only concept.
+func (c *Config) applyResolvers(_ context.Context) {}
+
 // CancelDNS reverts DNS changes made by SetupDNS and removes managed hosts entries.
 func (c *Config) CancelDNS() {
 	_ = c.removeHosts()

@@ -49,6 +49,9 @@ func (c *Config) SetupDNS(ctx context.Context) error {
 	return nil
 }
 
+// applyResolvers is a no-op on Windows: per-service resolver files are macOS-only.
+func (c *Config) applyResolvers(_ context.Context) {}
+
 // CancelDNS flushes DNS and route entries from the TUN interface and removes managed hosts entries.
 func (c *Config) CancelDNS() {
 	_ = c.removeHosts()

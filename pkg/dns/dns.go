@@ -13,29 +13,29 @@ import (
 	"strings"
 	"sync"
 	"text/tabwriter"
-	"time"
 
 	miekgdns "github.com/miekg/dns"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/client-go/tools/cache"
 	"tailscale.com/net/dns"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
-	netutil "github.com/wencaiwulue/kubevpn/v2/pkg/util/netutil"
 )
 
 // Config holds DNS configuration for setting up cluster DNS resolution on the local machine.
 type Config struct {
-	Config      *miekgdns.ClientConfig
-	Ns          []string
-	Services    []corev1.Service
-	SvcInformer cache.SharedIndexInformer
-	TunName     string
+	Config   *miekgdns.ClientConfig
+	Ns       []string
+	Services []corev1.Service
+	TunName  string
 
 	Hosts []Entry
 	Lock  *sync.Mutex
+
+	// extra is the base set of host entries (extra domains) always applied,
+	// preserved so a push-driven UpdateServices can re-fold them in.
+	extra []Entry
 
 	HowToGetExternalName func(name string) (string, error)
 
@@ -43,11 +43,13 @@ type Config struct {
 	OSConfigurator dns.OSConfigurator
 }
 
-// AddServiceNameToHosts appends service name entries to the system hosts file and
-// watches for service changes to keep them up to date. It returns the number of
-// host entries written.
+// AddServiceNameToHosts writes the initial service-name host entries. Unlike the
+// former informer-driven design, it does NOT start a watch goroutine: service
+// records now arrive server-side via the route watcher, which calls UpdateServices.
+// It returns the number of host entries written.
 func (c *Config) AddServiceNameToHosts(ctx context.Context, hosts ...Entry) (int, error) {
 	c.Lock.Lock()
+	c.extra = hosts
 	appendHosts := c.generateAppendHosts(c.Services, hosts)
 	err := c.appendHosts(appendHosts)
 	c.Lock.Unlock()
@@ -55,65 +57,23 @@ func (c *Config) AddServiceNameToHosts(ctx context.Context, hosts ...Entry) (int
 		plog.G(ctx).Errorf("Failed to add hosts(%s): %v", c.entryList2String(appendHosts), err)
 		return 0, err
 	}
-
-	go c.watchServiceToAddHosts(ctx, hosts)
 	return len(appendHosts), nil
 }
 
-func (c *Config) watchServiceToAddHosts(ctx context.Context, hosts []Entry) {
-	defer netutil.HandleCrash()
-	ticker := time.NewTicker(config.DNSRouteRefreshInterval)
-	defer ticker.Stop()
-	_, err := c.SvcInformer.AddEventHandler(cache.FilteringResourceEventHandler{
-		FilterFunc: func(obj any) bool {
-			svc, ok := obj.(*corev1.Service)
-			return ok && svc.Namespace == c.Ns[0]
-		},
-		Handler: cache.ResourceEventHandlerFuncs{
-			AddFunc: func(obj any) {
-				ticker.Reset(config.DNSRouteDebounceInterval)
-			},
-			UpdateFunc: func(oldObj, newObj any) {
-				ticker.Reset(config.DNSRouteDebounceInterval)
-			},
-			DeleteFunc: func(obj any) {
-				ticker.Reset(config.DNSRouteDebounceInterval)
-			},
-		},
-	})
-	if err != nil {
-		plog.G(ctx).Errorf("Failed to add service event handler: %v", err)
-		return
+// UpdateServices replaces the known service set (push-driven by the client route
+// watcher, which receives ServiceRecords from the traffic manager) and appends any
+// new service-name host entries. Hosts are add-only, matching the previous
+// informer-driven behavior. On macOS it also refreshes the per-service resolver files.
+func (c *Config) UpdateServices(ctx context.Context, services []corev1.Service) {
+	c.Lock.Lock()
+	c.Services = services
+	appendHosts := c.generateAppendHosts(services, c.extra)
+	err := c.appendHosts(appendHosts)
+	c.Lock.Unlock()
+	if err != nil && !errors.Is(err, context.Canceled) {
+		plog.G(ctx).Errorf("Failed to add hosts(%s) to hosts: %v", c.entryList2String(appendHosts), err)
 	}
-	for ; ctx.Err() == nil; <-ticker.C {
-		ticker.Reset(config.DNSRouteRefreshInterval)
-		serviceList, err := c.SvcInformer.GetIndexer().ByIndex(cache.NamespaceIndex, c.Ns[0])
-		if err != nil {
-			plog.G(ctx).Errorf("Failed to list service by namespace %s: %v", c.Ns[0], err)
-			continue
-		}
-		var services []corev1.Service
-		for _, service := range serviceList {
-			svc, ok := service.(*corev1.Service)
-			if !ok {
-				continue
-			}
-			services = append(services, *svc)
-		}
-		if len(services) == 0 {
-			continue
-		}
-		if ctx.Err() != nil {
-			return
-		}
-		c.Lock.Lock()
-		appendHosts := c.generateAppendHosts(services, hosts)
-		err = c.appendHosts(appendHosts)
-		c.Lock.Unlock()
-		if err != nil && !errors.Is(err, context.Canceled) {
-			plog.G(ctx).Errorf("Failed to add hosts(%s) to hosts: %v", c.entryList2String(appendHosts), err)
-		}
-	}
+	c.applyResolvers(ctx)
 }
 
 // param: entry list is needs to added

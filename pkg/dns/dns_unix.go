@@ -10,12 +10,10 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"time"
 
 	miekgdns "github.com/miekg/dns"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/client-go/tools/cache"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
@@ -35,59 +33,16 @@ var ignoreSearchSuffix = []string{"com", "io", "net", "org", "cn", "ru"}
 // service.namespace.svc.cluster.local:port
 func (c *Config) SetupDNS(ctx context.Context) error {
 	defer netutil.HandleCrash()
-	ticker := time.NewTicker(config.DNSRouteRefreshInterval)
-	_, err := c.SvcInformer.AddEventHandler(cache.FilteringResourceEventHandler{
-		FilterFunc: func(obj any) bool {
-			svc, ok := obj.(*corev1.Service)
-			return ok && svc.Namespace == c.Ns[0]
-		},
-		Handler: cache.ResourceEventHandlerFuncs{
-			AddFunc: func(obj any) {
-				ticker.Reset(config.DNSRouteDebounceInterval)
-			},
-			UpdateFunc: func(oldObj, newObj any) {
-				ticker.Reset(config.DNSRouteDebounceInterval)
-			},
-			DeleteFunc: func(obj any) {
-				ticker.Reset(config.DNSRouteDebounceInterval)
-			},
-		},
-	})
-	if err != nil {
-		plog.G(ctx).Errorf("Failed to add service event handler: %v", err)
-		return err
-	}
-	go func() {
-		defer ticker.Stop()
-		for ; ctx.Err() == nil; <-ticker.C {
-			ticker.Reset(config.DNSRouteRefreshInterval)
-			serviceList, err := c.SvcInformer.GetIndexer().ByIndex(cache.NamespaceIndex, c.Ns[0])
-			if err != nil {
-				plog.G(ctx).Errorf("Failed to list service by namespace %s: %v", c.Ns[0], err)
-				continue
-			}
-			var services []corev1.Service
-			for _, service := range serviceList {
-				svc, ok := service.(*corev1.Service)
-				if !ok {
-					continue
-				}
-				services = append(services, *svc)
-			}
-			if len(services) == 0 {
-				continue
-			}
-			if ctx.Err() != nil {
-				return
-			}
-			c.Lock.Lock()
-			c.Services = services
-			c.Lock.Unlock()
-			c.usingResolver(ctx)
-		}
-	}()
+	// Service records arrive push-driven via UpdateServices (which calls applyResolvers);
+	// SetupDNS just lays down the initial resolver files for the known state.
 	c.usingResolver(ctx)
 	return nil
+}
+
+// applyResolvers refreshes the macOS per-service resolver files from the current
+// service set. It is invoked by UpdateServices when the pushed service records change.
+func (c *Config) applyResolvers(ctx context.Context) {
+	c.usingResolver(ctx)
 }
 
 func (c *Config) usingResolver(ctx context.Context) {
