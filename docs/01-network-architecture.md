@@ -4,6 +4,11 @@
 
 KubeVPN creates a bidirectional network tunnel between a local machine and a Kubernetes cluster. All IP traffic (TCP, UDP, ICMP) flows through a TUN device on the client, gets encapsulated over TCP, and is forwarded via `kubectl port-forward` to a traffic manager pod running a userspace network stack (gvisor).
 
+> **Route source:** the cluster pod/service **CIDRs** are routed to the TUN device at connect
+> time. Per-pod route prefixes are discovered **server-side** by the traffic manager and
+> pushed to the client over gRPC (the client no longer runs its own cluster-wide pod/service
+> list-watch) — see [44-server-side-route-discovery.md](44-server-side-route-discovery.md).
+
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
 │ Local Machine                                                                    │

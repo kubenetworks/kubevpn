@@ -4,6 +4,13 @@
 
 The DNS package (`pkg/dns`) configures the local machine's DNS to resolve Kubernetes service names when connected via KubeVPN. It has two main components: a DNS forward server that runs in the traffic manager pod, and platform-specific client-side DNS setup that configures the local machine to use the cluster's DNS.
 
+> **Service records source:** the `/etc/hosts` short-name entries (and macOS resolver files)
+> are no longer driven by a client-side service informer. The traffic manager discovers
+> services and pushes them to the client, which feeds them to `dns.Config.UpdateServices`
+> (see [44-server-side-route-discovery.md](44-server-side-route-discovery.md)). Hosts remain
+> add-only. If server discovery is unavailable, short-name hosts entries are simply absent
+> (name resolution still works via the cluster DNS forward server + search domains).
+
 ## 2. Architecture
 
 ```

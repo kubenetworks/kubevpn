@@ -14,6 +14,14 @@ The traffic manager is a pod deployed in the cluster that provides the VPN serve
 | 2 | ServiceAccount | `kubevpn-traffic-manager` | Pod identity (`automountServiceAccountToken: true`) |
 | 3 | Role | `kubevpn-traffic-manager` | RBAC: get/list/watch/create/update/patch/delete on configmaps + secrets (resourceName scoped) |
 | 4 | RoleBinding | `kubevpn-traffic-manager` | Binds Role to ServiceAccount |
+
+> **Route-discovery RBAC** (separate, namespaced): a distinct `kubevpn-traffic-manager-route`
+> Role + RoleBinding grants the manager SA `list,watch` on **pods and services** in each
+> **workload** namespace, for server-side route/service discovery
+> ([44-server-side-route-discovery.md](44-server-side-route-discovery.md)). It is created
+> idempotently, best-effort, on every `CreateOutboundPod` (`ensureRouteRBAC`) — not part of
+> the static resource set above, and **no cluster-scoped RBAC object** is used. If it cannot
+> be created, discovery degrades to CIDR-only routing.
 | 5 | Service | `kubevpn-traffic-manager` | ClusterIP: 10801/TCP, 9002/TCP, 53/UDP |
 | 6 | ConfigMap | `kubevpn-traffic-manager` | Initial keys: ENVOY_CONFIG, TUN_IP_POOL, CLUSTER_CIDRS (TUN_ALLOCS added lazily on first IP allocation) |
 | 7 | Secret | `kubevpn-traffic-manager` | TLS cert/key/server_name (Opaque type, env-var friendly keys) |
