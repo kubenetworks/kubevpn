@@ -47,6 +47,11 @@ func (c *Config) applyResolvers(ctx context.Context) {
 
 func (c *Config) usingResolver(ctx context.Context) {
 	var clientConfig = c.Config
+	// clientConfig.Servers[0] is used below; bail out safely if the pod resolv.conf yielded no
+	// nameserver (Linux/Windows already guard this — keep macOS consistent instead of panicking).
+	if clientConfig == nil || len(clientConfig.Servers) == 0 {
+		return
+	}
 
 	path := "/etc/resolver"
 	if _, err := os.Stat(path); os.IsNotExist(err) {
@@ -135,6 +140,11 @@ func toString(config miekgdns.ClientConfig) string {
 
 // CancelDNS removes the injected DNS nameserver from macOS resolver files and cleans up hosts entries.
 func (c *Config) CancelDNS() {
+	// c.Config.Servers[0] is dereferenced below; nothing to undo without it. Still clean up hosts.
+	if c.Config == nil || len(c.Config.Servers) == 0 {
+		_ = c.removeHosts()
+		return
+	}
 	c.Lock.Lock()
 	services := c.Services
 	c.Lock.Unlock()

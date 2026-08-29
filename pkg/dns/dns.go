@@ -85,8 +85,10 @@ func (c *Config) appendHosts(appendHosts []Entry) error {
 		return nil
 	}
 
+	existing := sets.New[Entry]().Insert(c.Hosts...)
 	for _, appendHost := range appendHosts {
-		if !sets.New[Entry]().Insert(c.Hosts...).Has(appendHost) {
+		if !existing.Has(appendHost) {
+			existing.Insert(appendHost)
 			c.Hosts = append(c.Hosts, appendHost)
 		}
 	}
@@ -127,7 +129,10 @@ func (c *Config) entryList2String(entryList []Entry) string {
 
 func (c *Config) generateAppendHosts(serviceList []corev1.Service, hosts []Entry) []Entry {
 	const ServiceKubernetes = "kubernetes"
-	var entryList = sets.New[Entry]().Insert(c.Hosts...).Insert(hosts...).UnsortedList()
+	// seen tracks membership in O(1); reused across the loop instead of rebuilding a set from the
+	// whole entryList per service (which was O(n^2) on large clusters).
+	var seen = sets.New[Entry]().Insert(c.Hosts...).Insert(hosts...)
+	var entryList = seen.UnsortedList()
 
 	// 1) add only if not exist
 	for _, service := range serviceList {
@@ -147,7 +152,8 @@ func (c *Config) generateAppendHosts(serviceList []corev1.Service, hosts []Entry
 		}
 
 		var e = Entry{IP: ip.String(), Domain: service.Name}
-		if !sets.New[Entry]().Insert(entryList...).Has(e) {
+		if !seen.Has(e) {
+			seen.Insert(e)
 			entryList = append([]Entry{e}, entryList...)
 		}
 	}

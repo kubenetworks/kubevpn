@@ -34,13 +34,13 @@ func (c *Config) SetupDNS(ctx context.Context) error {
 	// sudo systemd-resolve --set-dns 172.28.64.10 --interface tun0 --set-domain=vke-system.svc.cluster.local --set-domain=svc.cluster.local --set-domain=cluster.local
 	//Failed to set DNS configuration: Unit dbus-org.freedesktop.resolve1.service not found.
 	// ref: https://superuser.com/questions/1427311/activation-via-systemd-failed-for-unit-dbus-org-freedesktop-resolve1-service
-	// systemctl enable systemd-resolved.service
-	_ = exec.Command("systemctl", "enable", "systemd-resolved.service").Run()
-	// systemctl start systemd-resolved.service
+	// Best-effort start only. We deliberately do NOT `systemctl enable` it: enabling persistently
+	// changes the user's boot configuration just to set up VPN DNS, which can disrupt machines that
+	// use NetworkManager/dnsmasq instead. `systemctl status` is likewise dropped (its output was
+	// discarded). If systemd-resolved isn't the DNS manager here, the resolvectl/systemd-resolve
+	// attempts below simply fail and we fall through to the library / resolv.conf paths.
 	_ = exec.Command("systemctl", "start", "systemd-resolved.service").Run()
-	//systemctl status systemd-resolved.service
-	_ = exec.Command("systemctl", "status", "systemd-resolved.service").Run()
-	plog.G(ctx).Debugf("Enable service systemd resolved...")
+	plog.G(ctx).Debugf("Started systemd-resolved (best-effort)...")
 	var exists = func(cmd string) bool {
 		_, err := exec.LookPath(cmd)
 		return err == nil
