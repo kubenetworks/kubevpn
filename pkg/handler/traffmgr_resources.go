@@ -105,6 +105,65 @@ func genRouteRoleBinding(roleNamespace, saNamespace string) *rbacv1.RoleBinding 
 	}
 }
 
+// proxyRBACName is the name of the Role/RoleBinding that grants the traffic manager's
+// ServiceAccount permission to inject sidecars into workloads in a workload namespace
+// (server-side ProxyInject). Distinct from the manager's own Role and the -route Role
+// so the three never clobber each other when workload ns == manager ns.
+var proxyRBACName = config.ConfigMapPodTrafficManager + "-proxy"
+
+// genProxyRole grants the verbs needed to inject/uninject sidecars in the given
+// namespace: patch/update workload controllers and their pods (rollout wait needs
+// list/watch on pods and replicasets), and get/update services (fargate target-port
+// remap). Namespaced only — no cluster-scoped RBAC. list/watch cannot be filtered by
+// resourceNames, so the rules are namespaced without a name filter.
+func genProxyRole(namespace string) *rbacv1.Role {
+	return &rbacv1.Role{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      proxyRBACName,
+			Namespace: namespace,
+		},
+		Rules: []rbacv1.PolicyRule{
+			{
+				Verbs:     []string{"get", "list", "watch", "patch", "update"},
+				APIGroups: []string{"apps"},
+				Resources: []string{"deployments", "statefulsets", "daemonsets", "replicasets"},
+			},
+			{
+				Verbs:     []string{"get", "list", "watch", "create", "delete", "patch", "update"},
+				APIGroups: []string{""},
+				Resources: []string{"pods"},
+			},
+			{
+				Verbs:     []string{"get", "list", "watch", "patch", "update"},
+				APIGroups: []string{""},
+				Resources: []string{"replicationcontrollers", "services"},
+			},
+		},
+	}
+}
+
+// genProxyRoleBinding binds genProxyRole (in roleNamespace, a workload namespace) to
+// the traffic manager ServiceAccount in saNamespace (the manager namespace). In the
+// non-central case the two namespaces are the same.
+func genProxyRoleBinding(roleNamespace, saNamespace string) *rbacv1.RoleBinding {
+	return &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      proxyRBACName,
+			Namespace: roleNamespace,
+		},
+		Subjects: []rbacv1.Subject{{
+			Kind:      "ServiceAccount",
+			Name:      config.ConfigMapPodTrafficManager,
+			Namespace: saNamespace,
+		}},
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: "rbac.authorization.k8s.io",
+			Kind:     "Role",
+			Name:     proxyRBACName,
+		},
+	}
+}
+
 func genService(namespace string) *v1.Service {
 	tcp10801 := config.PortNameTCP
 	tcp9002 := config.PortNameEnvoy

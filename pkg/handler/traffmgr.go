@@ -245,12 +245,31 @@ func ensureRouteRBAC(ctx context.Context, clientset kubernetes.Interface, worklo
 	}
 }
 
+// ensureProxyRBAC creates (idempotently, best-effort) the namespaced Role + RoleBinding
+// that lets the traffic manager's ServiceAccount inject/uninject sidecars into workloads
+// in the workload namespace (server-side ProxyInject). It never fails the connect: if the
+// RBAC cannot be created, ProxyInject fails and the client falls back to local injection.
+func ensureProxyRBAC(ctx context.Context, clientset kubernetes.Interface, workloadNamespace, managerNamespace string) {
+	if workloadNamespace == "" {
+		workloadNamespace = managerNamespace
+	}
+	if _, err := clientset.RbacV1().Roles(workloadNamespace).Create(ctx, genProxyRole(workloadNamespace), metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
+		plog.G(ctx).Warnf("Could not create proxy-inject Role in namespace %q (server-side injection will fall back to local): %v", workloadNamespace, err)
+		return
+	}
+	if _, err := clientset.RbacV1().RoleBindings(workloadNamespace).Create(ctx, genProxyRoleBinding(workloadNamespace, managerNamespace), metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
+		plog.G(ctx).Warnf("Could not create proxy-inject RoleBinding in namespace %q: %v", workloadNamespace, err)
+	}
+}
+
 func cleanupTrafficManagerResources(ctx context.Context, clientset kubernetes.Interface, namespace string) {
 	options := metav1.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0)}
 	name := config.ConfigMapPodTrafficManager
-	// Route-discovery RBAC (distinct name). In central mode it lives in the workload
-	// namespace and is cleaned up there; here we clear the manager-namespace copy
-	// (non-central mode, where workload ns == manager ns).
+	// Route-discovery and proxy-inject RBAC (distinct names). In central mode they live
+	// in the workload namespace and are cleaned up there; here we clear the
+	// manager-namespace copy (non-central mode, where workload ns == manager ns).
+	_ = clientset.RbacV1().RoleBindings(namespace).Delete(ctx, proxyRBACName, options)
+	_ = clientset.RbacV1().Roles(namespace).Delete(ctx, proxyRBACName, options)
 	_ = clientset.RbacV1().RoleBindings(namespace).Delete(ctx, routeRBACName, options)
 	_ = clientset.RbacV1().Roles(namespace).Delete(ctx, routeRBACName, options)
 	_ = clientset.RbacV1().RoleBindings(namespace).Delete(ctx, name, options)

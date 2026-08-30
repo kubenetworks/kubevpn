@@ -198,6 +198,14 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 	if localTunIPv4 == "" {
 		return fmt.Errorf("local tun IPv4 is empty")
 	}
+
+	// Prefer server-side injection: the traffic manager does the cluster writes with
+	// its own ServiceAccount, so the client needs no workload-patch RBAC. Falls back to
+	// the local path below when the manager is unreachable / too old / lacks RBAC.
+	if handled, injErr := c.createRemoteInboundViaManager(ctx, namespace, headers, portMap, image, localTunIPv4, localTunIPv6, workloads); handled || injErr != nil {
+		return injErr
+	}
+
 	if c.proxyManager == nil {
 		c.proxyManager = newProxyManager(c.factory, c.clientset, c.ManagerNamespace)
 	}
@@ -278,6 +286,10 @@ func (c *ConnectOptions) CreateOutboundPod(ctx context.Context) error {
 	// (idempotent), covering an already-installed / just-upgraded manager. Best-effort:
 	// if the user cannot create this RBAC, discovery degrades to CIDR-only routing.
 	ensureRouteRBAC(ctx, c.clientset, c.WorkloadNamespace, c.ManagerNamespace)
+	// Grant the manager SA the verbs to inject sidecars in the workload namespace, so
+	// server-side ProxyInject works. Idempotent, best-effort: if the user cannot create
+	// this RBAC, ProxyInject fails and the client falls back to local injection.
+	ensureProxyRBAC(ctx, c.clientset, c.WorkloadNamespace, c.ManagerNamespace)
 	return nil
 }
 

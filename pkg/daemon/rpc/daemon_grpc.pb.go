@@ -1099,6 +1099,8 @@ const (
 	TunConfigService_GetTunIP_FullMethodName             = "/rpc.TunConfigService/GetTunIP"
 	TunConfigService_WatchTunIP_FullMethodName           = "/rpc.TunConfigService/WatchTunIP"
 	TunConfigService_WatchNamespaceRoutes_FullMethodName = "/rpc.TunConfigService/WatchNamespaceRoutes"
+	TunConfigService_ProxyInject_FullMethodName          = "/rpc.TunConfigService/ProxyInject"
+	TunConfigService_LeaveInject_FullMethodName          = "/rpc.TunConfigService/LeaveInject"
 )
 
 // TunConfigServiceClient is the client API for TunConfigService service.
@@ -1119,6 +1121,21 @@ type TunConfigServiceClient interface {
 	// deltas. Enabled=false means the manager lacks RBAC to watch the namespace
 	// and the client should degrade to CIDR-only routing.
 	WatchNamespaceRoutes(ctx context.Context, in *NamespaceRoutesRequest, opts ...grpc.CallOption) (TunConfigService_WatchNamespaceRoutesClient, error)
+	// ProxyInject injects envoy sidecar(s) into the given workloads server-side: the
+	// traffic manager performs the workload get/patch, envoy-rule ConfigMap update,
+	// rollout wait and (fargate) service target-port change using its OWN in-cluster
+	// ServiceAccount, so the client no longer needs workload-patch RBAC. The client
+	// dials this over the VPN (manager Service ClusterIP:9002) after connect. Progress
+	// is streamed as human-readable Message lines; the final frame carries Services
+	// (K8s Service workloads + selector) so the client can run its local port Mapper.
+	// Unimplemented on an older manager -> client falls back to local injection.
+	ProxyInject(ctx context.Context, in *InjectRequest, opts ...grpc.CallOption) (TunConfigService_ProxyInjectClient, error)
+	// LeaveInject removes the caller's envoy rule (by OwnerID) from the given workloads
+	// server-side: the traffic manager unpatches the sidecar when no rule remains, waits
+	// for rollout and (fargate) restores the service target port, using its own in-cluster
+	// ServiceAccount. Reuses InjectRequest (only Namespace/Workloads/OwnerID are used).
+	// Streams progress; Unimplemented on an older manager -> client falls back to local.
+	LeaveInject(ctx context.Context, in *InjectRequest, opts ...grpc.CallOption) (TunConfigService_LeaveInjectClient, error)
 }
 
 type tunConfigServiceClient struct {
@@ -1202,6 +1219,70 @@ func (x *tunConfigServiceWatchNamespaceRoutesClient) Recv() (*NamespaceRoutesRes
 	return m, nil
 }
 
+func (c *tunConfigServiceClient) ProxyInject(ctx context.Context, in *InjectRequest, opts ...grpc.CallOption) (TunConfigService_ProxyInjectClient, error) {
+	stream, err := c.cc.NewStream(ctx, &TunConfigService_ServiceDesc.Streams[2], TunConfigService_ProxyInject_FullMethodName, opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &tunConfigServiceProxyInjectClient{stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type TunConfigService_ProxyInjectClient interface {
+	Recv() (*InjectResponse, error)
+	grpc.ClientStream
+}
+
+type tunConfigServiceProxyInjectClient struct {
+	grpc.ClientStream
+}
+
+func (x *tunConfigServiceProxyInjectClient) Recv() (*InjectResponse, error) {
+	m := new(InjectResponse)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func (c *tunConfigServiceClient) LeaveInject(ctx context.Context, in *InjectRequest, opts ...grpc.CallOption) (TunConfigService_LeaveInjectClient, error) {
+	stream, err := c.cc.NewStream(ctx, &TunConfigService_ServiceDesc.Streams[3], TunConfigService_LeaveInject_FullMethodName, opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &tunConfigServiceLeaveInjectClient{stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type TunConfigService_LeaveInjectClient interface {
+	Recv() (*InjectResponse, error)
+	grpc.ClientStream
+}
+
+type tunConfigServiceLeaveInjectClient struct {
+	grpc.ClientStream
+}
+
+func (x *tunConfigServiceLeaveInjectClient) Recv() (*InjectResponse, error) {
+	m := new(InjectResponse)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 // TunConfigServiceServer is the server API for TunConfigService service.
 // All implementations must embed UnimplementedTunConfigServiceServer
 // for forward compatibility
@@ -1220,6 +1301,21 @@ type TunConfigServiceServer interface {
 	// deltas. Enabled=false means the manager lacks RBAC to watch the namespace
 	// and the client should degrade to CIDR-only routing.
 	WatchNamespaceRoutes(*NamespaceRoutesRequest, TunConfigService_WatchNamespaceRoutesServer) error
+	// ProxyInject injects envoy sidecar(s) into the given workloads server-side: the
+	// traffic manager performs the workload get/patch, envoy-rule ConfigMap update,
+	// rollout wait and (fargate) service target-port change using its OWN in-cluster
+	// ServiceAccount, so the client no longer needs workload-patch RBAC. The client
+	// dials this over the VPN (manager Service ClusterIP:9002) after connect. Progress
+	// is streamed as human-readable Message lines; the final frame carries Services
+	// (K8s Service workloads + selector) so the client can run its local port Mapper.
+	// Unimplemented on an older manager -> client falls back to local injection.
+	ProxyInject(*InjectRequest, TunConfigService_ProxyInjectServer) error
+	// LeaveInject removes the caller's envoy rule (by OwnerID) from the given workloads
+	// server-side: the traffic manager unpatches the sidecar when no rule remains, waits
+	// for rollout and (fargate) restores the service target port, using its own in-cluster
+	// ServiceAccount. Reuses InjectRequest (only Namespace/Workloads/OwnerID are used).
+	// Streams progress; Unimplemented on an older manager -> client falls back to local.
+	LeaveInject(*InjectRequest, TunConfigService_LeaveInjectServer) error
 	mustEmbedUnimplementedTunConfigServiceServer()
 }
 
@@ -1235,6 +1331,12 @@ func (UnimplementedTunConfigServiceServer) WatchTunIP(*TunIPRequest, TunConfigSe
 }
 func (UnimplementedTunConfigServiceServer) WatchNamespaceRoutes(*NamespaceRoutesRequest, TunConfigService_WatchNamespaceRoutesServer) error {
 	return status.Errorf(codes.Unimplemented, "method WatchNamespaceRoutes not implemented")
+}
+func (UnimplementedTunConfigServiceServer) ProxyInject(*InjectRequest, TunConfigService_ProxyInjectServer) error {
+	return status.Errorf(codes.Unimplemented, "method ProxyInject not implemented")
+}
+func (UnimplementedTunConfigServiceServer) LeaveInject(*InjectRequest, TunConfigService_LeaveInjectServer) error {
+	return status.Errorf(codes.Unimplemented, "method LeaveInject not implemented")
 }
 func (UnimplementedTunConfigServiceServer) mustEmbedUnimplementedTunConfigServiceServer() {}
 
@@ -1309,6 +1411,48 @@ func (x *tunConfigServiceWatchNamespaceRoutesServer) Send(m *NamespaceRoutesResp
 	return x.ServerStream.SendMsg(m)
 }
 
+func _TunConfigService_ProxyInject_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(InjectRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(TunConfigServiceServer).ProxyInject(m, &tunConfigServiceProxyInjectServer{stream})
+}
+
+type TunConfigService_ProxyInjectServer interface {
+	Send(*InjectResponse) error
+	grpc.ServerStream
+}
+
+type tunConfigServiceProxyInjectServer struct {
+	grpc.ServerStream
+}
+
+func (x *tunConfigServiceProxyInjectServer) Send(m *InjectResponse) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func _TunConfigService_LeaveInject_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(InjectRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(TunConfigServiceServer).LeaveInject(m, &tunConfigServiceLeaveInjectServer{stream})
+}
+
+type TunConfigService_LeaveInjectServer interface {
+	Send(*InjectResponse) error
+	grpc.ServerStream
+}
+
+type tunConfigServiceLeaveInjectServer struct {
+	grpc.ServerStream
+}
+
+func (x *tunConfigServiceLeaveInjectServer) Send(m *InjectResponse) error {
+	return x.ServerStream.SendMsg(m)
+}
+
 // TunConfigService_ServiceDesc is the grpc.ServiceDesc for TunConfigService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1330,6 +1474,16 @@ var TunConfigService_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "WatchNamespaceRoutes",
 			Handler:       _TunConfigService_WatchNamespaceRoutes_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "ProxyInject",
+			Handler:       _TunConfigService_ProxyInject_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "LeaveInject",
+			Handler:       _TunConfigService_LeaveInject_Handler,
 			ServerStreams: true,
 		},
 	},

@@ -3475,6 +3475,222 @@ func (x *NamespaceRoutesResponse) GetEnabled() bool {
 	return false
 }
 
+type InjectRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Namespace    string            `protobuf:"bytes,1,opt,name=Namespace,proto3" json:"Namespace,omitempty"`                                                                                     // workload namespace
+	Workloads    []string          `protobuf:"bytes,2,rep,name=Workloads,proto3" json:"Workloads,omitempty"`                                                                                     // normalized workloads, e.g. "deployments.apps/foo"
+	Headers      map[string]string `protobuf:"bytes,3,rep,name=Headers,proto3" json:"Headers,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"` // header-match rule (empty = full interception)
+	PortMap      []string          `protobuf:"bytes,4,rep,name=PortMap,proto3" json:"PortMap,omitempty"`                                                                                         // containerPort:localPort mappings
+	OwnerID      string            `protobuf:"bytes,5,opt,name=OwnerID,proto3" json:"OwnerID,omitempty"`                                                                                         // connection owner (envoy rule primary key)
+	LocalTunIPv4 string            `protobuf:"bytes,6,opt,name=LocalTunIPv4,proto3" json:"LocalTunIPv4,omitempty"`                                                                               // client's TUN IPv4 (envoy routes here)
+	LocalTunIPv6 string            `protobuf:"bytes,7,opt,name=LocalTunIPv6,proto3" json:"LocalTunIPv6,omitempty"`                                                                               // client's TUN IPv6 (optional)
+	Image        string            `protobuf:"bytes,8,opt,name=Image,proto3" json:"Image,omitempty"`                                                                                             // sidecar image
+}
+
+func (x *InjectRequest) Reset() {
+	*x = InjectRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_daemon_proto_msgTypes[53]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *InjectRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InjectRequest) ProtoMessage() {}
+
+func (x *InjectRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_daemon_proto_msgTypes[53]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InjectRequest.ProtoReflect.Descriptor instead.
+func (*InjectRequest) Descriptor() ([]byte, []int) {
+	return file_daemon_proto_rawDescGZIP(), []int{53}
+}
+
+func (x *InjectRequest) GetNamespace() string {
+	if x != nil {
+		return x.Namespace
+	}
+	return ""
+}
+
+func (x *InjectRequest) GetWorkloads() []string {
+	if x != nil {
+		return x.Workloads
+	}
+	return nil
+}
+
+func (x *InjectRequest) GetHeaders() map[string]string {
+	if x != nil {
+		return x.Headers
+	}
+	return nil
+}
+
+func (x *InjectRequest) GetPortMap() []string {
+	if x != nil {
+		return x.PortMap
+	}
+	return nil
+}
+
+func (x *InjectRequest) GetOwnerID() string {
+	if x != nil {
+		return x.OwnerID
+	}
+	return ""
+}
+
+func (x *InjectRequest) GetLocalTunIPv4() string {
+	if x != nil {
+		return x.LocalTunIPv4
+	}
+	return ""
+}
+
+func (x *InjectRequest) GetLocalTunIPv6() string {
+	if x != nil {
+		return x.LocalTunIPv6
+	}
+	return ""
+}
+
+func (x *InjectRequest) GetImage() string {
+	if x != nil {
+		return x.Image
+	}
+	return ""
+}
+
+// ServiceWorkload identifies a K8s Service workload that was injected, so the client
+// runs its local port Mapper (SSH reverse tunnels to the developer's machine) — the
+// one injection side effect that cannot move server-side.
+type ServiceWorkload struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Workload string `protobuf:"bytes,1,opt,name=Workload,proto3" json:"Workload,omitempty"` // workload string as sent in InjectRequest.Workloads
+	Selector string `protobuf:"bytes,2,opt,name=Selector,proto3" json:"Selector,omitempty"` // label selector for the Service's pods (for the Mapper)
+}
+
+func (x *ServiceWorkload) Reset() {
+	*x = ServiceWorkload{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_daemon_proto_msgTypes[54]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *ServiceWorkload) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ServiceWorkload) ProtoMessage() {}
+
+func (x *ServiceWorkload) ProtoReflect() protoreflect.Message {
+	mi := &file_daemon_proto_msgTypes[54]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ServiceWorkload.ProtoReflect.Descriptor instead.
+func (*ServiceWorkload) Descriptor() ([]byte, []int) {
+	return file_daemon_proto_rawDescGZIP(), []int{54}
+}
+
+func (x *ServiceWorkload) GetWorkload() string {
+	if x != nil {
+		return x.Workload
+	}
+	return ""
+}
+
+func (x *ServiceWorkload) GetSelector() string {
+	if x != nil {
+		return x.Selector
+	}
+	return ""
+}
+
+type InjectResponse struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Message  string             `protobuf:"bytes,1,opt,name=Message,proto3" json:"Message,omitempty"`   // progress line to stream to the client
+	Services []*ServiceWorkload `protobuf:"bytes,2,rep,name=Services,proto3" json:"Services,omitempty"` // set on the final frame: Service workloads needing a client-side Mapper
+}
+
+func (x *InjectResponse) Reset() {
+	*x = InjectResponse{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_daemon_proto_msgTypes[55]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *InjectResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InjectResponse) ProtoMessage() {}
+
+func (x *InjectResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_daemon_proto_msgTypes[55]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InjectResponse.ProtoReflect.Descriptor instead.
+func (*InjectResponse) Descriptor() ([]byte, []int) {
+	return file_daemon_proto_rawDescGZIP(), []int{55}
+}
+
+func (x *InjectResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *InjectResponse) GetServices() []*ServiceWorkload {
+	if x != nil {
+		return x.Services
+	}
+	return nil
+}
+
 var File_daemon_proto protoreflect.FileDescriptor
 
 var file_daemon_proto_rawDesc = []byte{
@@ -3898,7 +4114,39 @@ var file_daemon_proto_rawDesc = []byte{
 	0x73, 0x12, 0x18, 0x0a, 0x07, 0x56, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x18, 0x06, 0x20, 0x01,
 	0x28, 0x03, 0x52, 0x07, 0x56, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x12, 0x18, 0x0a, 0x07, 0x45,
 	0x6e, 0x61, 0x62, 0x6c, 0x65, 0x64, 0x18, 0x07, 0x20, 0x01, 0x28, 0x08, 0x52, 0x07, 0x45, 0x6e,
-	0x61, 0x62, 0x6c, 0x65, 0x64, 0x2a, 0x2c, 0x0a, 0x09, 0x52, 0x6f, 0x75, 0x74, 0x65, 0x54, 0x79,
+	0x61, 0x62, 0x6c, 0x65, 0x64, 0x22, 0xd4, 0x02, 0x0a, 0x0d, 0x49, 0x6e, 0x6a, 0x65, 0x63, 0x74,
+	0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x1c, 0x0a, 0x09, 0x4e, 0x61, 0x6d, 0x65, 0x73,
+	0x70, 0x61, 0x63, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x09, 0x4e, 0x61, 0x6d, 0x65,
+	0x73, 0x70, 0x61, 0x63, 0x65, 0x12, 0x1c, 0x0a, 0x09, 0x57, 0x6f, 0x72, 0x6b, 0x6c, 0x6f, 0x61,
+	0x64, 0x73, 0x18, 0x02, 0x20, 0x03, 0x28, 0x09, 0x52, 0x09, 0x57, 0x6f, 0x72, 0x6b, 0x6c, 0x6f,
+	0x61, 0x64, 0x73, 0x12, 0x39, 0x0a, 0x07, 0x48, 0x65, 0x61, 0x64, 0x65, 0x72, 0x73, 0x18, 0x03,
+	0x20, 0x03, 0x28, 0x0b, 0x32, 0x1f, 0x2e, 0x72, 0x70, 0x63, 0x2e, 0x49, 0x6e, 0x6a, 0x65, 0x63,
+	0x74, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x2e, 0x48, 0x65, 0x61, 0x64, 0x65, 0x72, 0x73,
+	0x45, 0x6e, 0x74, 0x72, 0x79, 0x52, 0x07, 0x48, 0x65, 0x61, 0x64, 0x65, 0x72, 0x73, 0x12, 0x18,
+	0x0a, 0x07, 0x50, 0x6f, 0x72, 0x74, 0x4d, 0x61, 0x70, 0x18, 0x04, 0x20, 0x03, 0x28, 0x09, 0x52,
+	0x07, 0x50, 0x6f, 0x72, 0x74, 0x4d, 0x61, 0x70, 0x12, 0x18, 0x0a, 0x07, 0x4f, 0x77, 0x6e, 0x65,
+	0x72, 0x49, 0x44, 0x18, 0x05, 0x20, 0x01, 0x28, 0x09, 0x52, 0x07, 0x4f, 0x77, 0x6e, 0x65, 0x72,
+	0x49, 0x44, 0x12, 0x22, 0x0a, 0x0c, 0x4c, 0x6f, 0x63, 0x61, 0x6c, 0x54, 0x75, 0x6e, 0x49, 0x50,
+	0x76, 0x34, 0x18, 0x06, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0c, 0x4c, 0x6f, 0x63, 0x61, 0x6c, 0x54,
+	0x75, 0x6e, 0x49, 0x50, 0x76, 0x34, 0x12, 0x22, 0x0a, 0x0c, 0x4c, 0x6f, 0x63, 0x61, 0x6c, 0x54,
+	0x75, 0x6e, 0x49, 0x50, 0x76, 0x36, 0x18, 0x07, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0c, 0x4c, 0x6f,
+	0x63, 0x61, 0x6c, 0x54, 0x75, 0x6e, 0x49, 0x50, 0x76, 0x36, 0x12, 0x14, 0x0a, 0x05, 0x49, 0x6d,
+	0x61, 0x67, 0x65, 0x18, 0x08, 0x20, 0x01, 0x28, 0x09, 0x52, 0x05, 0x49, 0x6d, 0x61, 0x67, 0x65,
+	0x1a, 0x3a, 0x0a, 0x0c, 0x48, 0x65, 0x61, 0x64, 0x65, 0x72, 0x73, 0x45, 0x6e, 0x74, 0x72, 0x79,
+	0x12, 0x10, 0x0a, 0x03, 0x6b, 0x65, 0x79, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x03, 0x6b,
+	0x65, 0x79, 0x12, 0x14, 0x0a, 0x05, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28,
+	0x09, 0x52, 0x05, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x3a, 0x02, 0x38, 0x01, 0x22, 0x49, 0x0a, 0x0f,
+	0x53, 0x65, 0x72, 0x76, 0x69, 0x63, 0x65, 0x57, 0x6f, 0x72, 0x6b, 0x6c, 0x6f, 0x61, 0x64, 0x12,
+	0x1a, 0x0a, 0x08, 0x57, 0x6f, 0x72, 0x6b, 0x6c, 0x6f, 0x61, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28,
+	0x09, 0x52, 0x08, 0x57, 0x6f, 0x72, 0x6b, 0x6c, 0x6f, 0x61, 0x64, 0x12, 0x1a, 0x0a, 0x08, 0x53,
+	0x65, 0x6c, 0x65, 0x63, 0x74, 0x6f, 0x72, 0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x08, 0x53,
+	0x65, 0x6c, 0x65, 0x63, 0x74, 0x6f, 0x72, 0x22, 0x5c, 0x0a, 0x0e, 0x49, 0x6e, 0x6a, 0x65, 0x63,
+	0x74, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12, 0x18, 0x0a, 0x07, 0x4d, 0x65, 0x73,
+	0x73, 0x61, 0x67, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x07, 0x4d, 0x65, 0x73, 0x73,
+	0x61, 0x67, 0x65, 0x12, 0x30, 0x0a, 0x08, 0x53, 0x65, 0x72, 0x76, 0x69, 0x63, 0x65, 0x73, 0x18,
+	0x02, 0x20, 0x03, 0x28, 0x0b, 0x32, 0x14, 0x2e, 0x72, 0x70, 0x63, 0x2e, 0x53, 0x65, 0x72, 0x76,
+	0x69, 0x63, 0x65, 0x57, 0x6f, 0x72, 0x6b, 0x6c, 0x6f, 0x61, 0x64, 0x52, 0x08, 0x53, 0x65, 0x72,
+	0x76, 0x69, 0x63, 0x65, 0x73, 0x2a, 0x2c, 0x0a, 0x09, 0x52, 0x6f, 0x75, 0x74, 0x65, 0x54, 0x79,
 	0x70, 0x65, 0x12, 0x0d, 0x0a, 0x09, 0x52, 0x4f, 0x55, 0x54, 0x45, 0x5f, 0x41, 0x44, 0x44, 0x10,
 	0x00, 0x12, 0x10, 0x0a, 0x0c, 0x52, 0x4f, 0x55, 0x54, 0x45, 0x5f, 0x44, 0x45, 0x4c, 0x45, 0x54,
 	0x45, 0x10, 0x01, 0x32, 0xd9, 0x08, 0x0a, 0x06, 0x44, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x12, 0x3a,
@@ -3971,7 +4219,7 @@ var file_daemon_proto_rawDesc = []byte{
 	0x12, 0x14, 0x2e, 0x72, 0x70, 0x63, 0x2e, 0x49, 0x64, 0x65, 0x6e, 0x74, 0x69, 0x66, 0x79, 0x52,
 	0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x15, 0x2e, 0x72, 0x70, 0x63, 0x2e, 0x49, 0x64, 0x65,
 	0x6e, 0x74, 0x69, 0x66, 0x79, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x32,
-	0xd7, 0x01, 0x0a, 0x10, 0x54, 0x75, 0x6e, 0x43, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x53, 0x65, 0x72,
+	0xcf, 0x02, 0x0a, 0x10, 0x54, 0x75, 0x6e, 0x43, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x53, 0x65, 0x72,
 	0x76, 0x69, 0x63, 0x65, 0x12, 0x33, 0x0a, 0x08, 0x47, 0x65, 0x74, 0x54, 0x75, 0x6e, 0x49, 0x50,
 	0x12, 0x11, 0x2e, 0x72, 0x70, 0x63, 0x2e, 0x54, 0x75, 0x6e, 0x49, 0x50, 0x52, 0x65, 0x71, 0x75,
 	0x65, 0x73, 0x74, 0x1a, 0x12, 0x2e, 0x72, 0x70, 0x63, 0x2e, 0x54, 0x75, 0x6e, 0x49, 0x50, 0x52,
@@ -3984,8 +4232,16 @@ var file_daemon_proto_rawDesc = []byte{
 	0x2e, 0x4e, 0x61, 0x6d, 0x65, 0x73, 0x70, 0x61, 0x63, 0x65, 0x52, 0x6f, 0x75, 0x74, 0x65, 0x73,
 	0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x1c, 0x2e, 0x72, 0x70, 0x63, 0x2e, 0x4e, 0x61,
 	0x6d, 0x65, 0x73, 0x70, 0x61, 0x63, 0x65, 0x52, 0x6f, 0x75, 0x74, 0x65, 0x73, 0x52, 0x65, 0x73,
-	0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x30, 0x01, 0x42, 0x07, 0x5a, 0x05, 0x2e, 0x3b, 0x72,
-	0x70, 0x63, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
+	0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x30, 0x01, 0x12, 0x3a, 0x0a, 0x0b, 0x50, 0x72, 0x6f,
+	0x78, 0x79, 0x49, 0x6e, 0x6a, 0x65, 0x63, 0x74, 0x12, 0x12, 0x2e, 0x72, 0x70, 0x63, 0x2e, 0x49,
+	0x6e, 0x6a, 0x65, 0x63, 0x74, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x13, 0x2e, 0x72,
+	0x70, 0x63, 0x2e, 0x49, 0x6e, 0x6a, 0x65, 0x63, 0x74, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73,
+	0x65, 0x22, 0x00, 0x30, 0x01, 0x12, 0x3a, 0x0a, 0x0b, 0x4c, 0x65, 0x61, 0x76, 0x65, 0x49, 0x6e,
+	0x6a, 0x65, 0x63, 0x74, 0x12, 0x12, 0x2e, 0x72, 0x70, 0x63, 0x2e, 0x49, 0x6e, 0x6a, 0x65, 0x63,
+	0x74, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x13, 0x2e, 0x72, 0x70, 0x63, 0x2e, 0x49,
+	0x6e, 0x6a, 0x65, 0x63, 0x74, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x30,
+	0x01, 0x42, 0x07, 0x5a, 0x05, 0x2e, 0x3b, 0x72, 0x70, 0x63, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74,
+	0x6f, 0x33,
 }
 
 var (
@@ -4001,7 +4257,7 @@ func file_daemon_proto_rawDescGZIP() []byte {
 }
 
 var file_daemon_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_daemon_proto_msgTypes = make([]protoimpl.MessageInfo, 58)
+var file_daemon_proto_msgTypes = make([]protoimpl.MessageInfo, 62)
 var file_daemon_proto_goTypes = []interface{}{
 	(RouteType)(0),                  // 0: rpc.RouteType
 	(*ConnectRequest)(nil),          // 1: rpc.ConnectRequest
@@ -4057,20 +4313,24 @@ var file_daemon_proto_goTypes = []interface{}{
 	(*NamespaceRoutesRequest)(nil),  // 51: rpc.NamespaceRoutesRequest
 	(*ServiceRecord)(nil),           // 52: rpc.ServiceRecord
 	(*NamespaceRoutesResponse)(nil), // 53: rpc.NamespaceRoutesResponse
-	nil,                             // 54: rpc.ProxyRequest.HeadersEntry
-	nil,                             // 55: rpc.SyncRequest.HeadersEntry
-	nil,                             // 56: rpc.ProxyRule.HeadersEntry
-	nil,                             // 57: rpc.ProxyRule.PortMapEntry
-	nil,                             // 58: rpc.SyncRule.HeadersEntry
+	(*InjectRequest)(nil),           // 54: rpc.InjectRequest
+	(*ServiceWorkload)(nil),         // 55: rpc.ServiceWorkload
+	(*InjectResponse)(nil),          // 56: rpc.InjectResponse
+	nil,                             // 57: rpc.ProxyRequest.HeadersEntry
+	nil,                             // 58: rpc.SyncRequest.HeadersEntry
+	nil,                             // 59: rpc.ProxyRule.HeadersEntry
+	nil,                             // 60: rpc.ProxyRule.PortMapEntry
+	nil,                             // 61: rpc.SyncRule.HeadersEntry
+	nil,                             // 62: rpc.InjectRequest.HeadersEntry
 }
 var file_daemon_proto_depIdxs = []int32{
 	45, // 0: rpc.ConnectRequest.ExtraRoute:type_name -> rpc.ExtraRoute
 	44, // 1: rpc.ConnectRequest.SshJump:type_name -> rpc.SshJump
 	44, // 2: rpc.DisconnectRequest.SshJump:type_name -> rpc.SshJump
-	54, // 3: rpc.ProxyRequest.Headers:type_name -> rpc.ProxyRequest.HeadersEntry
+	57, // 3: rpc.ProxyRequest.Headers:type_name -> rpc.ProxyRequest.HeadersEntry
 	45, // 4: rpc.ProxyRequest.ExtraRoute:type_name -> rpc.ExtraRoute
 	44, // 5: rpc.ProxyRequest.SshJump:type_name -> rpc.SshJump
-	55, // 6: rpc.SyncRequest.Headers:type_name -> rpc.SyncRequest.HeadersEntry
+	58, // 6: rpc.SyncRequest.Headers:type_name -> rpc.SyncRequest.HeadersEntry
 	45, // 7: rpc.SyncRequest.ExtraRoute:type_name -> rpc.ExtraRoute
 	44, // 8: rpc.SyncRequest.SshJump:type_name -> rpc.SshJump
 	21, // 9: rpc.ConnectionListResponse.List:type_name -> rpc.Status
@@ -4078,64 +4338,70 @@ var file_daemon_proto_depIdxs = []int32{
 	22, // 11: rpc.Status.ProxyList:type_name -> rpc.Proxy
 	24, // 12: rpc.Status.SyncList:type_name -> rpc.Sync
 	23, // 13: rpc.Proxy.RuleList:type_name -> rpc.ProxyRule
-	56, // 14: rpc.ProxyRule.Headers:type_name -> rpc.ProxyRule.HeadersEntry
-	57, // 15: rpc.ProxyRule.PortMap:type_name -> rpc.ProxyRule.PortMapEntry
+	59, // 14: rpc.ProxyRule.Headers:type_name -> rpc.ProxyRule.HeadersEntry
+	60, // 15: rpc.ProxyRule.PortMap:type_name -> rpc.ProxyRule.PortMapEntry
 	25, // 16: rpc.Sync.RuleList:type_name -> rpc.SyncRule
-	58, // 17: rpc.SyncRule.Headers:type_name -> rpc.SyncRule.HeadersEntry
+	61, // 17: rpc.SyncRule.Headers:type_name -> rpc.SyncRule.HeadersEntry
 	0,  // 18: rpc.RouteRequest.type:type_name -> rpc.RouteType
 	44, // 19: rpc.SshConnectRequest.SshJump:type_name -> rpc.SshJump
 	44, // 20: rpc.UninstallRequest.SshJump:type_name -> rpc.SshJump
 	44, // 21: rpc.ResetRequest.SshJump:type_name -> rpc.SshJump
 	52, // 22: rpc.NamespaceRoutesResponse.UpsertedServices:type_name -> rpc.ServiceRecord
-	1,  // 23: rpc.Daemon.Connect:input_type -> rpc.ConnectRequest
-	3,  // 24: rpc.Daemon.Disconnect:input_type -> rpc.DisconnectRequest
-	5,  // 25: rpc.Daemon.Proxy:input_type -> rpc.ProxyRequest
-	7,  // 26: rpc.Daemon.Leave:input_type -> rpc.LeaveRequest
-	9,  // 27: rpc.Daemon.Sync:input_type -> rpc.SyncRequest
-	11, // 28: rpc.Daemon.Unsync:input_type -> rpc.UnsyncRequest
-	13, // 29: rpc.Daemon.ConnectionList:input_type -> rpc.ConnectionListRequest
-	15, // 30: rpc.Daemon.ConnectionUse:input_type -> rpc.ConnectionUseRequest
-	28, // 31: rpc.Daemon.SshStart:input_type -> rpc.SshStartRequest
-	30, // 32: rpc.Daemon.SshStop:input_type -> rpc.SshStopRequest
-	32, // 33: rpc.Daemon.Route:input_type -> rpc.RouteRequest
-	36, // 34: rpc.Daemon.Logs:input_type -> rpc.LogRequest
-	38, // 35: rpc.Daemon.Upgrade:input_type -> rpc.UpgradeRequest
-	19, // 36: rpc.Daemon.Status:input_type -> rpc.StatusRequest
-	26, // 37: rpc.Daemon.Version:input_type -> rpc.VersionRequest
-	42, // 38: rpc.Daemon.Reset:input_type -> rpc.ResetRequest
-	40, // 39: rpc.Daemon.Uninstall:input_type -> rpc.UninstallRequest
-	17, // 40: rpc.Daemon.Quit:input_type -> rpc.QuitRequest
-	46, // 41: rpc.Daemon.Identify:input_type -> rpc.IdentifyRequest
-	49, // 42: rpc.TunConfigService.GetTunIP:input_type -> rpc.TunIPRequest
-	49, // 43: rpc.TunConfigService.WatchTunIP:input_type -> rpc.TunIPRequest
-	51, // 44: rpc.TunConfigService.WatchNamespaceRoutes:input_type -> rpc.NamespaceRoutesRequest
-	2,  // 45: rpc.Daemon.Connect:output_type -> rpc.ConnectResponse
-	4,  // 46: rpc.Daemon.Disconnect:output_type -> rpc.DisconnectResponse
-	6,  // 47: rpc.Daemon.Proxy:output_type -> rpc.ProxyResponse
-	8,  // 48: rpc.Daemon.Leave:output_type -> rpc.LeaveResponse
-	10, // 49: rpc.Daemon.Sync:output_type -> rpc.SyncResponse
-	12, // 50: rpc.Daemon.Unsync:output_type -> rpc.UnsyncResponse
-	14, // 51: rpc.Daemon.ConnectionList:output_type -> rpc.ConnectionListResponse
-	16, // 52: rpc.Daemon.ConnectionUse:output_type -> rpc.ConnectionUseResponse
-	29, // 53: rpc.Daemon.SshStart:output_type -> rpc.SshStartResponse
-	31, // 54: rpc.Daemon.SshStop:output_type -> rpc.SshStopResponse
-	33, // 55: rpc.Daemon.Route:output_type -> rpc.RouteResponse
-	37, // 56: rpc.Daemon.Logs:output_type -> rpc.LogResponse
-	39, // 57: rpc.Daemon.Upgrade:output_type -> rpc.UpgradeResponse
-	20, // 58: rpc.Daemon.Status:output_type -> rpc.StatusResponse
-	27, // 59: rpc.Daemon.Version:output_type -> rpc.VersionResponse
-	43, // 60: rpc.Daemon.Reset:output_type -> rpc.ResetResponse
-	41, // 61: rpc.Daemon.Uninstall:output_type -> rpc.UninstallResponse
-	18, // 62: rpc.Daemon.Quit:output_type -> rpc.QuitResponse
-	47, // 63: rpc.Daemon.Identify:output_type -> rpc.IdentifyResponse
-	50, // 64: rpc.TunConfigService.GetTunIP:output_type -> rpc.TunIPResponse
-	50, // 65: rpc.TunConfigService.WatchTunIP:output_type -> rpc.TunIPResponse
-	53, // 66: rpc.TunConfigService.WatchNamespaceRoutes:output_type -> rpc.NamespaceRoutesResponse
-	45, // [45:67] is the sub-list for method output_type
-	23, // [23:45] is the sub-list for method input_type
-	23, // [23:23] is the sub-list for extension type_name
-	23, // [23:23] is the sub-list for extension extendee
-	0,  // [0:23] is the sub-list for field type_name
+	62, // 23: rpc.InjectRequest.Headers:type_name -> rpc.InjectRequest.HeadersEntry
+	55, // 24: rpc.InjectResponse.Services:type_name -> rpc.ServiceWorkload
+	1,  // 25: rpc.Daemon.Connect:input_type -> rpc.ConnectRequest
+	3,  // 26: rpc.Daemon.Disconnect:input_type -> rpc.DisconnectRequest
+	5,  // 27: rpc.Daemon.Proxy:input_type -> rpc.ProxyRequest
+	7,  // 28: rpc.Daemon.Leave:input_type -> rpc.LeaveRequest
+	9,  // 29: rpc.Daemon.Sync:input_type -> rpc.SyncRequest
+	11, // 30: rpc.Daemon.Unsync:input_type -> rpc.UnsyncRequest
+	13, // 31: rpc.Daemon.ConnectionList:input_type -> rpc.ConnectionListRequest
+	15, // 32: rpc.Daemon.ConnectionUse:input_type -> rpc.ConnectionUseRequest
+	28, // 33: rpc.Daemon.SshStart:input_type -> rpc.SshStartRequest
+	30, // 34: rpc.Daemon.SshStop:input_type -> rpc.SshStopRequest
+	32, // 35: rpc.Daemon.Route:input_type -> rpc.RouteRequest
+	36, // 36: rpc.Daemon.Logs:input_type -> rpc.LogRequest
+	38, // 37: rpc.Daemon.Upgrade:input_type -> rpc.UpgradeRequest
+	19, // 38: rpc.Daemon.Status:input_type -> rpc.StatusRequest
+	26, // 39: rpc.Daemon.Version:input_type -> rpc.VersionRequest
+	42, // 40: rpc.Daemon.Reset:input_type -> rpc.ResetRequest
+	40, // 41: rpc.Daemon.Uninstall:input_type -> rpc.UninstallRequest
+	17, // 42: rpc.Daemon.Quit:input_type -> rpc.QuitRequest
+	46, // 43: rpc.Daemon.Identify:input_type -> rpc.IdentifyRequest
+	49, // 44: rpc.TunConfigService.GetTunIP:input_type -> rpc.TunIPRequest
+	49, // 45: rpc.TunConfigService.WatchTunIP:input_type -> rpc.TunIPRequest
+	51, // 46: rpc.TunConfigService.WatchNamespaceRoutes:input_type -> rpc.NamespaceRoutesRequest
+	54, // 47: rpc.TunConfigService.ProxyInject:input_type -> rpc.InjectRequest
+	54, // 48: rpc.TunConfigService.LeaveInject:input_type -> rpc.InjectRequest
+	2,  // 49: rpc.Daemon.Connect:output_type -> rpc.ConnectResponse
+	4,  // 50: rpc.Daemon.Disconnect:output_type -> rpc.DisconnectResponse
+	6,  // 51: rpc.Daemon.Proxy:output_type -> rpc.ProxyResponse
+	8,  // 52: rpc.Daemon.Leave:output_type -> rpc.LeaveResponse
+	10, // 53: rpc.Daemon.Sync:output_type -> rpc.SyncResponse
+	12, // 54: rpc.Daemon.Unsync:output_type -> rpc.UnsyncResponse
+	14, // 55: rpc.Daemon.ConnectionList:output_type -> rpc.ConnectionListResponse
+	16, // 56: rpc.Daemon.ConnectionUse:output_type -> rpc.ConnectionUseResponse
+	29, // 57: rpc.Daemon.SshStart:output_type -> rpc.SshStartResponse
+	31, // 58: rpc.Daemon.SshStop:output_type -> rpc.SshStopResponse
+	33, // 59: rpc.Daemon.Route:output_type -> rpc.RouteResponse
+	37, // 60: rpc.Daemon.Logs:output_type -> rpc.LogResponse
+	39, // 61: rpc.Daemon.Upgrade:output_type -> rpc.UpgradeResponse
+	20, // 62: rpc.Daemon.Status:output_type -> rpc.StatusResponse
+	27, // 63: rpc.Daemon.Version:output_type -> rpc.VersionResponse
+	43, // 64: rpc.Daemon.Reset:output_type -> rpc.ResetResponse
+	41, // 65: rpc.Daemon.Uninstall:output_type -> rpc.UninstallResponse
+	18, // 66: rpc.Daemon.Quit:output_type -> rpc.QuitResponse
+	47, // 67: rpc.Daemon.Identify:output_type -> rpc.IdentifyResponse
+	50, // 68: rpc.TunConfigService.GetTunIP:output_type -> rpc.TunIPResponse
+	50, // 69: rpc.TunConfigService.WatchTunIP:output_type -> rpc.TunIPResponse
+	53, // 70: rpc.TunConfigService.WatchNamespaceRoutes:output_type -> rpc.NamespaceRoutesResponse
+	56, // 71: rpc.TunConfigService.ProxyInject:output_type -> rpc.InjectResponse
+	56, // 72: rpc.TunConfigService.LeaveInject:output_type -> rpc.InjectResponse
+	49, // [49:73] is the sub-list for method output_type
+	25, // [25:49] is the sub-list for method input_type
+	25, // [25:25] is the sub-list for extension type_name
+	25, // [25:25] is the sub-list for extension extendee
+	0,  // [0:25] is the sub-list for field type_name
 }
 
 func init() { file_daemon_proto_init() }
@@ -4780,6 +5046,42 @@ func file_daemon_proto_init() {
 				return nil
 			}
 		}
+		file_daemon_proto_msgTypes[53].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*InjectRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_daemon_proto_msgTypes[54].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*ServiceWorkload); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_daemon_proto_msgTypes[55].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*InjectResponse); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
 	}
 	file_daemon_proto_msgTypes[2].OneofWrappers = []interface{}{}
 	type x struct{}
@@ -4788,7 +5090,7 @@ func file_daemon_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_daemon_proto_rawDesc,
 			NumEnums:      1,
-			NumMessages:   58,
+			NumMessages:   62,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

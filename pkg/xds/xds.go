@@ -43,6 +43,8 @@ func Main(ctx context.Context, factory cmdutil.Factory, port uint, logger *log.E
 	if err != nil {
 		return fmt.Errorf("start TunConfigServer: %w", err)
 	}
+	// Back server-side sidecar injection (ProxyInject) with the in-cluster factory.
+	tunConfig.factory = factory
 	tunConfig.StartLeaseReaper(ctx)
 
 	errChan := make(chan error, 2)

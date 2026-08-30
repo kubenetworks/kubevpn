@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/retry"
+	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"sigs.k8s.io/yaml"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -69,6 +70,13 @@ type TunConfigServer struct {
 	// routes serves WatchNamespaceRoutes: server-side per-namespace pod/service
 	// discovery pushed to clients, replacing each client's cluster-wide list-watch.
 	routes *routeBroadcaster
+
+	// factory backs server-side sidecar injection (ProxyInject). Set by xds.Main
+	// from the in-cluster config; nil in unit tests / when unavailable, in which
+	// case ProxyInject returns Unavailable and the client falls back to local
+	// injection. Kept separate from clientset because the kubectl injection
+	// machinery (GetTopOwnerObject, RolloutStatus, resource.Helper) needs a Factory.
+	factory cmdutil.Factory
 }
 
 // lastIPRecord is the last IPv4/IPv6 a given owner held.

@@ -208,7 +208,7 @@ func (s *VirtualStore) Mutate(ctx context.Context, fn MutationFunc) error
 
 `Mutate` wraps `retry.RetryOnConflict(retry.DefaultBackoff, ...)`. On each attempt it:
 1. GETs the ConfigMap (preserving `ResourceVersion`)
-2. Unmarshals the YAML in `cm.Data[ENVOY_CONFIG]` → `[]*xds.Virtual`
+2. Unmarshals the YAML in `cm.Data[ENVOY_CONFIG]` → `[]*controlplane.Virtual`
 3. Calls `fn` (the mutation)
 4. Marshals back to YAML and calls `Update` (optimistic concurrency via `ResourceVersion`)
 
