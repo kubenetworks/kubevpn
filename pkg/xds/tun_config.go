@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
 	"sort"
 	"sync"
 	"time"
@@ -41,6 +42,12 @@ type TunConfigServer struct {
 	// when it is still free. In-memory only; bounded by the real client count
 	// because OwnerID is now stable per machine+user.
 	lastIPs map[string]lastIPRecord
+
+	// reapedAt records when an ownerID's lease was reaped (and not since re-acquired).
+	// The lease reaper uses it to clean up a truly-abandoned owner's envoy rules after
+	// abandonmentTTL — long enough that a sleeping client (whose lease lapsed but which
+	// will wake and re-allocate) is NOT affected. Cleared when the owner calls GetTunIP.
+	reapedAt map[string]time.Time
 
 	// pendingProposal tracks a dry-run IP change proposed to a client but not yet
 	// confirmed. It is pure intent — NO IP is rented while pending. The server never
@@ -137,6 +144,7 @@ func NewTunConfigServer(ctx context.Context, clientset kubernetes.Interface, nam
 		allocs:          make(map[string]*tunAllocation),
 		watchers:        make(map[string][]chan *rpc.TunIPResponse),
 		lastIPs:         make(map[string]lastIPRecord),
+		reapedAt:        make(map[string]time.Time),
 		pendingProposal: make(map[string]proposal),
 	}
 	s.routes = newRouteBroadcaster(clientset)
@@ -341,6 +349,10 @@ func (s *TunConfigServer) GetTunIP(ctx context.Context, req *rpc.TunIPRequest) (
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	// The owner is active (or returning from sleep): it is no longer abandoned, so it
+	// keeps its envoy rules regardless of how long its lease had lapsed.
+	delete(s.reapedAt, req.OwnerID)
 
 	// Dry-run confirm: the client validated a proposed IP (v4 or v6) and asks to
 	// commit it. The family is inferred from the ConfirmIP address.
@@ -1084,6 +1096,77 @@ const LeaseDuration = 5 * time.Minute
 // leaseReapInterval is how often the lease reaper scans for and reclaims expired allocations.
 const leaseReapInterval = 30 * time.Second
 
+// abandonmentTTL is how long after a lease is reaped (with no re-acquire) the owner's
+// envoy rules are cleaned up as abandoned. It is deliberately much longer than
+// LeaseDuration so a sleeping client — whose lease lapses but which will wake and
+// re-allocate, re-pointing its still-present rule via syncEnvoyRuleIP — is not affected;
+// only a client gone this long (crash / SIGKILL / powered off) has its rule removed.
+// Default 24h; override with KUBEVPN_PROXY_ABANDON_TTL (a Go duration, e.g. "6h").
+var abandonmentTTL = resolveAbandonmentTTL()
+
+func resolveAbandonmentTTL() time.Duration {
+	if v := os.Getenv("KUBEVPN_PROXY_ABANDON_TTL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+	}
+	return 24 * time.Hour
+}
+
+// removeEnvoyRulesForOwner deletes all envoy rules owned by ownerID from ENVOY_CONFIG
+// (dropping any Virtual left with no rules). Used by the lease reaper's abandonment pass
+// to clean up a rule left behind by a client that vanished without a clean Leave (crash /
+// SIGKILL). It mirrors syncEnvoyRuleIP's read-modify-write; the xDS ConfigMap watcher
+// re-pushes the envoy snapshot on the change. It does NOT unpatch the sidecar container
+// (that needs workload RBAC).
+func (s *TunConfigServer) removeEnvoyRulesForOwner(ctx context.Context, ownerID string) {
+	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		cm, err := s.clientset.CoreV1().ConfigMaps(s.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		virtuals, parseErr := parseYaml(cm.Data[config.KeyEnvoy])
+		if parseErr != nil {
+			return nil // not a valid Virtual list (empty/legacy/corrupt): nothing to remove
+		}
+		changed := false
+		kept := virtuals[:0]
+		for _, v := range virtuals {
+			rules := v.Rules[:0]
+			for _, rule := range v.Rules {
+				if rule.OwnerID == ownerID {
+					changed = true
+					continue
+				}
+				rules = append(rules, rule)
+			}
+			v.Rules = rules
+			if len(v.Rules) == 0 {
+				continue // drop a Virtual with no remaining rules
+			}
+			kept = append(kept, v)
+		}
+		if !changed {
+			return nil
+		}
+		data, marshalErr := yaml.Marshal(kept)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		if cm.Data == nil {
+			cm.Data = make(map[string]string)
+		}
+		cm.Data[config.KeyEnvoy] = string(data)
+		_, err = s.clientset.CoreV1().ConfigMaps(s.namespace).Update(ctx, cm, metav1.UpdateOptions{})
+		return err
+	})
+	if err != nil {
+		plog.G(ctx).Warnf("[TunConfig] failed to remove envoy rules for abandoned owner %s: %v", ownerID, err)
+	} else {
+		plog.G(ctx).Infof("[TunConfig] removed envoy rules for abandoned owner %s (no re-acquire in %v)", ownerID, abandonmentTTL)
+	}
+}
+
 // manualGrace is how long a manual TUN_ALLOCS edit keeps the owner's pre-edit IP
 // rented (a reservation) after pushing the new IP, awaiting client accept/reject.
 // On expiry with no reject the change is assumed accepted and the old IP released.
@@ -1131,6 +1214,11 @@ func (s *TunConfigServer) reapExpiredLeases(ctx context.Context) {
 		delete(s.allocs, ownerID)
 		// Remember the IP so this owner reclaims it on reconnect if still free.
 		s.lastIPs[ownerID] = lastIPRecord{v4: alloc.IPv4, v6: alloc.IPv6}
+		// Mark when the lease was reaped (only if not already marked, so the abandonment
+		// clock starts at the first reap and is not reset by re-reaps). Cleared on GetTunIP.
+		if _, marked := s.reapedAt[ownerID]; !marked {
+			s.reapedAt[ownerID] = now
+		}
 		s.mu.Unlock()
 
 		var ipv4, ipv6 net.IP
@@ -1155,6 +1243,13 @@ func (s *TunConfigServer) reapExpiredLeases(ctx context.Context) {
 		}
 	}
 
+	// Abandonment pass: an owner whose lease was reaped and has not re-acquired within
+	// abandonmentTTL (and has no live watcher/alloc) is treated as gone for good (crash /
+	// SIGKILL / powered off) — clean up its leftover envoy rules so a stale proxy rule does
+	// not linger indefinitely. A sleeping client is unaffected: it re-acquires via GetTunIP
+	// on wake (which clears reapedAt) well within the (long) TTL.
+	s.reapAbandonedOwners(ctx, now)
+
 	// Drop dry-run proposals whose grace deadline elapsed with no client response
 	// (offline/lost push). No IP was rented for a proposal, so there is nothing to
 	// release — just revert any operator edit still sitting in TUN_ALLOCS to actual.
@@ -1165,6 +1260,34 @@ func (s *TunConfigServer) reapExpiredLeases(ctx context.Context) {
 	// deployment: GetTunIP is mutex-serialized, so no in-flight allocation is
 	// misclassified as an orphan.
 	s.scrubOrphanBits(ctx)
+}
+
+// reapAbandonedOwners removes the envoy rules of owners whose lease was reaped more than
+// abandonmentTTL ago and which have not re-acquired (no alloc, no watcher). Candidates are
+// collected under the lock; the ConfigMap read-modify-write runs outside it.
+func (s *TunConfigServer) reapAbandonedOwners(ctx context.Context, now time.Time) {
+	var abandoned []string
+	s.mu.Lock()
+	for owner, t := range s.reapedAt {
+		if now.Sub(t) <= abandonmentTTL {
+			continue
+		}
+		if _, hasAlloc := s.allocs[owner]; hasAlloc {
+			delete(s.reapedAt, owner) // re-acquired; no longer abandoned
+			continue
+		}
+		if len(s.watchers[owner]) > 0 {
+			continue // still connected via a stream; not abandoned
+		}
+		abandoned = append(abandoned, owner)
+		delete(s.reapedAt, owner)
+		delete(s.lastIPs, owner)
+	}
+	s.mu.Unlock()
+
+	for _, owner := range abandoned {
+		s.removeEnvoyRulesForOwner(ctx, owner)
+	}
 }
 
 // expirePendingProposals drops dry-run proposals past their deadline. Proposals hold

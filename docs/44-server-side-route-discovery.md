@@ -81,6 +81,25 @@ create this RBAC, discovery degrades (see above). Cleanup removes the `-route` R
 manager namespace; in central mode a harmless dangling copy may remain in the workload
 namespace (its subject SA is deleted on uninstall).
 
+## 3b. Zombie rule cleanup (abandonment TTL)
+
+A client that vanishes without a clean Leave (crash / SIGKILL / powered off) leaves its
+envoy proxy rule in ENVOY_CONFIG. The lease reaper cleans these up, but **only after a long
+`abandonmentTTL`** measured from when the lease was reaped — never on the lease reap itself.
+This distinction matters: a lease expiring does **not** mean the client is gone. A sleeping
+laptop's `WatchTunIP` stream drops and its lease is reaped, but on wake it re-allocates and
+`syncEnvoyRuleIP` re-points the still-present rule (see [09-tun-ip-hot-update.md](09-tun-ip-hot-update.md)
+and [28-sleep-wake-ip-update.md](28-sleep-wake-ip-update.md)). Removing the rule on reap would
+break that; so instead:
+
+- On reap, the owner's reap time is recorded (`reapedAt`); `GetTunIP` clears it (the owner is
+  back). The abandonment pass removes an owner's rules only when `reapedAt` is older than
+  `abandonmentTTL` **and** it has no live alloc and no active watcher.
+- `abandonmentTTL` defaults to **24h** (deliberately far longer than the 5-min lease, so even
+  overnight sleep is unaffected) and is overridable via `KUBEVPN_PROXY_ABANDON_TTL` (a Go
+  duration). Only a client gone longer than the TTL has its rule cleaned; on a later wake it
+  must re-`proxy` (the rule is not auto-recreated). Rule removal does not unpatch the sidecar.
+
 ## 4. Files
 
 | File | Role |
