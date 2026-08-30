@@ -11,6 +11,97 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 )
 
+// parseServiceCIDRFromError extracts the Service CIDR the API server embeds in the
+// rejection message for an invalid ClusterIP. Dry-run returns the authoritative range on
+// both standard and managed control planes; GKE's real-create message carries no CIDR.
+func TestParseServiceCIDRFromError(t *testing.T) {
+	tests := []struct {
+		name    string
+		errMsg  string
+		want    string
+		wantOk  bool
+	}{
+		{
+			name:   "GKE server-side dry-run message",
+			errMsg: `The Service "foo-svc-x" is invalid: spec.clusterIPs: Invalid value: ["0.0.0.0"]: failed to allocate IP 0.0.0.0: the provided IP (0.0.0.0) is not in the valid range. The range of valid IPs is 34.118.224.0/20`,
+			want:   "34.118.224.0/20",
+			wantOk: true,
+		},
+		{
+			name:   "standard kubeadm/minikube message",
+			errMsg: `The Service "foo-svc-y" is invalid: spec.clusterIPs: Invalid value: ["0.0.0.0"]: provided IP is not in the valid IP range. The range of valid IPs is 10.96.0.0/12`,
+			want:   "10.96.0.0/12",
+			wantOk: true,
+		},
+		{
+			name:   "keyword 'valid IP range is'",
+			errMsg: `... the valid IP range is 192.168.0.0/16`,
+			want:   "192.168.0.0/16",
+			wantOk: true,
+		},
+		{
+			// GKE real-create wording — no CIDR anywhere, so nothing is parseable.
+			name:   "GKE real-create message carries no CIDR",
+			errMsg: `The Service "foo-svc-z" is invalid: spec.clusterIPs: Invalid value: ["0.0.0.0"]: failed to allocate IP 0.0.0.0: the provided network does not match the current range`,
+			wantOk: false,
+		},
+		{
+			name:   "totally unrelated error",
+			errMsg: "services is forbidden: User cannot create resource",
+			wantOk: false,
+		},
+		{
+			name:   "empty string",
+			errMsg: "",
+			wantOk: false,
+		},
+		// IPv6 range.
+		{
+			name:   "IPv6 service range",
+			errMsg: `The range of valid IPs is fd00::/108`,
+			want:   "fd00::/108",
+			wantOk: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := parseServiceCIDRFromError(tt.errMsg)
+			if ok != tt.wantOk {
+				t.Fatalf("parseServiceCIDRFromError ok = %v, want %v (got %v)", ok, tt.wantOk, got)
+			}
+			if !tt.wantOk {
+				return
+			}
+			if got == nil || got.String() != tt.want {
+				t.Errorf("parseServiceCIDRFromError = %v, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestGetServiceCIDRByCreateService_DryRunDoesNotPersist verifies the probe runs as a
+// server-side dry-run: against a fake clientset (which has no admission, so Create succeeds
+// and returns no CIDR) NO Service is ever persisted — proving dry-run leaves no trace. On a
+// real API server the dry-run is rejected with the valid range parsed by
+// parseServiceCIDRFromError (covered by the integration TestByCreateSvc against a cluster).
+func TestGetServiceCIDRByCreateService_DryRunDoesNotPersist(t *testing.T) {
+	const ns = "kubevpn"
+	cs := fake.NewSimpleClientset()
+	_, err := GetServiceCIDRByCreateService(context.Background(), cs.CoreV1().Services(ns))
+	if err == nil {
+		t.Fatal("expected an error: fake clientset has no admission, so dry-run returns no CIDR")
+	}
+	list, lErr := cs.CoreV1().Services(ns).List(context.Background(), metav1.ListOptions{})
+	if lErr != nil {
+		t.Fatalf("list services: %v", lErr)
+	}
+	for _, s := range list.Items {
+		if len(s.Name) >= len("foo-svc-") && s.Name[:len("foo-svc-")] == "foo-svc-" {
+			t.Errorf("dry-run must not persist a Service, found %q", s.Name)
+		}
+	}
+}
+
 // cidrSet collects the string form of a CIDR slice into a set for order-independent asserts.
 func cidrSet(cidrs []*net.IPNet) sets.Set[string] {
 	s := sets.New[string]()

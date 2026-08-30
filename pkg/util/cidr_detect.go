@@ -106,32 +106,61 @@ func GetCIDRByDumpClusterInfo(ctx context.Context, clientset kubernetes.Interfac
 	return result, nil
 }
 
-// GetServiceCIDRByCreateService discovers the service CIDR by attempting to create a service with an invalid ClusterIP and parsing the error.
-func GetServiceCIDRByCreateService(ctx context.Context, serviceInterface typedcorev1.ServiceInterface) (*net.IPNet, error) {
-	cidrKeywords := []string{
-		"valid IPs is",
-		"The range of valid IPs",
-		"valid IP range is",
+// serviceCIDRKeywords are the markers after which the API server appends the valid
+// Service CIDR in the rejection message for an invalid ClusterIP. e.g. kubeadm/minikube
+// return "...The range of valid IPs is 10.96.0.0/12" and GKE (server-side dry-run)
+// returns "...valid IPs is 34.118.224.0/20". The trailing CIDR is parsed from whatever
+// follows the keyword.
+var serviceCIDRKeywords = []string{
+	"valid IPs is",
+	"The range of valid IPs",
+	"valid IP range is",
+}
+
+// parseServiceCIDRFromError extracts the Service CIDR an API server embeds in the
+// rejection message for an invalid ClusterIP create. It scans errMsg for the last
+// occurrence of any serviceCIDRKeywords and parses the trailing CIDR. Returns
+// (cidr, true) on success, or (nil, false) when no keyword matches or the trailing
+// text is not a CIDR — e.g. GKE's real-create message ("...does not match the current
+// range") carries no CIDR at all. Pure (no cluster I/O) so it is unit-testable.
+func parseServiceCIDRFromError(errMsg string) (*net.IPNet, bool) {
+	for _, keyword := range serviceCIDRKeywords {
+		idx := strings.LastIndex(errMsg, keyword)
+		if idx == -1 {
+			continue
+		}
+		_, cidr, err := net.ParseCIDR(strings.TrimSpace(errMsg[idx+len(keyword):]))
+		if err == nil && cidr != nil {
+			return cidr, true
+		}
 	}
+	return nil, false
+}
+
+// GetServiceCIDRByCreateService discovers the service CIDR by attempting to create a
+// service with an invalid ClusterIP and parsing the range out of the API rejection
+// error. The create is performed as a SERVER-SIDE DRY-RUN
+// (CreateOptions{DryRun: []string{metav1.DryRunAll}}): admission still rejects the
+// invalid ClusterIP and returns the valid range (identical to a real create on
+// standard clusters), but the Service is NEVER actually persisted. This matters on
+// GKE, where the real-create message ("...does not match the current range") carries
+// no CIDR at all, while the dry-run message ("...valid IPs is 34.118.224.0/20") does —
+// so dry-run is both safer (no junk Service) and strictly more correct. See docs/32.
+func GetServiceCIDRByCreateService(ctx context.Context, serviceInterface typedcorev1.ServiceInterface) (*net.IPNet, error) {
 	svc := &corev1.Service{
 		ObjectMeta: v1.ObjectMeta{GenerateName: "foo-svc-"},
 		Spec:       corev1.ServiceSpec{Ports: []corev1.ServicePort{{Port: 80}}, ClusterIP: "0.0.0.0"},
 	}
-	_, err := serviceInterface.Create(ctx, svc, v1.CreateOptions{})
-	if err != nil {
-		errMsg := err.Error()
-		for _, keyword := range cidrKeywords {
-			idx := strings.LastIndex(errMsg, keyword)
-			if idx != -1 {
-				_, cidr, parseErr := net.ParseCIDR(strings.TrimSpace(errMsg[idx+len(keyword):]))
-				if parseErr == nil && cidr != nil {
-					return cidr, nil
-				}
-			}
-		}
-		return nil, fmt.Errorf("cannot detect service CIDR from error message: %w", err)
+	_, err := serviceInterface.Create(ctx, svc, v1.CreateOptions{DryRun: []string{v1.DryRunAll}})
+	if err == nil {
+		// No admission rejection (e.g. fake clientset has no admission, or a cluster that
+		// silently accepts 0.0.0.0). Dry-run guarantees no Service was persisted either way.
+		return nil, fmt.Errorf("cannot detect service CIDR: service creation did not return expected error")
 	}
-	return nil, fmt.Errorf("cannot detect service CIDR: service creation did not return expected error")
+	if cidr, ok := parseServiceCIDRFromError(err.Error()); ok {
+		return cidr, nil
+	}
+	return nil, fmt.Errorf("cannot detect service CIDR from error message: %w", err)
 }
 
 // inferredCIDRFromIP expands a single cluster IP to its inferred containing CIDR:

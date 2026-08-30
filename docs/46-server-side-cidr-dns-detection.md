@@ -46,16 +46,26 @@ this is safe and is strictly more correct than the current "filtered by whoever 
 - Host: the **`xds` container's `TunConfigServer`** (`pkg/xds`) — the in-cluster control
   plane that already holds a clientset and starts before any client connects. No import
   cycle (`pkg/xds` does not import `pkg/handler`; both may import `pkg/util`/`pkg/config`).
-- On startup, if `CLUSTER_CIDRS` is empty, run detection **in-cluster** and write the **raw**
-  CIDRs. Detection uses `util.GetClusterCIDRNoProbePod` — the pod-free strategies only
-  (kube-system component flags, a rejected Service create, the Service CIDR inferred from
+- On startup, run detection **in-cluster** and write the **raw** CIDRs to `CLUSTER_CIDRS`,
+  using `util.GetClusterCIDRNoProbePod` — the pod-free strategies only (kube-system
+  component flags, a rejected **dry-run** Service create, the Service CIDR inferred from
   existing Services' ClusterIPs, and the pod CIDR inferred from existing pod IPs): **no probe
-  pod, no exec**, since the manager is already an in-cluster pod. Inferred CIDRs (from pod IPs
-  and Service ClusterIPs) use a narrow **/24** for IPv4 and **/64** for IPv6, so a routed
-  range does not hijack locally-used networks; the per-IP /24s are then coalesced upward into
-  the enclosing Pod/Service range by `mergeToSupernet` (bounded — /12 v4, /48 v6; see
-  [32-cidr-detection.md](32-cidr-detection.md) §4), and overlaps collapse via
+  pod, no exec**, since the manager is already an in-cluster pod. The Service probe uses a
+  server-side dry-run (`DryRunAll`) so it never persists a Service and returns the authoritative
+  range on managed control planes (GKE) where a real create's error carries no CIDR. Inferred
+  CIDRs (from pod IPs and Service ClusterIPs) use a narrow **/24** for IPv4 and **/64** for
+  IPv6, so a routed range does not hijack locally-used networks; the per-IP /24s are then
+  coalesced upward into the enclosing Pod/Service range by `mergeToSupernet` (bounded — /12 v4,
+  /48 v6; see [32-cidr-detection.md](32-cidr-detection.md) §4), and overlaps collapse via
   `RemoveLargerOverlappingCIDRs`.
+- The cache write is **version-gated** (not strictly "fill-empty-never-overwrite"). The warm-up
+  writes `CLUSTER_CIDRS` together with a sibling `CLUSTER_CIDRS_SCHEMA` version key
+  (`config.CurrentClusterCIDRsSchema`) in one atomic Update: empty → fill + stamp schema;
+  populated + current schema → skip (protects manual edits); populated + absent/older schema
+  (a cache written by a pre-versioning or buggy manager/client, e.g. v2.11.6 under-detected
+  GKE's Service CIDR) → re-detect and **overwrite** + restamp, but only if detection is
+  non-empty. This auto-recovers a poisoned cache on upgrade. See
+  [32-cidr-detection.md](32-cidr-detection.md) §6a.
 - Client: **unchanged** read path + local fallback. Because the manager warms the cache, the
   client's `util.GetCIDR` effectively never runs; if the manager is old / detection failed /
   RBAC missing, the cache is empty and the client falls back to local detection. That fallback
@@ -118,7 +128,11 @@ Implemented (unit-tested, additive, degrade-safe) — **pending CI minikube e2e*
 - **C1 cache contract**: `data_session.getCIDR` now caches **raw** (deduped, unfiltered) CIDRs.
 - **C1 warm-up**: `TunConfigServer.WarmClusterCIDRCache` (`pkg/xds/tun_config_cidr.go`), started
   from `xds.Main`; fills an empty `CLUSTER_CIDRS` in-cluster via `util.GetClusterCIDRNoProbePod`
-  (no probe pod / no exec).
+  (no probe pod / no exec). The Service-CIDR probe runs as a server-side dry-run, so it returns
+  the authoritative range on managed control planes (GKE) and never persists a Service. The
+  cache write is version-gated by the sibling `CLUSTER_CIDRS_SCHEMA` key: an older/absent schema
+  (a cache written by a buggy version, e.g. v2.11.6's under-detected GKE Service CIDR) is
+  re-detected and overwritten on manager upgrade; a current-schema cache is never overwritten.
 - **C1 RBAC**: `genRole` grants the manager SA `pods list` + `services create`/`services list`
   in the manager namespace (fresh installs; existing managers keep their Role until recreated —
   warm-up degrades safely meanwhile).
@@ -128,8 +142,10 @@ Implemented (unit-tested, additive, degrade-safe) — **pending CI minikube e2e*
   Timing: **both** the CIDR and DNS warm-ups run **synchronously in `xds.Main` before the
   server serves** (bounded 10s / 5s), so both caches are present before the first client
   connects (no fallback race). Both are cheap now — no probe pod / no exec, just a few API
-  calls and a local file read. Each writes once, only when its key is empty; the value
-  persists across manager restarts.
+  calls and a local file read. The DNS cache writes once, only when its key is empty; the
+  CIDR cache fills an empty key or, when its schema is absent/older than current, re-detects
+  and overwrites (recovery) — otherwise it is left untouched. Values persist across manager
+  restarts.
 
 > **CI e2e is still required before relying on it:** correctness of the in-cluster detection
 > (parity with client detection), the RBAC grant, and the existing-manager rollout are only

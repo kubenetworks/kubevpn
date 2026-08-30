@@ -50,3 +50,41 @@ func (s *TunConfigServer) configMapKeyAbsent(ctx context.Context, key string) (b
 	}
 	return strings.TrimSpace(cm.Data[key]) == "", nil
 }
+
+// readClusterCIDRCache reads the CLUSTER_CIDRs value and its CLUSTER_CIDRs_SCHEMA
+// version in a single Get. The schema is "" when unset (read as legacy by
+// cacheIsCurrentSchema). Used by the version-gated warm-up to decide fill vs skip vs
+// overwrite. See docs/32 §6, docs/46.
+func (s *TunConfigServer) readClusterCIDRCache(ctx context.Context) (cidrVal, schemaVal string, err error) {
+	cm, err := s.clientset.CoreV1().ConfigMaps(s.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		return "", "", err
+	}
+	return cm.Data[config.KeyClusterCIDRs], cm.Data[config.KeyClusterCIDRsSchema], nil
+}
+
+// writeClusterCIDRCache writes the CLUSTER_CIDRs value and stamps the CLUSTER_CIDRs_SCHEMA
+// version in a single optimistic read-modify-write under RetryOnConflict, so the two keys
+// never end up in an inconsistent intermediate state. When overwrite is false it only
+// writes if CLUSTER_CIDRs is currently empty (the additive fill path, preserving a
+// concurrent manual/client fill); when true it overwrites unconditionally (the stale-cache
+// recovery path). Returns nil on success (including a skipped non-overwrite fill) or the
+// underlying Get/Update error.
+func (s *TunConfigServer) writeClusterCIDRCache(ctx context.Context, cidrs, schema string, overwrite bool) error {
+	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		cm, err := s.clientset.CoreV1().ConfigMaps(s.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		if !overwrite && strings.TrimSpace(cm.Data[config.KeyClusterCIDRs]) != "" {
+			return nil // filled in the meantime — leave it (additive: never overwrite)
+		}
+		if cm.Data == nil {
+			cm.Data = map[string]string{}
+		}
+		cm.Data[config.KeyClusterCIDRs] = cidrs
+		cm.Data[config.KeyClusterCIDRsSchema] = schema
+		_, err = s.clientset.CoreV1().ConfigMaps(s.namespace).Update(ctx, cm, metav1.UpdateOptions{})
+		return err
+	})
+}

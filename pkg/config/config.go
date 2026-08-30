@@ -25,6 +25,19 @@ const (
 	KeyEnvoy = "ENVOY_CONFIG"
 	// KeyClusterCIDRs is the ConfigMap key for cluster CIDR cache (IPv4 + IPv6).
 	KeyClusterCIDRs = "CLUSTER_CIDRS"
+	// KeyClusterCIDRsSchema is the ConfigMap key holding the schema version of the
+	// CLUSTER_CIDRs cache. The manager warm-up stamps it with CurrentClusterCIDRsSchema
+	// whenever it writes the CIDR cache. A populated CIDR cache whose schema is older
+	// than current (or absent — written by a pre-versioning manager/client) is treated
+	// as STALE and re-validated/overwritten on the next warm-up; a current-schema cache
+	// is never overwritten (protects manual edits). See docs/32 §6, docs/46.
+	KeyClusterCIDRsSchema = "CLUSTER_CIDRS_SCHEMA"
+	// CurrentClusterCIDRsSchema is the current CIDR-cache schema version. Bumped when a
+	// detection fix changes what a correct cache looks like, so a manager upgrade can
+	// auto-recover caches the previous (buggy) version wrote — e.g. v1 under-detected
+	// GKE's Service CIDR (/23 instead of /20); v2 uses the server-side dry-run probe
+	// that returns the authoritative range. Absent key reads as 0 (< current).
+	CurrentClusterCIDRsSchema = "2"
 	// KeyClusterDNS is the ConfigMap key holding the manager pod's /etc/resolv.conf
 	// (raw text). The manager publishes it so clients read the cluster DNS server +
 	// search domains from the cache instead of exec-ing into the pod. See docs/46.

@@ -77,10 +77,19 @@ the cheapest and most authoritative source when the control-plane pods are visib
 ### Strategy 2 — Service-CIDR error trick (`GetServiceCIDRByCreateService`)
 
 The Service CIDR is never exposed directly, so KubeVPN provokes the API server: it creates a
-Service with `ClusterIP: 0.0.0.0` (always invalid). The API server rejects it with a message
-containing the valid range, e.g. *"The range of valid IPs is 10.96.0.0/12"*. The error text is
-scanned for the keywords `valid IPs is`, `The range of valid IPs`, `valid IP range is`, and the
-trailing CIDR is parsed.
+Service with `ClusterIP: 0.0.0.0` (always invalid) **as a server-side dry-run**
+(`CreateOptions{DryRun: []string{metav1.DryRunAll}}`). Admission still rejects the invalid
+ClusterIP with a message containing the valid range, e.g. *"The range of valid IPs is
+10.96.0.0/12"*, but the Service is never actually persisted. The error text is scanned (by the
+pure `parseServiceCIDRFromError` helper) for the keywords `valid IPs is`,
+`The range of valid IPs`, `valid IP range is`, and the trailing CIDR is parsed.
+
+Dry-run is both safer (no junk Service can be left behind) and strictly more correct than a real
+create: on GKE a real create returns *"…the provided network does not match the current range"*
+— **no CIDR at all**, so the strategy silently returned nothing and detection fell through to
+the namespace-scoped inference (Strategy 3), which under-detected the range (a `/23` instead of
+the real `/20`). The same create performed as a dry-run returns the authoritative
+*"…valid IPs is 34.118.224.0/20"*, which the keyword matches and parses.
 
 ### Strategy 3 — Infer from Service ClusterIPs (`GetServiceCIDRFromService`)
 
@@ -152,6 +161,29 @@ Detection touches the API server several times, so the result is cached:
 
 `pkg/handler/once.go` reuses `getCIDR` during the Helm `once` bootstrap to warm this cache.
 
+### 6a. Schema versioning & auto-recovery (`CLUSTER_CIDRS_SCHEMA`)
+
+The server-side warm-up (`pkg/xds/tun_config_cidr.go`, see
+[46-server-side-cidr-dns-detection.md](46-server-side-cidr-dns-detection.md)) writes both
+`CLUSTER_CIDRS` and a sibling `config.KeyClusterCIDRsSchema` = `CLUSTER_CIDRS_SCHEMA` version key
+(`config.CurrentClusterCIDRsSchema`), in a single atomic Update. The version gates overwrite so a
+manager upgrade can auto-recover a cache the previous (buggy) version wrote:
+
+- **Empty `CLUSTER_CIDRS`** → detect, write RAW CIDRs + stamp schema (additive fill).
+- **Populated + current schema** → **never overwrite** — protects a manual edit or a
+  client/operator-set value.
+- **Populated + absent/older schema** (written by a pre-versioning or buggy manager/client — e.g.
+  v2.11.6 under-detected GKE's Service CIDR to a `/23`) → re-detect and **overwrite** the CIDRs +
+  restamp the schema, **only if detection is non-empty** (an empty result never clobbers an
+  existing value). This is what auto-recovers a poisoned cache on upgrade, without the operator
+  having to delete the key.
+
+The schema key is manager-managed only; the client write path (`data_session.getCIDR`) writes raw
+CIDRs on a cache miss and does not stamp the schema — but such a cache has no schema, so a later
+manager start re-validates it. The client read path (`parseCachedCIDRs`) only parses the
+`CLUSTER_CIDRS` CIDR tokens and is blind to the schema key. To force a re-detection, an operator
+deletes the `CLUSTER_CIDRS_SCHEMA` key (or both keys).
+
 ## 7. Edge Cases
 
 - All strategies may legitimately return nothing (e.g. extremely locked-down clusters); `getCIDR`
@@ -171,7 +203,7 @@ Detection touches the API server several times, so the result is cached:
 | `pkg/handler/connect.go` | `getCIDR` caching wrapper, `parseCachedCIDRs`, `encodeCIDRs`, `dedupAndFilterCIDRs`, `getAPIServerIPs` |
 | `pkg/handler/once.go` | Warms the CIDR cache during Helm `once` bootstrap |
 | `pkg/handler/traffmgr.go` | Pre-creates the `CLUSTER_CIDRS` ConfigMap key |
-| `pkg/config/config.go` | `KeyClusterCIDRs` constant |
+| `pkg/config/config.go` | `KeyClusterCIDRs`, `KeyClusterCIDRsSchema`, `CurrentClusterCIDRsSchema` constants |
 
 ## 9. Related Docs
 
