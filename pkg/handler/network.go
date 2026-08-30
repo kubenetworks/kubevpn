@@ -82,8 +82,15 @@ const (
 	ipWatcherRetryInterval = 10 * time.Second
 	// portForwardPodListTimeout bounds listing the traffic-manager pod before a port-forward session.
 	portForwardPodListTimeout = 10 * time.Second
-	// portForwardReconnectDelay is the pause between port-forward reconnect attempts.
+	// portForwardReconnectDelay is the initial/minimum pause between port-forward reconnect attempts.
 	portForwardReconnectDelay = 200 * time.Millisecond
+	// portForwardReconnectMaxDelay caps the exponential backoff between reconnects, so a
+	// sustained apiserver stall is not hammered with rapid Pods.List + TLS-handshake retries.
+	portForwardReconnectMaxDelay = 15 * time.Second
+	// portForwardHealthySession is the minimum session duration considered "healthy": a
+	// session that lasted at least this long before dropping resets the reconnect backoff
+	// (normal pod recreation reconnects fast); shorter sessions grow the backoff.
+	portForwardHealthySession = 30 * time.Second
 	// portForwardStartTimeout is how long to wait for the first port-forward session to become ready.
 	portForwardStartTimeout = 60 * time.Second
 )
@@ -582,6 +589,24 @@ func parseTunIPResponse(resp *rpc.TunIPResponse) (ipv4, ipv6 *net.IPNet) {
 	return
 }
 
+// nextPortForwardDelay computes the next reconnect backoff. A session that lasted at
+// least portForwardHealthySession before dropping resets to the fast initial delay;
+// otherwise (a short-lived failure, e.g. an apiserver stall) the delay doubles, capped
+// at portForwardReconnectMaxDelay. Pure function for testability.
+func nextPortForwardDelay(cur, sessionDuration time.Duration) time.Duration {
+	if sessionDuration >= portForwardHealthySession {
+		return portForwardReconnectDelay
+	}
+	next := cur * 2
+	if next < portForwardReconnectDelay {
+		next = portForwardReconnectDelay
+	}
+	if next > portForwardReconnectMaxDelay {
+		next = portForwardReconnectMaxDelay
+	}
+	return next
+}
+
 // portForward sets up port-forwarding to the traffic manager pod with automatic
 // retry when the pod is recreated or the connection drops.
 func (nm *NetworkManager) portForward(ctx context.Context, portPair []string) error {
@@ -590,6 +615,7 @@ func (nm *NetworkManager) portForward(ctx context.Context, portPair []string) er
 	errChan := make(chan error, 1)
 	go func() {
 		first := true
+		delay := portForwardReconnectDelay
 		for ctx.Err() == nil {
 			sessionStart := time.Now()
 			err := nm.portForwardOnce(ctx, portPair, first, firstCancelFunc)
@@ -600,10 +626,19 @@ func (nm *NetworkManager) portForward(ctx context.Context, portPair []string) er
 					return
 				}
 			} else {
-				plog.G(ctx).Infof("[Perf] Port-forward session ended after %v, reconnecting...", sessionDuration)
+				plog.G(ctx).Infof("[Perf] Port-forward session ended after %v, reconnecting in %v...", sessionDuration, delay)
 			}
 			first = false
-			time.Sleep(portForwardReconnectDelay)
+			// Exponential backoff on consecutive short-lived sessions so a stalled
+			// apiserver is not hammered with a Pods.List + TLS handshake every 200ms
+			// (which prolongs the stall). A healthy session that then drops resets to
+			// the fast initial delay so normal pod recreation still reconnects quickly.
+			delay = nextPortForwardDelay(delay, sessionDuration)
+			select {
+			case <-time.After(delay):
+			case <-ctx.Done():
+				return
+			}
 		}
 	}()
 	ticker := time.NewTicker(portForwardStartTimeout)
@@ -1006,31 +1041,52 @@ func (nm *NetworkManager) doWatchNamespaceRoutes(ctx context.Context, target str
 			<-ctx.Done()
 			return nil
 		}
-		if resp.Snapshot {
-			services = map[string]*rpc.ServiceRecord{}
+		applyRouteFrame(resp, services,
+			func(cidrs []string) {
+				if err := nm.AddRouteCIDR(cidrs...); err != nil {
+					plog.G(ctx).Debugf("[RouteWatcher] add pod CIDR routes failed: %v", err)
+				}
+			},
+			func(svcs []v1.Service) {
+				if nm.dnsConfig != nil {
+					nm.dnsConfig.UpdateServices(ctx, svcs)
+				}
+			},
+		)
+		*version = resp.Version
+	}
+}
+
+// applyRouteFrame applies one WatchNamespaceRoutes frame to the running state: it resets
+// the service set on a snapshot, adds pushed pod CIDR routes (via addCIDR), upserts/removes
+// service records, and pushes the updated service set to DNS (via setDNS) when it changed.
+// Routes are add-only: RemovedPodCIDRs are NOT unrouted (a stale prefix pointed at the TUN
+// is harmless), they only affect state. Pure of gRPC/NetworkManager for unit-testing.
+func applyRouteFrame(resp *rpc.NamespaceRoutesResponse, services map[string]*rpc.ServiceRecord,
+	addCIDR func([]string), setDNS func([]v1.Service)) {
+	if resp.Snapshot {
+		for k := range services {
+			delete(services, k)
 		}
-		if len(resp.AddedPodCIDRs) > 0 {
-			if err := nm.AddRouteCIDR(resp.AddedPodCIDRs...); err != nil {
-				plog.G(ctx).Debugf("[RouteWatcher] add pod CIDR routes failed: %v", err)
-			}
-		}
-		// service records also carry ClusterIPs; those are already covered by the service
-		// CIDR route, so we do not add per-service routes — the records drive DNS only.
-		changed := resp.Snapshot
-		for _, rec := range resp.UpsertedServices {
-			services[rec.Namespace+"/"+rec.Name] = rec
+	}
+	if len(resp.AddedPodCIDRs) > 0 {
+		addCIDR(resp.AddedPodCIDRs)
+	}
+	// Service ClusterIPs are already covered by the service CIDR route, so no per-service
+	// route is added — the records drive DNS only.
+	changed := resp.Snapshot
+	for _, rec := range resp.UpsertedServices {
+		services[rec.Namespace+"/"+rec.Name] = rec
+		changed = true
+	}
+	for _, key := range resp.RemovedServiceKeys {
+		if _, ok := services[key]; ok {
+			delete(services, key)
 			changed = true
 		}
-		for _, key := range resp.RemovedServiceKeys {
-			if _, ok := services[key]; ok {
-				delete(services, key)
-				changed = true
-			}
-		}
-		if changed && nm.dnsConfig != nil {
-			nm.dnsConfig.UpdateServices(ctx, serviceRecordsToServices(services))
-		}
-		*version = resp.Version
+	}
+	if changed {
+		setDNS(serviceRecordsToServices(services))
 	}
 }
 
