@@ -62,20 +62,31 @@ pattern) never touch CoreDNS, and search-domain misses are absorbed by the negat
 
 ### 4.1 Linux (`dns_linux.go`)
 
-Three-tier fallback strategy:
+**Split DNS only — the cluster nameserver is always scoped to cluster domains on the TUN
+interface, never written to the global `/etc/resolv.conf`.** Two tiers:
 
-1. **systemd-resolved** (preferred):
-   - `resolvectl dns <tun> <dnsIP>` — set DNS server on TUN interface
-   - `resolvectl domain <tun> <search domains>` — set search domains
+1. **systemd-resolved** (preferred, via CLI):
+   - `resolvectl dns <tun> <dnsIP>` — set DNS server on the TUN interface
+   - `resolvectl domain <tun> <search domains>` — scope those domains to the TUN (no `~.`, so
+     it is a split resolver, not a global default route)
    - Falls back to `systemd-resolve --set-dns` for older systems
-2. **Library DNS** (tailscale `dns.OSConfigurator`):
-   - Uses tailscale's OS-specific DNS configurator
-   - Only used if it supports split DNS
-3. **`/etc/resolv.conf`** (fallback):
-   - Prepends cluster DNS server to existing nameserver list
-   - Uses Docker's `resolvconf.Build()` to write
+2. **Library DNS** (tailscale `dns.OSConfigurator`) — used only if `SupportsSplitDNS()`:
+   - Covers systemd-resolved (D-Bus), NetworkManager, openresolv and debian-resolvconf
+   - `buildLibraryOSConfig` sets **`MatchDomains` = cluster search domains**. This is what makes
+     the library configure a *split* resolver: an **empty** `MatchDomains` would trip
+     `SetLinkDefaultRoute` in tailscale's `resolved.go` and hijack **all** host DNS through the
+     TUN. Non-empty routes only cluster domains there.
 
-**Cleanup** (`CancelDNS`): Closes the OS configurator, removes the added DNS server from resolv.conf, and removes hosts file entries.
+There is **no `/etc/resolv.conf` fallback**. On a host with no split-capable DNS manager
+(`SupportsSplitDNS()` false → `errNotSupportSplitDNS`), setup logs a warning and returns
+without touching the global resolver; cluster **service names still resolve via `/etc/hosts`**
+entries pushed by the traffic manager, while other cluster FQDNs (e.g. raw pod DNS) do not
+resolve on such hosts. This is a deliberate trade-off: never pollute the global resolver.
+
+**Cleanup** (`CancelDNS`): closes the OS configurator (reverts the library split config) and
+removes hosts file entries. The resolvectl/systemd-resolve per-interface settings are dropped
+by systemd-resolved when the TUN device is destroyed; nothing was written to
+`/etc/resolv.conf`, so there is nothing to undo there.
 
 ### 4.2 macOS (`dns_unix.go`)
 
@@ -118,7 +129,7 @@ For service short-name resolution (e.g., `curl my-svc:8080`), KubeVPN adds entri
 |------|---------|
 | `pkg/dns/forward_server.go` | DNS forward server (traffic manager pod) |
 | `pkg/dns/dns.go` | Hosts file management, Config struct |
-| `pkg/dns/dns_linux.go` | Linux DNS setup (systemd-resolved / resolv.conf) |
+| `pkg/dns/dns_linux.go` | Linux DNS setup (split DNS: systemd-resolved / tailscale library) |
 | `pkg/dns/dns_unix.go` | macOS DNS setup (/etc/resolver) |
 | `pkg/dns/dns_windows.go` | Windows DNS setup (LUID API) |
 | `pkg/dns/dns_lock_unix.go` | Unix hosts file locking (flock) |
