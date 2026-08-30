@@ -653,7 +653,7 @@ func newXDSSnapshotCache(t *testing.T, logger *log.Entry, nodeID string, v *Virt
 // util.DetectSupportIPv6(), which would make these tests host-dependent.)
 func pushVirtual(t *testing.T, logger *log.Entry, sc cache.SnapshotCache, nodeID, version string, v *Virtual) {
 	t.Helper()
-	listeners, clusters, routes, endpoints := v.To(false, logger)
+	listeners, clusters, routes, endpoints := To(v, false, logger)
 	snapshot, err := cache.NewSnapshot(version, map[resource.Type][]types.Resource{
 		resource.ListenerType: listeners,
 		resource.RouteType:    routes,

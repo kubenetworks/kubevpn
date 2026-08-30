@@ -19,9 +19,9 @@ import (
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/utils/ptr"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/xds"
 )
 
 var errPodCreated = errors.New("pod created, waiting for running")
@@ -121,9 +121,9 @@ func gatherContainerPorts(templateSpec *v1.PodTemplateSpec, portMaps []string) [
 	return ports
 }
 
-func collectPorts(templateSpec *v1.PodTemplateSpec, portMaps []string) ([]xds.ContainerPort, map[int32]string) {
+func collectPorts(templateSpec *v1.PodTemplateSpec, portMaps []string) ([]controlplane.ContainerPort, map[int32]string) {
 	ports := gatherContainerPorts(templateSpec, portMaps)
-	envoyPorts := xds.ConvertContainerPort(ports...)
+	envoyPorts := controlplane.ConvertContainerPort(ports...)
 	portmap := make(map[int32]string)
 	for _, p := range envoyPorts {
 		portmap[p.ContainerPort] = fmt.Sprintf("%d", p.ContainerPort)

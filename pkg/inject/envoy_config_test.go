@@ -10,7 +10,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/xds"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
 )
 
 func TestAddEnvoyConfig_NewEntry(t *testing.T) {
@@ -26,7 +26,7 @@ func TestAddEnvoyConfig_NewEntry(t *testing.T) {
 	clientset := fake.NewSimpleClientset(cm)
 	mapInterface := clientset.CoreV1().ConfigMaps("test-ns")
 
-	ports := []xds.ContainerPort{
+	ports := []controlplane.ContainerPort{
 		{ContainerPort: 8080, Protocol: "TCP"},
 	}
 	headers := map[string]string{"version": "v1"}
@@ -49,7 +49,7 @@ func TestAddEnvoyConfig_NewEntry(t *testing.T) {
 	}
 
 	// Verify content by parsing back
-	var virtuals []*xds.Virtual
+	var virtuals []*controlplane.Virtual
 	if err := yamlUnmarshal([]byte(data), &virtuals); err != nil {
 		t.Fatalf("failed to unmarshal envoy config: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestAddEnvoyConfig_MergeExisting(t *testing.T) {
 		t.Fatalf("failed to get ConfigMap: %v", err)
 	}
 
-	var virtuals []*xds.Virtual
+	var virtuals []*controlplane.Virtual
 	if err := yamlUnmarshal([]byte(updated.Data[config.KeyEnvoy]), &virtuals); err != nil {
 		t.Fatalf("failed to unmarshal: %v", err)
 	}
@@ -161,7 +161,7 @@ func TestAddEnvoyConfig_FargateMode(t *testing.T) {
 	clientset := fake.NewSimpleClientset(cm)
 	mapInterface := clientset.CoreV1().ConfigMaps("test-ns")
 
-	ports := []xds.ContainerPort{
+	ports := []controlplane.ContainerPort{
 		{ContainerPort: 8080, EnvoyListenerPort: 15001, Protocol: "TCP"},
 	}
 	headers := map[string]string{"user": "alice"}
@@ -177,7 +177,7 @@ func TestAddEnvoyConfig_FargateMode(t *testing.T) {
 		t.Fatalf("failed to get ConfigMap: %v", err)
 	}
 
-	var virtuals []*xds.Virtual
+	var virtuals []*controlplane.Virtual
 	if err := yamlUnmarshal([]byte(updated.Data[config.KeyEnvoy]), &virtuals); err != nil {
 		t.Fatalf("failed to unmarshal: %v", err)
 	}
@@ -211,7 +211,7 @@ func TestRemoveEnvoyConfig_Found(t *testing.T) {
 	clientset := fake.NewSimpleClientset(cm)
 	mapInterface := clientset.CoreV1().ConfigMaps("test-ns")
 
-	ports := []xds.ContainerPort{
+	ports := []controlplane.ContainerPort{
 		{ContainerPort: 8080, Protocol: "TCP"},
 	}
 	headers := map[string]string{"version": "v2"}
@@ -239,7 +239,7 @@ func TestRemoveEnvoyConfig_Found(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to get ConfigMap: %v", err)
 	}
-	var virtuals []*xds.Virtual
+	var virtuals []*controlplane.Virtual
 	if err := yamlUnmarshal([]byte(updated.Data[config.KeyEnvoy]), &virtuals); err != nil {
 		t.Fatalf("failed to unmarshal: %v", err)
 	}

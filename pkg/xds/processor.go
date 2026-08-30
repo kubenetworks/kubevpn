@@ -88,7 +88,7 @@ func (p *Processor) ProcessFile(file NotifyMessage) error {
 		p.logger.Infof("updating xDS config for %s, version: %d", uid, p.version)
 		p.logger.Debugf("config detail: %s", marshal)
 
-		listeners, clusters, routes, endpoints := config.To(enableIPv6, p.logger)
+		listeners, clusters, routes, endpoints := To(config, enableIPv6, p.logger)
 		resources := map[resource.Type][]types.Resource{
 			resource.ListenerType: listeners, // listeners
 			resource.RouteType:    routes,    // routes

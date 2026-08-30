@@ -95,7 +95,7 @@ func TestVirtual_To_MeshMode(t *testing.T) {
 	}
 
 	logger := log.NewEntry(log.New())
-	listeners, clusters, routes, endpoints := v.To(false, logger)
+	listeners, clusters, routes, endpoints := To(v, false, logger)
 
 	if len(listeners) == 0 {
 		t.Fatal("expected at least 1 listener")
@@ -134,7 +134,7 @@ func TestVirtual_To_RDSUsesADS(t *testing.T) {
 	}
 
 	logger := log.NewEntry(log.New())
-	listeners, _, _, _ := v.To(false, logger)
+	listeners, _, _, _ := To(v, false, logger)
 
 	checked := 0
 	for _, l := range nonCaptureListeners(listeners) {
@@ -182,7 +182,7 @@ func TestVirtual_To_FargateMode(t *testing.T) {
 	}
 
 	logger := log.NewEntry(log.New())
-	listeners, clusters, routes, endpoints := v.To(false, logger)
+	listeners, clusters, routes, endpoints := To(v, false, logger)
 
 	if len(listeners) == 0 {
 		t.Fatal("expected at least 1 listener")
@@ -219,7 +219,7 @@ func TestVirtual_To_IPv6(t *testing.T) {
 	}
 
 	logger := log.NewEntry(log.New())
-	listeners, clusters, _, endpoints := v.To(true, logger)
+	listeners, clusters, _, endpoints := To(v, true, logger)
 
 	if got := len(nonCaptureListeners(listeners)); got != 1 {
 		t.Fatalf("expected 1 listener, got %d", got)
@@ -248,7 +248,7 @@ func TestVirtual_To_MultipleRules(t *testing.T) {
 	}
 
 	logger := log.NewEntry(log.New())
-	_, clusters, routes, _ := v.To(false, logger)
+	_, clusters, routes, _ := To(v, false, logger)
 
 	// 3 rules + 1 origin = 4 clusters minimum
 	if len(clusters) < 4 {
@@ -295,7 +295,7 @@ func TestVirtual_To_SkipsEmptyTunIP_TCP(t *testing.T) {
 	}
 
 	logger := log.NewEntry(log.New())
-	_, clusters, _, endpoints := v.To(false, logger)
+	_, clusters, _, endpoints := To(v, false, logger)
 
 	if bad := emptyEndpointAddrs(endpoints); len(bad) != 0 {
 		t.Fatalf("empty-address endpoints generated for empty TUN IP: %v", bad)
@@ -327,7 +327,7 @@ func TestVirtual_To_SkipsEmptyTunIP_IPv6Missing(t *testing.T) {
 	}
 
 	logger := log.NewEntry(log.New())
-	_, _, _, endpoints := v.To(true, logger)
+	_, _, _, endpoints := To(v, true, logger)
 
 	if bad := emptyEndpointAddrs(endpoints); len(bad) != 0 {
 		t.Fatalf("empty-address endpoints generated for missing IPv6: %v", bad)
@@ -345,7 +345,7 @@ func TestVirtual_To_EmptyRules(t *testing.T) {
 	}
 
 	logger := log.NewEntry(log.New())
-	listeners, clusters, routes, _ := v.To(false, logger)
+	listeners, clusters, routes, _ := To(v, false, logger)
 
 	if got := len(nonCaptureListeners(listeners)); got != 1 {
 		t.Fatalf("expected 1 listener even with empty rules, got %d", got)
@@ -424,7 +424,7 @@ func TestVirtual_To_UDPProtocol(t *testing.T) {
 		},
 	}
 	logger := log.NewEntry(log.New())
-	listeners, _, _, _ := v.To(false, logger)
+	listeners, _, _, _ := To(v, false, logger)
 	if got := len(nonCaptureListeners(listeners)); got != 1 {
 		t.Fatalf("expected 1 UDP listener, got %d", got)
 	}
@@ -447,7 +447,7 @@ func TestVirtual_To_UDPDualStack(t *testing.T) {
 		},
 	}
 	logger := log.NewEntry(log.New())
-	listeners, _, _, _ := v.To(true, logger)
+	listeners, _, _, _ := To(v, true, logger)
 	udpListeners := nonCaptureListeners(listeners)
 	if len(udpListeners) != 2 {
 		t.Fatalf("expected 2 UDP listeners (v4 + v6), got %d", len(udpListeners))
@@ -492,7 +492,7 @@ func TestVirtual_To_UDPSkipsEmptyIPv6(t *testing.T) {
 		},
 	}
 	logger := log.NewEntry(log.New())
-	listeners, _, _, endpoints := v.To(true, logger)
+	listeners, _, _, endpoints := To(v, true, logger)
 	if got := len(nonCaptureListeners(listeners)); got != 1 {
 		t.Fatalf("expected 1 UDP listener (empty v6 skipped), got %d", got)
 	}
@@ -532,7 +532,7 @@ func TestVirtual_To_MeshInboundCaptureListener(t *testing.T) {
 	logger := log.NewEntry(log.New())
 
 	// Mesh mode: capture listener present and correctly shaped.
-	listeners, clusters, _, _ := mkVirtual(false).To(false, logger)
+	listeners, clusters, _, _ := To(mkVirtual(false), false, logger)
 	var capture *listener.Listener
 	for _, res := range listeners {
 		l := res.(*listener.Listener)
@@ -573,7 +573,7 @@ func TestVirtual_To_MeshInboundCaptureListener(t *testing.T) {
 	}
 
 	// Fargate mode: NO capture listener (listeners bind directly).
-	flisteners, _, _, _ := mkVirtual(true).To(false, logger)
+	flisteners, _, _, _ := To(mkVirtual(true), false, logger)
 	for _, res := range flisteners {
 		l := res.(*listener.Listener)
 		if l.GetAddress().GetSocketAddress().GetPortValue() == uint32(config.PortEnvoyInbound) {
@@ -600,7 +600,7 @@ func TestVirtual_To_MultiplePortsTCP(t *testing.T) {
 	}
 
 	logger := log.NewEntry(log.New())
-	listeners, clusters, routes, endpoints := v.To(false, logger)
+	listeners, clusters, routes, endpoints := To(v, false, logger)
 
 	// Each port should produce one listener
 	portListeners := nonCaptureListeners(listeners)
@@ -659,7 +659,7 @@ func TestVirtual_To_MixedProtocols(t *testing.T) {
 	}
 
 	logger := log.NewEntry(log.New())
-	listeners, _, _, _ := v.To(false, logger)
+	listeners, _, _, _ := To(v, false, logger)
 
 	portListeners := nonCaptureListeners(listeners)
 	if len(portListeners) != 2 {
@@ -711,7 +711,7 @@ func TestVirtual_To_FargateDefaultRoute(t *testing.T) {
 	}
 
 	logger := log.NewEntry(log.New())
-	_, _, _, endpoints := v.To(false, logger)
+	_, _, _, endpoints := To(v, false, logger)
 
 	// In fargate mode with 1 rule (IPv4 only):
 	// - 1 endpoint for the rule (127.0.0.1:29000)
@@ -756,7 +756,7 @@ func TestVirtual_To_MeshDefaultRouteLoopback(t *testing.T) {
 	}
 
 	logger := log.NewEntry(log.New())
-	_, clusters, routes, _ := v.To(false, logger)
+	_, clusters, routes, _ := To(v, false, logger)
 
 	// loopback_9080 must exist, be STATIC, and point at 127.0.0.1:9080.
 	var lb *cluster.Cluster
@@ -818,7 +818,7 @@ func TestVirtual_To_MeshLoopbackDualStack(t *testing.T) {
 	}
 
 	logger := log.NewEntry(log.New())
-	_, clusters, _, _ := v.To(true, logger)
+	_, clusters, _, _ := To(v, true, logger)
 
 	var lb *cluster.Cluster
 	for _, res := range clusters {

@@ -11,7 +11,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/xds"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
 )
 
 // TestVirtualStore_ConcurrentMutate_NoDataRace verifies that concurrent calls to
@@ -50,7 +50,7 @@ func TestVirtualStore_ConcurrentMutate_NoDataRace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get configmap: %v", err)
 	}
-	var virtuals []*xds.Virtual
+	var virtuals []*controlplane.Virtual
 	if str := cm.Data[config.KeyEnvoy]; str != "" {
 		if err := yaml.Unmarshal([]byte(str), &virtuals); err != nil {
 			t.Fatalf("invalid YAML after concurrent Mutate: %v\nYAML: %s", err, str)

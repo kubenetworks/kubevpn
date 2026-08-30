@@ -13,7 +13,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/xds"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
 )
 
 func newTestConfigMap(ns string) *v1.ConfigMap {
@@ -23,13 +23,13 @@ func newTestConfigMap(ns string) *v1.ConfigMap {
 	}
 }
 
-func getVirtuals(t *testing.T, clientset *fake.Clientset, ns string) []*xds.Virtual {
+func getVirtuals(t *testing.T, clientset *fake.Clientset, ns string) []*controlplane.Virtual {
 	t.Helper()
 	cm, err := clientset.CoreV1().ConfigMaps(ns).Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var v []*xds.Virtual
+	var v []*controlplane.Virtual
 	if cm.Data[config.KeyEnvoy] != "" {
 		if err := yaml.Unmarshal([]byte(cm.Data[config.KeyEnvoy]), &v); err != nil {
 			t.Fatal(err)
@@ -38,10 +38,10 @@ func getVirtuals(t *testing.T, clientset *fake.Clientset, ns string) []*xds.Virt
 	return v
 }
 
-func findRulesByOwner(virtuals []*xds.Virtual, nodeID, ns, ownerID string) []*xds.Rule {
+func findRulesByOwner(virtuals []*controlplane.Virtual, nodeID, ns, ownerID string) []*controlplane.Rule {
 	for _, v := range virtuals {
 		if v.UID == nodeID && v.Namespace == ns {
-			var result []*xds.Rule
+			var result []*controlplane.Rule
 			for _, r := range v.Rules {
 				if r.OwnerID == ownerID {
 					result = append(result, r)
@@ -71,7 +71,7 @@ func TestMultiUser_ProxySameWorkload_DifferentHeaders(t *testing.T) {
 		LocalTunIPv4: "198.18.0.1",
 		Headers:      map[string]string{"env": "dev"},
 		OwnerID:      "user-a-owner",
-		Ports:        []xds.ContainerPort{{ContainerPort: 9080, Protocol: "TCP"}},
+		Ports:        []controlplane.ContainerPort{{ContainerPort: 9080, Protocol: "TCP"}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -84,7 +84,7 @@ func TestMultiUser_ProxySameWorkload_DifferentHeaders(t *testing.T) {
 		LocalTunIPv4: "198.18.0.2",
 		Headers:      map[string]string{"env": "staging"},
 		OwnerID:      "user-b-owner",
-		Ports:        []xds.ContainerPort{{ContainerPort: 9080, Protocol: "TCP"}},
+		Ports:        []controlplane.ContainerPort{{ContainerPort: 9080, Protocol: "TCP"}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -180,7 +180,7 @@ func TestMultiUser_OneLeaves_OtherStays(t *testing.T) {
 			LocalTunIPv4: u.ip,
 			Headers:      map[string]string{"env": u.env},
 			OwnerID:      u.owner,
-			Ports:        []xds.ContainerPort{{ContainerPort: 9080, Protocol: "TCP"}},
+			Ports:        []controlplane.ContainerPort{{ContainerPort: 9080, Protocol: "TCP"}},
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -227,7 +227,7 @@ func TestMultiUser_AllLeave_VirtualRemoved(t *testing.T) {
 		LocalTunIPv4: "198.18.0.1",
 		Headers:      map[string]string{"env": "test"},
 		OwnerID:      "only-user",
-		Ports:        []xds.ContainerPort{{ContainerPort: 9080, Protocol: "TCP"}},
+		Ports:        []controlplane.ContainerPort{{ContainerPort: 9080, Protocol: "TCP"}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -271,7 +271,7 @@ func TestMultiUser_DifferentWorkloads_Isolated(t *testing.T) {
 			LocalTunIPv4: w.ip,
 			Headers:      map[string]string{"user": w.owner},
 			OwnerID:      w.owner,
-			Ports:        []xds.ContainerPort{{ContainerPort: 8080, Protocol: "TCP"}},
+			Ports:        []controlplane.ContainerPort{{ContainerPort: 8080, Protocol: "TCP"}},
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -327,7 +327,7 @@ func TestMultiUser_ConcurrentProxy_SameWorkload(t *testing.T) {
 				LocalTunIPv4: fmt.Sprintf("198.18.0.%d", i+1),
 				Headers:      map[string]string{"user": fmt.Sprintf("user-%d", i)},
 				OwnerID:      fmt.Sprintf("owner-%d", i),
-				Ports:        []xds.ContainerPort{{ContainerPort: 9080, Protocol: "TCP"}},
+				Ports:        []controlplane.ContainerPort{{ContainerPort: 9080, Protocol: "TCP"}},
 			})
 			if err != nil {
 				atomic.AddInt32(&errCount, 1)
@@ -382,7 +382,7 @@ func TestMultiUser_ConcurrentLeave(t *testing.T) {
 			LocalTunIPv4: fmt.Sprintf("198.18.0.%d", i+1),
 			Headers:      map[string]string{"user": fmt.Sprintf("user-%d", i)},
 			OwnerID:      fmt.Sprintf("owner-%d", i),
-			Ports:        []xds.ContainerPort{{ContainerPort: 9080, Protocol: "TCP"}},
+			Ports:        []controlplane.ContainerPort{{ContainerPort: 9080, Protocol: "TCP"}},
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -426,19 +426,19 @@ func TestMultiUser_ReProxy_UpdatesOwnRule(t *testing.T) {
 	addEnvoyConfig(ctx, mapInterface, envoyRuleSpec{
 		Namespace: ns, NodeID: nodeID, LocalTunIPv4: "198.18.0.1",
 		Headers: map[string]string{"env": "dev"}, OwnerID: "user-a",
-		Ports: []xds.ContainerPort{{ContainerPort: 9080, Protocol: "TCP"}},
+		Ports: []controlplane.ContainerPort{{ContainerPort: 9080, Protocol: "TCP"}},
 	})
 	addEnvoyConfig(ctx, mapInterface, envoyRuleSpec{
 		Namespace: ns, NodeID: nodeID, LocalTunIPv4: "198.18.0.2",
 		Headers: map[string]string{"env": "staging"}, OwnerID: "user-b",
-		Ports: []xds.ContainerPort{{ContainerPort: 9080, Protocol: "TCP"}},
+		Ports: []controlplane.ContainerPort{{ContainerPort: 9080, Protocol: "TCP"}},
 	})
 
 	// User A re-proxies (new IP, same OwnerID) → should update, not add
 	addEnvoyConfig(ctx, mapInterface, envoyRuleSpec{
 		Namespace: ns, NodeID: nodeID, LocalTunIPv4: "198.18.0.99",
 		Headers: map[string]string{"env": "dev"}, OwnerID: "user-a",
-		Ports: []xds.ContainerPort{{ContainerPort: 9080, Protocol: "TCP"}},
+		Ports: []controlplane.ContainerPort{{ContainerPort: 9080, Protocol: "TCP"}},
 	})
 
 	virtuals := getVirtuals(t, clientset, ns)
@@ -474,14 +474,14 @@ func TestMultiUser_SameWorkload_DifferentNamespaces(t *testing.T) {
 	addEnvoyConfig(ctx, clientset.CoreV1().ConfigMaps("ns-a"), envoyRuleSpec{
 		Namespace: "ns-a", NodeID: nodeID, LocalTunIPv4: "198.18.0.1",
 		Headers: map[string]string{"env": "dev"}, OwnerID: "user-a",
-		Ports: []xds.ContainerPort{{ContainerPort: 9080, Protocol: "TCP"}},
+		Ports: []controlplane.ContainerPort{{ContainerPort: 9080, Protocol: "TCP"}},
 	})
 
 	// User B in ns-b (same workload name, different namespace)
 	addEnvoyConfig(ctx, clientset.CoreV1().ConfigMaps("ns-b"), envoyRuleSpec{
 		Namespace: "ns-b", NodeID: nodeID, LocalTunIPv4: "198.18.0.2",
 		Headers: map[string]string{"env": "dev"}, OwnerID: "user-b",
-		Ports: []xds.ContainerPort{{ContainerPort: 9080, Protocol: "TCP"}},
+		Ports: []controlplane.ContainerPort{{ContainerPort: 9080, Protocol: "TCP"}},
 	})
 
 	// Each namespace has its own ConfigMap — fully isolated
@@ -521,7 +521,7 @@ func TestMultiUser_LeaveWrongOwner_NoOp(t *testing.T) {
 	addEnvoyConfig(ctx, mapInterface, envoyRuleSpec{
 		Namespace: ns, NodeID: nodeID, LocalTunIPv4: "198.18.0.1",
 		Headers: map[string]string{"env": "dev"}, OwnerID: "real-owner",
-		Ports: []xds.ContainerPort{{ContainerPort: 9080, Protocol: "TCP"}},
+		Ports: []controlplane.ContainerPort{{ContainerPort: 9080, Protocol: "TCP"}},
 	})
 
 	// Try to remove with wrong OwnerID

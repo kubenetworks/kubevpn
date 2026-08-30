@@ -18,10 +18,10 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/inject"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/xds"
 )
 
 // Reset removes injected sidecar containers and restores workloads to their original spec.
@@ -65,7 +65,7 @@ func resetConfigMap(ctx context.Context, mapInterface v1.ConfigMapInterface, nam
 		plog.G(ctx).Infof("No proxy resources found")
 		return nil
 	}
-	v := make([]*xds.Virtual, 0)
+	v := make([]*controlplane.Virtual, 0)
 	str := cm.Data[config.KeyEnvoy]
 	if err = yaml.Unmarshal([]byte(str), &v); err != nil {
 		plog.G(ctx).Errorf("Unmarshal envoy config error: %v", err)

@@ -12,9 +12,9 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/xds"
 )
 
 type fargateInjector struct {
@@ -34,7 +34,7 @@ func (f *fargateInjector) Inject(ctx context.Context) error {
 	localTunIPv4 := "127.0.0.1"
 	localTunIPv6 := netip.IPv6Loopback().String()
 	ports, portmap := collectFargatePorts(templateSpec, o.PortMaps)
-	port := xds.ConvertContainerPort(ports...)
+	port := controlplane.ConvertContainerPort(ports...)
 	containerPort2EnvoyListenerPort := make(map[int32]int32)
 	for i := range len(port) {
 		randomPort, _ := util.GetAvailableTCPPort()

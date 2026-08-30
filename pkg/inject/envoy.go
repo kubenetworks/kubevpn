@@ -15,9 +15,9 @@ import (
 	v12 "k8s.io/client-go/kubernetes/typed/core/v1"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/xds"
 )
 
 //go:embed envoy.yaml
@@ -53,7 +53,7 @@ type envoyRuleSpec struct {
 	LocalTunIPv4 string
 	LocalTunIPv6 string
 	Headers      map[string]string
-	Ports        []xds.ContainerPort
+	Ports        []controlplane.ContainerPort
 	PortMap      map[int32]string
 	FargateMode  bool
 	OwnerID      string
@@ -80,7 +80,7 @@ func addEnvoyConfig(ctx context.Context, mapInterface v12.ConfigMapInterface, sp
 	return NewVirtualStore(mapInterface).AddRule(ctx, spec)
 }
 
-func addVirtualRule(ctx context.Context, v []*xds.Virtual, spec envoyRuleSpec) []*xds.Virtual {
+func addVirtualRule(ctx context.Context, v []*controlplane.Virtual, spec envoyRuleSpec) []*controlplane.Virtual {
 	index := -1
 	for i, virtual := range v {
 		if spec.NodeID == virtual.UID && virtual.Namespace == spec.Namespace {
@@ -89,7 +89,7 @@ func addVirtualRule(ctx context.Context, v []*xds.Virtual, spec envoyRuleSpec) [
 		}
 	}
 
-	newRule := &xds.Rule{
+	newRule := &controlplane.Rule{
 		Headers:      spec.Headers,
 		LocalTunIPv4: spec.LocalTunIPv4,
 		LocalTunIPv6: spec.LocalTunIPv6,
@@ -99,13 +99,13 @@ func addVirtualRule(ctx context.Context, v []*xds.Virtual, spec envoyRuleSpec) [
 
 	// 1) no existing Virtual for this workload — create one
 	if index < 0 {
-		return append(v, &xds.Virtual{
-			SchemaVersion: xds.CurrentSchemaVersion,
+		return append(v, &controlplane.Virtual{
+			SchemaVersion: controlplane.CurrentSchemaVersion,
 			UID:           spec.NodeID,
 			Namespace:     spec.Namespace,
 			FargateMode:   spec.FargateMode,
 			Ports:         spec.Ports,
-			Rules:         []*xds.Rule{newRule},
+			Rules:         []*controlplane.Rule{newRule},
 		})
 	}
 

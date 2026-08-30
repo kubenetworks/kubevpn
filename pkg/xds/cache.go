@@ -2,7 +2,6 @@ package xds
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -38,13 +37,29 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
 )
 
-// CurrentSchemaVersion is the latest schema version for Virtual configs stored in ConfigMaps.
-// Bump this when making breaking changes to the Virtual/Rule struct layout.
-// A zero value means a legacy config created before versioning was introduced.
-// Version 2: OwnerID is required on all rules (no backward compat with empty OwnerID).
-const CurrentSchemaVersion = 2
+// The envoy config data types (Virtual, Rule, ContainerPort, PortMapping) and their
+// pure helpers now live in the leaf package pkg/controlplane, so pkg/inject can use
+// them without importing pkg/xds (which lets pkg/xds import pkg/inject to run
+// injection server-side). These aliases keep the envoy-resource-building code below —
+// which does pull in the heavy go-control-plane deps — readable with short names.
+type (
+	Virtual       = controlplane.Virtual
+	Rule          = controlplane.Rule
+	ContainerPort = controlplane.ContainerPort
+	PortMapping   = controlplane.PortMapping
+)
+
+// CurrentSchemaVersion re-exports controlplane.CurrentSchemaVersion for xds-internal use.
+const CurrentSchemaVersion = controlplane.CurrentSchemaVersion
+
+// ConvertContainerPort re-exports controlplane.ConvertContainerPort so the xds
+// envoy-building code and its tests can call it with a short name.
+func ConvertContainerPort(ports ...corev1.ContainerPort) []ContainerPort {
+	return controlplane.ConvertContainerPort(ports...)
+}
 
 // originClusterName is the name of the shared ORIGINAL_DST cluster that forwards a
 // connection to its original destination (the local app). It backs both the mesh TCP
@@ -59,68 +74,6 @@ const (
 	// envoyUDPProxyIdleTimeout is the idle timeout for the Envoy UDP proxy listener.
 	envoyUDPProxyIdleTimeout = 5 * time.Minute
 )
-
-// Virtual represents an envoy xDS configuration for a single proxied workload.
-type Virtual struct {
-	// SchemaVersion tracks the config schema revision. Zero means legacy (pre-versioning).
-	SchemaVersion int `yaml:"schemaVersion,omitempty" json:"schemaVersion,omitempty"`
-	Namespace     string
-	UID           string `yaml:"Uid" json:"Uid"` // group.resource.name
-	FargateMode   bool   `yaml:"fargateMode,omitempty" json:"fargateMode,omitempty"`
-	Ports         []ContainerPort
-	Rules         []*Rule
-}
-
-// ContainerPort describes a port on a container with optional envoy listener binding.
-type ContainerPort struct {
-	// If specified, this must be an IANA_SVC_NAME and unique within the pod. Each
-	// named port in a pod must have a unique name. Name for the port that can be
-	// referred to by services.
-	// +optional
-	Name string `json:"name,omitempty"`
-	// EnvoyListenerPort is the port envoy binds to in fargate mode (BindToPort=true).
-	// In mesh mode this is 0 (envoy uses iptables-redirected traffic instead).
-	// +optional
-	EnvoyListenerPort int32 `json:"envoyListenerPort,omitempty"`
-	// Number of port to expose on the pod's IP address.
-	// This must be a valid port number, 0 < x < 65536.
-	ContainerPort int32 `json:"containerPort"`
-	// Protocol for port. Must be UDP, TCP, or SCTP.
-	// Defaults to "TCP".
-	// +optional
-	// +default="TCP"
-	Protocol corev1.Protocol `json:"protocol,omitempty"`
-}
-
-// IsFargateMode returns true if this Virtual uses Fargate/Service mode
-// (no iptables, SSH tunnels instead of VPN sidecar).
-// Checks the explicit FargateMode field first, with a fallback to the legacy
-// heuristic (EnvoyListenerPort != 0) for backward compatibility with existing ConfigMaps.
-func (a *Virtual) IsFargateMode() bool {
-	if a.FargateMode {
-		return true
-	}
-	for _, port := range a.Ports {
-		if port.EnvoyListenerPort != 0 {
-			return true
-		}
-	}
-	return false
-}
-
-// ConvertContainerPort converts Kubernetes ContainerPort values to xds ContainerPort with EnvoyListenerPort=0.
-func ConvertContainerPort(ports ...corev1.ContainerPort) []ContainerPort {
-	var result []ContainerPort
-	for _, port := range ports {
-		result = append(result, ContainerPort{
-			Name:              port.Name,
-			EnvoyListenerPort: 0,
-			ContainerPort:     port.ContainerPort,
-			Protocol:          port.Protocol,
-		})
-	}
-	return result
-}
 
 // mustMarshalAny marshals a protobuf message into an Any.
 // All call sites pass statically-typed envoy config messages that are always valid.
@@ -137,55 +90,10 @@ func createPreserveCaseConfig() *core.TypedExtensionConfig {
 	}
 }
 
-// Rule defines a header-based routing rule for envoy traffic splitting.
-type Rule struct {
-	Headers      map[string]string
-	LocalTunIPv4 string
-	LocalTunIPv6 string
-	// OwnerID identifies the connection that owns this rule (a UUID prefix).
-	// Required — used as the primary key for rule matching in addVirtualRule and removeEnvoyConfig.
-	OwnerID string `yaml:"ownerID" json:"ownerID"`
-	// for no privileged mode (AWS Fargate mode), don't have cap NET_ADMIN and privileged: true. so we cannot use OSI layer 3 proxy
-	// containerPort -> envoyRulePort:localPort
-	// envoyRulePort for envoy forward to localhost:envoyRulePort
-	// localPort for local pc listen localhost:localPort
-	// use ssh reverse tunnel, envoy rule endpoint localhost:envoyRulePort will forward to local pc localhost:localPort
-	// localPort is required and envoyRulePort is optional
-	PortMap map[int32]string
-}
-
-// PortMapping represents a parsed port mapping from the PortMap string encoding.
-type PortMapping struct {
-	// ContainerPort is the original container port (the map key in PortMap).
-	ContainerPort int32
-	// EnvoyPort is the port envoy forwards to (the first number in the string value).
-	EnvoyPort int32
-	// LocalPort is the port the local PC listens on.
-	// In non-fargate mode (plain "envoyPort" format), LocalPort equals ContainerPort.
-	// In fargate mode ("envoyPort:localPort" format), LocalPort is the second number.
-	LocalPort int32
-}
-
-// ParsePortMap parses the string-encoded PortMap into typed PortMapping values.
-// The string value is either "envoyPort" (plain number) or "envoyPort:localPort" (colon-separated pair).
-func (r *Rule) ParsePortMap() []PortMapping {
-	result := make([]PortMapping, 0, len(r.PortMap))
-	for containerPort, portStr := range r.PortMap {
-		pm := PortMapping{ContainerPort: containerPort}
-		if before, after, ok := strings.Cut(portStr, ":"); ok {
-			pm.EnvoyPort, _ = parsePort(before)
-			pm.LocalPort, _ = parsePort(after)
-		} else {
-			pm.EnvoyPort, _ = parsePort(portStr)
-			pm.LocalPort = containerPort
-		}
-		result = append(result, pm)
-	}
-	return result
-}
-
 // tunIPs returns the rule's local TUN IPs: IPv4 only, or IPv4 + IPv6 when enabled.
-func (r *Rule) tunIPs(enableIPv6 bool) []string {
+// A free function (not a method) because Rule lives in pkg/controlplane; the envoy
+// builders below are the only callers and stay in pkg/xds.
+func tunIPs(r *Rule, enableIPv6 bool) []string {
 	if enableIPv6 {
 		return []string{r.LocalTunIPv4, r.LocalTunIPv6}
 	}
@@ -194,22 +102,13 @@ func (r *Rule) tunIPs(enableIPv6 bool) []string {
 
 // envoyPort returns the envoy upstream port mapped for the given container port,
 // or 0 if the rule has no mapping for it.
-func (r *Rule) envoyPort(containerPort int32) int32 {
+func envoyPort(r *Rule, containerPort int32) int32 {
 	for _, pm := range r.ParsePortMap() {
 		if pm.ContainerPort == containerPort {
 			return pm.EnvoyPort
 		}
 	}
 	return 0
-}
-
-// parsePort converts a port string to int32, returning 0 on parse failure.
-func parsePort(s string) (int32, bool) {
-	n, err := strconv.Atoi(s)
-	if err != nil {
-		return 0, false
-	}
-	return int32(n), true
 }
 
 // xdsResources accumulates the four Envoy xDS resource lists a Virtual produces. The
@@ -235,7 +134,7 @@ func (r *xdsResources) addTunCluster(ip string, port int32) string {
 // endpoints). Each port is turned into per-protocol resources; in mesh mode a single
 // virtual-inbound capture listener is added as the bound entry point for the sidecar's
 // iptables DNAT.
-func (a *Virtual) To(enableIPv6 bool, logger *log.Entry) (
+func To(a *Virtual, enableIPv6 bool, logger *log.Entry) (
 	listeners []types.Resource,
 	clusters []types.Resource,
 	routes []types.Resource,
@@ -253,9 +152,9 @@ func (a *Virtual) To(enableIPv6 bool, logger *log.Entry) (
 		}
 		logger.Debugf("[xDS] %s/%s port %d/%s -> listen on %d", a.Namespace, a.UID, port.ContainerPort, port.Protocol, listenPort)
 		if port.Protocol == corev1.ProtocolUDP {
-			a.addUDPPort(&res, port, listenPort, enableIPv6, logger)
+			addUDPPort(a, &res, port, listenPort, enableIPv6, logger)
 		} else {
-			a.addTCPPort(&res, port, listenPort, fargate, enableIPv6, logger)
+			addTCPPort(a, &res, port, listenPort, fargate, enableIPv6, logger)
 		}
 	}
 
@@ -292,11 +191,11 @@ func (a *Virtual) To(enableIPv6 bool, logger *log.Entry) (
 // listeners do not collapse to one in the xDS snapshot (which would leave the survivor bound
 // to the wrong family); unpopulated IP families are skipped to avoid an endpoint with an
 // invalid empty address.
-func (a *Virtual) addUDPPort(res *xdsResources, port ContainerPort, listenPort int32, enableIPv6 bool, logger *log.Entry) {
+func addUDPPort(a *Virtual, res *xdsResources, port ContainerPort, listenPort int32, enableIPv6 bool, logger *log.Entry) {
 	listenerName := fmt.Sprintf("%s_%s_%v_%s", a.Namespace, a.UID, listenPort, port.Protocol)
 	for _, rule := range a.Rules {
-		envoyRulePort := rule.envoyPort(port.ContainerPort)
-		for _, ip := range rule.tunIPs(enableIPv6) {
+		envoyRulePort := envoyPort(rule, port.ContainerPort)
+		for _, ip := range tunIPs(rule, enableIPv6) {
 			if ip == "" {
 				logger.Warnf("[xDS] %s/%s UDP %d: skip rule (headers=%v, owner=%s) — empty TUN IP (not allocated/propagated yet)",
 					a.Namespace, a.UID, port.ContainerPort, rule.Headers, rule.OwnerID)
@@ -318,7 +217,7 @@ func (a *Virtual) addUDPPort(res *xdsResources, port ContainerPort, listenPort i
 // TCP port, with header-based routing to each rule's TUN IP. The default route falls back to
 // origin_cluster (mesh, via use_original_dst) or to an explicit per-IP container-port cluster
 // (fargate, where use_original_dst does not work).
-func (a *Virtual) addTCPPort(res *xdsResources, port ContainerPort, listenPort int32, fargate, enableIPv6 bool, logger *log.Entry) {
+func addTCPPort(a *Virtual, res *xdsResources, port ContainerPort, listenPort int32, fargate, enableIPv6 bool, logger *log.Entry) {
 	listenerName := fmt.Sprintf("%s_%s_%v_%s", a.Namespace, a.UID, listenPort, port.Protocol)
 	// The listener resolves its routes from an RDS config of the same name.
 	routeName := listenerName
@@ -326,8 +225,8 @@ func (a *Virtual) addTCPPort(res *xdsResources, port ContainerPort, listenPort i
 
 	var rr []*route.Route
 	for _, rule := range a.Rules {
-		envoyRulePort := rule.envoyPort(port.ContainerPort)
-		for _, ip := range rule.tunIPs(enableIPv6) {
+		envoyRulePort := envoyPort(rule, port.ContainerPort)
+		for _, ip := range tunIPs(rule, enableIPv6) {
 			// Skip an empty TUN IP (e.g. a rule whose IP has not been allocated/propagated
 			// yet, or an absent IPv6 in a v4-only rule). Routing to an empty upstream address
 			// makes envoy fail every request with 503 "connection refused"; an empty-headers
@@ -349,7 +248,7 @@ func (a *Virtual) addTCPPort(res *xdsResources, port ContainerPort, listenPort i
 		// rules) because use_original_dst does not work there.
 		ips := sets.New[string]()
 		for _, rule := range a.Rules {
-			ips.Insert(rule.tunIPs(enableIPv6)...)
+			ips.Insert(tunIPs(rule, enableIPv6)...)
 		}
 		for _, ip := range ips.UnsortedList() {
 			if ip == "" {

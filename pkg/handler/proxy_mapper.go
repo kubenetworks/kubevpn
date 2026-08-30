@@ -18,11 +18,11 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/core"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/xds"
 )
 
 func NewMapper(clientset kubernetes.Interface, ns string, labels string, headers map[string]string, workload string, cmInformer cache.SharedInformer) *Mapper {
@@ -201,7 +201,7 @@ func (m *Mapper) getPortMappingFromCache() (map[int32]portForward, error) {
 }
 
 func (m *Mapper) extractPortMapping(configMap *v1.ConfigMap) (map[int32]portForward, error) {
-	var virtuals []*xds.Virtual
+	var virtuals []*controlplane.Virtual
 	if str, ok := configMap.Data[config.KeyEnvoy]; ok {
 		if err := yaml.Unmarshal([]byte(str), &virtuals); err != nil {
 			return nil, err

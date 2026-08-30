@@ -13,7 +13,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/xds"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
 )
 
 func TestReset_NilReceiver(t *testing.T) {
@@ -73,18 +73,18 @@ func TestResetConfigMap_EmptyEnvoyKey(t *testing.T) {
 }
 
 func TestResetConfigMap_RemoveMatchingWorkload(t *testing.T) {
-	virtuals := []*xds.Virtual{
+	virtuals := []*controlplane.Virtual{
 		{
 			Namespace: "default",
 			UID:       "deployments.apps.nginx",
-			Rules: []*xds.Rule{
+			Rules: []*controlplane.Rule{
 				{LocalTunIPv4: "10.0.0.1"},
 			},
 		},
 		{
 			Namespace: "default",
 			UID:       "deployments.apps.redis",
-			Rules: []*xds.Rule{
+			Rules: []*controlplane.Rule{
 				{LocalTunIPv4: "10.0.0.2"},
 			},
 		},
@@ -108,7 +108,7 @@ func TestResetConfigMap_RemoveMatchingWorkload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to get updated configmap: %v", err)
 	}
-	var remaining []*xds.Virtual
+	var remaining []*controlplane.Virtual
 	if err := yaml.Unmarshal([]byte(cm.Data[config.KeyEnvoy]), &remaining); err != nil {
 		t.Fatalf("failed to unmarshal result: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestResetConfigMap_RemoveMatchingWorkload(t *testing.T) {
 }
 
 func TestResetConfigMap_NoMatchingWorkload(t *testing.T) {
-	virtuals := []*xds.Virtual{
+	virtuals := []*controlplane.Virtual{
 		{
 			Namespace: "default",
 			UID:       "deployments.apps.nginx",
@@ -146,7 +146,7 @@ func TestResetConfigMap_NoMatchingWorkload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to get updated configmap: %v", err)
 	}
-	var remaining []*xds.Virtual
+	var remaining []*controlplane.Virtual
 	if err := yaml.Unmarshal([]byte(cm.Data[config.KeyEnvoy]), &remaining); err != nil {
 		t.Fatalf("failed to unmarshal result: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestResetConfigMap_NoMatchingWorkload(t *testing.T) {
 }
 
 func TestResetConfigMap_DifferentNamespace(t *testing.T) {
-	virtuals := []*xds.Virtual{
+	virtuals := []*controlplane.Virtual{
 		{Namespace: "production", UID: "deployments.apps.nginx"},
 		{Namespace: "default", UID: "deployments.apps.nginx"},
 	}
@@ -179,7 +179,7 @@ func TestResetConfigMap_DifferentNamespace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to get updated configmap: %v", err)
 	}
-	var remaining []*xds.Virtual
+	var remaining []*controlplane.Virtual
 	if err := yaml.Unmarshal([]byte(cm.Data[config.KeyEnvoy]), &remaining); err != nil {
 		t.Fatalf("failed to unmarshal result: %v", err)
 	}
@@ -192,7 +192,7 @@ func TestResetConfigMap_DifferentNamespace(t *testing.T) {
 }
 
 func TestResetConfigMap_EmptyWorkloads(t *testing.T) {
-	virtuals := []*xds.Virtual{
+	virtuals := []*controlplane.Virtual{
 		{Namespace: "default", UID: "deployments.apps.nginx"},
 	}
 	data, err := yaml.Marshal(virtuals)
@@ -214,7 +214,7 @@ func TestResetConfigMap_EmptyWorkloads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to get updated configmap: %v", err)
 	}
-	var remaining []*xds.Virtual
+	var remaining []*controlplane.Virtual
 	if err := yaml.Unmarshal([]byte(cm.Data[config.KeyEnvoy]), &remaining); err != nil {
 		t.Fatalf("failed to unmarshal result: %v", err)
 	}
@@ -224,7 +224,7 @@ func TestResetConfigMap_EmptyWorkloads(t *testing.T) {
 }
 
 func TestResetConfigMap_RemoveMultipleWorkloads(t *testing.T) {
-	virtuals := []*xds.Virtual{
+	virtuals := []*controlplane.Virtual{
 		{Namespace: "default", UID: "deployments.apps.nginx"},
 		{Namespace: "default", UID: "deployments.apps.redis"},
 		{Namespace: "default", UID: "statefulsets.apps.postgres"},
@@ -251,7 +251,7 @@ func TestResetConfigMap_RemoveMultipleWorkloads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to get updated configmap: %v", err)
 	}
-	var remaining []*xds.Virtual
+	var remaining []*controlplane.Virtual
 	if err := yaml.Unmarshal([]byte(cm.Data[config.KeyEnvoy]), &remaining); err != nil {
 		t.Fatalf("failed to unmarshal result: %v", err)
 	}
@@ -264,7 +264,7 @@ func TestResetConfigMap_RemoveMultipleWorkloads(t *testing.T) {
 }
 
 func TestResetConfigMap_RemoveAllVirtuals(t *testing.T) {
-	virtuals := []*xds.Virtual{
+	virtuals := []*controlplane.Virtual{
 		{Namespace: "default", UID: "deployments.apps.nginx"},
 	}
 	data, err := yaml.Marshal(virtuals)
@@ -286,7 +286,7 @@ func TestResetConfigMap_RemoveAllVirtuals(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to get updated configmap: %v", err)
 	}
-	var remaining []*xds.Virtual
+	var remaining []*controlplane.Virtual
 	if err := yaml.Unmarshal([]byte(cm.Data[config.KeyEnvoy]), &remaining); err != nil {
 		t.Fatalf("failed to unmarshal result: %v", err)
 	}

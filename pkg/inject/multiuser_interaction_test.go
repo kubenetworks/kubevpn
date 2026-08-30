@@ -9,7 +9,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/xds"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
 )
 
 // user is a test helper representing a single kubevpn user session.
@@ -44,7 +44,7 @@ func (c *testCluster) proxy(t *testing.T, u user, nodeID string) {
 		LocalTunIPv4: u.tunIPv4,
 		Headers:      u.headers,
 		OwnerID:      u.ownerID,
-		Ports:        []xds.ContainerPort{{ContainerPort: 9080, Protocol: "TCP"}},
+		Ports:        []controlplane.ContainerPort{{ContainerPort: 9080, Protocol: "TCP"}},
 	})
 	if err != nil {
 		t.Fatalf("[%s] proxy %s failed: %v", u.name, nodeID, err)

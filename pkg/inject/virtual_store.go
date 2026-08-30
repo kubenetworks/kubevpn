@@ -10,14 +10,14 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/xds"
 )
 
 // MutationFunc is called with the current Virtual list and must return the
 // updated list. Returning nil (with a nil error) signals a no-op and causes
 // Mutate to skip the Update call.
-type MutationFunc func(ctx context.Context, virtuals []*xds.Virtual) ([]*xds.Virtual, error)
+type MutationFunc func(ctx context.Context, virtuals []*controlplane.Virtual) ([]*controlplane.Virtual, error)
 
 // VirtualStore wraps a ConfigMapInterface and provides a single read-modify-write
 // loop for the ENVOY_CONFIG key. All callers go through Mutate.
@@ -42,7 +42,7 @@ func (s *VirtualStore) Mutate(ctx context.Context, fn MutationFunc) error {
 		if err != nil {
 			return err
 		}
-		var virtuals []*xds.Virtual
+		var virtuals []*controlplane.Virtual
 		if str, ok := cm.Data[config.KeyEnvoy]; ok && str != "" {
 			if err = yaml.Unmarshal([]byte(str), &virtuals); err != nil {
 				return err
@@ -75,7 +75,7 @@ func (s *VirtualStore) AddRule(ctx context.Context, spec envoyRuleSpec) error {
 	if err := spec.validate(); err != nil {
 		return err
 	}
-	return s.Mutate(ctx, func(ctx context.Context, virtuals []*xds.Virtual) ([]*xds.Virtual, error) {
+	return s.Mutate(ctx, func(ctx context.Context, virtuals []*controlplane.Virtual) ([]*controlplane.Virtual, error) {
 		updated := addVirtualRule(ctx, virtuals, spec)
 		// Log the persisted rule set for this workload so the actual rules (headers/tunIP/
 		// owner) are visible for diagnosing full-proxy routing and ownership.
@@ -98,7 +98,7 @@ func (s *VirtualStore) AddRule(ctx context.Context, spec envoyRuleSpec) error {
 // Returns (empty, found) where empty=true means the Virtual for nodeID has no more rules.
 // Callers must handle k8s IsNotFound before calling this method.
 func (s *VirtualStore) RemoveRule(ctx context.Context, namespace, nodeID, ownerID string) (empty bool, found bool, err error) {
-	mutateErr := s.Mutate(ctx, func(ctx context.Context, virtuals []*xds.Virtual) ([]*xds.Virtual, error) {
+	mutateErr := s.Mutate(ctx, func(ctx context.Context, virtuals []*controlplane.Virtual) ([]*controlplane.Virtual, error) {
 		// Reset per-attempt output fields so retries start clean.
 		empty = false
 		found = false
