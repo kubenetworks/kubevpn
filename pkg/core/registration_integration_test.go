@@ -21,14 +21,19 @@ package core
 // working around exactly this bug.
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	logrus "github.com/sirupsen/logrus"
+
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	netutil "github.com/wencaiwulue/kubevpn/v2/pkg/util/netutil"
 )
 
@@ -148,6 +153,36 @@ func startRegClient(ctx context.Context, t testing.TB, serverPort int, v4, v6 ne
 	return stats
 }
 
+// syncBuffer collects log output written concurrently by the data plane's goroutines.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// unthrottleDataPlaneWarnings disables warning rate limiting so a test observes each diagnostic
+// regardless of what earlier tests in this package already logged. The returned func restores it;
+// it also runs on cleanup in case the test fails first.
+func unthrottleDataPlaneWarnings(t *testing.T) func() {
+	t.Helper()
+	orig := dataPlaneWarn
+	dataPlaneWarn = plog.NewThrottle(0)
+	restore := func() { dataPlaneWarn = orig }
+	t.Cleanup(restore)
+	return restore
+}
+
 // TestIntegration_DataSlotsAutoRegisterRouteAndPrimeLiveness walks the full story: a freshly
 // connected idle client registers its route by itself, its heartbeat completes a round trip, a
 // port-forward-style teardown re-registers everything, and a client that cannot determine its own
@@ -203,9 +238,14 @@ func TestIntegration_DataSlotsAutoRegisterRouteAndPrimeLiveness(t *testing.T) {
 	// Phase 4: the production failure, reproduced. A client that cannot determine its own
 	// addresses announces nothing, so the server has no route, drops every echo reply it
 	// generates, and the client never primes — which is what drove the 30s reconnect loop.
+	// It must also SAY so: at Debug level this state produced 20 hours of clean logs.
+	logs := &syncBuffer{}
+	blindCtx := plog.WithLogger(ctx, plog.GetLoggerForClient(int32(logrus.WarnLevel), logs))
+	restore := unthrottleDataPlaneWarnings(t)
 	routesBefore := srv.routeKeyCount()
-	blind := startRegClient(ctx, t, srv.port, nil, nil)
+	blind := startRegClient(blindCtx, t, srv.port, nil, nil)
 	time.Sleep(3 * config.HeartbeatInterval)
+	restore()
 	if got := srv.routeKeyCount(); got != routesBefore {
 		t.Fatalf("blind client added %d route(s) to the hub, want 0", got-routesBefore)
 	}
@@ -213,7 +253,14 @@ func TestIntegration_DataSlotsAutoRegisterRouteAndPrimeLiveness(t *testing.T) {
 		t.Fatal("blind client observed a heartbeat reply; the route→liveness dependency this test " +
 			"pins down no longer holds — re-check the diagnosis before relaxing this assertion")
 	}
-	t.Log("✅ Phase 4: no addresses ⇒ no route ⇒ every echo reply dropped ⇒ liveness never primes")
+	// The two diagnostics that were missing when this happened for real.
+	for _, want := range []string{"Cannot announce our route", "Heartbeat not sent"} {
+		if !strings.Contains(logs.String(), want) {
+			t.Fatalf("no %q warning was logged; this failure mode must never be silent again.\nlogs:\n%s",
+				want, logs.String())
+		}
+	}
+	t.Log("✅ Phase 4: no addresses ⇒ no route ⇒ every echo reply dropped ⇒ liveness never primes, loudly")
 }
 
 // TestRegistrationPayloadsUseInjectedAddresses pins the contract that registration payloads are
@@ -225,7 +272,7 @@ func TestRegistrationPayloadsUseInjectedAddresses(t *testing.T) {
 	dev := &tunDevice{addrsFn: func() (net.IP, net.IP, net.IP) { return v4, v6, nil }}
 	ct := &clientTransport{dev: dev}
 
-	payloads := ct.registrationPayloads()
+	payloads := ct.registrationPayloads(context.Background())
 	if len(payloads) != 2 {
 		t.Fatalf("got %d registration payloads, want 2 (one per address family)", len(payloads))
 	}
@@ -254,7 +301,7 @@ func TestRegistrationPayloadsUseInjectedAddresses(t *testing.T) {
 	// No addresses ⇒ nothing to announce. This is the state that black-holed production; the
 	// throttled warning that now accompanies it is asserted separately.
 	blind := &clientTransport{dev: &tunDevice{addrsFn: func() (net.IP, net.IP, net.IP) { return nil, nil, nil }}}
-	if got := blind.registrationPayloads(); got != nil {
+	if got := blind.registrationPayloads(context.Background()); got != nil {
 		t.Fatalf("got %d payloads with no addresses, want none", len(got))
 	}
 }

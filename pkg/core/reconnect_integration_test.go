@@ -280,7 +280,7 @@ func TestReconnect_ProactiveRegistration(t *testing.T) {
 		inbound:       make(chan *Packet, MaxSize),
 		tunOutbound:   make(chan *Packet, MaxSize),
 		forward:       fwd,
-		registrations: func() [][]byte { return [][]byte{regPayload} },
+		registrations: func(context.Context) [][]byte { return [][]byte{regPayload} },
 	}
 	ctx1, cancel1 := context.WithCancel(context.Background())
 	go slot.run(ctx1)
