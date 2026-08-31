@@ -23,16 +23,29 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
+// interfaceAddrs reads one interface's addresses. A var so tests can inject an interface whose
+// addresses cannot be read, which is what macOS does in the field (awdl0/llw0).
+var interfaceAddrs = func(i net.Interface) ([]net.Addr, error) { return i.Addrs() }
+
 // GetTunDevice returns the network interface that has one of the specified IPs assigned.
+//
+// An interface whose addresses cannot be read is skipped rather than aborting the whole scan: it
+// says nothing about the interface we are looking for. macOS in particular brings interfaces up and
+// down dynamically (awdl0/llw0 for AirDrop/AWDL), and one of them erroring used to make every
+// lookup fail — including "is my own TUN up?" (daemon/action/status.go) — for as long as it stayed
+// broken. The names of any skipped interfaces are reported in the not-found error so the cause is
+// nameable next time.
 func GetTunDevice(ips ...net.IP) (*net.Interface, error) {
 	interfaces, err := net.Interfaces()
 	if err != nil {
 		return nil, err
 	}
+	var skipped []string
 	for _, i := range interfaces {
-		addrList, err := i.Addrs()
+		addrList, err := interfaceAddrs(i)
 		if err != nil {
-			return nil, err
+			skipped = append(skipped, fmt.Sprintf("%s(%v)", i.Name, err))
+			continue
 		}
 		for _, addr := range addrList {
 			if ipNet, ok := addr.(*net.IPNet); ok {
@@ -43,6 +56,9 @@ func GetTunDevice(ips ...net.IP) (*net.Interface, error) {
 				}
 			}
 		}
+	}
+	if len(skipped) > 0 {
+		return nil, fmt.Errorf("cannot find any interface with IP %v (skipped unreadable: %s)", ips, strings.Join(skipped, ", "))
 	}
 	return nil, fmt.Errorf("cannot find any interface with IP %v", ips)
 }
