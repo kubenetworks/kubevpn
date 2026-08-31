@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/containernetworking/cni/pkg/types"
@@ -99,8 +100,18 @@ const (
 	portForwardReconnectMaxDelay = 2 * time.Second
 	// portForwardHealthySession is the minimum session duration considered "healthy": a
 	// session that lasted at least this long before dropping resets the reconnect backoff
-	// (normal pod recreation reconnects fast); shorter sessions grow the backoff.
+	// (normal pod recreation reconnects fast); shorter sessions grow the backoff. Note this
+	// equals livenessStartupDeadline, so duration is NOT sufficient evidence of health — see
+	// nextPortForwardDelay, which also requires the session to have carried traffic.
 	portForwardHealthySession = 30 * time.Second
+	// portForwardBlackHoleMaxDelay caps the backoff once the data plane has repeatedly failed to
+	// come up at all. Much larger than portForwardReconnectMaxDelay because reconnecting faster
+	// cannot help a black-holed tunnel, while each reconnect also tears down the xDS control
+	// stream that shares this session (lease renewal, route discovery, DNS).
+	portForwardBlackHoleMaxDelay = 30 * time.Second
+	// portForwardBlackHoleThreshold is how many consecutive never-primed sessions constitute a
+	// black hole worth reporting to the user rather than retrying quietly.
+	portForwardBlackHoleThreshold = 3
 	// portForwardStartTimeout is how long to wait for the first port-forward session to become ready.
 	portForwardStartTimeout = 60 * time.Second
 	// livenessCheckInterval is how often the data-plane liveness watchdog samples HeartbeatStats.
@@ -117,6 +128,30 @@ const (
 	// then lands on a healthy session.
 	rentIPCallTimeout = 10 * time.Second
 )
+
+// blackHoleWarn rate-limits the "data plane never came up" escalation so a tunnel that stays down
+// for hours reports periodically rather than once (invisible to anyone reading recent logs) or on
+// every attempt (a flood).
+var blackHoleWarn = plog.NewThrottle(5 * time.Minute)
+
+// livenessOutcome records whether a port-forward session ever carried data-plane traffic, i.e.
+// produced a heartbeat echo reply of its own. The reconnect loop needs this to tell "the session
+// worked and then dropped" from "the session never came up": their backoff differs, and only the
+// former may reset it.
+type livenessOutcome struct{ primed atomic.Bool }
+
+// markPrimed records that this session carried traffic. Nil-safe for tests that drive the watchdog
+// without caring about the outcome.
+func (o *livenessOutcome) markPrimed() {
+	if o != nil {
+		o.primed.Store(true)
+	}
+}
+
+// wasPrimed reports whether the session ever carried traffic. A nil outcome reads as never primed.
+func (o *livenessOutcome) wasPrimed() bool {
+	return o != nil && o.primed.Load()
+}
 
 // livenessSteadyThreshold is how long an already-primed session (one that produced a fresh heartbeat
 // echo reply) may then go silent before it is treated as black-holed and force-reconnected. A small
@@ -663,20 +698,34 @@ func parseTunIPResponse(resp *rpc.TunIPResponse) (ipv4, ipv6 *net.IPNet) {
 	return
 }
 
-// nextPortForwardDelay computes the next reconnect backoff. A session that lasted at
-// least portForwardHealthySession before dropping resets to the fast initial delay;
-// otherwise (a short-lived failure, e.g. an apiserver stall) the delay doubles, capped
-// at portForwardReconnectMaxDelay. Pure function for testability.
-func nextPortForwardDelay(cur, sessionDuration time.Duration) time.Duration {
-	if sessionDuration >= portForwardHealthySession {
+// nextPortForwardDelay computes the next reconnect backoff. Only a session that BOTH carried
+// data-plane traffic (primed) and lasted at least portForwardHealthySession counts as healthy and
+// resets to the fast initial delay; anything else doubles the delay.
+//
+// Duration alone is not evidence of health, and treating it as such disabled the backoff entirely
+// for the case that needed it most: the liveness watchdog tears a black-holed session down after
+// livenessStartupDeadline, which is exactly portForwardHealthySession, so every black-holed session
+// looked "healthy" and reset the delay to 200ms. The result was a Pods.List + SPDY handshake every
+// 30s for 20 hours, with no convergence and no escalation.
+//
+// A never-primed session backs off to the larger portForwardBlackHoleMaxDelay: the tunnel is down
+// regardless of how fast we retry, so a longer gap costs nothing and buys the control plane (xDS
+// lease renewal, route discovery, DNS — all sharing this one port-forward session) uninterrupted
+// time between attempts. Pure function for testability.
+func nextPortForwardDelay(cur, sessionDuration time.Duration, primed bool) time.Duration {
+	if primed && sessionDuration >= portForwardHealthySession {
 		return portForwardReconnectDelay
+	}
+	maxDelay := portForwardReconnectMaxDelay
+	if !primed {
+		maxDelay = portForwardBlackHoleMaxDelay
 	}
 	next := cur * 2
 	if next < portForwardReconnectDelay {
 		next = portForwardReconnectDelay
 	}
-	if next > portForwardReconnectMaxDelay {
-		next = portForwardReconnectMaxDelay
+	if next > maxDelay {
+		next = maxDelay
 	}
 	return next
 }
@@ -748,9 +797,14 @@ func (nm *NetworkManager) portForward(ctx context.Context, portPair []string) er
 	go func() {
 		first := true
 		delay := portForwardReconnectDelay
+		// Consecutive sessions that never carried data-plane traffic. Tracked separately from the
+		// backoff so a persistent black hole is reported instead of silently looping: in the field
+		// this ran 2221 rounds over 20 hours without a single line explaining why.
+		consecutiveDead := 0
+		var deadSince time.Time
 		for ctx.Err() == nil {
 			sessionStart := time.Now()
-			err := nm.portForwardOnce(ctx, portPair, first, firstCancelFunc)
+			primed, err := nm.portForwardOnce(ctx, portPair, first, firstCancelFunc)
 			sessionDuration := time.Since(sessionStart)
 			if first {
 				if err != nil {
@@ -761,11 +815,25 @@ func (nm *NetworkManager) portForward(ctx context.Context, portPair []string) er
 				plog.G(ctx).Debugf("[Perf] Port-forward session ended after %v, reconnecting in %v...", sessionDuration, delay)
 			}
 			first = false
+			if primed {
+				consecutiveDead, deadSince = 0, time.Time{}
+			} else {
+				if consecutiveDead == 0 {
+					deadSince = sessionStart
+				}
+				consecutiveDead++
+				if consecutiveDead >= portForwardBlackHoleThreshold {
+					blackHoleWarn.Warnf(ctx, "port-forward-black-hole",
+						"Data plane has not come up across %d consecutive port-forward sessions (%v). Backing "+
+							"off to %v between attempts; `kubevpn status` reports this connection as unhealthy",
+						consecutiveDead, time.Since(deadSince).Round(time.Second), portForwardBlackHoleMaxDelay)
+				}
+			}
 			// Exponential backoff on consecutive short-lived sessions so a stalled
 			// apiserver is not hammered with a Pods.List + TLS handshake every 200ms
 			// (which prolongs the stall). A healthy session that then drops resets to
 			// the fast initial delay so normal pod recreation still reconnects quickly.
-			delay = nextPortForwardDelay(delay, sessionDuration)
+			delay = nextPortForwardDelay(delay, sessionDuration, primed)
 			select {
 			case <-time.After(delay):
 			case <-ctx.Done():
@@ -786,13 +854,13 @@ func (nm *NetworkManager) portForward(ctx context.Context, portPair []string) er
 }
 
 // portForwardOnce runs a single port-forward session to the traffic manager pod.
-func (nm *NetworkManager) portForwardOnce(ctx context.Context, portPair []string, first bool, onReady func()) error {
+func (nm *NetworkManager) portForwardOnce(ctx context.Context, portPair []string, first bool, onReady func()) (primed bool, err error) {
 	ctx2, cancelFunc2 := context.WithTimeout(ctx, portForwardPodListTimeout)
 	defer cancelFunc2()
 	podList, err := nm.cfg.GetRunningPodList(ctx2)
 	if err != nil {
 		plog.G(ctx).Debugf("Failed to get running pod: %v", err)
-		return err
+		return false, err
 	}
 	pod := podList[0]
 	// add route in case the pod was recreated with a new IP that is not yet routable
@@ -806,7 +874,8 @@ func (nm *NetworkManager) portForwardOnce(ctx context.Context, portPair []string
 	// detect pod deletion so we can redo port-forward
 	go util.CheckPodStatus(childCtx, cancelFunc, podName, nm.cfg.Clientset.CoreV1().Pods(nm.cfg.ManagerNamespace))
 	// The data-plane heartbeat watchdog is the sole liveness-based reconnect trigger.
-	go nm.watchDataPlaneLiveness(childCtx, cancelFunc, readyChan)
+	outcome := &livenessOutcome{}
+	go nm.watchDataPlaneLiveness(childCtx, cancelFunc, readyChan, outcome)
 	if first {
 		go func() {
 			select {
@@ -830,7 +899,7 @@ func (nm *NetworkManager) portForwardOnce(ctx context.Context, portPair []string
 		plog.G(ctx).Logger.Out,
 	)
 	plog.G(ctx).Debugf("[Perf] PortForwardPod for %s exited after %v, err=%v", podName, time.Since(pfStart), err)
-	return nil
+	return outcome.wasPrimed(), nil
 }
 
 // watchDataPlaneLiveness force-reconnects the current port-forward session when the data plane goes
@@ -844,7 +913,7 @@ func (nm *NetworkManager) portForwardOnce(ctx context.Context, portPair []string
 // portForward loop then reconnects. heartbeatStats is allocated in newNetworkManager (never nil).
 // This runs for every session, including the first (typically longest-lived) one. It is the sole
 // data-plane reconnect trigger — the xDS health check only reports control-plane status.
-func (nm *NetworkManager) watchDataPlaneLiveness(ctx context.Context, cancelFunc context.CancelFunc, readyChan <-chan struct{}) {
+func (nm *NetworkManager) watchDataPlaneLiveness(ctx context.Context, cancelFunc context.CancelFunc, readyChan <-chan struct{}, outcome *livenessOutcome) {
 	sessionStart := time.Now()
 	// A session that never even becomes ready is still black-holed: bound the wait so it reconnects.
 	select {
@@ -856,7 +925,7 @@ func (nm *NetworkManager) watchDataPlaneLiveness(ctx context.Context, cancelFunc
 	case <-ctx.Done():
 		return
 	}
-	watchLiveness(ctx, cancelFunc, sessionStart, livenessCheckInterval, livenessStartupDeadline, livenessSteadyThreshold, nm.heartbeatStats.LastReply)
+	watchLiveness(ctx, cancelFunc, sessionStart, livenessCheckInterval, livenessStartupDeadline, livenessSteadyThreshold, nm.heartbeatStats.LastReply, outcome)
 }
 
 // watchLiveness force-reconnects (cancelFunc) a black-holed session using the data-plane heartbeat
@@ -870,7 +939,7 @@ func (nm *NetworkManager) watchDataPlaneLiveness(ctx context.Context, cancelFunc
 //   - primed: reconnect if the last fresh reply is now older than steadyThreshold (went silent).
 //
 // Extracted so it can be driven with small timings and a fake reply source in tests.
-func watchLiveness(ctx context.Context, cancelFunc context.CancelFunc, sessionStart time.Time, interval, startupDeadline, steadyThreshold time.Duration, lastReply func() time.Time) {
+func watchLiveness(ctx context.Context, cancelFunc context.CancelFunc, sessionStart time.Time, interval, startupDeadline, steadyThreshold time.Duration, lastReply func() time.Time, outcome *livenessOutcome) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	primed := false
@@ -883,6 +952,7 @@ func watchLiveness(ctx context.Context, cancelFunc context.CancelFunc, sessionSt
 			if !primed {
 				if last.After(sessionStart) {
 					primed = true
+					outcome.markPrimed()
 					continue
 				}
 				if time.Since(sessionStart) >= startupDeadline {

@@ -25,11 +25,16 @@ func TestWatchLiveness_NeverPrimedTriggersReconnect(t *testing.T) {
 	defer cancel()
 
 	neverReplies := func() time.Time { return time.Time{} }
+	outcome := &livenessOutcome{}
 	// startupDeadline small (50ms), steadyThreshold large (irrelevant here).
-	go watchLiveness(ctx, cancel, time.Now(), 10*time.Millisecond, 50*time.Millisecond, time.Second, neverReplies)
+	go watchLiveness(ctx, cancel, time.Now(), 10*time.Millisecond, 50*time.Millisecond, time.Second, neverReplies, outcome)
 
 	if !waitCancelled(ctx, time.Second) {
 		t.Fatal("expected a never-primed (black-holed) session to be force-reconnected, but it was not")
+	}
+	// The reconnect loop keys its backoff off this: a never-primed session must not look healthy.
+	if outcome.wasPrimed() {
+		t.Fatal("a session that never saw a reply must not be reported as primed")
 	}
 }
 
@@ -44,10 +49,15 @@ func TestWatchLiveness_PrimedThenSilentTriggersReconnect(t *testing.T) {
 	stats.MarkReply()                                 // one fresh reply after sessionStart → primes, then never again
 
 	// startupDeadline large (so it does not fire), steadyThreshold small (50ms).
-	go watchLiveness(ctx, cancel, sessionStart, 10*time.Millisecond, time.Second, 50*time.Millisecond, stats.LastReply)
+	outcome := &livenessOutcome{}
+	go watchLiveness(ctx, cancel, sessionStart, 10*time.Millisecond, time.Second, 50*time.Millisecond, stats.LastReply, outcome)
 
 	if !waitCancelled(ctx, time.Second) {
 		t.Fatal("expected a primed-then-silent session to be reconnected, but it was not")
+	}
+	// It DID carry traffic, so the backoff may reset — unlike the never-primed case.
+	if !outcome.wasPrimed() {
+		t.Fatal("a session that saw a fresh reply must be reported as primed")
 	}
 }
 
@@ -76,10 +86,14 @@ func TestWatchLiveness_FreshHeartbeatKeepsSession(t *testing.T) {
 		}
 	}()
 
-	go watchLiveness(ctx, cancel, sessionStart, 10*time.Millisecond, 50*time.Millisecond, 50*time.Millisecond, stats.LastReply)
+	outcome := &livenessOutcome{}
+	go watchLiveness(ctx, cancel, sessionStart, 10*time.Millisecond, 50*time.Millisecond, 50*time.Millisecond, stats.LastReply, outcome)
 
 	if waitCancelled(ctx, 300*time.Millisecond) {
 		t.Fatal("watchdog tore down a healthy session that kept receiving heartbeat replies")
+	}
+	if !outcome.wasPrimed() {
+		t.Fatal("a healthy session must be reported as primed")
 	}
 }
 
@@ -94,10 +108,14 @@ func TestWatchLiveness_StaleReplyDoesNotPrime(t *testing.T) {
 	stats.MarkReply()          // reply happens BEFORE sessionStart → stale for this session
 	sessionStart := time.Now() // this session starts after the stale reply
 
-	go watchLiveness(ctx, cancel, sessionStart, 10*time.Millisecond, 50*time.Millisecond, time.Second, stats.LastReply)
+	outcome := &livenessOutcome{}
+	go watchLiveness(ctx, cancel, sessionStart, 10*time.Millisecond, 50*time.Millisecond, time.Second, stats.LastReply, outcome)
 
 	if !waitCancelled(ctx, time.Second) {
 		t.Fatal("a stale pre-session reply must not prime; the black-holed session should reconnect")
+	}
+	if outcome.wasPrimed() {
+		t.Fatal("a stale pre-session reply must not mark the session primed")
 	}
 }
 
@@ -123,7 +141,7 @@ func TestWatchDataPlaneLiveness_NotReadyReturns(t *testing.T) {
 	neverReady := make(chan struct{})
 
 	done := make(chan struct{})
-	go func() { defer close(done); nm.watchDataPlaneLiveness(ctx, cancel, neverReady) }()
+	go func() { defer close(done); nm.watchDataPlaneLiveness(ctx, cancel, neverReady, &livenessOutcome{}) }()
 
 	cancel() // teardown before ready
 
