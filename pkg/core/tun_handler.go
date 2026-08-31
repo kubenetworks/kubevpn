@@ -61,6 +61,7 @@ func (h *tunHandler) Handle(ctx context.Context, tun net.Conn) {
 
 	dev := &tunDevice{
 		tun:         tun,
+		tunName:     tunIfi.Name,
 		tunInbound:  make(chan *Packet, MaxSize),
 		tunOutbound: make(chan *Packet, MaxSize),
 		errChan:     h.errChan,

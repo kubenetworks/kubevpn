@@ -44,11 +44,36 @@ type batchTUN interface {
 // the universal read-tun / write-tun loops; the role-specific routing and goroutines live behind
 // the transport strategy (clientTransport dials a conn pool; serverTransport uses RouteHub).
 type tunDevice struct {
-	tun         net.Conn
+	tun net.Conn
+	// tunName is the OS interface name of tun, resolved ONCE when the device is created (see
+	// tunHandler.Handle). Everything that needs the device's current addresses looks them up by
+	// name (netutil.GetTunDeviceIP → net.InterfaceByName), never by re-scanning the whole
+	// interface table: a scan can fail for reasons unrelated to this device (a transient or
+	// misbehaving unrelated NIC), and callers on the reconnect path silently degraded to "no
+	// addresses" when it did — which cost the server its route for this client and black-holed
+	// every heartbeat echo reply. Empty in tests that drive a device without a real TUN.
+	tunName string
+	// addrsFn overrides how the device's addresses are resolved. Production leaves it nil (the
+	// name-based lookup); only tests that drive a device without a real TUN set it, mirroring
+	// clientTransport.poolSize.
+	addrsFn     func() (v4, v6, dockerV4 net.IP)
 	tunInbound  chan *Packet
 	tunOutbound chan *Packet
 	errChan     chan error
 	transport   transport
+}
+
+// addrs returns the device's current IPv4, IPv6 and Docker-IPv4 TUN addresses, or nils when the
+// device has none / cannot be inspected. It is the single seam through which the data plane learns
+// its own addresses, and it is deliberately re-read on every call rather than cached: ChangeTunIP
+// can reassign them at runtime. Errors collapse to nil addresses — callers must treat that as
+// "unknown right now" and retry, never as a permanent condition.
+func (d *tunDevice) addrs() (v4, v6, dockerV4 net.IP) {
+	if d.addrsFn != nil {
+		return d.addrsFn()
+	}
+	v4, v6, dockerV4, _ = netutil.GetTunDeviceIP(d.tunName)
+	return v4, v6, dockerV4
 }
 
 // routines returns every goroutine the device runs: the two universal TUN loops plus the

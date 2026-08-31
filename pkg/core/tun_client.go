@@ -171,11 +171,11 @@ func (t *clientTransport) runControlSlot(ctx context.Context) {
 // (re)connect so the server registers the route for that conn immediately. The echo also doubles
 // as a liveness ping (its reply marks HeartbeatStats). Returns nil if the TUN IPs are unavailable.
 func (t *clientTransport) registrationPayloads() [][]byte {
-	tunIfi, err := netutil.GetTunDeviceByConn(t.dev.tun)
-	if err != nil {
-		return nil
-	}
-	srcIPv4, srcIPv6, _, _ := netutil.GetTunDeviceIP(tunIfi.Name)
+	// Look the addresses up by interface NAME (resolved once at device creation), never by
+	// re-scanning the interface table: this runs on every slot (re)connect, and a failed scan
+	// here means the server never learns our route — every heartbeat echo reply it generates is
+	// then dropped for want of a route, so the liveness watchdog force-reconnects forever.
+	srcIPv4, srcIPv6, _ := t.dev.addrs()
 	var payloads [][]byte
 	appendPayload := func(icmp []byte) {
 		payload := make([]byte, typePrefixLen+len(icmp))
@@ -199,12 +199,10 @@ func (t *clientTransport) registrationPayloads() [][]byte {
 // heartbeats sends periodic ICMP echo packets via the dedicated controlSlot, bypassing the data
 // tunInbound path entirely. This ensures liveness probes flow even when data slots are congested.
 func (t *clientTransport) heartbeats(ctx context.Context) {
-	tunIfi, err := netutil.GetTunDeviceByConn(t.dev.tun)
-	if err != nil {
-		plog.G(ctx).Errorf("[Client] Failed to get tun device: %v", err)
-		return
-	}
-
+	// No fail-fast on an unresolvable device here: a transient lookup failure must not disable
+	// liveness for the rest of the session (that failure mode is exactly what black-holed the
+	// tunnel). sendAll re-reads the addresses every tick and warns (throttled) while they are
+	// unavailable, so the heartbeat recovers on its own once they come back.
 	ticker := time.NewTicker(config.HeartbeatInterval)
 	defer ticker.Stop()
 
@@ -219,7 +217,7 @@ func (t *clientTransport) heartbeats(ctx context.Context) {
 	}
 
 	sendAll := func(reason string) {
-		srcIPv4, srcIPv6, dockerSrcIPv4, _ := netutil.GetTunDeviceIP(tunIfi.Name)
+		srcIPv4, srcIPv6, dockerSrcIPv4 := t.dev.addrs()
 		plog.G(ctx).Debugf("[Client] Sending heartbeat (%s)", reason)
 		if srcIPv4 != nil {
 			if icmp, e := netutil.GenICMPPacket(srcIPv4, config.RouterIP); e != nil {
