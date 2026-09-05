@@ -61,7 +61,7 @@ func TestDoc07_WorkloadNamespaceSeparateFromManager(t *testing.T) {
 		ManagerNamespace:  "kubevpn",
 		WorkloadNamespace: "production",
 	}
-	c.proxyManager = newProxyManager(nil, nil, c.ManagerNamespace)
+	c.proxyManager = newProxyManager()
 	c.proxyManager.Add(&Proxy{workload: "deploy/web", namespace: "production"})
 
 	res := c.ProxyResources()
@@ -77,7 +77,7 @@ func TestDoc07_WorkloadNamespaceSeparateFromManager(t *testing.T) {
 
 func TestDoc10_ProxyManager_AddAndResources(t *testing.T) {
 	// Doc says: ProxyManager tracks injected sidecars
-	pm := newProxyManager(nil, nil, "test-ns")
+	pm := newProxyManager()
 	pm.Add(&Proxy{workload: "deployments.apps/web", namespace: "test-ns"})
 	pm.Add(&Proxy{workload: "deployments.apps/api", namespace: "test-ns"})
 
@@ -89,7 +89,7 @@ func TestDoc10_ProxyManager_AddAndResources(t *testing.T) {
 
 func TestDoc10_ProxyManager_RemoveByWorkload(t *testing.T) {
 	// Doc says: Leave removes specific workloads
-	pm := newProxyManager(nil, nil, "ns")
+	pm := newProxyManager()
 	pm.Add(&Proxy{workload: "deploy/a", namespace: "ns"})
 	pm.Add(&Proxy{workload: "deploy/b", namespace: "ns"})
 

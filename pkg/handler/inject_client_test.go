@@ -11,11 +11,11 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
-// TestCreateRemoteInboundViaManager_FallsBack verifies the client-fallback trigger:
-// when the traffic manager Service has no usable ClusterIP (or does not exist), the
-// server-side injection attempt reports handled=false with no error, so
-// CreateRemoteInboundPod proceeds with local injection. No cluster required.
-func TestCreateRemoteInboundViaManager_FallsBack(t *testing.T) {
+// TestManagerDial_FailsWithoutClusterIP verifies that, with injection now server-side
+// only (no local fallback), a missing / headless / empty-ClusterIP traffic manager
+// Service makes the inject and leave paths return an error rather than silently
+// succeeding. No cluster required.
+func TestManagerDial_FailsWithoutClusterIP(t *testing.T) {
 	cases := []struct {
 		name string
 		svc  *v1.Service
@@ -42,15 +42,11 @@ func TestCreateRemoteInboundViaManager_FallsBack(t *testing.T) {
 				SessionBase:      SessionBase{K8sClient: K8sClient{clientset: cs}},
 				ManagerNamespace: "kubevpn",
 			}
-			handled, err := c.createRemoteInboundViaManager(context.Background(), "kubevpn", nil, nil, "img", "198.18.0.5", "", []string{"deployments.apps/foo"})
-			if handled || err != nil {
-				t.Fatalf("inject: expected fallback (handled=false, err=nil), got handled=%v err=%v", handled, err)
+			if err := c.createRemoteInboundViaManager(context.Background(), "kubevpn", nil, nil, "img", "198.18.0.5", "", []string{"deployments.apps/foo"}); err == nil {
+				t.Fatal("inject: expected error when manager is unreachable, got nil")
 			}
-
-			// leaveViaManager shares dialManager, so it falls back the same way.
-			handled, err = c.leaveViaManager(context.Background(), "kubevpn", []string{"deployments.apps/foo"}, "owner-a")
-			if handled || err != nil {
-				t.Fatalf("leave: expected fallback (handled=false, err=nil), got handled=%v err=%v", handled, err)
+			if err := c.leaveViaManager(context.Background(), "kubevpn", []string{"deployments.apps/foo"}, "owner-a"); err == nil {
+				t.Fatal("leave: expected error when manager is unreachable, got nil")
 			}
 		})
 	}

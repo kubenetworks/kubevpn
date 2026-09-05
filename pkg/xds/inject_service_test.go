@@ -11,12 +11,10 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-// TestProxyInject_DegradesWhenUnavailable verifies the client-fallback contract end
-// to end through the real gRPC server + client: when the manager has no factory
-// (server-side injection unavailable, e.g. an older manager or missing config), the
-// ProxyInject stream fails with codes.Unavailable so the client falls back to local
-// injection instead of failing the proxy.
-func TestProxyInject_DegradesWhenUnavailable(t *testing.T) {
+// TestProxyInject_UnavailableWithoutFactory verifies that when the manager has no factory
+// (server-side injection not configured), the ProxyInject stream fails cleanly with
+// codes.Unavailable rather than panicking, end to end through the real gRPC server.
+func TestProxyInject_UnavailableWithoutFactory(t *testing.T) {
 	env := newTestEnv(t) // server.factory is nil (not set by NewTunConfigServer)
 
 	stream, err := env.client.ProxyInject(context.Background(), &rpc.InjectRequest{
@@ -29,7 +27,7 @@ func TestProxyInject_DegradesWhenUnavailable(t *testing.T) {
 		t.Fatalf("ProxyInject open stream: %v", err)
 	}
 	if _, err = stream.Recv(); status.Code(err) != codes.Unavailable {
-		t.Fatalf("expected codes.Unavailable so the client falls back to local injection, got %v", err)
+		t.Fatalf("expected codes.Unavailable when factory unset, got %v", err)
 	}
 }
 
@@ -55,9 +53,9 @@ func TestProxyInject_RejectsEmptyTunIP(t *testing.T) {
 	}
 }
 
-// TestLeaveInject_DegradesWhenUnavailable verifies the same client-fallback contract for
-// LeaveInject: no factory -> codes.Unavailable, so the client unpatches locally instead.
-func TestLeaveInject_DegradesWhenUnavailable(t *testing.T) {
+// TestLeaveInject_UnavailableWithoutFactory verifies LeaveInject fails cleanly with
+// codes.Unavailable when the manager has no factory (not configured), via real gRPC.
+func TestLeaveInject_UnavailableWithoutFactory(t *testing.T) {
 	env := newTestEnv(t) // server.factory is nil
 
 	stream, err := env.client.LeaveInject(context.Background(), &rpc.InjectRequest{
@@ -69,6 +67,6 @@ func TestLeaveInject_DegradesWhenUnavailable(t *testing.T) {
 		t.Fatalf("LeaveInject open stream: %v", err)
 	}
 	if _, err = stream.Recv(); status.Code(err) != codes.Unavailable {
-		t.Fatalf("expected codes.Unavailable so the client unpatches locally, got %v", err)
+		t.Fatalf("expected codes.Unavailable when factory unset, got %v", err)
 	}
 }

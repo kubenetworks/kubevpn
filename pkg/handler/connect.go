@@ -9,18 +9,12 @@ import (
 	"time"
 
 	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/client-go/tools/cache"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dns"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/inject"
-	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -193,82 +187,18 @@ func (c *ConnectOptions) SetSync(s *SyncOptions) {
 	c.Sync = s
 }
 
-// CreateRemoteInboundPod injects Envoy sidecar proxies into the specified workloads for inbound traffic interception.
-func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace string, workloads []string, headers map[string]string, portMap []string, image string, localTunIPv4, localTunIPv6 string) (err error) {
+// CreateRemoteInboundPod injects Envoy sidecar proxies into the specified workloads for
+// inbound traffic interception. Injection runs entirely server-side (the traffic manager
+// patches workloads and writes envoy rules with its own ServiceAccount over the VPN); the
+// client only starts the local port Mapper for K8s Service workloads. There is no local
+// fallback — a manager/RBAC failure is returned to the caller.
+func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace string, workloads []string, headers map[string]string, portMap []string, image string, localTunIPv4, localTunIPv6 string) error {
 	if localTunIPv4 == "" {
 		return fmt.Errorf("local tun IPv4 is empty")
 	}
-
-	// Prefer server-side injection: the traffic manager does the cluster writes with
-	// its own ServiceAccount, so the client needs no workload-patch RBAC. Falls back to
-	// the local path below when the manager is unreachable / too old / lacks RBAC.
-	if handled, injErr := c.createRemoteInboundViaManager(ctx, namespace, headers, portMap, image, localTunIPv4, localTunIPv6, workloads); handled || injErr != nil {
-		return injErr
+	if err := c.createRemoteInboundViaManager(ctx, namespace, headers, portMap, image, localTunIPv4, localTunIPv6, workloads); err != nil {
+		return fmt.Errorf("%w: %w", err, config.ErrEnvoyInject)
 	}
-
-	if c.proxyManager == nil {
-		c.proxyManager = newProxyManager(c.factory, c.clientset, c.ManagerNamespace)
-	}
-
-	tlsSecret, err := c.clientset.CoreV1().Secrets(c.ManagerNamespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
-	if err != nil {
-		return err
-	}
-
-	plog.StepStart(ctx, "Injecting proxy sidecar")
-	for _, workload := range workloads {
-		plog.G(ctx).Debugf("Injecting proxy sidecar into workload %q in namespace %q", workload, namespace)
-		var object, controller *resource.Info
-		object, controller, err = util.GetTopOwnerObject(ctx, c.factory, namespace, workload)
-		if err != nil {
-			return err
-		}
-		var templateSpec *v1.PodTemplateSpec
-		templateSpec, _, err = util.GetPodTemplateSpecPath(controller.Object.(*unstructured.Unstructured))
-		if err != nil {
-			return err
-		}
-		var mapper *Mapper
-		if util.IsK8sService(object) {
-			mapper = NewMapper(c.clientset, namespace, labels.SelectorFromSet(templateSpec.Labels).String(), headers, workload, c.GetConfigMapInformer())
-		}
-		c.proxyManager.Add(&Proxy{
-			headers:    headers,
-			portMap:    portMap,
-			workload:   workload,
-			namespace:  namespace,
-			portMapper: mapper,
-		})
-
-		nodeID := fmt.Sprintf("%s.%s", object.Mapping.Resource.GroupResource().String(), object.Name)
-		// todo consider to use ephemeral container
-		// https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/
-		injector := inject.NewInjector(inject.InjectOptions{
-			Factory:          c.factory,
-			Clientset:        c.clientset,
-			ManagerNamespace: c.ManagerNamespace,
-			NodeID:           nodeID,
-			Object:           object,
-			Controller:       controller,
-			LocalTunIPv4:     localTunIPv4,
-			LocalTunIPv6:     localTunIPv6,
-			Headers:          headers,
-			PortMaps:         portMap,
-			Secret:           tlsSecret,
-			Image:            image,
-			OwnerID:          c.OwnerID,
-		})
-		err = injector.Inject(ctx)
-		if err != nil {
-			plog.G(ctx).Errorf("Failed to inject proxy sidecar into workload %q in namespace %q: %v", workload, namespace, err)
-			return fmt.Errorf("inject sidecar into %s: %w: %w", workload, err, config.ErrEnvoyInject)
-		}
-		plog.G(ctx).Debugf("Injected proxy sidecar into workload %q in namespace %q", workload, namespace)
-		if mapper != nil {
-			go mapper.Run()
-		}
-	}
-	plog.StepDone(ctx, "Injected proxy sidecar into %d workloads", len(workloads))
 	return nil
 }
 

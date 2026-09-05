@@ -147,9 +147,9 @@ func (s *TunConfigServer) LeaveInject(req *rpc.InjectRequest, stream rpc.TunConf
 
 	workloads := req.GetWorkloads()
 	if len(workloads) == 0 {
-		// Leave-all: derive the workloads this owner proxies from the envoy config.
+		// Leave-all: derive the workloads this owner proxies in this namespace.
 		var err error
-		if workloads, err = s.workloadsOwnedBy(ctx, req.GetOwnerID()); err != nil {
+		if workloads, err = s.workloadsOwnedBy(ctx, req.GetNamespace(), req.GetOwnerID()); err != nil {
 			return status.Errorf(codes.Internal, "list owned workloads: %v", err)
 		}
 	}
@@ -178,11 +178,14 @@ func (s *TunConfigServer) LeaveInject(req *rpc.InjectRequest, stream rpc.TunConf
 	return stream.Send(&rpc.InjectResponse{})
 }
 
-// workloadsOwnedBy returns the workloads (as "group.resource/name") that currently carry
-// an envoy rule owned by ownerID, read from the ENVOY_CONFIG ConfigMap. Used by
-// LeaveInject's leave-all (disconnect) path. Returns nil (not an error) when the config
-// is absent/empty/unparseable — nothing to clean up.
-func (s *TunConfigServer) workloadsOwnedBy(ctx context.Context, ownerID string) ([]string, error) {
+// workloadsOwnedBy returns the workloads (as "group.resource/name") in the given
+// namespace that currently carry an envoy rule owned by ownerID, read from the
+// ENVOY_CONFIG ConfigMap. Used by LeaveInject's leave-all (disconnect) path. The
+// namespace filter matters for a central manager where the same OwnerID (stable per
+// machine+user) may proxy workloads in several namespaces — leave-all for one namespace
+// must not touch another's rules. Returns nil (not an error) when the config is
+// absent/empty/unparseable — nothing to clean up.
+func (s *TunConfigServer) workloadsOwnedBy(ctx context.Context, namespace, ownerID string) ([]string, error) {
 	cm, err := s.clientset.CoreV1().ConfigMaps(s.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
@@ -196,6 +199,9 @@ func (s *TunConfigServer) workloadsOwnedBy(ctx context.Context, ownerID string) 
 	}
 	var workloads []string
 	for _, v := range virtuals {
+		if v.Namespace != namespace {
+			continue
+		}
 		for _, r := range v.Rules {
 			if r.OwnerID == ownerID {
 				workloads = append(workloads, util.ConvertUIDToWorkload(v.UID))

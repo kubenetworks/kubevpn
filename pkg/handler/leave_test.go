@@ -6,9 +6,7 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/kubernetes/fake"
-	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
@@ -39,7 +37,7 @@ func TestLeaveAllProxyResources_EmptyConfigMap(t *testing.T) {
 	c := &ConnectOptions{
 		SessionBase:      SessionBase{K8sClient: K8sClient{clientset: clientset}},
 		ManagerNamespace: "test-ns",
-		proxyManager:     newProxyManager(nil, clientset, "test-ns"),
+		proxyManager:     newProxyManager(),
 	}
 	err := c.LeaveAllProxyResources(context.Background())
 	if err != nil {
@@ -52,7 +50,7 @@ func TestLeaveAllProxyResources_ConfigMapNotFound(t *testing.T) {
 	c := &ConnectOptions{
 		SessionBase:      SessionBase{K8sClient: K8sClient{clientset: clientset}},
 		ManagerNamespace: "test-ns",
-		proxyManager:     newProxyManager(nil, clientset, "test-ns"),
+		proxyManager:     newProxyManager(),
 	}
 	err := c.LeaveAllProxyResources(context.Background())
 	if err != nil {
@@ -78,7 +76,7 @@ func TestLeaveResource_NilResources(t *testing.T) {
 
 func TestProxyManager_Remove_RemovesWorkload(t *testing.T) {
 	c := newTestConnectOptions(t)
-	c.proxyManager = newProxyManager(c.factory, c.clientset, c.ManagerNamespace)
+	c.proxyManager = newProxyManager()
 	c.proxyManager.Add(&Proxy{workload: "deployments.apps/app1", namespace: "default"})
 	c.proxyManager.Add(&Proxy{workload: "deployments.apps/app2", namespace: "default"})
 	c.proxyManager.Add(&Proxy{workload: "services/svc1", namespace: "other-ns"})
@@ -98,7 +96,7 @@ func TestProxyManager_Remove_RemovesWorkload(t *testing.T) {
 
 func TestProxyManager_Remove_NonExistentWorkload(t *testing.T) {
 	c := newTestConnectOptions(t)
-	c.proxyManager = newProxyManager(c.factory, c.clientset, c.ManagerNamespace)
+	c.proxyManager = newProxyManager()
 	c.proxyManager.Add(&Proxy{workload: "deployments.apps/app1", namespace: "default"})
 
 	// Removing a non-existent workload should not panic or modify the list
@@ -112,7 +110,7 @@ func TestProxyManager_Remove_NonExistentWorkload(t *testing.T) {
 
 func TestProxyManager_Remove_AllWorkloads(t *testing.T) {
 	c := newTestConnectOptions(t)
-	c.proxyManager = newProxyManager(c.factory, c.clientset, c.ManagerNamespace)
+	c.proxyManager = newProxyManager()
 	c.proxyManager.Add(&Proxy{workload: "deployments.apps/app1", namespace: "ns1"})
 	c.proxyManager.Add(&Proxy{workload: "deployments.apps/app2", namespace: "ns2"})
 
@@ -246,83 +244,18 @@ func TestCleanup_OnlyRunsOnce(t *testing.T) {
 	}
 }
 
-func TestLeaveAllProxyResources_WithProxyWorkloads(t *testing.T) {
-	kubeconfig := "/nonexistent-kubeconfig-for-test"
-	configFlags := genericclioptions.NewConfigFlags(true)
-	configFlags.KubeConfig = &kubeconfig
-	factory := cmdutil.NewFactory(configFlags)
-
-	clientset := fake.NewSimpleClientset(
-		&v1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "test-ns"},
-			Data:       map[string]string{config.KeyEnvoy: "[]"},
-		},
-	)
-	pm := newProxyManager(factory, clientset, "test-ns")
-	pm.Add(&Proxy{workload: "deployments.apps/web", namespace: "default"})
-	pm.Add(&Proxy{workload: "deployments.apps/api", namespace: "default"})
-	c := &ConnectOptions{
-		SessionBase: SessionBase{K8sClient: K8sClient{
-			clientset: clientset,
-			factory:   factory,
-		}},
-		ManagerNamespace: "test-ns",
-		proxyManager:     pm,
-	}
-	// proxyManager has entries, so LeaveAll will be called, which calls GetTopOwnerObject.
-	// With a bad kubeconfig, GetTopOwnerObject returns an error for each workload.
-	err := c.LeaveAllProxyResources(context.Background())
-	if err == nil {
-		t.Fatal("expected error when resources can't be resolved")
-	}
-}
-
-func TestLeaveResource_ErrorPropagationFromGetTopOwnerObject(t *testing.T) {
-	kubeconfig := "/nonexistent-kubeconfig-for-test"
-	configFlags := genericclioptions.NewConfigFlags(true)
-	configFlags.KubeConfig = &kubeconfig
-	factory := cmdutil.NewFactory(configFlags)
-
+func TestLeaveResource_ErrorsWhenManagerUnreachable(t *testing.T) {
+	// Pure server-side leave: with no traffic manager Service to dial, LeaveResource
+	// returns an error (no local fallback).
 	clientset := fake.NewSimpleClientset()
 	c := &ConnectOptions{
-		SessionBase: SessionBase{K8sClient: K8sClient{
-			clientset: clientset,
-			factory:   factory,
-		}},
+		SessionBase:      SessionBase{K8sClient: K8sClient{clientset: clientset}},
 		ManagerNamespace: "test-ns",
-		proxyManager:     newProxyManager(factory, clientset, "test-ns"),
 	}
 	resources := []Resources{
 		{Namespace: "default", Workload: "deployments.apps/nonexistent"},
 	}
-	err := c.LeaveResource(context.Background(), resources, "198.18.0.1")
-	if err == nil {
-		t.Fatal("expected error from GetTopOwnerObject, got nil")
-	}
-}
-
-func TestLeaveResource_MultipleErrorsAggregated(t *testing.T) {
-	kubeconfig := "/nonexistent-kubeconfig-for-test"
-	configFlags := genericclioptions.NewConfigFlags(true)
-	configFlags.KubeConfig = &kubeconfig
-	factory := cmdutil.NewFactory(configFlags)
-
-	clientset := fake.NewSimpleClientset()
-	c := &ConnectOptions{
-		SessionBase: SessionBase{K8sClient: K8sClient{
-			clientset: clientset,
-			factory:   factory,
-		}},
-		ManagerNamespace: "test-ns",
-		proxyManager:     newProxyManager(factory, clientset, "test-ns"),
-	}
-	resources := []Resources{
-		{Namespace: "default", Workload: "deployments.apps/app1"},
-		{Namespace: "default", Workload: "deployments.apps/app2"},
-		{Namespace: "other-ns", Workload: "statefulsets.apps/db"},
-	}
-	err := c.LeaveResource(context.Background(), resources, "198.18.0.1")
-	if err == nil {
-		t.Fatal("expected aggregate error, got nil")
+	if err := c.LeaveResource(context.Background(), resources, "198.18.0.1"); err == nil {
+		t.Fatal("expected error when manager is unreachable, got nil")
 	}
 }
