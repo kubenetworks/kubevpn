@@ -112,33 +112,23 @@ func genRouteRoleBinding(roleNamespace, saNamespace string) *rbacv1.RoleBinding 
 var proxyRBACName = config.ConfigMapPodTrafficManager + "-proxy"
 
 // genProxyRole grants the verbs needed to inject/uninject sidecars in the given
-// namespace: patch/update workload controllers and their pods (rollout wait needs
-// list/watch on pods and replicasets), and get/update services (fargate target-port
-// remap). Namespaced only — no cluster-scoped RBAC. list/watch cannot be filtered by
-// resourceNames, so the rules are namespaced without a name filter.
+// (workload) namespace for server-side ProxyInject/LeaveInject. Resources are wildcard
+// so the manager can patch ANY workload type — including CRD-based workloads (e.g. Argo
+// Rollouts) the user could previously proxy with their own kubeconfig — since injection
+// is now server-side with no local fallback. Namespaced only (no cluster-scoped RBAC);
+// the helm central-install path uses a ClusterRole instead (see charts clusterrole.yaml).
+// list/watch cannot be filtered by resourceNames, so the rule carries no name filter.
 func genProxyRole(namespace string) *rbacv1.Role {
 	return &rbacv1.Role{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      proxyRBACName,
 			Namespace: namespace,
 		},
-		Rules: []rbacv1.PolicyRule{
-			{
-				Verbs:     []string{"get", "list", "watch", "patch", "update"},
-				APIGroups: []string{"apps"},
-				Resources: []string{"deployments", "statefulsets", "daemonsets", "replicasets"},
-			},
-			{
-				Verbs:     []string{"get", "list", "watch", "create", "delete", "patch", "update"},
-				APIGroups: []string{""},
-				Resources: []string{"pods"},
-			},
-			{
-				Verbs:     []string{"get", "list", "watch", "patch", "update"},
-				APIGroups: []string{""},
-				Resources: []string{"replicationcontrollers", "services"},
-			},
-		},
+		Rules: []rbacv1.PolicyRule{{
+			Verbs:     []string{"get", "list", "watch", "create", "delete", "patch", "update"},
+			APIGroups: []string{"*"},
+			Resources: []string{"*"},
+		}},
 	}
 }
 

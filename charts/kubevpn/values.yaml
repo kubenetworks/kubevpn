@@ -39,6 +39,13 @@ serviceAccount:
   # If not set and create is true, a name is generated using the fullname template
   name: ""
 
+rbac:
+  # Create a cluster-scoped ClusterRole/ClusterRoleBinding granting the traffic
+  # manager permission to inject sidecars (ProxyInject/LeaveInject) into workloads
+  # in ANY namespace. Required for a centralized install that serves clients across
+  # namespaces. Disable only if this manager serves a single namespace.
+  proxyClusterRole: true
+
 podAnnotations: { }
 podLabels:
 
