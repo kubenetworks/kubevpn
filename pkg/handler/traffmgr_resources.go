@@ -154,6 +154,40 @@ func genProxyRoleBinding(roleNamespace, saNamespace string) *rbacv1.RoleBinding 
 	}
 }
 
+// genProxyClusterRole is the cluster-scoped counterpart of genProxyRole, used when the
+// traffic manager lives in the central kubevpn namespace (config.DefaultNamespaceKubevpn):
+// a central manager injects workloads across ALL namespaces, so it needs cluster-wide
+// permission rather than a per-workload-namespace Role. Same name as the helm chart's
+// ClusterRole so the two are idempotent.
+func genProxyClusterRole() *rbacv1.ClusterRole {
+	return &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{Name: proxyRBACName},
+		Rules: []rbacv1.PolicyRule{{
+			Verbs:     []string{"get", "list", "watch", "create", "delete", "patch", "update"},
+			APIGroups: []string{"*"},
+			Resources: []string{"*"},
+		}},
+	}
+}
+
+// genProxyClusterRoleBinding binds genProxyClusterRole to the traffic manager
+// ServiceAccount in saNamespace (the central kubevpn namespace).
+func genProxyClusterRoleBinding(saNamespace string) *rbacv1.ClusterRoleBinding {
+	return &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: proxyRBACName},
+		Subjects: []rbacv1.Subject{{
+			Kind:      "ServiceAccount",
+			Name:      config.ConfigMapPodTrafficManager,
+			Namespace: saNamespace,
+		}},
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: "rbac.authorization.k8s.io",
+			Kind:     "ClusterRole",
+			Name:     proxyRBACName,
+		},
+	}
+}
+
 func genService(namespace string) *v1.Service {
 	tcp10801 := config.PortNameTCP
 	tcp9002 := config.PortNameEnvoy

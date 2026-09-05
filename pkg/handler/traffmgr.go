@@ -245,16 +245,33 @@ func ensureRouteRBAC(ctx context.Context, clientset kubernetes.Interface, worklo
 	}
 }
 
-// ensureProxyRBAC creates (idempotently, best-effort) the namespaced Role + RoleBinding
-// that lets the traffic manager's ServiceAccount inject/uninject sidecars into workloads
-// in the workload namespace (server-side ProxyInject). It never fails the connect: if the
-// RBAC cannot be created, ProxyInject fails and the client falls back to local injection.
+// ensureProxyRBAC creates (idempotently, best-effort) the RBAC that lets the traffic
+// manager's ServiceAccount inject/uninject sidecars server-side (ProxyInject/LeaveInject).
+// Injection is server-side only (no client fallback), so this grants wildcard resources to
+// cover any workload type (incl. CRDs). Scope depends on the manager namespace:
+//   - central manager (config.DefaultNamespaceKubevpn): a ClusterRole + ClusterRoleBinding,
+//     since a central manager injects across all namespaces (matches the helm chart's
+//     ClusterRole by name, so the two are idempotent);
+//   - per-namespace manager: a namespaced Role + RoleBinding in the workload namespace.
+//
+// It never fails the connect: if the RBAC cannot be created (e.g. the user lacks
+// permission), ProxyInject later fails with a clear error.
 func ensureProxyRBAC(ctx context.Context, clientset kubernetes.Interface, workloadNamespace, managerNamespace string) {
 	if workloadNamespace == "" {
 		workloadNamespace = managerNamespace
 	}
+	if managerNamespace == config.DefaultNamespaceKubevpn {
+		if _, err := clientset.RbacV1().ClusterRoles().Create(ctx, genProxyClusterRole(), metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
+			plog.G(ctx).Warnf("Could not create proxy-inject ClusterRole (server-side injection may fail): %v", err)
+			return
+		}
+		if _, err := clientset.RbacV1().ClusterRoleBindings().Create(ctx, genProxyClusterRoleBinding(managerNamespace), metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
+			plog.G(ctx).Warnf("Could not create proxy-inject ClusterRoleBinding: %v", err)
+		}
+		return
+	}
 	if _, err := clientset.RbacV1().Roles(workloadNamespace).Create(ctx, genProxyRole(workloadNamespace), metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
-		plog.G(ctx).Warnf("Could not create proxy-inject Role in namespace %q (server-side injection will fall back to local): %v", workloadNamespace, err)
+		plog.G(ctx).Warnf("Could not create proxy-inject Role in namespace %q (server-side injection may fail): %v", workloadNamespace, err)
 		return
 	}
 	if _, err := clientset.RbacV1().RoleBindings(workloadNamespace).Create(ctx, genProxyRoleBinding(workloadNamespace, managerNamespace), metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
@@ -281,4 +298,9 @@ func cleanupTrafficManagerResources(ctx context.Context, clientset kubernetes.In
 	_ = clientset.CoreV1().Pods(namespace).Delete(ctx, config.CniNetName, options)
 	_ = clientset.BatchV1().Jobs(namespace).Delete(ctx, name, options)
 	_ = clientset.AppsV1().Deployments(namespace).Delete(ctx, name, options)
+	// Central (kubevpn-namespace) manager owns the cluster-scoped proxy RBAC; remove it too.
+	if namespace == config.DefaultNamespaceKubevpn {
+		_ = clientset.RbacV1().ClusterRoleBindings().Delete(ctx, proxyRBACName, options)
+		_ = clientset.RbacV1().ClusterRoles().Delete(ctx, proxyRBACName, options)
+	}
 }
