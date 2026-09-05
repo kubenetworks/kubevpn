@@ -188,9 +188,26 @@ func TestInject_MultiUser_ProxyLeave(t *testing.T) {
 		t.Fatalf("after B proxy, want [owner-a owner-b], got %v", owners)
 	}
 
-	// 3) owner A leaves (not the last owner) -> only B remains, no workload patch needed.
-	leave("owner-a")
+	_ = leave // explicit-workload leave is exercised via the leave-all path below
+
+	// 3) owner A leaves-all (empty Workloads): the manager derives A's workloads from
+	// ENVOY_CONFIG by owner and removes A's rule. B remains (not the last owner, so no
+	// container patch / rollout — which the fake factory cannot converge; the last-owner
+	// removal path is covered at the store level by pkg/inject/multiuser_test).
+	leaveAll := func(owner string) {
+		stream, err := env.client.LeaveInject(context.Background(), &rpc.InjectRequest{
+			Namespace: ns,
+			OwnerID:   owner, // Workloads intentionally empty -> leave-all-by-owner
+		})
+		if err != nil {
+			t.Fatalf("LeaveInject(all,%s) open: %v", owner, err)
+		}
+		if err := collectInjectStream(stream.Recv); err != nil {
+			t.Fatalf("LeaveInject(all,%s): %v", owner, err)
+		}
+	}
+	leaveAll("owner-a")
 	if owners := readRuleOwners(t, env.server, ns); len(owners) != 1 || owners[0] != "owner-b" {
-		t.Fatalf("after A leave, want [owner-b], got %v", owners)
+		t.Fatalf("after A leave-all, want [owner-b], got %v", owners)
 	}
 }

@@ -1,6 +1,7 @@
 package xds
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -8,6 +9,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
@@ -124,12 +126,15 @@ func (s *TunConfigServer) ProxyInject(req *rpc.InjectRequest, stream rpc.TunConf
 	return stream.Send(&rpc.InjectResponse{Services: services})
 }
 
-// LeaveInject removes the caller's envoy rule (by OwnerID) from the requested workloads
-// server-side: the traffic manager unpatches the sidecar when the workload has no rules
-// left, waits for rollout and (fargate) restores the service target port, using its own
-// in-cluster ServiceAccount. It mirrors ProxyManager.Leave but runs in the pod. Only
-// Namespace/Workloads/OwnerID of the request are used. Returns codes.Unavailable when
-// the factory is unset so the client falls back to local unpatching.
+// LeaveInject removes the caller's envoy rule (by OwnerID) from workloads server-side:
+// the traffic manager unpatches the sidecar when the workload has no rules left, waits
+// for rollout and (fargate) restores the service target port, using its own in-cluster
+// ServiceAccount.
+//
+// If Workloads is empty it removes the OwnerID's rules from ALL workloads it currently
+// proxies (derived from ENVOY_CONFIG) — used by the client's disconnect cleanup, since
+// with server-side injection the client no longer tracks which mesh workloads it proxied.
+// Only Namespace/Workloads/OwnerID of the request are used.
 func (s *TunConfigServer) LeaveInject(req *rpc.InjectRequest, stream rpc.TunConfigService_LeaveInjectServer) error {
 	if s.factory == nil {
 		return status.Error(codes.Unavailable, "server-side injection unavailable")
@@ -140,8 +145,17 @@ func (s *TunConfigServer) LeaveInject(req *rpc.InjectRequest, stream rpc.TunConf
 	})
 	ctx := plog.WithLogger(stream.Context(), logger)
 
+	workloads := req.GetWorkloads()
+	if len(workloads) == 0 {
+		// Leave-all: derive the workloads this owner proxies from the envoy config.
+		var err error
+		if workloads, err = s.workloadsOwnedBy(ctx, req.GetOwnerID()); err != nil {
+			return status.Errorf(codes.Internal, "list owned workloads: %v", err)
+		}
+	}
+
 	plog.StepStart(ctx, "Removing proxy from workloads (server-side)")
-	for _, workload := range req.GetWorkloads() {
+	for _, workload := range workloads {
 		object, controller, err := util.GetTopOwnerObject(ctx, s.factory, req.GetNamespace(), workload)
 		if err != nil {
 			return status.Errorf(codes.Internal, "resolve workload %s: %v", workload, err)
@@ -160,6 +174,34 @@ func (s *TunConfigServer) LeaveInject(req *rpc.InjectRequest, stream rpc.TunConf
 		}
 		plog.G(ctx).Infof("Left workload %q in namespace %q", workload, req.GetNamespace())
 	}
-	plog.StepDone(ctx, "Removed proxy from %d workloads", len(req.GetWorkloads()))
+	plog.StepDone(ctx, "Removed proxy from %d workloads", len(workloads))
 	return stream.Send(&rpc.InjectResponse{})
+}
+
+// workloadsOwnedBy returns the workloads (as "group.resource/name") that currently carry
+// an envoy rule owned by ownerID, read from the ENVOY_CONFIG ConfigMap. Used by
+// LeaveInject's leave-all (disconnect) path. Returns nil (not an error) when the config
+// is absent/empty/unparseable — nothing to clean up.
+func (s *TunConfigServer) workloadsOwnedBy(ctx context.Context, ownerID string) ([]string, error) {
+	cm, err := s.clientset.CoreV1().ConfigMaps(s.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	virtuals, err := parseYaml(cm.Data[config.KeyEnvoy])
+	if err != nil {
+		return nil, nil // empty/legacy/corrupt: nothing to clean up
+	}
+	var workloads []string
+	for _, v := range virtuals {
+		for _, r := range v.Rules {
+			if r.OwnerID == ownerID {
+				workloads = append(workloads, util.ConvertUIDToWorkload(v.UID))
+				break
+			}
+		}
+	}
+	return workloads, nil
 }
