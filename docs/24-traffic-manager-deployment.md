@@ -23,13 +23,24 @@ The traffic manager is a pod deployed in the cluster that provides the VPN serve
 > the static resource set above, and **no cluster-scoped RBAC object** is used. If it cannot
 > be created, discovery degrades to CIDR-only routing.
 >
-> **Proxy-inject RBAC** (separate, namespaced): a distinct `kubevpn-traffic-manager-proxy`
-> Role + RoleBinding grants the manager SA `get,list,watch,patch,update` on **workload
-> controllers + pods** and `get,update` on **services** in each **workload** namespace, so
-> the manager can perform sidecar injection/unpatch server-side (`ProxyInject`/`LeaveInject`,
-> see [17-sidecar-injection.md](17-sidecar-injection.md) §7). Created idempotently,
-> best-effort on every `CreateOutboundPod` (`ensureProxyRBAC`); **no cluster-scoped RBAC
-> object**. If it cannot be created, injection falls back to running on the client.
+> **Proxy-inject RBAC** (`kubevpn-traffic-manager-proxy`, wildcard resources so any
+> workload type — incl. CRDs like Argo Rollouts — can be patched): lets the manager perform
+> sidecar injection/unpatch server-side (`ProxyInject`/`LeaveInject`, see
+> [17-sidecar-injection.md](17-sidecar-injection.md) §7). Provisioned in **two modes by
+> install type**:
+> - **Helm central install → ClusterRole + ClusterRoleBinding** (cluster-scoped), so the
+>   centralized manager can inject across **all** namespaces. Chart templates
+>   `clusterrole.yaml` / `clusterrolebinding.yaml`, gated by `rbac.proxyClusterRole`
+>   (default true), and also by `kubevpn connect` when it targets a manager in the kubevpn
+>   namespace (`ensureProxyRBAC` -> `genProxyClusterRole`; same object name, so idempotent).
+>   This is the only cluster-scoped RBAC object kubevpn uses.
+> - **`kubevpn connect` → namespaced Role + RoleBinding** in the workload namespace
+>   (`genProxyRole`/`genProxyRoleBinding`), created idempotently/best-effort on every
+>   `CreateOutboundPod` (`ensureProxyRBAC`). Cleanup removes the cluster-scoped objects when
+>   tearing down a kubevpn-namespace manager.
+>
+> Injection is server-side only (no client fallback), so if neither grants access the
+> proxy/leave fails.
 | 5 | Service | `kubevpn-traffic-manager` | ClusterIP: 10801/TCP, 9002/TCP, 53/UDP |
 | 6 | ConfigMap | `kubevpn-traffic-manager` | Initial keys: ENVOY_CONFIG, TUN_IP_POOL, CLUSTER_CIDRS (TUN_ALLOCS added lazily on first IP allocation) |
 | 7 | Secret | `kubevpn-traffic-manager` | TLS cert/key/server_name (Opaque type, env-var friendly keys) |

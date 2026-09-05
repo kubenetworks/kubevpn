@@ -259,41 +259,44 @@ type envoyRuleSpec struct {
 2. If no rules remain (empty), call `RemoveContainers` and patch workload
 3. If other users still have rules, leave containers in place
 
-## 7. Where injection runs — client vs traffic manager
+## 7. Where injection runs — server-side only
 
-The injection *logic* above is the same wherever it runs; what changed is **who executes
-the cluster writes**. It now prefers running **inside the traffic-manager pod** so the
-client needs no workload-patch RBAC.
+Sidecar injection and leave run **entirely inside the traffic-manager pod** — there is no
+client-side injection path. The client only sends intent over gRPC and streams progress.
 
-- **Server-side (preferred).** `TunConfigService` (port 9002) exposes two streaming RPCs
-  — `ProxyInject` and `LeaveInject` (`pkg/xds/inject_service.go`). The manager runs the
-  same `inject.NewInjector(...).Inject` / `inject.UnpatchContainer` loop with its **own
+- **Server-side execution.** `TunConfigService` (port 9002) exposes two streaming RPCs —
+  `ProxyInject` and `LeaveInject` (`pkg/xds/inject_service.go`). The manager runs the same
+  `inject.NewInjector(...).Inject` / `inject.UnpatchContainer` loop with its **own
   in-cluster ServiceAccount** and factory (injected into `TunConfigServer.factory` by
-  `xds.Main`). Progress is streamed back as message lines. `ProxyInject`'s final frame
-  reports which workloads are K8s Services (plus their pod selector) so the client can
-  start the one piece that cannot move server-side — the local port **Mapper** (SSH
-  reverse tunnels back to the developer's machine, see [26-sync-mode.md] / `proxy_mapper.go`).
+  `xds.Main`). `ProxyInject`'s final frame reports which workloads are K8s Services (plus
+  their pod selector) so the client can start the one piece that cannot move server-side —
+  the local port **Mapper** (SSH reverse tunnels back to the developer's machine, see
+  [26-sync-mode.md] / `proxy_mapper.go`).
 - **Client dials the manager over the VPN.** After connect the manager Service ClusterIP
   is routable, so the user daemon dials `ClusterIP:9002` directly (`dialManager` /
   `createRemoteInboundViaManager` / `leaveViaManager` in `pkg/handler/inject_client.go`).
-  Connection setup is bounded by a short timeout (`WithBlock`), while the RPC itself keeps
+  Connection setup is bounded by `managerDialTimeout` (`WithBlock`); the RPC itself keeps
   the parent context (rollout waits can be long).
-- **Graceful degradation (no behavior change on old clusters).** If the manager is
-  unreachable, too old to serve the RPC (`codes.Unimplemented`), or lacks RBAC
-  (`codes.Unavailable`), the client transparently falls back to the **local** injection /
-  unpatch path (`CreateRemoteInboundPod` / `ProxyManager.Leave`). When the manager
-  *attempted* the operation and failed, the client does **not** fall back — that would risk
-  a double injection.
-- **RBAC.** Server-side execution needs the manager SA to patch workloads in the workload
-  namespace: a namespaced `kubevpn-traffic-manager-proxy` Role/RoleBinding
-  (`genProxyRole`/`genProxyRoleBinding`), created best-effort at connect (`ensureProxyRBAC`,
-  mirroring the `-route` RBAC of [44-server-side-route-discovery.md](44-server-side-route-discovery.md)).
-  **No cluster-scoped RBAC** is introduced. If the connecting user cannot create it,
-  ProxyInject/LeaveInject return `Unavailable` and the client falls back.
+- **No local fallback.** If the manager is unreachable or injection fails, the operation
+  fails and the error is surfaced — there is no local injection path to fall back to
+  (this is a deliberate choice: clients force-upgrade the manager, and the RBAC below is
+  provisioned to guarantee the manager can inject). A stale/older manager is not supported.
+- **Disconnect cleanup by owner.** On disconnect the client calls `LeaveInject` with an
+  **empty Workloads** list; the manager derives every workload carrying a rule for this
+  `OwnerID` in the namespace (`workloadsOwnedBy`, from ENVOY_CONFIG) and unpatches them —
+  the client no longer tracks mesh workloads locally. Best-effort: if the VPN is already
+  down (crash), the manager's lease reaper reclaims the rules later
+  ([44-server-side-route-discovery.md](44-server-side-route-discovery.md) §3b).
+- **RBAC (two modes, see [24-traffic-manager-deployment.md](24-traffic-manager-deployment.md)).**
+  Server-side injection needs the manager SA to patch any workload type. Helm central
+  install provisions a **ClusterRole** (`kubevpn-traffic-manager-proxy`, wildcard resources,
+  cluster-wide); the `kubevpn connect` path lazily creates a **namespaced Role** with
+  wildcard resources in the workload namespace (`genProxyRole` / `ensureProxyRBAC`). If
+  neither grants access, ProxyInject/LeaveInject fail (no fallback).
 - **`Reset` stays client-side.** Unlike proxy/leave, `Reset` (`pkg/handler/reset.go`) is a
   **stateless** cleanup that connects with the provided kubeconfig and may run with **no
-  active VPN**, so it cannot reliably reach the manager over the VPN — it keeps doing the
-  cluster writes locally.
+  active VPN**, so it cannot reach the manager over the VPN — it keeps doing the cluster
+  writes locally with the user's kubeconfig.
 
 ## 8. Embedded Envoy Config Templates
 

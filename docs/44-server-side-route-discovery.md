@@ -76,7 +76,11 @@ the workload namespace. This is granted by a **namespaced** Role + RoleBinding n
 it when workload ns == manager ns), created idempotently and **best-effort** on every
 `CreateOutboundPod` (`ensureRouteRBAC`). `list`/`watch` cannot be `resourceNames`-scoped, so
 the rule is namespaced without a name filter — the least-privilege way to grant it without
-any **cluster-scoped** RBAC object (kubevpn introduces none). If the connecting user cannot
+any **cluster-scoped** RBAC object. (Route discovery itself introduces no cluster-scoped
+RBAC. Server-side sidecar injection, added later, does use one ClusterRole for a *central*
+manager in the kubevpn namespace — see [17-sidecar-injection.md](17-sidecar-injection.md)
+§7 and [24-traffic-manager-deployment.md](24-traffic-manager-deployment.md); per-namespace
+managers stay namespaced.) If the connecting user cannot
 create this RBAC, discovery degrades (see above). Cleanup removes the `-route` RBAC in the
 manager namespace; in central mode a harmless dangling copy may remain in the workload
 namespace (its subject SA is deleted on uninstall).
