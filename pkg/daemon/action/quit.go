@@ -37,6 +37,7 @@ func (svr *Server) Quit(resp rpc.Daemon_QuitServer) error {
 	svr.connMu.Lock()
 	connects := handler.Connects(svr.connections)
 	svr.connections = nil
+	svr.currentConnectionID = ""
 	svr.connMu.Unlock()
 	sorted := connects.Sort()
 	// Emit the progress step only from the user daemon (the orchestrator). The sudo
