@@ -30,7 +30,14 @@ type Virtual struct {
 	// SchemaVersion tracks the config schema revision. Zero means legacy (pre-versioning).
 	SchemaVersion int `yaml:"schemaVersion,omitempty" json:"schemaVersion,omitempty"`
 	Namespace     string
-	UID           string `yaml:"Uid" json:"Uid"` // group.resource.name
+	// UID identifies the proxied workload as "group.resource.name" (e.g. "deployments.apps.web").
+	//
+	// Tag invariant — DO NOT change the json tag value "Uid":
+	// sigs.k8s.io/yaml encodes through encoding/json, so the yaml tag is ignored
+	// and the on-disk key is determined solely by the json tag. Existing ConfigMap
+	// data in production clusters uses the key "Uid"; changing this tag would make
+	// all stored configs unreadable. The yaml tag is kept for documentation only.
+	UID string `yaml:"Uid" json:"Uid"` // group.resource.name
 	FargateMode   bool   `yaml:"fargateMode,omitempty" json:"fargateMode,omitempty"`
 	Ports         []ContainerPort
 	Rules         []*Rule

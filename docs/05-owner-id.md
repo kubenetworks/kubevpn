@@ -124,7 +124,36 @@ Since `CurrentSchemaVersion = 2`, OwnerID is **required** on all rules. The YAML
 | Old version reads new ConfigMap | OwnerID field is ignored (Go YAML parser ignores unknown fields) |
 | SchemaVersion 2 rule without OwnerID | Should not occur — `addVirtualRule` always sets OwnerID |
 
-## 3. ConfigMap YAML Example
+## 3. Serialization Format Constraints
+
+The `Virtual` struct is serialized with `sigs.k8s.io/yaml`, which routes through
+`encoding/json`. This means **yaml struct tags are ignored**; the on-disk key for
+every field is determined by its `json` tag (or the Go field name when no `json`
+tag is present).
+
+Key names that are fixed by production ConfigMap data and **must not be changed**:
+
+| Go field | On-disk YAML key | Tag | Note |
+|----------|-----------------|-----|------|
+| `Virtual.UID` | `Uid` | `json:"Uid"` | Non-conventional casing — intentional for backward compat |
+| `Rule.OwnerID` | `ownerID` | `json:"ownerID"` | Lowercase camel, written since SchemaVersion 2 |
+| `Virtual.Namespace` | `Namespace` | *(none)* | Go field name |
+| `Virtual.Ports` | `Ports` | *(none)* | Go field name |
+| `Virtual.Rules` | `Rules` | *(none)* | Go field name |
+| `Rule.Headers` | `Headers` | *(none)* | Go field name |
+| `Rule.LocalTunIPv4` | `LocalTunIPv4` | *(none)* | Go field name |
+| `Rule.PortMap` | `PortMap` | *(none)* | Go field name |
+
+`sigs.k8s.io/yaml` reads with case-insensitive field matching, so legacy records
+written in older casing (e.g. `uid:` in hand-written YAML) still deserialize
+correctly. However, **marshaling always produces the exact key from the json tag**,
+so the format written by the current code is the canonical reference.
+
+The round-trip contract is enforced by `pkg/controlplane/marshal_test.go`:
+`TestVirtualSerializedKeyNames` asserts the exact key names in the marshaled
+output and will fail if any tag is accidentally changed.
+
+## 4. ConfigMap YAML Example
 
 ```yaml
 - schemaVersion: 2
@@ -145,17 +174,19 @@ Since `CurrentSchemaVersion = 2`, OwnerID is **required** on all rules. The YAML
 
 `ownerID` is the first 12 characters of a UUID, independent of `localtunipv4`. Even if the IP is reassigned to another user, the OwnerID still uniquely identifies the original creator.
 
-## 4. Related Files
+## 5. Related Files
 
 | File | Purpose |
 |------|---------|
-| `pkg/xds/cache.go` | `Rule.OwnerID` field definition |
+| `pkg/controlplane/virtual.go` | `Virtual`, `Rule`, `ContainerPort` struct definitions and serialization tags |
+| `pkg/controlplane/marshal_test.go` | Round-trip tests + key-name assertions that guard the serialization contract |
+| `pkg/xds/cache.go` | Re-exports `Rule`, `Virtual`, `CurrentSchemaVersion` for xds-internal use |
 | `pkg/inject/envoy.go` | `addVirtualRule` writes OwnerID; `removeEnvoyConfig` matches and deletes by OwnerID |
 | `pkg/inject/mesh.go` | `UnpatchContainer` receives ownerID parameter |
 | `pkg/handler/proxy_manager.go` | `Leave/LeaveAll` passes ownerID to `UnpatchContainer` |
 | `pkg/daemon/action/status.go` | `CurrentDevice` uses `rule.OwnerID == connect.OwnerID` for matching |
 
-## 5. Risk Assessment
+## 6. Risk Assessment
 
 | Risk | Severity | Mitigation |
 |------|----------|------------|
