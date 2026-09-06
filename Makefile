@@ -126,6 +126,16 @@ ut:
 ut-no-cluster:
 	go test -p=1 -v -timeout=60m ${LDFLAGS} ./...
 
+# ut-compile type-checks the WHOLE tree, INCLUDING integration-tagged test files,
+# without running anything or needing a cluster. `go test` / `ut-no-cluster` never
+# compile `//go:build integration` files, so signature/identifier breakage in them
+# (which fails the cluster-only `ut`) can otherwise go unnoticed. Run as a fast gate
+# in CI before the heavy `ut`.
+.PHONY: ut-compile
+ut-compile:
+	go build ./...
+	go vet -tags=integration ./...
+
 # ut-tun runs ONLY the tests behind the `tun` build tag — those that need
 # CAP_NET_ADMIN (TUN device creation / route manipulation). Run as root:
 #   sudo -E env PATH="$PATH" make ut-tun
