@@ -24,39 +24,59 @@ func genServiceAccount(namespace string) *v1.ServiceAccount {
 	}
 }
 
-func genRole(namespace string) *rbacv1.Role {
+// genRBACRole is a private factory that constructs a namespaced Role with the given
+// name, namespace, and policy rules. All three Role generators delegate to this
+// function so that the structural skeleton (TypeMeta is implicit, ObjectMeta layout)
+// is defined exactly once.
+func genRBACRole(name, namespace string, rules []rbacv1.PolicyRule) *rbacv1.Role {
 	return &rbacv1.Role{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      config.ConfigMapPodTrafficManager,
+			Name:      name,
 			Namespace: namespace,
 		},
-		Rules: []rbacv1.PolicyRule{{
+		Rules: rules,
+	}
+}
+
+// genRBACRoleBinding is a private factory that constructs a namespaced RoleBinding
+// binding a Role (identified by name, living in roleNamespace) to the traffic manager
+// ServiceAccount living in saNamespace. All three RoleBinding generators delegate to
+// this function so that the structural skeleton (RoleRef.APIGroup/Kind, Subject.Kind/Name)
+// is defined exactly once.
+func genRBACRoleBinding(name, roleNamespace, saNamespace string) *rbacv1.RoleBinding {
+	return &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: roleNamespace,
+		},
+		Subjects: []rbacv1.Subject{{
+			Kind:      "ServiceAccount",
+			Name:      config.ConfigMapPodTrafficManager,
+			Namespace: saNamespace,
+		}},
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: "rbac.authorization.k8s.io",
+			Kind:     "Role",
+			Name:     name,
+		},
+	}
+}
+
+func genRole(namespace string) *rbacv1.Role {
+	return genRBACRole(
+		config.ConfigMapPodTrafficManager,
+		namespace,
+		[]rbacv1.PolicyRule{{
 			Verbs:         []string{"get", "list", "watch", "create", "update", "patch", "delete"},
 			APIGroups:     []string{""},
 			Resources:     []string{"configmaps", "secrets"},
 			ResourceNames: []string{config.ConfigMapPodTrafficManager},
 		}},
-	}
+	)
 }
 
 func genRoleBinding(namespace string) *rbacv1.RoleBinding {
-	return &rbacv1.RoleBinding{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      config.ConfigMapPodTrafficManager,
-			Namespace: namespace,
-		},
-		Subjects: []rbacv1.Subject{{
-			Kind: "ServiceAccount",
-			//APIGroup:  "rbac.authorization.k8s.io",
-			Name:      config.ConfigMapPodTrafficManager,
-			Namespace: namespace,
-		}},
-		RoleRef: rbacv1.RoleRef{
-			APIGroup: "rbac.authorization.k8s.io",
-			Kind:     "Role",
-			Name:     config.ConfigMapPodTrafficManager,
-		},
-	}
+	return genRBACRoleBinding(config.ConfigMapPodTrafficManager, namespace, namespace)
 }
 
 // routeRBACName is the name of the Role/RoleBinding that grants the traffic manager's
@@ -70,39 +90,22 @@ var routeRBACName = config.ConfigMapPodTrafficManager + "-route"
 // no resource-name filter — the least-privilege way to let the manager discover routes in
 // one namespace without any cluster-scoped RBAC object.
 func genRouteRole(namespace string) *rbacv1.Role {
-	return &rbacv1.Role{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      routeRBACName,
-			Namespace: namespace,
-		},
-		Rules: []rbacv1.PolicyRule{{
+	return genRBACRole(
+		routeRBACName,
+		namespace,
+		[]rbacv1.PolicyRule{{
 			Verbs:     []string{"list", "watch"},
 			APIGroups: []string{""},
 			Resources: []string{"pods", "services"},
 		}},
-	}
+	)
 }
 
 // genRouteRoleBinding binds genRouteRole (in roleNamespace, a workload namespace) to the
 // traffic manager ServiceAccount living in saNamespace (the manager namespace). In the
 // non-central case the two namespaces are the same.
 func genRouteRoleBinding(roleNamespace, saNamespace string) *rbacv1.RoleBinding {
-	return &rbacv1.RoleBinding{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      routeRBACName,
-			Namespace: roleNamespace,
-		},
-		Subjects: []rbacv1.Subject{{
-			Kind:      "ServiceAccount",
-			Name:      config.ConfigMapPodTrafficManager,
-			Namespace: saNamespace,
-		}},
-		RoleRef: rbacv1.RoleRef{
-			APIGroup: "rbac.authorization.k8s.io",
-			Kind:     "Role",
-			Name:     routeRBACName,
-		},
-	}
+	return genRBACRoleBinding(routeRBACName, roleNamespace, saNamespace)
 }
 
 // proxyRBACName is the name of the Role/RoleBinding that grants the traffic manager's
@@ -119,39 +122,22 @@ var proxyRBACName = config.ConfigMapPodTrafficManager + "-proxy"
 // the helm central-install path uses a ClusterRole instead (see charts clusterrole.yaml).
 // list/watch cannot be filtered by resourceNames, so the rule carries no name filter.
 func genProxyRole(namespace string) *rbacv1.Role {
-	return &rbacv1.Role{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      proxyRBACName,
-			Namespace: namespace,
-		},
-		Rules: []rbacv1.PolicyRule{{
+	return genRBACRole(
+		proxyRBACName,
+		namespace,
+		[]rbacv1.PolicyRule{{
 			Verbs:     []string{"get", "list", "watch", "create", "delete", "patch", "update"},
 			APIGroups: []string{"*"},
 			Resources: []string{"*"},
 		}},
-	}
+	)
 }
 
 // genProxyRoleBinding binds genProxyRole (in roleNamespace, a workload namespace) to
 // the traffic manager ServiceAccount in saNamespace (the manager namespace). In the
 // non-central case the two namespaces are the same.
 func genProxyRoleBinding(roleNamespace, saNamespace string) *rbacv1.RoleBinding {
-	return &rbacv1.RoleBinding{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      proxyRBACName,
-			Namespace: roleNamespace,
-		},
-		Subjects: []rbacv1.Subject{{
-			Kind:      "ServiceAccount",
-			Name:      config.ConfigMapPodTrafficManager,
-			Namespace: saNamespace,
-		}},
-		RoleRef: rbacv1.RoleRef{
-			APIGroup: "rbac.authorization.k8s.io",
-			Kind:     "Role",
-			Name:     proxyRBACName,
-		},
-	}
+	return genRBACRoleBinding(proxyRBACName, roleNamespace, saNamespace)
 }
 
 // genProxyClusterRole is the cluster-scoped counterpart of genProxyRole, used when the
