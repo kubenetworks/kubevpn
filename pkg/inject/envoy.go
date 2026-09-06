@@ -73,6 +73,13 @@ func (s *envoyRuleSpec) validate() error {
 	if s.OwnerID == "" {
 		return errors.New("envoyRuleSpec: ownerID must not be empty")
 	}
+	if s.FargateMode {
+		for _, p := range s.Ports {
+			if p.EnvoyListenerPort == 0 {
+				return errors.New("envoyRuleSpec: fargate mode requires EnvoyListenerPort on all ports")
+			}
+		}
+	}
 	return nil
 }
 
