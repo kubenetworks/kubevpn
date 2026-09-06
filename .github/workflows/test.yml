@@ -54,7 +54,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.26'
+          go-version-file: go.mod
           check-latest: true
       - name: Setup Minikube
         id: minikube
@@ -126,9 +126,9 @@ jobs:
     runs-on:  macos-15-intel
     needs: [ "image" ]
     # Split the two heavy handler e2e suites across separate jobs, each on its own
-    # minikube cluster. A single ~90m run overloads the macOS runner's nested-VM
-    # apiserver into multi-minute TLS-handshake-timeout stalls, which blackout the
-    # traffic-manager pod and permanently break the mesh sidecar xDS stream — the
+    # runner + minikube cluster. A single ~90m run overloads the macOS runner's
+    # nested-VM apiserver into multi-minute TLS-handshake-timeout stalls, which
+    # blackout the traffic-manager pod and break the mesh sidecar xDS stream — the
     # mesh subtests then fail on infra flakiness, not code. Halving each cluster's
     # sustained load avoids the degradation. See docs/43-macos-ci-apiserver-flakiness.md.
     strategy:
@@ -138,40 +138,65 @@ jobs:
     env:
       # Same VERSION as the image job (see linux job).
       VERSION: ${{ github.event.pull_request.head.sha || github.sha }}
+      # macOS has no Docker daemon, so we run one in a colima VM. lima (colima's
+      # backend) refuses to run as root, so everything here runs as the normal runner
+      # user — mirroring the linux job, where `make ut` runs unprivileged and kubevpn
+      # self-elevates its own root data-plane daemon via passwordless sudo. Because
+      # the test runs as the runner, run-mode t.TempDir() dirs are runner-owned and
+      # colima's reverse-sshfs file server (also the runner) can read them. DOCKER_HOST
+      # is exported after colima start; KUBECONFIG stays the runner default
+      # (~/.kube/config), where the docker-driver minikube writes it.
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.26'
+          go-version-file: go.mod
           check-latest: true
 
-      - name: Set up Docker
-        uses: docker/setup-docker-action@v4
-        with:
-          daemon-config: |
-            {
-              "debug": true,
-              "features": {
-                "containerd-snapshotter": true
-              }
-            }
       - uses: azure/setup-kubectl@v4
+
+      # Docker daemon in a colima VM, started as the runner (lima forbids root).
+      # --mount "<workspace>:w" makes the checkout writable inside the VM so the
+      # run-mode tests can bind-mount their temp dirs (TMPDIR lives under the
+      # workspace). The reverse-sshfs file server runs as the runner, matching the
+      # runner-owned test files. Give the VM all the runner has minus a small host
+      # reserve (the host still runs the heavy side: kubevpn data plane, TUN, go
+      # test, local servers). Export DOCKER_HOST so later steps and the test share
+      # this daemon.
+      - name: Set up Docker (colima)
+        run: |
+          brew install colima docker
+          HOST_RESERVE_MB=2048
+          TOTAL_MB=$(( $(sysctl -n hw.memsize) / 1024 / 1024 ))
+          VM_GB=$(( (TOTAL_MB - HOST_RESERVE_MB) / 1024 ))
+          CPUS=$(sysctl -n hw.logicalcpu)
+          echo "host=${TOTAL_MB}MiB cpus=${CPUS} -> colima memory=${VM_GB}GiB"
+          colima start \
+            --mount-type sshfs \
+            --mount "${GITHUB_WORKSPACE}:w" \
+            --cpus "$CPUS" --memory "$VM_GB" --disk 60
+          echo "DOCKER_HOST=unix://${HOME}/.colima/default/docker.sock" >> "$GITHUB_ENV"
+          docker info
+
+      # minikube uses the docker driver against the runner's colima daemon and runs
+      # as the runner, writing its kubeconfig to the default ~/.kube/config shared by
+      # every later step and the test. --memory/--cpus max is a limit (not a
+      # reservation) of the VM's size; the run-mode and ssh containers share what k8s
+      # does not actually use.
       - name: Install minikube
         timeout-minutes: 30
-        uses: medyagh/setup-minikube@latest
-        with:
-          cache: true
-          cpus: 'max'
-          memory: 'max'
+        run: |
+          brew install minikube
+          minikube start --driver=docker --cpus max --memory max --wait all
+          minikube status
 
       - name: Kubernetes info
         run: |
           kubectl config view --flatten --raw
           kubectl get pod -A -o wide
           kubectl cluster-info
-          cat ~/.kube/config
           kubectl get pods -n kube-system -o wide
 
       - name: Install demo bookinfo
@@ -182,7 +207,7 @@ jobs:
         run: |
           make kubevpn-darwin-amd64
           chmod +x ./bin/kubevpn
-          cp ./bin/kubevpn /usr/local/bin/kubevpn
+          sudo cp ./bin/kubevpn /usr/local/bin/kubevpn
           kubevpn version
 
       - name: Wait for pods reviews to be ready
@@ -213,18 +238,22 @@ jobs:
 
       - name: Test
         env:
-          TMPDIR: .
+          # Each matrix job runs one e2e suite on its own cluster (see the strategy
+          # comment above); make ut passes this to `go test -run`.
           E2E_RUN: ${{ matrix.suite }}
-        run: make ut
-
-      # The TUN suite (tun build tag, CAP_NET_ADMIN) is independent of the e2e
-      # split; run it once — on the TestFunctions leg only — to avoid duplicating
-      # the same root-privileged run across both matrix jobs.
-      - name: Test (TUN)
-        if: matrix.suite == '^TestFunctions$'
-        env:
-          TMPDIR: .
-        run: sudo -E env HOME="$HOME" PATH="$PATH" TMPDIR="$TMPDIR" make ut-tun
+          # NOT TMPDIR=. : cgo writes its temp files (cgo-gcc-input-*) into TMPDIR, and the
+          # workspace root is not reliably writable by the compile process, so `.` fails with
+          # "permission denied". Use a dedicated, pre-created, world-writable dir under the
+          # workspace: it stays inside colima's --mount (so run-mode bind mounts still see
+          # t.TempDir()), while 0777 lets whichever user runs the compile write there.
+          TMPDIR: ${{ github.workspace }}/tmp
+        # Runs as the runner (not root): kubevpn self-elevates its root data-plane
+        # daemon via passwordless sudo, exactly like the linux job. DOCKER_HOST (from
+        # the colima step) and KUBECONFIG (~/.kube/config) are inherited from the
+        # environment, so the run-mode docker client and the cluster client resolve.
+        run: |
+          mkdir -p "$TMPDIR" && chmod 777 "$TMPDIR"
+          make ut
 
   windows:
     runs-on: windows-latest
@@ -248,7 +277,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.26'
+          go-version-file: go.mod
 
       - name: Install make
         run: choco install -y make
