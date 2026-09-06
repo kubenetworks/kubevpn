@@ -22,6 +22,7 @@ import (
 	"google.golang.org/grpc/reflection"
 	"gopkg.in/natefinch/lumberjack.v2"
 	glog "gvisor.dev/gvisor/pkg/log"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
 
@@ -193,15 +194,7 @@ func (o *SvrOption) detectUnixSocksFile(ctx context.Context) {
 	}()
 
 	const pollInterval = 2 * time.Second
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-			f()
-			time.Sleep(pollInterval)
-		}
-	}
+	wait.UntilWithContext(ctx, func(context.Context) { f() }, pollInterval)
 }
 
 func writePIDToFile(isSudo bool) error {

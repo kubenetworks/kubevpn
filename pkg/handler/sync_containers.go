@@ -17,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/utils/ptr"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -169,40 +170,36 @@ func (d *SyncOptions) SyncDir(ctx context.Context, labels string) error {
 		client := syncthing.NewClient(localAddr)
 		podName := list[0].Name
 		const syncRetryDelay = 2 * time.Second
-		for d.ctx.Err() == nil {
-			func() {
-				defer time.Sleep(syncRetryDelay)
+		wait.UntilWithContext(d.ctx, func(_ context.Context) {
+			list, err := util.GetRunningPodList(d.ctx, d.clientset, d.WorkloadNamespace, labels)
+			if err != nil {
+				plog.G(ctx).Error(err)
+				return
+			}
+			if podName == list[0].Name {
+				return
+			}
 
-				list, err := util.GetRunningPodList(d.ctx, d.clientset, d.WorkloadNamespace, labels)
-				if err != nil {
-					plog.G(ctx).Error(err)
-					return
+			podName = list[0].Name
+			plog.G(ctx).Debugf("Detect newer pod %s", podName)
+			var conf *libconfig.Configuration
+			conf, err = client.GetConfig(d.ctx)
+			if err != nil {
+				plog.G(ctx).Errorf("Failed to get config from syncthing: %v", err)
+				return
+			}
+			for i := range conf.Devices {
+				if config.RemoteDeviceID.Equals(conf.Devices[i].DeviceID) {
+					addr := netutil.AddressURL("tcp", net.JoinHostPort(list[0].Status.PodIP, strconv.Itoa(libconfig.DefaultTCPPort)))
+					conf.Devices[i].Addresses = []string{addr}
+					plog.G(ctx).Debugf("Use newer remote syncthing endpoint: %s", addr)
 				}
-				if podName == list[0].Name {
-					return
-				}
-
-				podName = list[0].Name
-				plog.G(ctx).Debugf("Detect newer pod %s", podName)
-				var conf *libconfig.Configuration
-				conf, err = client.GetConfig(d.ctx)
-				if err != nil {
-					plog.G(ctx).Errorf("Failed to get config from syncthing: %v", err)
-					return
-				}
-				for i := range conf.Devices {
-					if config.RemoteDeviceID.Equals(conf.Devices[i].DeviceID) {
-						addr := netutil.AddressURL("tcp", net.JoinHostPort(list[0].Status.PodIP, strconv.Itoa(libconfig.DefaultTCPPort)))
-						conf.Devices[i].Addresses = []string{addr}
-						plog.G(ctx).Debugf("Use newer remote syncthing endpoint: %s", addr)
-					}
-				}
-				err = client.PutConfig(d.ctx, conf)
-				if err != nil {
-					plog.G(ctx).Errorf("Failed to set config to syncthing: %v", err)
-				}
-			}()
-		}
+			}
+			err = client.PutConfig(d.ctx, conf)
+			if err != nil {
+				plog.G(ctx).Errorf("Failed to set config to syncthing: %v", err)
+			}
+		}, syncRetryDelay)
 	}()
 	return nil
 }

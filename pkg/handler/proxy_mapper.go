@@ -12,6 +12,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/wait"
 	informerv1 "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
@@ -241,8 +242,13 @@ func (m *Mapper) startTunnels(ctx context.Context, podIP netip.Addr, portMapping
 	const retryDelay = 2 * time.Second
 	for localPort, pf := range portMapping {
 		go func(localPort int32, pf portForward) {
-			for ctx.Err() == nil {
+			wait.UntilWithContext(ctx, func(ctx context.Context) {
+				// Derive a per-attempt context so the cleanup goroutine spawned
+				// inside expose* (which closes the conn on ctx.Done) is released
+				// when the attempt returns, instead of accumulating one leaked
+				// goroutine per retry until the parent context is canceled.
 				ctx2, cancel := context.WithCancel(ctx)
+				defer cancel()
 				if pf.UDP {
 					_ = exposeUDPToRemote(ctx2, bridgeServer, pf.EnvoyPort, localPort)
 				} else {
@@ -250,9 +256,7 @@ func (m *Mapper) startTunnels(ctx context.Context, podIP netip.Addr, portMapping
 					remote := netip.AddrPortFrom(netip.IPv4Unspecified(), uint16(pf.EnvoyPort))
 					_ = ssh.ExposeLocalPortToRemote(ctx2, sshServer, remote, local)
 				}
-				cancel()
-				time.Sleep(retryDelay)
-			}
+			}, retryDelay)
 		}(localPort, pf)
 	}
 }
