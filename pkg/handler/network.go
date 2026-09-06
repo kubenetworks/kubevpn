@@ -725,6 +725,7 @@ func (nm *NetworkManager) startTUN(ctx context.Context, forwardAddress string) e
 		cidrList = append(cidrList, ipNet)
 	}
 
+	// Build CIDR routes first; host routes for the TUN IP are appended after allocation.
 	var routes []types.Route
 	for _, ipNet := range nm.dedupAndFilterCIDRs(cidrList) {
 		if ipNet != nil && !ipNet.IP.IsLoopback() {
@@ -732,6 +733,21 @@ func (nm *NetworkManager) startTUN(ctx context.Context, forwardAddress string) e
 		}
 	}
 
+	if err := nm.ensureTunIPAllocated(ctx); err != nil {
+		return err
+	}
+
+	// Append /32 and /128 host routes for the allocated TUN IPs after CIDR routes.
+	routes = append(routes, tunHostRoutes(nm.localTunIPv4, nm.localTunIPv6)...)
+
+	tunConfig := buildTunConfig(nm.localTunIPv4, nm.localTunIPv6, routes)
+
+	return nm.startTunServer(ctx, forwardNode, forwardAddress, tlsSecret.Data, tunConfig)
+}
+
+// ensureTunIPAllocated allocates the TUN IP via rentIP if not already allocated.
+// It emits StepStart/StepDone progress messages and logs the allocated IPs.
+func (nm *NetworkManager) ensureTunIPAllocated(ctx context.Context) error {
 	if nm.localTunIPv4 == nil {
 		plog.StepStart(ctx, "Allocating TUN IP")
 		if err := nm.rentIP(ctx); err != nil {
@@ -748,27 +764,43 @@ func (nm *NetworkManager) startTUN(ctx context.Context, forwardAddress string) e
 		v6Str = nm.localTunIPv6.IP.String()
 	}
 	plog.G(ctx).Debugf("IPv4: %s, IPv6: %s", nm.localTunIPv4.IP.String(), v6Str)
+	return nil
+}
 
-	if nm.localTunIPv4 != nil {
-		routes = append(routes, types.Route{Dst: net.IPNet{IP: nm.localTunIPv4.IP, Mask: net.CIDRMask(32, 32)}})
+// tunHostRoutes builds the /32 (IPv4) and /128 (IPv6) host routes for the TUN device's
+// own IPs. Either argument may be nil (family absent → no route for that family).
+func tunHostRoutes(v4, v6 *net.IPNet) []types.Route {
+	var routes []types.Route
+	if v4 != nil {
+		routes = append(routes, types.Route{Dst: net.IPNet{IP: v4.IP, Mask: net.CIDRMask(32, 32)}})
 	}
-	if nm.localTunIPv6 != nil {
-		routes = append(routes, types.Route{Dst: net.IPNet{IP: nm.localTunIPv6.IP, Mask: net.CIDRMask(128, 128)}})
+	if v6 != nil {
+		routes = append(routes, types.Route{Dst: net.IPNet{IP: v6.IP, Mask: net.CIDRMask(128, 128)}})
 	}
+	return routes
+}
 
-	tunConfig := tun.Config{
-		Addr:   (&net.IPNet{IP: nm.localTunIPv4.IP, Mask: net.CIDRMask(32, 32)}).String(),
+// buildTunConfig assembles a tun.Config from the allocated TUN IPs and the pre-built
+// route list. IPv6 address is only set when IPv6 is enabled on the host and v6 is non-nil.
+func buildTunConfig(v4, v6 *net.IPNet, routes []types.Route) tun.Config {
+	cfg := tun.Config{
+		Addr:   (&net.IPNet{IP: v4.IP, Mask: net.CIDRMask(32, 32)}).String(),
 		Routes: routes,
 		MTU:    config.DefaultMTU,
 	}
-	if enable, _ := netutil.IsIPv6Enabled(); enable && nm.localTunIPv6 != nil {
-		tunConfig.Addr6 = (&net.IPNet{IP: nm.localTunIPv6.IP, Mask: net.CIDRMask(128, 128)}).String()
+	if enable, _ := netutil.IsIPv6Enabled(); enable && v6 != nil {
+		cfg.Addr6 = (&net.IPNet{IP: v6.IP, Mask: net.CIDRMask(128, 128)}).String()
 	}
+	return cfg
+}
 
+// startTunServer creates the TUN listener, wires up the gvisor handler and forwarder,
+// starts the server goroutine, and resolves the TUN device name.
+func (nm *NetworkManager) startTunServer(ctx context.Context, forwardNode *core.Node, forwardAddress string, secretData map[string][]byte, tunConfig tun.Config) error {
 	forwarder := &core.Forwarder{
 		Addr:        forwardNode.Addr,
 		Connector:   core.NewUDPOverTCPConnector(),
-		Transporter: core.TCPTransporter(tlsSecret.Data),
+		Transporter: core.TCPTransporter(secretData),
 		MaxRetries:  5,
 	}
 
@@ -851,15 +883,7 @@ func (nm *NetworkManager) setupDNS(ctx context.Context) error {
 		return err
 	}
 
-	ns := []string{nm.cfg.WorkloadNamespace}
-	list, err := nm.cfg.Clientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{Limit: 500})
-	if err == nil {
-		for _, item := range list.Items {
-			if !sets.New[string](ns...).Has(item.Name) {
-				ns = append(ns, item.Name)
-			}
-		}
-	}
+	ns := nm.listResolvableNamespaces(ctx)
 
 	plog.G(ctx).Debugf("Listing namespace %s services...", nm.cfg.WorkloadNamespace)
 	nm.dnsConfig = &dns.Config{
@@ -895,6 +919,22 @@ func (nm *NetworkManager) setupDNS(ctx context.Context) error {
 	}
 	plog.StepDone(ctx, "Wrote %d service records to the hosts file (namespace %q)", n, nm.cfg.WorkloadNamespace)
 	return nil
+}
+
+// listResolvableNamespaces returns the full list of namespaces to use for DNS resolution.
+// WorkloadNamespace is always first. All other namespaces are appended in list order,
+// skipping any duplicate. When the List call fails, only WorkloadNamespace is returned.
+func (nm *NetworkManager) listResolvableNamespaces(ctx context.Context) []string {
+	ns := []string{nm.cfg.WorkloadNamespace}
+	list, err := nm.cfg.Clientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{Limit: 500})
+	if err == nil {
+		for _, item := range list.Items {
+			if !sets.New[string](ns...).Has(item.Name) {
+				ns = append(ns, item.Name)
+			}
+		}
+	}
+	return ns
 }
 
 // dedupAndFilterCIDRs removes overlapping CIDRs and filters out those containing API server IPs.
