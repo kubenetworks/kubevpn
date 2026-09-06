@@ -141,7 +141,8 @@ func upgradeDeploySpec(ctx context.Context, f cmdutil.Factory, ns, name, image s
 			plog.G(ctx).Errorf("Failed to patch image update to pod template: %v", err)
 			return err
 		}
-		err = util.RolloutStatus(ctx, f, ns, fmt.Sprintf("%s/%s", p.Info.Mapping.Resource.GroupResource().String(), p.Info.Name))
+		// upgrade: undo on rollout failure to fall back to the previous image.
+		err = util.RolloutStatus(ctx, f, ns, fmt.Sprintf("%s/%s", p.Info.Mapping.Resource.GroupResource().String(), p.Info.Name), true)
 		if err != nil {
 			return err
 		}

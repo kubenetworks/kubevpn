@@ -139,7 +139,9 @@ func (d *SyncOptions) DoSync(ctx context.Context, kubeconfigJsonBytes []byte, im
 		if err != nil {
 			return err
 		}
-		_ = util.RolloutStatus(ctx, d.factory, d.WorkloadNamespace, workload)
+		// waiting for the freshly-created sync clone to become ready; undo has no
+		// meaningful previous revision here and would only disturb the clone.
+		_ = util.RolloutStatus(ctx, d.factory, d.WorkloadNamespace, workload, false)
 
 		if d.LocalDir != "" {
 			err = d.SyncDir(ctx, fields.SelectorFromSet(labelsMap).String())
@@ -254,6 +256,24 @@ func (d *SyncOptions) Cleanup(ctx context.Context, workloads ...string) error {
 		}
 	}
 	plog.StepStart(ctx, "Stopping file sync")
+	// The daemon registers this Cleanup as a deferred error-path handler BEFORE
+	// InitClient sets d.factory (e.g. resolveKubeconfig may fail first). With a
+	// nil factory the GetUnstructuredObject / DynamicClient / RolloutStatus calls
+	// below would dereference a nil interface and crash the daemon. There is no
+	// K8s state to unwind yet, so skip the factory-dependent work — but still run
+	// rollbackFuncList to tear down the session (SSH tunnel + temp kubeconfig).
+	if d.factory == nil {
+		plog.G(ctx).Debug("Skipping workload cleanup: kubernetes client not initialized")
+		for _, f := range d.rollbackFuncList {
+			if f != nil {
+				if err := f(); err != nil {
+					plog.G(ctx).Warnf("Failed to exec rollback function: %s", err)
+				}
+			}
+		}
+		plog.StepDone(ctx, "Stopped file sync")
+		return nil
+	}
 	syncCount := len(workloads)
 	var firstErr error
 	for _, workload := range workloads {
@@ -291,7 +311,9 @@ func (d *SyncOptions) Cleanup(ctx context.Context, workloads ...string) error {
 	// below would hit a closed tunnel and fail with "connection refused".
 	for _, workload := range d.Workloads {
 		plog.G(ctx).Debugf("Waiting for workload %q to roll back", workload)
-		err := util.RolloutStatus(ctx, d.factory, d.WorkloadNamespace, workload)
+		// cleanup rolls the workload back to its original spec; a timed-out
+		// rollout must not undo it (that would restore the sync sidecar).
+		err := util.RolloutStatus(ctx, d.factory, d.WorkloadNamespace, workload, false)
 		if err != nil {
 			plog.G(ctx).Warnf("Failed to rollback workload %s: %v", workload, err)
 		}

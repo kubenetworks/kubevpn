@@ -64,7 +64,11 @@ type JSONPatchOp struct {
 	Value any    `json:"value,omitempty"`
 }
 
-func patchWorkload(ctx context.Context, factory cmdutil.Factory, info *resource.Info, templateSpec *v1.PodTemplateSpec, path []string) error {
+// patchWorkload writes templateSpec back to the workload and waits for the
+// rollout. undoOnFailure is threaded into RolloutStatus: inject callers pass true
+// (revert a broken sidecar injection), unpatch callers pass false (a timed-out
+// rollout must NOT undo the sidecar removal we just applied).
+func patchWorkload(ctx context.Context, factory cmdutil.Factory, info *resource.Info, templateSpec *v1.PodTemplateSpec, path []string, undoOnFailure bool) error {
 	workload := fmt.Sprintf("%s/%s", info.Mapping.Resource.Resource, info.Name)
 	helper := resource.NewHelper(info.Client, info.Mapping)
 
@@ -92,7 +96,7 @@ func patchWorkload(ctx context.Context, factory cmdutil.Factory, info *resource.
 		return err
 	}
 	plog.G(ctx).Debugf("Patched workload %q", workload)
-	return util.RolloutStatus(ctx, factory, info.Namespace, workload)
+	return util.RolloutStatus(ctx, factory, info.Namespace, workload, undoOnFailure)
 }
 
 // gatherContainerPorts collects all container ports from a pod template spec,

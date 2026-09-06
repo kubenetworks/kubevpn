@@ -114,6 +114,7 @@ func (svr *Server) Sync(resp rpc.Daemon_SyncServer) (err error) {
 	})
 	file, err = resolveKubeconfig(session.Ctx, req.SshJump, req.KubeconfigBytes, false)
 	if err != nil {
+		plog.G(resp.Context()).Errorf("Failed to resolve kubeconfig: %v", err)
 		return err
 	}
 	f := util.InitFactoryByPath(file, req.Namespace)
@@ -137,6 +138,7 @@ func (svr *Server) Sync(resp rpc.Daemon_SyncServer) (err error) {
 	options.SetContext(session.Ctx)
 	newKubeconfigBytes, err := options.ConvertApiServerToNodeIP(resp.Context(), []byte(req.KubeconfigBytes))
 	if err != nil {
+		plog.G(resp.Context()).Errorf("Failed to convert apiserver to node IP: %v", err)
 		return err
 	}
 	err = options.DoSync(plog.WithLogger(session.Ctx, logger), newKubeconfigBytes, req.Image)

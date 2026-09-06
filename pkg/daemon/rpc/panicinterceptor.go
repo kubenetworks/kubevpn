@@ -20,7 +20,10 @@ func UnaryPanicHandler(ctx context.Context, req any, info *grpc.UnaryServerInfo,
 		if r := recover(); r != nil {
 			str := fmt.Sprintf("Panic: `%s` %s", info.FullMethod, string(debug.Stack()))
 			err = status.Error(codes.Internal, str)
-			plog.G(ctx).Panic(str)
+			// Log at Error, NOT Panic: logrus.Panic re-panics after logging, and
+			// this runs inside the recover defer where nothing catches it — that
+			// second panic would crash the whole daemon and defeat this interceptor.
+			plog.G(ctx).Errorf("%s", str)
 		}
 	}()
 	return handler(ctx, req)
@@ -31,7 +34,10 @@ func StreamPanicHandler(srv any, ss grpc.ServerStream, info *grpc.StreamServerIn
 		if r := recover(); r != nil {
 			str := fmt.Sprintf("Panic: `%s` %s", info.FullMethod, string(debug.Stack()))
 			err = status.Error(codes.Internal, str)
-			plog.G(ss.Context()).Panic(str)
+			// Log at Error, NOT Panic: logrus.Panic re-panics after logging, and
+			// this runs inside the recover defer where nothing catches it — that
+			// second panic would crash the whole daemon and defeat this interceptor.
+			plog.G(ss.Context()).Errorf("%s", str)
 		}
 	}()
 	return handler(srv, ss)

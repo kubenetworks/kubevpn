@@ -152,6 +152,45 @@ current-context: test-context
 	}
 }
 
+// TestSyncOptions_Cleanup_NilFactory_NoPanic pins the daemon-crash regression
+// where the daemon (daemon/action/sync.go) registers the deferred Cleanup on the
+// error path BEFORE InitClient sets the embedded factory. When an earlier step
+// (e.g. resolveKubeconfig) fails, that deferred Cleanup ran with a nil factory
+// and dereferenced it inside GetUnstructuredObject / DynamicClient / RolloutStatus
+// -> SIGSEGV, which the panic interceptor then turned into a full daemon crash.
+//
+// Cleanup must instead no-op the factory-dependent work when factory is nil, while
+// STILL running the rollback funcs that tear down the session (SSH tunnel + temp
+// kubeconfig) — otherwise those leak on the error path.
+func TestSyncOptions_Cleanup_NilFactory_NoPanic(t *testing.T) {
+	// Never call InitClient: the embedded K8sClient.factory stays nil, exactly as
+	// on the daemon's early-error path.
+	opts := &SyncOptions{
+		WorkloadNamespace:   "test-ns",
+		Workloads:           []string{"deployments/authors"},
+		TargetWorkloadNames: map[string]string{"authors": "authors-clone"},
+	}
+
+	rolledBack := false
+	opts.AddRollbackFunc(func() error {
+		rolledBack = true
+		return nil
+	})
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("Cleanup panicked with nil factory: %v", r)
+		}
+	}()
+
+	if err := opts.Cleanup(context.Background()); err != nil {
+		t.Fatalf("Cleanup with nil factory returned error: %v", err)
+	}
+	if !rolledBack {
+		t.Fatal("rollback func was not executed on the nil-factory path (session teardown would leak)")
+	}
+}
+
 func writeJSON(w http.ResponseWriter, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(v)

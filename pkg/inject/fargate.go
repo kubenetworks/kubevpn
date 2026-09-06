@@ -79,7 +79,8 @@ func (f *fargateInjector) Inject(ctx context.Context) error {
 	enableIPv6, _ := util.DetectPodSupportIPv6(ctx, o.Factory, o.ManagerNamespace)
 	AddEnvoyAndSSHContainer(templateSpec, o.Controller.Namespace, o.NodeID, enableIPv6, o.ManagerNamespace, o.Image)
 
-	err = patchWorkload(ctx, o.Factory, o.Controller, templateSpec, path)
+	// inject: undo on rollout failure to restore the working (pre-injection) revision.
+	err = patchWorkload(ctx, o.Factory, o.Controller, templateSpec, path, true)
 	if err != nil {
 		return err
 	}

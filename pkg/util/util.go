@@ -39,27 +39,38 @@ func IsWindows() bool {
 	return runtime.GOOS == "windows"
 }
 
-// RolloutStatus not use kubectl rollout options is this method can use context to cancel
-func RolloutStatus(ctx1 context.Context, f cmdutil.Factory, ns, workloads string) (err error) {
+// RolloutStatus not use kubectl rollout options is this method can use context to cancel.
+//
+// undoOnFailure controls the failure-path behavior: when true and the rollout
+// does not converge, it runs `kubectl rollout undo` to revert to the previous
+// revision. That is a deliberate safety net for the INJECT path (if a freshly
+// injected sidecar never becomes ready, undo restores the working version — see
+// pkg/inject/container.go). It MUST be false on the unpatch/leave/reset paths:
+// there the previous revision is the one WITH the sidecar, so undo would re-apply
+// the sidecar we just removed and leave the workload dirty.
+func RolloutStatus(ctx1 context.Context, f cmdutil.Factory, ns, workloads string, undoOnFailure bool) (err error) {
 	plog.G(ctx1).Debugf("Checking rollout status for %s", workloads)
 	defer func() {
-		if err != nil {
-			plog.G(ctx1).Errorf("Rollout status for %s failed: %v", workloads, err)
-			out := plog.G(ctx1).Logger.Out
-			streams := genericiooptions.IOStreams{
-				In:     os.Stdin,
-				Out:    out,
-				ErrOut: out,
-			}
-			o := rollout.NewRolloutUndoOptions(streams)
-			cmd := &cobra.Command{}
-			cmdutil.AddDryRunFlag(cmd)
-			_ = o.Complete(f, cmd, []string{workloads})
-			_ = o.Validate()
-			_ = o.RunUndo()
-		} else {
+		if err == nil {
 			plog.G(ctx1).Debugf("Rollout successfully for %s", workloads)
+			return
 		}
+		plog.G(ctx1).Errorf("Rollout status for %s failed: %v", workloads, err)
+		if !undoOnFailure {
+			return
+		}
+		out := plog.G(ctx1).Logger.Out
+		streams := genericiooptions.IOStreams{
+			In:     os.Stdin,
+			Out:    out,
+			ErrOut: out,
+		}
+		o := rollout.NewRolloutUndoOptions(streams)
+		cmd := &cobra.Command{}
+		cmdutil.AddDryRunFlag(cmd)
+		_ = o.Complete(f, cmd, []string{workloads})
+		_ = o.Validate()
+		_ = o.RunUndo()
 	}()
 	client, _ := f.DynamicClient()
 	r := f.NewBuilder().

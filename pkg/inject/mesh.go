@@ -64,7 +64,8 @@ func (m *meshInjector) Inject(ctx context.Context) error {
 	enableIPv6, _ := util.DetectPodSupportIPv6(ctx, o.Factory, o.ManagerNamespace)
 	AddVPNAndEnvoyContainer(templateSpec, o.Controller.Namespace, o.NodeID, enableIPv6, o.ManagerNamespace, o.Secret, o.Image)
 
-	return patchWorkload(ctx, o.Factory, o.Controller, templateSpec, path)
+	// inject: undo on rollout failure to restore the working (pre-injection) revision.
+	return patchWorkload(ctx, o.Factory, o.Controller, templateSpec, path, true)
 }
 
 func alreadyInjected(templateSpec *v1.PodTemplateSpec) bool {
@@ -140,6 +141,8 @@ func UnpatchContainer(ctx context.Context, nodeID string, factory cmdutil.Factor
 	}
 
 	RemoveContainers(&templateSpec.Spec)
-	err = patchWorkload(ctx, factory, object, templateSpec, path)
+	// unpatch/leave: do NOT undo on rollout failure — the previous revision still
+	// has the sidecar, so undo would re-apply what we just removed.
+	err = patchWorkload(ctx, factory, object, templateSpec, path, false)
 	return empty, err
 }
