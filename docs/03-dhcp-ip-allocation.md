@@ -304,7 +304,7 @@ Consistency between bitmap and allocs is guaranteed by K8s `resourceVersion` opt
 | File | Purpose |
 |------|---------|
 | `pkg/dhcp/dhcp.go` | DHCP Manager — bitmap allocator wrapper |
-| `pkg/xds/tun_config.go` | TunConfigServer — IP allocation control plane |
+| `pkg/xds/tun_config.go` | TunConfigServer type + construction (`NewTunConfigServer`). Methods are split by concern across `tun_config_ipalloc.go` (allocation/`GetTunIP`), `tun_config_lease.go` (leases/watchers/`WatchTunIP`), `tun_config_store.go` (ConfigMap persistence/reconcile), `tun_config_envoy.go` (`syncEnvoyRuleIP`) |
 | `pkg/config/config.go` | CIDR, ConfigMap key name constants, etc. |
 | `pkg/handler/network.go` | NetworkManager.rentIP — client-side IP acquisition |
 | `pkg/daemon/rpc/daemon.proto` | TunIPRequest/TunIPResponse proto definitions |

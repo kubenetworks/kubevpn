@@ -307,7 +307,7 @@ Envoy routes requests with `x-user: alice` to `198.18.0.5:9080` (Alice's local m
 | `pkg/xds/processor.go` | Processor — YAML → xDS snapshot pipeline |
 | `pkg/xds/watcher.go` | ConfigMap watcher with informer |
 | `pkg/xds/server.go` | gRPC server setup |
-| `pkg/xds/tun_config.go` | TunConfigServer (see `03-dhcp-ip-allocation.md`) |
+| `pkg/xds/tun_config.go` (+ `tun_config_ipalloc.go`, `tun_config_lease.go`, `tun_config_store.go`, `tun_config_envoy.go`) | TunConfigServer, split by concern (see `03-dhcp-ip-allocation.md`); `syncEnvoyRuleIP` lives in `tun_config_envoy.go` |
 | `pkg/inject/envoy.go` | Writes Virtual/Rule to ConfigMap (producer side); `addEnvoyConfig`/`removeEnvoyConfig` delegate to `VirtualStore` |
 | `pkg/inject/virtual_store.go` | `VirtualStore` — single read-modify-write path for `ENVOY_CONFIG` (`Mutate`, `AddRule`, `RemoveRule`) |
 | `pkg/config/config.go` | ConfigMap key names (`KeyEnvoy`, etc.) |
