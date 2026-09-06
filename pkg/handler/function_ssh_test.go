@@ -616,13 +616,13 @@ func (u *sshUt) checkConnectStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expect := status{List: []*connection{{
+	expect := connStatus{List: []*connection{{
 		Namespace: u.namespace,
 		Status:    "connected",
 		ProxyList: nil,
 	}}}
 
-	var statuses status
+	var statuses connStatus
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
@@ -638,13 +638,13 @@ func (u *sshUt) centerCheckConnectStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expect := status{List: []*connection{{
+	expect := connStatus{List: []*connection{{
 		Namespace: "default",
 		Status:    "connected",
 		ProxyList: nil,
 	}}}
 
-	var statuses status
+	var statuses connStatus
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
@@ -661,7 +661,7 @@ func (u *sshUt) checkProxyStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expect := status{List: []*connection{{
+	expect := connStatus{List: []*connection{{
 		Namespace: u.namespace,
 		Status:    "connected",
 		ProxyList: []*proxyItem{{
@@ -675,7 +675,7 @@ func (u *sshUt) checkProxyStatus(t *testing.T) {
 		}},
 	}}}
 
-	var statuses status
+	var statuses connStatus
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
@@ -692,7 +692,7 @@ func (u *sshUt) centerCheckProxyStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expect := status{List: []*connection{{
+	expect := connStatus{List: []*connection{{
 		Namespace: "default",
 		Status:    "connected",
 		ProxyList: []*proxyItem{{
@@ -706,7 +706,7 @@ func (u *sshUt) centerCheckProxyStatus(t *testing.T) {
 		}},
 	}}}
 
-	var statuses status
+	var statuses connStatus
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
@@ -723,7 +723,7 @@ func (u *sshUt) checkProxyWithServiceMeshStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expect := status{List: []*connection{{
+	expect := connStatus{List: []*connection{{
 		Namespace: u.namespace,
 		Status:    "connected",
 		ProxyList: []*proxyItem{{
@@ -737,7 +737,7 @@ func (u *sshUt) checkProxyWithServiceMeshStatus(t *testing.T) {
 		}},
 	}}}
 
-	var statuses status
+	var statuses connStatus
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
@@ -754,7 +754,7 @@ func (u *sshUt) centerCheckProxyWithServiceMeshStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expect := status{List: []*connection{{
+	expect := connStatus{List: []*connection{{
 		Namespace: "default",
 		Status:    "connected",
 		ProxyList: []*proxyItem{{
@@ -768,7 +768,7 @@ func (u *sshUt) centerCheckProxyWithServiceMeshStatus(t *testing.T) {
 		}},
 	}}}
 
-	var statuses status
+	var statuses connStatus
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
@@ -785,7 +785,7 @@ func (u *sshUt) checkProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expect := status{List: []*connection{{
+	expect := connStatus{List: []*connection{{
 		Namespace: u.namespace,
 		Status:    "connected",
 		ProxyList: []*proxyItem{{
@@ -799,7 +799,7 @@ func (u *sshUt) checkProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 		}},
 	}}}
 
-	var statuses status
+	var statuses connStatus
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
@@ -823,7 +823,7 @@ func (u *sshUt) centerCheckProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expect := status{List: []*connection{{
+	expect := connStatus{List: []*connection{{
 		Namespace: "default",
 		Status:    "connected",
 		ProxyList: []*proxyItem{{
@@ -837,7 +837,7 @@ func (u *sshUt) centerCheckProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 		}},
 	}}}
 
-	var statuses status
+	var statuses connStatus
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}

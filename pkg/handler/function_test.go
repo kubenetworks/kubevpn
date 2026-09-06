@@ -189,7 +189,7 @@ func (u *ut) requireConnected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("kubevpn status failed, cannot verify connection: %v", err)
 	}
-	var statuses status
+	var statuses connStatus
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatalf("no active connection (status output=%q): %v", string(output), err)
 	}
@@ -686,13 +686,13 @@ func (u *ut) checkConnectStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expect := status{List: []*connection{{
+	expect := connStatus{List: []*connection{{
 		Namespace: u.namespace,
 		Status:    "connected",
 		ProxyList: nil,
 	}}}
 
-	var statuses status
+	var statuses connStatus
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
@@ -708,13 +708,13 @@ func (u *ut) centerCheckConnectStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expect := status{List: []*connection{{
+	expect := connStatus{List: []*connection{{
 		Namespace: "default",
 		Status:    "connected",
 		ProxyList: nil,
 	}}}
 
-	var statuses status
+	var statuses connStatus
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
@@ -724,7 +724,7 @@ func (u *ut) centerCheckConnectStatus(t *testing.T) {
 	}
 }
 
-type status struct {
+type connStatus struct {
 	List []*connection
 }
 
@@ -760,7 +760,7 @@ func (u *ut) checkProxyStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expect := status{List: []*connection{{
+	expect := connStatus{List: []*connection{{
 		Namespace: u.namespace,
 		Status:    "connected",
 		ProxyList: []*proxyItem{{
@@ -774,7 +774,7 @@ func (u *ut) checkProxyStatus(t *testing.T) {
 		}},
 	}}}
 
-	var statuses status
+	var statuses connStatus
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
@@ -791,7 +791,7 @@ func (u *ut) centerCheckProxyStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expect := status{List: []*connection{{
+	expect := connStatus{List: []*connection{{
 		Namespace: "default",
 		Status:    "connected",
 		ProxyList: []*proxyItem{{
@@ -805,7 +805,7 @@ func (u *ut) centerCheckProxyStatus(t *testing.T) {
 		}},
 	}}}
 
-	var statuses status
+	var statuses connStatus
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
@@ -822,7 +822,7 @@ func (u *ut) checkProxyWithServiceMeshStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expect := status{List: []*connection{{
+	expect := connStatus{List: []*connection{{
 		Namespace: u.namespace,
 		Status:    "connected",
 		ProxyList: []*proxyItem{{
@@ -836,7 +836,7 @@ func (u *ut) checkProxyWithServiceMeshStatus(t *testing.T) {
 		}},
 	}}}
 
-	var statuses status
+	var statuses connStatus
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
@@ -853,7 +853,7 @@ func (u *ut) centerCheckProxyWithServiceMeshStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expect := status{List: []*connection{{
+	expect := connStatus{List: []*connection{{
 		Namespace: "default",
 		Status:    "connected",
 		ProxyList: []*proxyItem{{
@@ -867,7 +867,7 @@ func (u *ut) centerCheckProxyWithServiceMeshStatus(t *testing.T) {
 		}},
 	}}}
 
-	var statuses status
+	var statuses connStatus
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
@@ -884,7 +884,7 @@ func (u *ut) checkProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expect := status{List: []*connection{{
+	expect := connStatus{List: []*connection{{
 		Namespace: u.namespace,
 		Status:    "connected",
 		ProxyList: []*proxyItem{{
@@ -898,7 +898,7 @@ func (u *ut) checkProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 		}},
 	}}}
 
-	var statuses status
+	var statuses connStatus
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
@@ -922,7 +922,7 @@ func (u *ut) centerCheckProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expect := status{List: []*connection{{
+	expect := connStatus{List: []*connection{{
 		Namespace: "default",
 		Status:    "connected",
 		ProxyList: []*proxyItem{{
@@ -936,7 +936,7 @@ func (u *ut) centerCheckProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 		}},
 	}}}
 
-	var statuses status
+	var statuses connStatus
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}

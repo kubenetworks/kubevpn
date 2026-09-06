@@ -163,7 +163,7 @@ func (u *sshUt) checkSyncWithFullProxyStatus(t *testing.T) {
 		t.Fatal(err, string(output))
 	}
 
-	expect := status{List: []*connection{{
+	expect := connStatus{List: []*connection{{
 		Namespace: u.namespace,
 		Status:    "connected",
 		ProxyList: []*proxyItem{{
@@ -182,7 +182,7 @@ func (u *sshUt) checkSyncWithFullProxyStatus(t *testing.T) {
 		}},
 	}}}
 
-	var statuses status
+	var statuses connStatus
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +210,7 @@ func (u *sshUt) kubevpnUnSync(t *testing.T) {
 		t.Fatal(err, string(output))
 	}
 
-	var statuses status
+	var statuses connStatus
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +235,7 @@ func (u *sshUt) checkSyncWithServiceMeshStatus(t *testing.T) {
 		t.Fatal(err, string(output))
 	}
 
-	expect := status{List: []*connection{{
+	expect := connStatus{List: []*connection{{
 		Namespace: u.namespace,
 		Status:    "connected",
 		ProxyList: []*proxyItem{{
@@ -254,7 +254,7 @@ func (u *sshUt) checkSyncWithServiceMeshStatus(t *testing.T) {
 		}},
 	}}}
 
-	var statuses status
+	var statuses connStatus
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
