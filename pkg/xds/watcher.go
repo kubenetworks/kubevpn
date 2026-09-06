@@ -15,6 +15,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 // NotifyMessage carries ConfigMap content updates from the watcher to the processor.
@@ -30,7 +31,7 @@ const cmResyncInterval = 5 * time.Second
 
 // Watch monitors the traffic-manager ConfigMap for changes and sends updates to notifyCh.
 func Watch(ctx context.Context, f cmdutil.Factory, notifyCh chan<- NotifyMessage, onDHCPChange ...OnDHCPChange) error {
-	namespace, _, err := f.ToRawKubeConfigLoader().Namespace()
+	namespace, err := util.GetNamespace(f)
 	if err != nil {
 		return err
 	}

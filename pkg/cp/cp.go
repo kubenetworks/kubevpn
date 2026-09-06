@@ -20,6 +20,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 // CopyOptions have the data required to perform the copy operation
@@ -91,7 +92,7 @@ func (o *CopyOptions) Complete(f cmdutil.Factory, cmd *cobra.Command, args []str
 	}
 
 	var err error
-	o.Namespace, _, err = f.ToRawKubeConfigLoader().Namespace()
+	o.Namespace, err = util.GetNamespace(f)
 	if err != nil {
 		return err
 	}

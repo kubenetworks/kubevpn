@@ -36,8 +36,17 @@ func InitKubeClient(f cmdutil.Factory) (cfg *rest.Config, restclient *rest.RESTC
 	if clientset, err = f.KubernetesClientSet(); err != nil {
 		return
 	}
-	namespace, _, err = f.ToRawKubeConfigLoader().Namespace()
+	namespace, err = GetNamespace(f)
 	return
+}
+
+// GetNamespace returns the namespace resolved from the factory's kubeconfig loader.
+func GetNamespace(f cmdutil.Factory) (string, error) {
+	namespace, _, err := f.ToRawKubeConfigLoader().Namespace()
+	if err != nil {
+		return "", fmt.Errorf("failed to get namespace: %w", err)
+	}
+	return namespace, nil
 }
 
 // GetKubeConfigPath returns the absolute path of the kubeconfig file used by the factory.

@@ -12,6 +12,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 // applyDebugLevel raises the logger to DebugLevel when --debug is set. The
@@ -30,7 +31,7 @@ func Main(ctx context.Context, factory cmdutil.Factory, port uint, logger *log.E
 	snapshotCache := cache.NewSnapshotCache(false, cache.IDHash{}, logger)
 	proc := newProcessor(snapshotCache, logger)
 
-	namespace, _, _ := factory.ToRawKubeConfigLoader().Namespace()
+	namespace, _ := util.GetNamespace(factory)
 	restConfig, _ := factory.ToRESTConfig()
 	clientset, _ := kubernetes.NewForConfig(restConfig)
 

@@ -13,6 +13,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 	netutil "github.com/wencaiwulue/kubevpn/v2/pkg/util/netutil"
 )
 
@@ -21,7 +22,7 @@ func Once(ctx context.Context, f cmdutil.Factory) error {
 	if err != nil {
 		return err
 	}
-	namespace, _, err := f.ToRawKubeConfigLoader().Namespace()
+	namespace, err := util.GetNamespace(f)
 	if err != nil {
 		return err
 	}
