@@ -137,20 +137,18 @@ func (m *Manager) InRange(ip net.IP) bool {
 // that family. The write is atomic: if either family fails, nothing is allocated.
 func (m *Manager) RentSpecificIP(ctx context.Context, v4, v6 net.IP) error {
 	plog.G(ctx).Infof("Renting specific IP: v4=%v v6=%v", v4, v6)
-	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		return m.updateDHCPConfigMap(ctx, func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) error {
-			if v4 != nil {
-				if err := ipv4.Allocate(v4); err != nil {
-					return fmt.Errorf("cannot allocate IPv4 %s: %w", v4, err)
-				}
+	return m.retryUpdate(ctx, func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) error {
+		if v4 != nil {
+			if err := ipv4.Allocate(v4); err != nil {
+				return fmt.Errorf("cannot allocate IPv4 %s: %w", v4, err)
 			}
-			if v6 != nil {
-				if err := ipv6.Allocate(v6); err != nil {
-					return fmt.Errorf("cannot allocate IPv6 %s: %w", v6, err)
-				}
+		}
+		if v6 != nil {
+			if err := ipv6.Allocate(v6); err != nil {
+				return fmt.Errorf("cannot allocate IPv6 %s: %w", v6, err)
 			}
-			return nil
-		})
+		}
+		return nil
 	})
 }
 
@@ -200,6 +198,9 @@ func (m *Manager) rentIP(ctx context.Context, prefV4, prefV6 net.IP, excludeIPs 
 	shouldSkip := makeShouldSkip(excludeIPs)
 	var uselessIPs []net.IP
 	var v4, v6 net.IP
+	// Not folded into retryUpdate: uselessIPs must be reset once per retry
+	// attempt (before updateDHCPConfigMap runs), so the reset stays in the outer
+	// retry closure rather than inside the mutate func.
 	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		uselessIPs = nil
 		return m.updateDHCPConfigMap(ctx, func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) (err error) {
@@ -233,16 +234,14 @@ func (m *Manager) rentIP(ctx context.Context, prefV4, prefV6 net.IP, excludeIPs 
 // ReleaseIP returns the given IPv4 and IPv6 addresses back to the DHCP pool.
 func (m *Manager) ReleaseIP(ctx context.Context, v4, v6 net.IP) error {
 	plog.G(ctx).Infof("Releasing IP: v4=%v v6=%v", v4, v6)
-	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		return m.updateDHCPConfigMap(ctx, func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) error {
-			if err := ipv4.Release(v4); err != nil {
-				return err
-			}
-			if err := ipv6.Release(v6); err != nil {
-				return err
-			}
-			return nil
-		})
+	return m.retryUpdate(ctx, func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) error {
+		if err := ipv4.Release(v4); err != nil {
+			return err
+		}
+		if err := ipv6.Release(v6); err != nil {
+			return err
+		}
+		return nil
 	})
 }
 
@@ -257,21 +256,26 @@ func (m *Manager) releaseIP(ctx context.Context, ips ...net.IP) error {
 	if len(ips) == 0 {
 		return nil
 	}
-	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		return m.updateDHCPConfigMap(ctx, func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) error {
-			for _, ip := range ips {
-				var err error
-				if ip.To4() != nil {
-					err = ipv4.Release(ip)
-				} else {
-					err = ipv6.Release(ip)
-				}
-				if err != nil {
-					return err
-				}
+	return m.retryUpdate(ctx, func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) error {
+		for _, ip := range ips {
+			var err error
+			if ip.To4() != nil {
+				err = ipv4.Release(ip)
+			} else {
+				err = ipv6.Release(ip)
 			}
-			return nil
-		})
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// retryUpdate runs f against the DHCP ConfigMap under RetryOnConflict.
+func (m *Manager) retryUpdate(ctx context.Context, f func(ipv4, ipv6 *ipallocator.Range) error) error {
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		return m.updateDHCPConfigMap(ctx, f)
 	})
 }
 
