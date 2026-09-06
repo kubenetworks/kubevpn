@@ -30,8 +30,13 @@ func CmdQuit(f cmdutil.Factory) *cobra.Command {
         kubevpn quit
 		`)),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			_ = quit(cmd.Context(), true)
+			// Quit the user daemon first: its connection cleanup runs server-side
+			// leave-all, which reaches the traffic manager over the VPN and so needs the
+			// data plane still up. The sudo daemon (which owns the TUN) is quit second.
+			// Quitting sudo first would tear down the VPN before leave-all could run,
+			// leaking proxy sidecars/rules until the manager's lease reaper reclaims them.
 			_ = quit(cmd.Context(), false)
+			_ = quit(cmd.Context(), true)
 			_ = stopAllManagedProxies()
 			util.CleanExtensionLib()
 			printSuccess(os.Stdout, "Exited")

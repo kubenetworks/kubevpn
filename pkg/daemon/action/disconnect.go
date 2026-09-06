@@ -36,10 +36,15 @@ func (svr *Server) Disconnect(resp rpc.Daemon_DisconnectServer) (err error) {
 		ctx = plog.WithField(ctx, LogFieldConnID, id)
 	}
 
-	// disconnect sudo daemon first
-	// then disconnect from user daemon
-	// because only ssh jump in user daemon
+	// Order matters. Server-side leave-all removes proxy sidecars/rules by asking the
+	// traffic manager over the VPN (see LeaveAllProxyResources), so it must run while the
+	// data plane is still up — i.e. BEFORE the sudo daemon drops the TUN below. The sudo
+	// daemon is disconnected first (only the user daemon holds the ssh jump); the user
+	// daemon's own connection cleanup (cleanupConnection) runs last and re-attempts leave
+	// as a harmless idempotent no-op.
 	if !svr.IsSudo {
+		svr.leaveProxiesBeforeTeardown(ctx, req)
+
 		cli, err := svr.GetClient(true)
 		if err != nil {
 			return fmt.Errorf("sudo daemon not start: %w", err)
@@ -113,29 +118,7 @@ func (svr *Server) Disconnect(resp rpc.Daemon_DisconnectServer) (err error) {
 }
 
 func disconnectByKubeconfig(ctx context.Context, svr *Server, kubeconfigBytes string, ns string, jump *rpc.SshJump) error {
-	file, err := resolveKubeconfig(ctx, jump, kubeconfigBytes, false)
-	if err != nil {
-		return err
-	}
-	defer os.Remove(file)
-	connect := &handler.ConnectOptions{}
-	err = connect.InitClient(util.InitFactoryByPath(file, ns))
-	if err != nil {
-		return err
-	}
-	// Connections are stored under the connection ID derived from the *manager*
-	// namespace (see connect_elevate.go detectAndSetManagerNamespace + GetConnectionID),
-	// which may differ from the workload namespace. Resolve it the same way so the
-	// lookup matches — otherwise removeConnection finds nothing and the proxy/VPN
-	// state leaks when the traffic manager lives in its own namespace.
-	managerNamespace, err := util.DetectManagerNamespace(ctx, connect.GetFactory(), ns)
-	if err != nil {
-		return err
-	}
-	if managerNamespace == "" {
-		managerNamespace = ns
-	}
-	connectionID, err := util.GetConnectionID(context.Background(), connect.GetClientset().CoreV1().Namespaces(), managerNamespace)
+	connectionID, err := resolveConnectionIDByKubeconfig(ctx, jump, kubeconfigBytes, ns)
 	if err != nil {
 		return err
 	}
@@ -144,6 +127,69 @@ func disconnectByKubeconfig(ctx context.Context, svr *Server, kubeconfigBytes st
 	svr.resetCurrentConnection(connectionID)
 	svr.connMu.Unlock()
 	return nil
+}
+
+// resolveConnectionIDByKubeconfig derives the stored connection ID for a kubeconfig +
+// namespace. Connections are keyed by the ID derived from the *manager* namespace (see
+// connect_elevate.go detectAndSetManagerNamespace + GetConnectionID), which may differ
+// from the workload namespace, so it is resolved the same way — otherwise the lookup
+// misses and the proxy/VPN state leaks when the manager lives in its own namespace.
+func resolveConnectionIDByKubeconfig(ctx context.Context, jump *rpc.SshJump, kubeconfigBytes, ns string) (string, error) {
+	file, err := resolveKubeconfig(ctx, jump, kubeconfigBytes, false)
+	if err != nil {
+		return "", err
+	}
+	defer os.Remove(file)
+	connect := &handler.ConnectOptions{}
+	if err = connect.InitClient(util.InitFactoryByPath(file, ns)); err != nil {
+		return "", err
+	}
+	managerNamespace, err := util.DetectManagerNamespace(ctx, connect.GetFactory(), ns)
+	if err != nil {
+		return "", err
+	}
+	if managerNamespace == "" {
+		managerNamespace = ns
+	}
+	return util.GetConnectionID(context.Background(), connect.GetClientset().CoreV1().Namespaces(), managerNamespace)
+}
+
+// leaveProxiesBeforeTeardown resolves the connections targeted by a Disconnect request
+// and asks the traffic manager to remove their proxy sidecars/rules while the VPN data
+// plane is still up. Server-side leave reaches the manager over the VPN, so it MUST run
+// before the sudo daemon drops the TUN. User daemon only (DataSession's leave is a no-op);
+// best-effort — errors are logged and teardown proceeds (the manager's lease reaper
+// reclaims any rule left behind).
+func (svr *Server) leaveProxiesBeforeTeardown(ctx context.Context, req *rpc.DisconnectRequest) {
+	var targets handler.Connects
+	switch {
+	case req.GetAll():
+		svr.connMu.RLock()
+		targets = append(targets, svr.connections...)
+		svr.connMu.RUnlock()
+	case req.GetConnectionID() != "":
+		svr.connMu.RLock()
+		if c, i := svr.findConnection(req.GetConnectionID()); i != -1 {
+			targets = targets.Append(c)
+		}
+		svr.connMu.RUnlock()
+	case req.KubeconfigBytes != nil && req.Namespace != nil:
+		id, err := resolveConnectionIDByKubeconfig(ctx, req.GetSshJump(), req.GetKubeconfigBytes(), req.GetNamespace())
+		if err != nil {
+			plog.G(ctx).Warnf("Resolve connection before leaving proxies failed: %v", err)
+			return
+		}
+		svr.connMu.RLock()
+		if c, i := svr.findConnection(id); i != -1 {
+			targets = targets.Append(c)
+		}
+		svr.connMu.RUnlock()
+	}
+	for _, conn := range targets {
+		if err := conn.LeaveAllProxyResources(ctx); err != nil {
+			plog.G(ctx).Warnf("Leave proxy resources before VPN teardown failed (lease reaper will reclaim): %v", err)
+		}
+	}
 }
 
 func disconnect(ctx context.Context, svr *Server, connectionID string) {
