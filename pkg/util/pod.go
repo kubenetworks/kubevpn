@@ -143,7 +143,27 @@ func WaitPod(ctx context.Context, podInterface v12.PodInterface, list v1.ListOpt
 }
 
 // Shell executes a command in a pod container and returns the stdout output.
+// The exec stream to the pod (over the apiserver) can drop mid-flight on flaky or
+// nested-VM clusters ("error stream protocol error", EOF); since every caller runs
+// a non-interactive read-only command (no stdin), it is safe to retry a fresh exec
+// on such transient stream errors. See retryTransientExec.
 func Shell(ctx context.Context, clientset kubernetes.Interface, config *rest.Config, podName, containerName, ns string, cmd []string) (string, error) {
+	var stdout, stderr string
+	err := retryTransientExec(func() error {
+		var e error
+		stdout, stderr, e = shellOnce(ctx, clientset, config, podName, containerName, ns, cmd)
+		return e
+	})
+	if err != nil {
+		return stderr, err
+	}
+	return stdout, nil
+}
+
+// shellOnce runs the pod exec once, returning (stdout, stderr, err). Stderr is only
+// meaningful when err != nil (Shell returns it to preserve the previous behavior of
+// surfacing the remote command's stderr on failure).
+func shellOnce(ctx context.Context, clientset kubernetes.Interface, config *rest.Config, podName, containerName, ns string, cmd []string) (string, string, error) {
 	stdin, _, _ := term.StdStreams()
 	buf := bytes.NewBuffer(nil)
 	errBuf := bytes.NewBuffer(nil)
@@ -163,9 +183,9 @@ func Shell(ctx context.Context, clientset kubernetes.Interface, config *rest.Con
 		Config:    config,
 	}
 	if err := options.Run(); err != nil {
-		return errBuf.String(), err
+		return "", errBuf.String(), err
 	}
-	return strings.TrimRight(buf.String(), "\n"), nil
+	return strings.TrimRight(buf.String(), "\n"), "", nil
 }
 
 // AllContainersRunning reports whether the pod is ready and all containers have a ready status.
