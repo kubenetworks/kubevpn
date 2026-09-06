@@ -140,7 +140,9 @@ of Maglev/IPVS-`sh`.
 
 | File | Change |
 |---|---|
-| `pkg/core/tun_client.go` | Add `flowKey`, `parseFiveTupleInline`, `l4Ports`, `flowHash`; `runConnPool` dispatch uses `flowHash` instead of `ipHash`. `ipHash` is retained as the fallback. |
+| `pkg/core/flow_hash.go` | `flowKey`, `parseFiveTupleInline`, `l4Ports`, `flowHash`, `ipHash` (the five-tuple parsing/hashing module, split out of `tun_client.go`). `runConnPool` dispatch uses `flowHash`; `ipHash` is the fallback. |
+| `pkg/core/conn_slot.go` | `connSlot` (single-connection read/write goroutines), `periodicDeadline`, `trySendToSlot`, `broadcastToSlots` (split out of `tun_client.go`). |
+| `pkg/core/tun_client.go` | `clientTransport` connection-pool orchestration (`runConnPool`, `routeOutbound`, `heartbeats`, `registrationPayloads`). |
 | `pkg/core/flow_hash_test.go` | New tests (below). |
 
 Server side, `RouteHub`, `ConnList`, `ParseIPFast`, the `Packet` type, and `pumpTun` are
