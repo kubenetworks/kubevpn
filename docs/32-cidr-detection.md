@@ -143,7 +143,8 @@ Detection touches the API server several times and creates a pod, so the result 
 
 | File | Purpose |
 |---|---|
-| `pkg/util/cidr.go` | `GetCIDR` and all five strategy functions, helper pod spec, dedup helpers |
+| `pkg/util/cidr.go` | Pure helpers: `CIDRsToString`, `parseCIDRFromFlag`, `RemoveCIDRsContainingIPs`, `RemoveLargerOverlappingCIDRs`, `GetAPIServerIP` (no cluster I/O — unit-tested without a kubeconfig) |
+| `pkg/util/cidr_detect.go` | Cluster-I/O detectors: `GetCIDR` and the five strategy functions, `CreateCIDRPod`, `buildCIDRPodSpec` |
 | `pkg/handler/connect.go` | `getCIDR` caching wrapper, `parseCachedCIDRs`, `encodeCIDRs`, `dedupAndFilterCIDRs`, `getAPIServerIPs` |
 | `pkg/handler/once.go` | Warms the CIDR cache during Helm `once` bootstrap |
 | `pkg/handler/traffmgr.go` | Pre-creates the `CLUSTER_CIDRS` ConfigMap key |
