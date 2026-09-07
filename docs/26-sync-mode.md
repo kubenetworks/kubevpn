@@ -152,7 +152,8 @@ The `Sync` daemon action:
 
 | File | Purpose |
 |------|---------|
-| `pkg/handler/sync.go` | SyncOptions, DoSync, prepareSyncPodSpec, Cleanup |
+| `pkg/handler/sync.go` | SyncOptions, DoSync, Cleanup |
+| `pkg/handler/sync_podspec.go` | `prepareSyncPodSpec` + `syncPodSpec` param object (pod template mutation) |
 | `pkg/handler/sync_containers.go` | genSyncthingContainer, genVPNContainer, SyncDir |
 | `pkg/syncthing/syncthing.go` | StartClient, StartServer |
 | `pkg/syncthing/api.go` | REST API client for config updates |
