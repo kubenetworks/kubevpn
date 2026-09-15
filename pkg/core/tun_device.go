@@ -63,6 +63,26 @@ type tunDevice struct {
 	transport   transport
 }
 
+// newTunDevice constructs a tunDevice bound to tun, resolving the device's OS interface name once
+// (netutil.GetTunDeviceByConn) and storing it as tunName — the single source of truth every later
+// address lookup uses (see the tunName field). Both the production handler (tunHandler.Handle) and
+// the real-TUN integration tests build their devices through here so neither can drift into leaving
+// tunName empty: an empty name makes addrs() return all-nil, which silently disables route
+// announcement and heartbeats and black-holes the tunnel — the exact regression this guards against.
+func newTunDevice(tun net.Conn, errChan chan error) (*tunDevice, error) {
+	tunIfi, err := netutil.GetTunDeviceByConn(tun)
+	if err != nil {
+		return nil, err
+	}
+	return &tunDevice{
+		tun:         tun,
+		tunName:     tunIfi.Name,
+		tunInbound:  make(chan *Packet, MaxSize),
+		tunOutbound: make(chan *Packet, MaxSize),
+		errChan:     errChan,
+	}, nil
+}
+
 // addrs returns the device's current IPv4, IPv6 and Docker-IPv4 TUN addresses, or nils when the
 // device has none / cannot be inspected. It is the single seam through which the data plane learns
 // its own addresses, and it is deliberately re-read on every call rather than cached: ChangeTunIP

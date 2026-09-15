@@ -58,3 +58,16 @@ func (t *Throttle) Warnf(ctx context.Context, key, format string, args ...any) {
 		G(ctx).Warnf(format, args...)
 	}
 }
+
+// Reset drops all recorded timestamps so the next occurrence of every key logs immediately. It
+// exists for tests that share a package-level throttle across cases: without it, one case that
+// trips a key inside the interval silently swallows a later case's diagnostic for the same key.
+// A nil *Throttle is a no-op.
+func (t *Throttle) Reset() {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	t.last = make(map[string]time.Time)
+	t.mu.Unlock()
+}

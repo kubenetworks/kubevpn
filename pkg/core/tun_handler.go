@@ -52,20 +52,13 @@ func TunHandler(forward *Forwarder, hub *RouteHub, stats *HeartbeatStats) Handle
 }
 
 func (h *tunHandler) Handle(ctx context.Context, tun net.Conn) {
-	tunIfi, err := netutil.GetTunDeviceByConn(tun)
+	dev, err := newTunDevice(tun, h.errChan)
 	if err != nil {
 		plog.G(ctx).Errorf("[TUN] Failed to get tun device: %v", err)
 		return
 	}
-	ctx = plog.WithField(ctx, plog.FieldTun, tunIfi.Name)
+	ctx = plog.WithField(ctx, plog.FieldTun, dev.tunName)
 
-	dev := &tunDevice{
-		tun:         tun,
-		tunName:     tunIfi.Name,
-		tunInbound:  make(chan *Packet, MaxSize),
-		tunOutbound: make(chan *Packet, MaxSize),
-		errChan:     h.errChan,
-	}
 	if h.forward.IsEmpty() {
 		dev.transport = newServerTransport(dev, h.hub)
 	} else {
