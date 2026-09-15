@@ -98,6 +98,21 @@ func (s *regServer) routeConnCount(ip net.IP) int {
 	return val.(*ConnList).Len()
 }
 
+// routeConns returns a snapshot of the exact conns the hub currently has registered for ip. Unlike
+// routeConnCount, comparing conns by identity gives a stable observable across a teardown: the old
+// conns are removed one by one while the client reconnects and registers fresh conns on the same
+// key, so the aggregate count may never read 0, but "these specific conns are gone" always holds.
+func (s *regServer) routeConns(ip net.IP) []net.Conn {
+	val, ok := s.hub.RouteMapTCP.Load(regRouteKey(ip))
+	if !ok {
+		return nil
+	}
+	cl := val.(*ConnList)
+	cl.mu.Lock()
+	defer cl.mu.Unlock()
+	return append([]net.Conn(nil), cl.conns...)
+}
+
 // routeKeyCount returns how many distinct addresses the hub currently has a route for.
 func (s *regServer) routeKeyCount() int {
 	n := 0
@@ -220,11 +235,24 @@ func TestIntegration_DataSlotsAutoRegisterRouteAndPrimeLiveness(t *testing.T) {
 	// Phase 3: the port-forward is torn down (what the watchdog does every 30s in production).
 	// Every slot must reconnect AND re-announce, and liveness must recover on its own.
 	before := stats.LastReply()
+	preTeardown := srv.routeConns(v4) // the ConnPoolSize conns registered before teardown
 	srv.dropAllConns()
+	// The client reconnects immediately on a clean disconnect (no backoff — SlotReconnectBackoff
+	// only applies on a dial failure), so a fresh conn can register on this route key before the
+	// last torn-down conn is evicted, and the aggregate count may never read 0. Assert instead
+	// that every pre-teardown conn is gone, which is stable regardless of reconnect timing.
 	waitFor(t, 20*time.Second, func() bool {
-		return srv.routeConnCount(v4) == 0
+		remaining := srv.routeConns(v4)
+		for _, old := range preTeardown {
+			for _, cur := range remaining {
+				if old == cur {
+					return false
+				}
+			}
+		}
+		return true
 	},
-		"routes to be dropped after teardown")
+		"the torn-down conns to be evicted from the route")
 	waitFor(t, 30*time.Second, func() bool {
 		return srv.routeConnCount(v4) == ConnPoolSize && srv.routeConnCount(v6) == ConnPoolSize
 	},
