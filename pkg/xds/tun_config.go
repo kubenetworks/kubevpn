@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -52,6 +53,18 @@ type TunConfigServer struct {
 	// conflicting proposal is simply dropped (decline/expiry) with nothing to roll
 	// back. In-memory only — lost on restart (proposal vanishes; operator re-edits).
 	pendingProposal map[string]proposal
+
+	// allocsDirty marks in-memory lease state that TUN_ALLOCS has not caught up with yet, so the
+	// reaper's existing tick can flush it. Renewals used to be persisted only by WatchTunIP's
+	// LeaseDuration/3 ticker, which meant a client whose xDS stream could not survive 100s never
+	// had its renewal written down at all: the persisted lastRenew froze while the in-memory lease
+	// stayed fresh. Harmless until the traffic manager restarts -- loadAllocs then reads the stale
+	// timestamp, declares a LIVE client's lease expired and releases its IP, freeing the bit for
+	// another client to be handed the same address.
+	//
+	// Atomic rather than mu-guarded because saveAllocs clears it and several of its callers hold
+	// only the read lock (persistRejected, ReconcileDHCP, the reaper).
+	allocsDirty atomic.Bool
 
 	// rejectedAnno is the latest "manual TUN_ALLOCS edit not applied" breadcrumb.
 	// It is written into the ConfigMap by saveAllocs (the single CM writer), so it
@@ -136,7 +149,17 @@ const XDSPort uint = config.PortXDS
 const LeaseDuration = 5 * time.Minute
 
 // leaseReapInterval is how often the lease reaper scans for and reclaims expired allocations.
+// It also flushes renewals recorded since the last tick, so the persisted lastRenew never lags
+// in-memory state by more than this.
 const leaseReapInterval = 30 * time.Second
+
+// loadGrace is the extra slack loadAllocs allows on top of LeaseDuration before releasing a
+// persisted allocation at startup. The persisted lastRenew can legitimately lag in-memory state by
+// up to leaseReapInterval, and a live client needs a moment after the traffic manager restarts to
+// re-subscribe (its xDS stream broke with the old pod) and renew. Releasing an in-use IP hands the
+// same address to a second client, so the race is resolved in favour of the client: an owner that
+// really is gone merely holds its IP for this much longer before the reaper takes it.
+const loadGrace = 2 * leaseReapInterval
 
 // abandonmentTTL is how long after a lease is reaped (with no re-acquire) the owner's
 // envoy rules are cleaned up as abandoned. It is deliberately much longer than

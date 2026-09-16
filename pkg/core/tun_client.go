@@ -170,12 +170,12 @@ func (t *clientTransport) runControlSlot(ctx context.Context) {
 // datagram length header: UDPConnOverTCP.Write frames that on send). A slot writes these on every
 // (re)connect so the server registers the route for that conn immediately. The echo also doubles
 // as a liveness ping (its reply marks HeartbeatStats). Returns nil if the TUN IPs are unavailable.
-func (t *clientTransport) registrationPayloads() [][]byte {
-	tunIfi, err := netutil.GetTunDeviceByConn(t.dev.tun)
-	if err != nil {
-		return nil
-	}
-	srcIPv4, srcIPv6, _, _ := netutil.GetTunDeviceIP(tunIfi.Name)
+func (t *clientTransport) registrationPayloads(ctx context.Context) [][]byte {
+	// Look the addresses up by interface NAME (resolved once at device creation), never by
+	// re-scanning the interface table: this runs on every slot (re)connect, and a failed scan
+	// here means the server never learns our route — every heartbeat echo reply it generates is
+	// then dropped for want of a route, so the liveness watchdog force-reconnects forever.
+	srcIPv4, srcIPv6, _ := t.dev.addrs()
 	var payloads [][]byte
 	appendPayload := func(icmp []byte) {
 		payload := make([]byte, typePrefixLen+len(icmp))
@@ -186,12 +186,24 @@ func (t *clientTransport) registrationPayloads() [][]byte {
 	if srcIPv4 != nil {
 		if icmp, e := netutil.GenICMPPacket(srcIPv4, config.RouterIP); e == nil {
 			appendPayload(icmp)
+		} else {
+			dataPlaneWarn.Warnf(ctx, "reg-gen-v4", "[Client] Failed to build IPv4 route announcement: %v", e)
 		}
 	}
 	if srcIPv6 != nil {
 		if icmp, e := netutil.GenICMPPacketIPv6(srcIPv6, config.RouterIP6); e == nil {
 			appendPayload(icmp)
+		} else {
+			dataPlaneWarn.Warnf(ctx, "reg-gen-v6", "[Client] Failed to build IPv6 route announcement: %v", e)
 		}
+	}
+	if len(payloads) == 0 {
+		// Announcing nothing is not a benign no-op: the server keeps no route for us, so every
+		// heartbeat echo reply it generates is dropped and the tunnel is dead for an idle client
+		// even though all its connections look healthy. Never let this be silent again.
+		dataPlaneWarn.Warnf(ctx, "reg-empty",
+			"[Client] Cannot announce our route: no TUN address available on %q. Inbound traffic and "+
+				"heartbeat replies will be dropped by the server until this resolves", t.dev.tunName)
 	}
 	return payloads
 }
@@ -199,28 +211,37 @@ func (t *clientTransport) registrationPayloads() [][]byte {
 // heartbeats sends periodic ICMP echo packets via the dedicated controlSlot, bypassing the data
 // tunInbound path entirely. This ensures liveness probes flow even when data slots are congested.
 func (t *clientTransport) heartbeats(ctx context.Context) {
-	tunIfi, err := netutil.GetTunDeviceByConn(t.dev.tun)
-	if err != nil {
-		plog.G(ctx).Errorf("[Client] Failed to get tun device: %v", err)
-		return
-	}
-
+	// No fail-fast on an unresolvable device here: a transient lookup failure must not disable
+	// liveness for the rest of the session (that failure mode is exactly what black-holed the
+	// tunnel). sendAll re-reads the addresses every tick and warns (throttled) while they are
+	// unavailable, so the heartbeat recovers on its own once they come back.
 	ticker := time.NewTicker(config.HeartbeatInterval)
 	defer ticker.Stop()
 
+	// Every way a heartbeat can fail to leave the host is reported (throttled): a heartbeat that is
+	// never sent is indistinguishable at the watchdog from a black-holed tunnel, and it will
+	// force-reconnect the port-forward every livenessStartupDeadline forever on the strength of it.
 	sendHeartbeat := func(payload []byte) {
 		if t.controlSlot == nil {
+			dataPlaneWarn.Warnf(ctx, "hb-no-control-slot", "[Client] Heartbeat skipped: control slot not up yet")
 			return
 		}
 		buf := config.LPool.Get().([]byte)
 		n := copy(buf[tunReserve:], payload)
 		buf[datagramHeaderLen] = packetTypeControl
-		trySendToSlot(t.controlSlot.inbound, NewPacket(buf, n+typePrefixLen, nil, nil))
+		if !trySendToSlot(t.controlSlot.inbound, NewPacket(buf, n+typePrefixLen, nil, nil)) {
+			dataPlaneWarn.Warnf(ctx, "hb-slot-full", "[Client] Heartbeat dropped: control slot queue full")
+		}
 	}
 
 	sendAll := func(reason string) {
-		srcIPv4, srcIPv6, dockerSrcIPv4, _ := netutil.GetTunDeviceIP(tunIfi.Name)
+		srcIPv4, srcIPv6, dockerSrcIPv4 := t.dev.addrs()
 		plog.G(ctx).Debugf("[Client] Sending heartbeat (%s)", reason)
+		if srcIPv4 == nil && srcIPv6 == nil {
+			dataPlaneWarn.Warnf(ctx, "hb-no-addr",
+				"[Client] Heartbeat not sent: no TUN address available on %q; the data plane will be "+
+					"reported unhealthy until this resolves", t.dev.tunName)
+		}
 		if srcIPv4 != nil {
 			if icmp, e := netutil.GenICMPPacket(srcIPv4, config.RouterIP); e != nil {
 				plog.G(ctx).Errorf("[Client] Failed to generate IPv4 heartbeat: %v", e)

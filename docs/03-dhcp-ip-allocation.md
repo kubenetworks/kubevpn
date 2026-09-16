@@ -193,12 +193,38 @@ On startup, `loadAllocs` restores from ConfigMap, and expired allocations are re
 - `LeaseReaper interval = 30 seconds` — Frequency of checking for expired IPs
 - `WatchTunIP renewal = LeaseDuration / 3` ≈ 100 seconds — Implicit renewal interval via stream
 
+- `loadGrace = 2 * LeaseReaper interval` = 60 s — Extra slack `loadAllocs` allows before releasing a
+  persisted allocation at startup
+
 **Renewal Methods:**
 
 | Source | Renewal Trigger |
 |--------|----------------|
 | `GetTunIP` call | Each call refreshes `LastRenew` |
-| `WatchTunIP` stream | Background ticker auto-renews every ~100s |
+| `WatchTunIP` subscribe | Every (re)subscribe refreshes `LastRenew` |
+| `WatchTunIP` stream | Background ticker also refreshes every ~100s |
+
+All three go through `renewLease`, the single place `LastRenew` is written.
+
+**Renewal persistence (important):** `renewLease` only marks the map dirty; the **LeaseReaper's 30 s
+tick** writes it to `TUN_ALLOCS`. Persistence must not depend on any one stream's lifetime. It used to:
+renewals were written only by `WatchTunIP`'s ~100 s ticker, so a client whose port-forward was being
+torn down every 30 s never kept a stream alive long enough for a single renewal to be recorded. Its
+persisted `lastRenew` froze — observed 1h54m stale for a client that was up — while the in-memory
+lease stayed fresh and the reaper correctly declined to reclaim it. See
+[51-idle-client-route-registration.md](51-idle-client-route-registration.md).
+
+`saveAllocs` clears the dirty mark before snapshotting and restores it if the write fails, so a
+renewal can never be lost; the worst case is a redundant write.
+
+**Restart grace:** `loadAllocs` releases a persisted allocation only past
+`LeaseDuration + loadGrace`, not `LeaseDuration`. Releasing here is irreversible from the client's
+point of view — the bit returns to the pool and the next client can be handed an address still in use.
+The persisted timestamp may legitimately lag in-memory state by one reap interval, and a live client
+needs a moment after a restart to re-subscribe (its stream died with the old pod), so the ambiguous
+window is resolved in favour of keeping the allocation. An owner that really is gone is reclaimed by
+the reaper one tick later. The grace is deliberately small: a record hours stale is indistinguishable
+from a dead client's.
 
 **Expiration Reclamation:**
 
@@ -210,7 +236,8 @@ LeaseReaper (every 30s):
     double-check: if alloc still exists AND still expired:  // prevents deleting a reconnected client
       delete(allocs, ownerID)
       dhcp.ReleaseIP(alloc.IPv4, alloc.IPv6)  // errors logged, not ignored
-  saveAllocs()
+  if anything was reclaimed OR a renewal was recorded since the last flush:
+    saveAllocs()
 ```
 
 **Design Rationale:** No explicit IP release is required. After a client disconnects, the lease naturally expires and LeaseReaper reclaims it. This avoids IP leaks caused by incomplete cleanup during disconnection.

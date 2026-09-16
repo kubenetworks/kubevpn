@@ -76,8 +76,8 @@ func (s *TunConfigServer) GetTunIP(ctx context.Context, req *rpc.TunIPRequest) (
 		if err := s.saveAllocs(ctx); err != nil {
 			plog.G(ctx).Warnf("[TunConfig] persist rejection after decline: %v", err)
 		}
+		s.renewLease(req.OwnerID)
 		if a, aok := s.allocs[req.OwnerID]; aok {
-			a.LastRenew = time.Now()
 			return tunResp(a), nil
 		}
 		// no committed alloc (rare) → fall through to fresh allocation
@@ -85,7 +85,9 @@ func (s *TunConfigServer) GetTunIP(ctx context.Context, req *rpc.TunIPRequest) (
 
 	if alloc, ok := s.allocs[req.OwnerID]; ok {
 		if !isIPExcluded(alloc.IPv4, excludeIPs) {
-			alloc.LastRenew = time.Now()
+			// renewLease is the single place LastRenew is written, so no renewal path can forget to
+			// mark the lease map for persistence.
+			s.renewLease(req.OwnerID)
 			if req.Hostname != "" {
 				alloc.Hostname = req.Hostname
 			}

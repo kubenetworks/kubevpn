@@ -38,6 +38,12 @@ import (
 // closed by each test's own defers (which run before this cleanup), unblocking accept loops.
 func tunTestContext(t *testing.T) context.Context {
 	t.Helper()
+	// Clear the data-plane warning throttle so each test's first diagnostic is visible. The
+	// throttle keys are global and low-cardinality (e.g. "reg-empty"), so an earlier test that
+	// tripped a key inside the 30s window would otherwise silently swallow this test's own
+	// warning for the same key — which once hid the "Cannot announce our route" line that
+	// pinpointed a real regression.
+	dataPlaneWarn.Reset()
 	base := runtime.NumGoroutine()
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	t.Cleanup(func() {
@@ -751,14 +757,13 @@ func TestTUN_ClientDevice_FullPipeline(t *testing.T) {
 		MaxRetries:  3,
 	}
 
-	// Construct ClientDevice directly — the core of this test.
-	// In production, HandleClient() does this inside tunHandler.
-	errChan := make(chan error, 1)
-	device := &tunDevice{
-		tun:         tunConn,
-		tunInbound:  make(chan *Packet, MaxSize),
-		tunOutbound: make(chan *Packet, MaxSize),
-		errChan:     errChan,
+	// Construct ClientDevice directly — the core of this test. In production, tunHandler.Handle
+	// builds it the same way, through newTunDevice, so tunName is resolved from the real TUN and
+	// addrs() can announce the route. A bare struct literal here left tunName empty, which made
+	// addrs() return all-nil and silently disabled route announcement and heartbeats.
+	device, err := newTunDevice(tunConn, make(chan error, 1))
+	if err != nil {
+		t.Fatalf("[Phase 4] construct tun device: %v", err)
 	}
 	device.transport = newClientTransport(device, forwarder, nil)
 	defer device.Close()
@@ -771,25 +776,21 @@ func TestTUN_ClientDevice_FullPipeline(t *testing.T) {
 
 	t.Log("[Phase 4] tunDevice (client transport) constructed and all goroutines started")
 
-	// Wait for connection pool to establish (ConnPoolSize TCP connections)
-	// and heartbeats to register routes.
-	time.Sleep(3 * time.Second)
-
 	// =========================================================================
 	// Phase 5: Verify connection pool
 	// =========================================================================
 
+	// Poll for the pool to establish and the route to register rather than sleeping a fixed 3s
+	// then asserting once: the fixed wait was both flaky (slower under CI CPU contention) and
+	// slower than necessary (it always paid the full 3s even when the pool came up immediately).
+	waitFor(t, 10*time.Second, func() bool { return int(serverConnCount.Load()) >= ConnPoolSize },
+		fmt.Sprintf("[Phase 5] Connection pool: expected >= %d connections, got %d", ConnPoolSize, serverConnCount.Load()))
 	poolConns := int(serverConnCount.Load())
-	if poolConns < ConnPoolSize {
-		t.Fatalf("[Phase 5] Connection pool: expected >= %d connections, got %d", ConnPoolSize, poolConns)
-	}
 	t.Logf("[Phase 5] Connection pool established: %d server connections (expected %d)", poolConns, ConnPoolSize)
 
-	// Verify client's route is registered in RouteHub (from heartbeat)
+	// Verify client's route is registered in RouteHub (from the registration payload / heartbeat).
 	clientRouteKey := string(net.ParseIP("198.18.0.2").To4())
-	if !hub.HasRoute(clientRouteKey) {
-		t.Fatal("[Phase 5] Client route 198.18.0.2 NOT registered in RouteHub after heartbeat")
-	}
+	waitForRoutes(t, hub, "198.18.0.2")
 	t.Log("[Phase 5] Route 198.18.0.2 registered in RouteHub via heartbeat")
 
 	// =========================================================================

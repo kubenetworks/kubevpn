@@ -94,9 +94,29 @@ watchdog runs for **every** session including the first. The core loop is extrac
 read/write loops) sends the route-registration ICMP echo (`registrationPayloads`,
 `conn_slot.go`), whose reply primes `HeartbeatStats` within ~RTT — it does not wait for the 5 s
 ticker. Because `livenessStartupDeadline` (30 s) ≫ that priming time, a healthy reconnected session
-always primes long before the deadline and is never falsely torn down. The only remaining loop is a
-genuine persistent black-hole (network truly down): a correct, gentle ~30 s retry (≈2 apiserver
-calls/min) that self-heals the instant the path recovers.
+always primes long before the deadline and is never falsely torn down.
+
+**This makes the watchdog only as trustworthy as that announcement.** The paragraph above used to
+conclude that the only remaining loop was a genuine persistent black-hole (network truly down), and a
+gentle ~30 s retry that self-heals when the path recovers. That was wrong on both counts. If the
+client fails to announce its route, the server drops every echo reply it generates and the session can
+never prime while the tunnel is otherwise fine — which is what happened in the field for 20 hours (see
+[51-idle-client-route-registration.md](51-idle-client-route-registration.md)). Two consequences were
+addressed there:
+
+- **The backoff was inert for exactly this case.** `portForwardHealthySession` (30 s) equals
+  `livenessStartupDeadline`, so a watchdog-killed session always reaches the "healthy" duration and
+  used to reset the delay to 200 ms. `nextPortForwardDelay` now also requires the session to have
+  **primed**; a never-primed session backs off toward `portForwardBlackHoleMaxDelay` (30 s), and a
+  later primed session clamps it straight back down. `watchLiveness` reports the verdict via
+  `livenessOutcome`, carried out through `portForwardOnce`.
+- **It now escalates instead of looping quietly.** After `portForwardBlackHoleThreshold` (3)
+  consecutive never-primed sessions the condition is logged (throttled to every 5 minutes) with its
+  duration and a pointer to `kubevpn status`.
+
+Note each reconnect also tears down the xDS control stream sharing this port-forward session (lease
+renewal, route discovery, DNS), so a tight loop actively amplifies the outage — which is why the
+black-hole ceiling is much larger than `portForwardReconnectMaxDelay`.
 
 ### 4.3 xDS health check removed (`pkg/handler/connect_tun.go`, `network.go`, `status.go`)
 

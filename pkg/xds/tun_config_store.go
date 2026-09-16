@@ -49,7 +49,14 @@ func (s *TunConfigServer) loadAllocs(ctx context.Context) {
 			continue
 		}
 
-		if now.Sub(lastRenew) > LeaseDuration {
+		// Release only past LeaseDuration + loadGrace, not LeaseDuration. Releasing here is
+		// irreversible from the client's point of view: the bit goes back to the pool and the next
+		// client can be handed an address another client is still using. The persisted timestamp is
+		// allowed to lag in-memory state (see loadGrace), and a live client whose stream died with
+		// the previous pod needs a moment to re-subscribe and renew, so the ambiguous window is
+		// resolved in favour of keeping the allocation. An owner that really is gone is reclaimed by
+		// the reaper one tick later.
+		if now.Sub(lastRenew) > LeaseDuration+loadGrace {
 			var ipv6 net.IP
 			if v6Net != nil {
 				ipv6 = v6Net.IP
@@ -97,6 +104,10 @@ func parsePersistedAllocs(data string) (map[string]*persistedAlloc, error) {
 // saveAllocs persists the current allocs map to ConfigMap.
 // Caller must hold s.mu (read or write lock) or ensure no concurrent modification.
 func (s *TunConfigServer) saveAllocs(ctx context.Context) error {
+	// Clear the dirty mark BEFORE snapshotting, and restore it if the write fails. Clearing after
+	// the write could drop a renewal that landed in between; clearing first can at worst cause one
+	// redundant persist. Losing a renewal is the failure that must not recur.
+	s.allocsDirty.Store(false)
 	persisted := make(map[string]*persistedAlloc, len(s.allocs))
 	for ownerID, alloc := range s.allocs {
 		pa := &persistedAlloc{
@@ -115,6 +126,7 @@ func (s *TunConfigServer) saveAllocs(ctx context.Context) error {
 
 	data, err := yaml.Marshal(persisted)
 	if err != nil {
+		s.allocsDirty.Store(true)
 		return err
 	}
 
@@ -124,7 +136,7 @@ func (s *TunConfigServer) saveAllocs(ctx context.Context) error {
 	// would resurrect intentionally-reclaimed leases. RetryOnConflict re-reads
 	// on a conflicting concurrent write (e.g. a bitmap or envoy patch bumping
 	// the ResourceVersion), so other ConfigMap keys are never clobbered.
-	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+	err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		cm, getErr := s.clientset.CoreV1().ConfigMaps(s.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 		if getErr != nil {
 			return getErr
@@ -144,6 +156,10 @@ func (s *TunConfigServer) saveAllocs(ctx context.Context) error {
 		_, updErr := s.clientset.CoreV1().ConfigMaps(s.namespace).Update(ctx, cm, metav1.UpdateOptions{})
 		return updErr
 	})
+	if err != nil {
+		s.allocsDirty.Store(true) // retry on the next reaper tick
+	}
+	return err
 }
 
 // recordRejectedLocked stages a breadcrumb explaining why a manual TUN_ALLOCS edit

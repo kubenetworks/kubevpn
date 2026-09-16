@@ -60,9 +60,13 @@ func (h *gvisorTCPHandler) readFromEndpointWriteToRoute(ctx context.Context, end
 		usedConn, err := h.hub.WriteToRoutePacket(string(dstIP), p)
 		p.release()
 		if err != nil {
-			if plog.IsDebugEnabled(ctx) {
-				plog.G(ctx).Debugf("[Gvisor-TCP] No route for stack output -> %s, dropping", net.IP(dstIP))
-			}
+			// Throttled Warn, not Debug: this is the server's only account of "I answered the
+			// client and threw the answer away". A client whose data conns never announce a route
+			// is invisible here — its heartbeat replies are all dropped, its liveness watchdog
+			// force-reconnects forever, and at Debug level the log says nothing at all.
+			dataPlaneWarn.Warnf(ctx, "no-route:"+string(dstIP),
+				"[Gvisor-TCP] No route for %s: dropping traffic addressed to it (client has not announced "+
+					"its TUN IP on any data conn)", net.IP(dstIP))
 		} else if plog.IsDebugEnabled(ctx) {
 			plog.G(ctx).Debugf("[Gvisor-TCP] Stack output -> %s via %s", net.IP(dstIP), usedConn.RemoteAddr())
 		}
@@ -147,9 +151,11 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 			}
 		} else if (config.CIDR.Contains(dst) || config.CIDR6.Contains(dst)) &&
 			ipProtocol != 1 && ipProtocol != 58 {
-			if plog.IsDebugEnabled(ctx) {
-				plog.G(ctx).Debugf("[Gvisor-TCP] Peer route missing for %s, dropping TCP/UDP from %s", net.IP(dst), net.IP(src))
-			}
+			// Same reasoning as the stack-output drop above: an unannounced peer silently swallows
+			// inter-client traffic, so say so once per peer per interval.
+			dataPlaneWarn.Warnf(ctx, "no-peer:"+string(dst),
+				"[Gvisor-TCP] Peer route missing for %s: dropping TCP/UDP from %s (peer has not announced "+
+					"its TUN IP on any data conn)", net.IP(dst), net.IP(src))
 			config.LPool.Put(buf[:])
 			continue
 		} else if buf[datagramHeaderLen] == packetTypeToGvisor {

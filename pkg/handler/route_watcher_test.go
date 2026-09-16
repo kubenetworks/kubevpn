@@ -9,41 +9,98 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 )
 
-// TestNextPortForwardDelay covers the reconnect backoff: healthy sessions reset to the
-// initial delay, short-lived failures double up to the cap.
+// TestNextPortForwardDelay covers the reconnect backoff across both dimensions that decide it:
+// how long the session lasted, and whether it ever carried data-plane traffic.
 func TestNextPortForwardDelay(t *testing.T) {
-	// A healthy session (>= threshold) that then drops resets to the fast initial delay.
-	if got := nextPortForwardDelay(portForwardReconnectMaxDelay, portForwardHealthySession); got != portForwardReconnectDelay {
-		t.Errorf("healthy session: got %v, want reset to %v", got, portForwardReconnectDelay)
-	}
-	if got := nextPortForwardDelay(2*time.Second, portForwardHealthySession+time.Minute); got != portForwardReconnectDelay {
-		t.Errorf("long session: got %v, want reset to %v", got, portForwardReconnectDelay)
+	for _, tc := range []struct {
+		name            string
+		cur             time.Duration
+		sessionDuration time.Duration
+		primed          bool
+		want            time.Duration
+		why             string
+	}{{
+		name: "primed and long enough resets to the floor",
+		cur:  portForwardReconnectMaxDelay, sessionDuration: portForwardHealthySession, primed: true,
+		want: portForwardReconnectDelay,
+		why:  "a session that worked and then dropped (pod recreation) must reconnect fast",
+	}, {
+		name: "primed and much longer resets to the floor",
+		cur:  2 * time.Second, sessionDuration: portForwardHealthySession + time.Minute, primed: true,
+		want: portForwardReconnectDelay,
+	}, {
+		// The regression this whole change exists for. livenessStartupDeadline ==
+		// portForwardHealthySession, so a black-holed session always reaches the "healthy"
+		// duration; keying only off duration reset the backoff forever.
+		name: "never primed at exactly the healthy duration must NOT reset",
+		cur:  time.Second, sessionDuration: portForwardHealthySession, primed: false,
+		want: 2 * time.Second,
+		why:  "a black-holed session reaches this duration by definition; it is not evidence of health",
+	}, {
+		name: "never primed and long must NOT reset",
+		cur:  4 * time.Second, sessionDuration: 10 * time.Minute, primed: false,
+		want: 8 * time.Second,
+	}, {
+		name: "primed but short-lived doubles, capped at the normal max",
+		cur:  portForwardReconnectMaxDelay, sessionDuration: time.Second, primed: true,
+		want: portForwardReconnectMaxDelay,
+	}, {
+		name: "first backoff doubles from the floor",
+		cur:  portForwardReconnectDelay, sessionDuration: time.Second, primed: true,
+		want: 2 * portForwardReconnectDelay,
+	}, {
+		name: "a primed session clamps a grown black-hole delay back down",
+		cur:  portForwardBlackHoleMaxDelay, sessionDuration: time.Second, primed: true,
+		want: portForwardReconnectMaxDelay,
+		why:  "recovery must not stay stuck at the black-hole ceiling",
+	}} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := nextPortForwardDelay(tc.cur, tc.sessionDuration, tc.primed); got != tc.want {
+				t.Errorf("nextPortForwardDelay(%v, %v, primed=%v) = %v, want %v. %s",
+					tc.cur, tc.sessionDuration, tc.primed, got, tc.want, tc.why)
+			}
+		})
 	}
 
-	// Consecutive short-lived failures double, capped at max, monotonic non-decreasing.
-	prev := portForwardReconnectDelay
-	last := time.Duration(0)
-	for i := 0; i < 20; i++ {
-		next := nextPortForwardDelay(prev, time.Second) // short session -> back off
-		if next < prev && next != portForwardReconnectMaxDelay {
-			t.Fatalf("backoff not monotonic: prev=%v next=%v", prev, next)
+	// Consecutive primed-but-short failures double, capped at the normal max, monotonic.
+	t.Run("primed short sessions converge to the normal cap", func(t *testing.T) {
+		prev, last := portForwardReconnectDelay, time.Duration(0)
+		for i := 0; i < 20; i++ {
+			next := nextPortForwardDelay(prev, time.Second, true)
+			if next < prev && next != portForwardReconnectMaxDelay {
+				t.Fatalf("backoff not monotonic: prev=%v next=%v", prev, next)
+			}
+			if next > portForwardReconnectMaxDelay {
+				t.Fatalf("backoff exceeded cap: %v > %v", next, portForwardReconnectMaxDelay)
+			}
+			prev, last = next, next
 		}
-		if next > portForwardReconnectMaxDelay {
-			t.Fatalf("backoff exceeded cap: %v > %v", next, portForwardReconnectMaxDelay)
+		if last != portForwardReconnectMaxDelay {
+			t.Errorf("after many failures delay should reach cap %v, got %v", portForwardReconnectMaxDelay, last)
 		}
-		prev, last = next, next
-	}
-	if last != portForwardReconnectMaxDelay {
-		t.Errorf("after many failures delay should reach cap %v, got %v", portForwardReconnectMaxDelay, last)
-	}
+	})
 
-	// First failure from the initial delay doubles.
-	if got := nextPortForwardDelay(portForwardReconnectDelay, time.Second); got != 2*portForwardReconnectDelay {
-		t.Errorf("first backoff: got %v, want %v", got, 2*portForwardReconnectDelay)
-	}
-	// Never returns below the initial floor.
-	if got := nextPortForwardDelay(0, time.Second); got < portForwardReconnectDelay {
-		t.Errorf("backoff below floor: %v", got)
+	// A sustained black hole must converge to the LARGER ceiling, so the control plane that shares
+	// this port-forward session gets usable stretches of uptime between attempts.
+	t.Run("never-primed sessions converge to the black-hole cap", func(t *testing.T) {
+		delay := portForwardReconnectDelay
+		for i := 0; i < 20; i++ {
+			next := nextPortForwardDelay(delay, portForwardHealthySession, false)
+			if next > portForwardBlackHoleMaxDelay {
+				t.Fatalf("backoff exceeded black-hole cap: %v > %v", next, portForwardBlackHoleMaxDelay)
+			}
+			delay = next
+		}
+		if delay != portForwardBlackHoleMaxDelay {
+			t.Errorf("sustained black hole should reach %v, got %v", portForwardBlackHoleMaxDelay, delay)
+		}
+	})
+
+	// Never returns below the initial floor, whatever the inputs.
+	for _, primed := range []bool{true, false} {
+		if got := nextPortForwardDelay(0, time.Second, primed); got < portForwardReconnectDelay {
+			t.Errorf("backoff below floor with primed=%v: %v", primed, got)
+		}
 	}
 }
 

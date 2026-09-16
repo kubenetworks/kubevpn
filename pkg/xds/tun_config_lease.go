@@ -69,6 +69,12 @@ func (s *TunConfigServer) WatchTunIP(req *rpc.TunIPRequest, stream rpc.TunConfig
 				return err
 			}
 		case <-ticker.C:
+			// Keep the lease alive and re-push the current snapshot. Persistence is NOT done here:
+			// this ticker only fires if the stream survives LeaseDuration/3, and a client whose
+			// port-forward is flapping never gets that far — which is precisely how the persisted
+			// lastRenew came to be frozen while the in-memory lease was fresh. renewLease marks the
+			// map dirty and the reaper's fixed-interval tick flushes it, independent of any stream's
+			// lifetime.
 			s.mu.Lock()
 			s.renewLease(req.OwnerID)
 			if alloc, ok := s.allocs[req.OwnerID]; ok {
@@ -83,9 +89,6 @@ func (s *TunConfigServer) WatchTunIP(req *rpc.TunIPRequest, stream rpc.TunConfig
 				case ch <- resp:
 				default:
 				}
-			}
-			if err := s.saveAllocs(stream.Context()); err != nil {
-				plog.G(stream.Context()).Warnf("[TunConfig] Failed to persist lease renewal for %s: %v", req.OwnerID, err)
 			}
 			s.mu.Unlock()
 		case <-stream.Context().Done():
@@ -181,12 +184,17 @@ func (s *TunConfigServer) reapExpiredLeases(ctx context.Context) {
 		plog.G(ctx).Infof("[TunConfig] Lease expired for owner %s, reclaimed IP %v", ownerID, alloc.IPv4)
 	}
 
-	if len(expired) > 0 {
+	// Persist whenever this tick reclaimed anything OR a renewal has been recorded since the last
+	// flush. The renewal case is what keeps the persisted lastRenew honest: it is written here, on a
+	// fixed interval, rather than by whichever client stream happens to live long enough to reach
+	// its own persist timer. A restart then sees timestamps at most leaseReapInterval old, instead
+	// of a frozen one that makes it release a live client's IP.
+	if s.allocsDirty.Load() || len(expired) > 0 {
 		s.mu.RLock()
 		err := s.saveAllocs(ctx)
 		s.mu.RUnlock()
 		if err != nil {
-			plog.G(ctx).Errorf("[TunConfig] Failed to persist allocs after lease reap: %v", err)
+			plog.G(ctx).Errorf("[TunConfig] Failed to persist allocs: %v", err)
 		}
 	}
 
@@ -264,10 +272,17 @@ func (s *TunConfigServer) expirePendingProposals(ctx context.Context) {
 	s.mu.Unlock()
 }
 
-// renewLease refreshes LastRenew for the given ownerID. Caller must hold s.mu.
+// renewLease refreshes LastRenew for the given ownerID and marks the lease map for persistence.
+// Caller must hold s.mu.
+//
+// Marking dirty rather than writing through keeps renewal cheap (it happens per stream subscribe and
+// per GetTunIP) while still guaranteeing the renewal reaches TUN_ALLOCS: the reaper's tick flushes
+// it within leaseReapInterval. What must never happen again is a renewal that only ever exists in
+// memory — see the allocsDirty field comment.
 func (s *TunConfigServer) renewLease(ownerID string) {
 	if alloc, ok := s.allocs[ownerID]; ok {
 		alloc.LastRenew = time.Now()
+		s.allocsDirty.Store(true)
 	}
 }
 
