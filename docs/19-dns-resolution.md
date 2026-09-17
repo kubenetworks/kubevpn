@@ -98,11 +98,27 @@ Uses the `/etc/resolver/` directory for split DNS:
 
 ### 4.3 Windows (`dns_windows.go`)
 
-Uses Windows LUID APIs via `winipcfg`:
+Uses Windows LUID APIs via `winipcfg`, **best-effort** (like Linux):
 
 - `luid.SetDNS(AF_INET, servers, searchDomains)` — sets DNS servers on TUN interface for IPv4
 - `luid.SetDNS(AF_INET6, servers, searchDomains)` — same for IPv6
-- Cleanup flushes DNS and routes from the TUN interface
+- Each family is programmed **independently**: a host with IPv6 disabled must not let the
+  AF_INET6 attempt abort a successful AF_INET setup (and vice versa). Only families that
+  actually have a matching nameserver are judged.
+- **netsh fallback**: `luid.SetDNS` calls `SetInterfaceDnsSettings` (iphlpapi); the vendored
+  code only falls back to `netsh` on `ERROR_PROC_NOT_FOUND` (Windows < 1809), **never** on
+  `ERROR_ACCESS_DENIED`. On any API error we therefore retry via our own `netsh interface
+  ipv4|ipv6 set/add dnsservers name=<ifIndex> …` (`buildNetshDNSCmds` / `setDNSByNetsh`).
+- **Degraded mode (non-fatal)**: DNS programming can fail with "Access is denied" even in an
+  elevated process when security software, an EDR agent, or group policy locks DNS settings
+  (the underlying `SetInterfaceDnsSettings` call is intercepted). This is **not fatal** — the
+  TUN device and routes are already up. If both the API and the netsh fallback fail for every
+  attempted family, `SetupDNS` logs an actionable warning and returns `nil`, so the connect
+  flow continues to write hosts entries. Cluster **Service names still resolve via the hosts
+  file**; other cluster FQDNs (e.g. raw pod DNS) may not — the same trade-off Linux makes
+  without a split DNS manager. (Previously any such failure aborted the whole connection with
+  `dns setup failed`, and even the hosts-file fallback was skipped — GitHub #798.)
+- Cleanup flushes DNS and routes from the TUN interface (both families)
 
 ## 5. Hosts File Management (`dns.go`)
 
