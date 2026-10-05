@@ -23,11 +23,13 @@ import (
 	netutil "github.com/wencaiwulue/kubevpn/v2/pkg/util/netutil"
 )
 
-func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, namespace, image, imagePullSecretName string) (err error) {
+// createOutboundPod reports whether this call created the traffic manager, rather
+// than reusing a running manager with an existing Deployment.
+func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, namespace, image, imagePullSecretName string) (created bool, err error) {
 	var exists bool
 	exists, err = util.DetectPodExists(ctx, clientset, namespace)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if exists {
 		// A running manager pod is present, but make sure its Deployment still
@@ -40,10 +42,10 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 		_, derr := clientset.AppsV1().Deployments(namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 		if derr == nil {
 			plog.StepDone(ctx, "Using traffic manager in namespace %q", namespace)
-			return nil
+			return false, nil
 		}
 		if !apierrors.IsNotFound(derr) {
-			return fmt.Errorf("failed to get deployment %s: %w", config.ConfigMapPodTrafficManager, derr)
+			return false, fmt.Errorf("failed to get deployment %s: %w", config.ConfigMapPodTrafficManager, derr)
 		}
 	}
 
@@ -58,42 +60,42 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 	plog.StepStart(ctx, "Labeling namespace")
 	ns, err := clientset.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to get namespace %s: %w", namespace, err)
+		return false, fmt.Errorf("failed to get namespace %s: %w", namespace, err)
 	}
 	if ns.Labels == nil {
 		ns.Labels = map[string]string{}
 	}
 	ns.Labels["ns"] = namespace
 	if _, err = clientset.CoreV1().Namespaces().Update(ctx, ns, metav1.UpdateOptions{}); err != nil {
-		return fmt.Errorf("failed to label namespace %s: %w", namespace, err)
+		return false, fmt.Errorf("failed to label namespace %s: %w", namespace, err)
 	}
 	plog.StepDone(ctx, "Labeled namespace %q", namespace)
 
 	// 2) create serviceAccount
 	plog.StepStart(ctx, "Creating ServiceAccount")
 	if _, err = clientset.CoreV1().ServiceAccounts(namespace).Create(ctx, genServiceAccount(namespace), metav1.CreateOptions{}); err != nil {
-		return fmt.Errorf("failed to create service account: %w", err)
+		return false, fmt.Errorf("failed to create service account: %w", err)
 	}
 	plog.StepDone(ctx, "Created ServiceAccount %q", config.ConfigMapPodTrafficManager)
 
 	// 3) create role
 	plog.StepStart(ctx, "Creating Role")
 	if _, err = clientset.RbacV1().Roles(namespace).Create(ctx, genRole(namespace), metav1.CreateOptions{}); err != nil {
-		return fmt.Errorf("failed to create role: %w", err)
+		return false, fmt.Errorf("failed to create role: %w", err)
 	}
 	plog.StepDone(ctx, "Created Role %q", config.ConfigMapPodTrafficManager)
 
 	// 4) create roleBinding
 	plog.StepStart(ctx, "Creating RoleBinding")
 	if _, err = clientset.RbacV1().RoleBindings(namespace).Create(ctx, genRoleBinding(namespace), metav1.CreateOptions{}); err != nil {
-		return fmt.Errorf("failed to create role binding: %w", err)
+		return false, fmt.Errorf("failed to create role binding: %w", err)
 	}
 	plog.StepDone(ctx, "Created RoleBinding %q", config.ConfigMapPodTrafficManager)
 
 	// 5) create service
 	plog.StepStart(ctx, "Creating Service")
 	if _, err = clientset.CoreV1().Services(namespace).Create(ctx, genService(namespace), metav1.CreateOptions{}); err != nil {
-		return fmt.Errorf("failed to create service: %w", err)
+		return false, fmt.Errorf("failed to create service: %w", err)
 	}
 	plog.StepDone(ctx, "Created Service %q", config.ConfigMapPodTrafficManager)
 
@@ -111,13 +113,13 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 		},
 	}, metav1.CreateOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to create config map: %w", err)
+		return false, fmt.Errorf("failed to create config map: %w", err)
 	}
 	plog.StepDone(ctx, "Created ConfigMap %q", config.ConfigMapPodTrafficManager)
 
 	// 7) create TLS secret (not surfaced as a step)
 	if _, err = createTLSSecret(ctx, clientset, namespace); err != nil {
-		return err
+		return false, err
 	}
 
 	// 8) create deployment
@@ -125,19 +127,19 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 	deploy := genDeploySpec(namespace, image, imagePullSecretName)
 	deploy, err = clientset.AppsV1().Deployments(namespace).Create(ctx, deploy, metav1.CreateOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to create deployment for %s: %w", config.ConfigMapPodTrafficManager, err)
+		return false, fmt.Errorf("failed to create deployment for %s: %w", config.ConfigMapPodTrafficManager, err)
 	}
 	plog.StepDone(ctx, "Created Deployment %q", config.ConfigMapPodTrafficManager)
 
 	_, selector, err := polymorphichelpers.SelectorsForObject(deploy)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if err = WaitPodReady(ctx, clientset.CoreV1().Pods(namespace), selector.String(), "traffic manager"); err != nil {
-		return err
+		return false, err
 	}
 	plog.StepDone(ctx, "Traffic manager ready in namespace %q", namespace)
-	return nil
+	return true, nil
 }
 
 // WaitPodReady blocks until a pod matching labelSelector is ready. When stepName

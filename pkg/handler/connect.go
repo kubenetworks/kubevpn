@@ -201,19 +201,24 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 // This is a control-plane responsibility and should be called from the user daemon
 // before calling the sudo daemon, so the TunConfigService is available for IP allocation.
 func (c *ConnectOptions) CreateOutboundPod(ctx context.Context) error {
-	if err := createOutboundPod(ctx, c.clientset, c.ManagerNamespace, c.Image, c.ImagePullSecretName); err != nil {
+	created, err := createOutboundPod(ctx, c.clientset, c.ManagerNamespace, c.Image, c.ImagePullSecretName)
+	if err != nil {
 		// Tag generic deploy failures; an already-classified cause (RBAC, pod-ready
 		// timeout, image pull) keeps its own, more specific code.
 		return fmt.Errorf("%w: %w", err, config.ErrTrafficManagerDeploy)
 	}
-	// Grant the manager SA list/watch on pods/services in the workload namespace so its
-	// server-side route discovery (WatchNamespaceRoutes) works. Runs every connect
-	// (idempotent), covering an already-installed / just-upgraded manager. Best-effort:
-	// if the user cannot create this RBAC, discovery degrades to CIDR-only routing.
+	// An existing central manager's RBAC is managed by its installer. Connecting
+	// users need not have RBAC-management permissions; the manager uses its own
+	// ServiceAccount for route discovery and injection.
+	if !created && c.ManagerNamespace == config.DefaultNamespaceKubevpn {
+		return nil
+	}
+	// Provision capabilities for newly created managers and keep reconciling
+	// workload-namespace permissions for per-namespace managers on every connect.
 	ensureRouteRBAC(ctx, c.clientset, c.WorkloadNamespace, c.ManagerNamespace)
 	// Grant the manager SA the verbs to inject sidecars in the workload namespace, so
 	// server-side ProxyInject works. Idempotent, best-effort: if the user cannot create
-	// this RBAC, ProxyInject fails and the client falls back to local injection.
+	// this RBAC, server-side ProxyInject reports the manager's authorization failure.
 	ensureProxyRBAC(ctx, c.clientset, c.WorkloadNamespace, c.ManagerNamespace)
 	return nil
 }
