@@ -9,6 +9,8 @@ on:
 jobs:
   linux:
     runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@v4
 
@@ -47,14 +49,14 @@ jobs:
 
       - name: Build
         run: |
-          export VERSION=${{github.event.pull_request.head.sha}}
-          if [[ -z "$VERSION" ]]; then
-            export VERSION=${{ github.sha }}
-          fi
           make kubevpn-linux-amd64
           chmod +x ./bin/kubevpn
           cp ./bin/kubevpn /usr/local/bin/kubevpn
           kubevpn version
+      - name: Build test image
+        run: docker build -t ghcr.io/kubenetworks/kubevpn:${{ env.VERSION }} -f build/test.Dockerfile .
+      - name: Load test image into minikube
+        run: minikube image load ghcr.io/kubenetworks/kubevpn:${{ env.VERSION }}
 
       - name: Wait for pods reviews to be ready
         run: |
