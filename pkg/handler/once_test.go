@@ -119,9 +119,13 @@ func TestCreateOutboundPod(t *testing.T) {
 		}, nil
 	})
 
-	err := createOutboundPod(ctx, clientset, namespace, image, imagePullSecretName)
+	created, err := createOutboundPod(ctx, clientset, namespace, image, imagePullSecretName)
 	if err != nil {
 		t.Fatalf("createOutboundPod returned unexpected error: %v", err)
+	}
+
+	if !created {
+		t.Fatal("expected manager to be created")
 	}
 
 	// Verify Deployment was created

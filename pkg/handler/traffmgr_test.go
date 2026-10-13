@@ -625,8 +625,10 @@ func TestCreateOutboundPod_RecreatesWhenDeploymentMissing(t *testing.T) {
 	// immediately; the timeout only guards against a regression hanging CI.
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	if err := createOutboundPod(ctx, clientset, ns, "ghcr.io/test/kubevpn:latest", ""); err != nil {
+	if created, err := createOutboundPod(ctx, clientset, ns, "ghcr.io/test/kubevpn:latest", ""); err != nil {
 		t.Fatalf("createOutboundPod returned error: %v", err)
+	} else if !created {
+		t.Fatal("expected manager to be recreated")
 	}
 
 	// The fix must have re-created the Deployment despite the lingering pod.
