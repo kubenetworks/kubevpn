@@ -101,3 +101,9 @@ aliases and an alternative pure-code deletion method is needed.
 `net.InterfaceByName().Addrs()` (pure Go) to verify the old address is truly gone; if not,
 retry/alert, turning "stale address" from an invisible degradation into a diagnosable
 explicit failure.
+
+## Sequel
+
+Removing the old address is necessary but not sufficient: the routes installed while it was
+present keep sourcing packets from it, producing the same silence with a clean `ifconfig`. See
+[52-stale-route-src-after-ip-change.md](52-stale-route-src-after-ip-change.md).
