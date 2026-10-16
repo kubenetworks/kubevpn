@@ -46,3 +46,10 @@ func deleteTunRoutes(ifName string, routes ...types.Route) error {
 	}
 	return nil
 }
+
+// listTunRoutes has nothing to report on Linux: routes are device-scoped and the source
+// address is chosen at transmit time, so there is no pinned address to go stale. See the
+// doc comment on ListRoutes.
+func listTunRoutes(string) ([]types.Route, error) {
+	return nil, nil
+}

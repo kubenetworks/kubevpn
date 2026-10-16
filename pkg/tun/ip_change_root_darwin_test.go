@@ -16,6 +16,10 @@ import (
 	"net/netip"
 	"testing"
 
+	"github.com/containernetworking/cni/pkg/types"
+	"golang.org/x/net/route"
+	"golang.org/x/sys/unix"
+
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
@@ -123,4 +127,120 @@ func TestTUN_ChangeIP_DualStack(t *testing.T) {
 	mustNotHave(t, name, v6old)
 	mustHave(t, name, v4new)
 	mustHave(t, name, v6new)
+}
+
+// routeSrcFor returns the source address the kernel pinned into the route for prefix on
+// ifName (RTAX_IFA) — the value `kubevpn route search` prints as RT_IFA, and the address
+// outbound packets matching that route actually carry.
+func routeSrcFor(t *testing.T, ifName, prefix string) net.IP {
+	t.Helper()
+	ifi, err := net.InterfaceByName(ifName)
+	if err != nil {
+		t.Fatalf("InterfaceByName(%s): %v", ifName, err)
+	}
+	rib, err := route.FetchRIB(unix.AF_UNSPEC, route.RIBTypeRoute, 0)
+	if err != nil {
+		t.Fatalf("FetchRIB: %v", err)
+	}
+	msgs, err := route.ParseRIB(route.RIBTypeRoute, rib)
+	if err != nil {
+		t.Fatalf("ParseRIB: %v", err)
+	}
+	want := netip.MustParsePrefix(prefix)
+	for _, msg := range msgs {
+		m, ok := msg.(*route.RouteMessage)
+		if !ok || m.Index != ifi.Index {
+			continue
+		}
+		dst, ok := ipFromRouteAddr(routeAddrAt(m.Addrs, unix.RTAX_DST))
+		if !ok || !dst.Equal(net.IP(want.Addr().AsSlice())) {
+			continue
+		}
+		if ones, _ := maskFromRouteAddr(routeAddrAt(m.Addrs, unix.RTAX_NETMASK), len(dst)).Size(); ones != want.Bits() {
+			continue
+		}
+		ifa, _ := ipFromRouteAddr(routeAddrAt(m.Addrs, unix.RTAX_IFA))
+		return ifa
+	}
+	t.Fatalf("no route for %s on %s", prefix, ifName)
+	return nil
+}
+
+func mustIPNet(t *testing.T, cidr string) net.IPNet {
+	t.Helper()
+	_, n, err := net.ParseCIDR(cidr)
+	if err != nil {
+		t.Fatalf("ParseCIDR(%s): %v", cidr, err)
+	}
+	return *n
+}
+
+// TestTUN_ChangeIP_RouteSrcFollowsNewAddress is the regression for
+// docs/52-stale-route-src-after-ip-change.md: deleting the old address is not enough, because
+// routes installed before the change keep sourcing packets from it. A connection in that state
+// looks perfectly healthy — the device holds the new address, every cluster prefix still routes
+// through the TUN — and carries nothing in either direction.
+//
+// It covers both of the things the earlier fix missed: that a /32 host route is refreshed and
+// not just the cluster CIDR, and that re-asserting an existing route actually rewrites its
+// source address instead of being swallowed as EEXIST.
+func TestTUN_ChangeIP_RouteSrcFollowsNewAddress(t *testing.T) {
+	const (
+		v4old       = "198.18.0.141/32"
+		v4new       = "198.18.0.142/32"
+		v6          = "2001:2::141/128"
+		clusterCIDR = "10.144.0.0/16"
+		serviceIP   = "10.145.0.10/32"
+	)
+
+	name, closeTun := newTestTun(t, v4old, v6)
+	defer closeTun()
+
+	for _, p := range []string{clusterCIDR, serviceIP} {
+		dst := mustIPNet(t, p)
+		if err := AddRoutes(name, types.Route{Dst: dst}); err != nil {
+			t.Fatalf("AddRoutes(%s): %v", p, err)
+		}
+		t.Cleanup(func() { _ = DeleteRoutes(name, types.Route{Dst: dst}) })
+	}
+
+	// listTunRoutes must find both, and only ours: the kernel's own scope entries for the
+	// device address carry no RTF_STATIC and must not be dragged into a refresh.
+	routes, err := listTunRoutes(name)
+	if err != nil {
+		t.Fatalf("listTunRoutes: %v", err)
+	}
+	listed := map[string]bool{}
+	for _, r := range routes {
+		listed[r.Dst.String()] = true
+	}
+	for _, p := range []string{clusterCIDR, serviceIP} {
+		if !listed[p] {
+			t.Fatalf("listTunRoutes missed %s, got %v", p, listed)
+		}
+	}
+
+	oldAddr := net.IP(netip.MustParsePrefix(v4old).Addr().AsSlice())
+	newAddr := net.IP(netip.MustParsePrefix(v4new).Addr().AsSlice())
+	for _, p := range []string{clusterCIDR, serviceIP} {
+		if got := routeSrcFor(t, name, p); !got.Equal(oldAddr) {
+			t.Fatalf("precondition: route %s sources from %s, want %s", p, got, oldAddr)
+		}
+	}
+
+	if err = ChangeIP(name, v4old, v4new); err != nil {
+		t.Fatalf("ChangeIP(%s -> %s): %v", v4old, v4new, err)
+	}
+	mustNotHave(t, name, v4old)
+	mustHave(t, name, v4new)
+
+	// What NetworkManager.refreshTunRoutes does: re-assert every route the device carries.
+	if err = AddRoutes(name, routes...); err != nil {
+		t.Fatalf("re-assert routes: %v", err)
+	}
+	for _, p := range []string{clusterCIDR, serviceIP} {
+		if got := routeSrcFor(t, name, p); !got.Equal(newAddr) {
+			t.Fatalf("route %s still sources from %s after refresh, want %s", p, got, newAddr)
+		}
+	}
 }
