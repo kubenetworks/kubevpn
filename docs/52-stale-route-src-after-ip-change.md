@@ -103,17 +103,22 @@ they come to be stale in the first place.
 
 ### 3.2 IPv6
 
-The mechanism does not distinguish address families: macOS pins `RTAX_IFA` into an IPv6 route
-exactly as it does an IPv4 one, so a `2001:2::` TUN address that is replaced leaves IPv6 cluster
-routes sourcing from an address the device no longer has. The fix carries both families —
-`FetchRIB` is called with `AF_UNSPEC`, the address helpers have `Inet6Addr` branches, and
-`newRouteMessage` already split on family — and both root tests now install and verify IPv6
-prefixes, which nothing had ever done.
+IPv6 does not share the failure, on either platform — but for a reason that is easy to get
+wrong, and that this document got wrong in its first version.
 
-Linux's route flush, by contrast, is IPv4-only, and measurably so. A device keeps its
-`fe80::/64` link-local address for its whole life, so it never loses its *last* IPv6 address and
-the flush never fires. Running the dual-stack test against the old delete-first ordering shows
-the asymmetry directly: the IPv4 routes are gone and `2001:db8:151::/64` is still there.
+**macOS pins the interface's link-local address into IPv6 routes, not the global one.** Measured
+on a real device: a route to `2001:db8:144::/64` reports
+`RT_IFA = fe80::a4e0:bb39:154f:25fe` while a socket to that same destination sources from
+`2001:2::…`. BSD hands `rt_ifa` straight to `ip_output` for IPv4, but for IPv6 it runs
+`in6_selectsrc` (RFC 6724) at transmit time against the addresses the device holds *now*. So the
+address recorded in an IPv6 route is one that never goes away, and the address packets actually
+carry is never stale.
+
+**Linux agrees, by a different route:** the global address is what both `ip route get` and a
+connected socket report (`2001:2::161` in the measurement), and the IPv4 flush of section 3.1
+has no IPv6 counterpart — a device keeps its `fe80::/64` for its whole life, so it never loses
+its *last* IPv6 address and the flush never fires. Running the dual-stack test against the old
+delete-first ordering shows the asymmetry directly:
 
 ```
 route 10.151.0.0/16 vanished when the address changed
@@ -121,14 +126,24 @@ route 10.151.0.0/16 vanished when the address changed
 packets to 10.151.0.1 would leave via eth0, not utun0
 ```
 
-One IPv4-only blind spot was real and is fixed: `repairStaleRouteSrc` probed a single IPv4
-cluster CIDR, so "IPv4 fine, IPv6 stale" was invisible — v6 traffic dead, watchdog silent. It
-now probes one destination per family and names the family in the throttle key, so a stale IPv4
-route and a stale IPv6 route cannot silence each other. The families are renumbered by the same
-`ChangeTunIP` call and refreshed together, so the split is unlikely; "unlikely asymmetry between
-two near-identical paths" is also precisely the shape of the bug in
-[51-idle-client-route-registration.md](51-idle-client-route-registration.md), where the half
-that still worked is what sent the diagnosis down the wrong road.
+This cost a round trip. `srcIsCurrentTunIP` first demanded that an IPv6 route's recorded source
+equal the TUN's global address — which on macOS is **permanently false**. Every route-watcher
+push would have reinstalled every IPv6 route, and the watchdog would have reported "outbound
+packets carry a dead address" at a perfectly healthy tunnel, on every teardown, forever: the
+precise kind of confident wrong diagnosis
+[51-idle-client-route-registration.md](51-idle-client-route-registration.md) is about. The check
+now asks for equality on IPv4 (where the recorded address *is* the source) and mere membership
+in the device's current addresses on IPv6 (which still catches a source that has been removed).
+
+What that round trip also established, on a real macOS kernel: IPv6 routes install fine despite
+`RTF_CLONING`, and `listTunRoutes` enumerates them — both previously unverified.
+
+**Methodology.** Judge a source address by dialling, not by reading the route table.
+`connect(2)` on a UDP socket makes the kernel perform the full route lookup and source
+selection and sends no packet, so `LocalAddr` is the kernel's own answer to the only question
+that matters. The shared helper is `kernelSourceFor` in `pkg/tun/src_probe_tun_test.go`, used by
+both root tests. Reading `RTAX_IFA` answers a different question on macOS IPv6, and that is how
+the wrong conclusion got into this file.
 
 ### 3.3 Windows: unverified
 
