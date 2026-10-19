@@ -84,7 +84,7 @@ type NetworkManager struct {
 	dnsConfig             *dns.Config
 	heartbeatStats        *core.HeartbeatStats // data-plane liveness from observed heartbeat replies
 
-	// The three seams onto the OS routing table. Indirected together so the stale-source repair
+	// The four seams onto the OS routing table and the device's own addresses. Indirected together so the stale-source repair
 	// path can be driven on any platform, without root and without a real TUN device; each
 	// falls back to the real implementation when unset.
 	//
@@ -93,6 +93,7 @@ type NetworkManager struct {
 	newRouteResolver func() routeResolver
 	addTunRoutes     func(tunName string, routes ...types.Route) error
 	listTunRoutes    func(tunName string) ([]types.Route, error)
+	tunDeviceAddrs   func(tunName string) ([]net.IP, error)
 }
 
 // routeResolver is the slice of the OS routing table NetworkManager consults: for a destination,
@@ -1033,10 +1034,20 @@ func (nm *NetworkManager) repairStaleRouteSrc(ctx context.Context) {
 			continue
 		}
 		stale = true
-		staleRouteSrcWarn.Warnf(ctx, "stale-route-src-"+familyOf(probe),
-			"Route to %s via %s still sources from %s, but this TUN now holds %s — outbound packets "+
-				"carry a dead address and every reply is dropped; re-asserting routes",
-			probe, nm.tunName, src, nm.currentTunIP(probe))
+		// The two families fail in different ways, so they are reported differently — see
+		// srcIsCurrentTunIP. Saying "sources from X" about an IPv6 route would be wrong: the
+		// kernel picks that source at transmit, and what is broken is the recorded address.
+		if probe.To4() != nil {
+			staleRouteSrcWarn.Warnf(ctx, "stale-route-src-v4",
+				"Route to %s via %s still sources from %s, but this TUN now holds %s — outbound "+
+					"packets carry a dead address and every reply is dropped; re-asserting routes",
+				probe, nm.tunName, src, nm.currentTunIP(probe))
+		} else {
+			staleRouteSrcWarn.Warnf(ctx, "stale-route-src-v6",
+				"Route to %s via %s records source %s, which is no longer assigned to this TUN "+
+					"(now %s); re-asserting routes",
+				probe, nm.tunName, src, nm.currentTunIP(probe))
+		}
 	}
 	// One refresh covers both families, so do it once however many probes complained.
 	if stale {
@@ -1082,15 +1093,6 @@ func (nm *NetworkManager) currentTunIP(ip net.IP) net.IP {
 		return nil
 	}
 	return want.IP
-}
-
-// familyOf labels a log throttle key so a stale IPv4 route and a stale IPv6 route cannot
-// silence each other.
-func familyOf(ip net.IP) string {
-	if ip.To4() != nil {
-		return "v4"
-	}
-	return "v6"
 }
 
 // watchLiveness force-reconnects (cancelFunc) a black-holed session using the data-plane heartbeat
@@ -1462,18 +1464,75 @@ func (nm *NetworkManager) routedViaTunWithCurrentSrc(r routeResolver, ip net.IP)
 	return nm.srcIsCurrentTunIP(src, ip)
 }
 
-// srcIsCurrentTunIP compares a route's source address against the TUN address of the matching
-// family. A family we never allocated has nothing to compare against, so it reports true and
-// leaves the caller's behaviour as it was before source checking existed.
+// srcIsCurrentTunIP reports whether a route's recorded source address is still good. The two
+// families are judged differently because the kernels treat them differently:
+//
+//   - IPv4 demands equality with the TUN's current address. BSD hands the route's rt_ifa
+//     straight to ip_output, so that address is literally what packets will carry, and nothing
+//     weaker catches the case in docs/45 where the dead address is still on the device.
+//   - IPv6 only demands that the address still exists on the device. macOS pins the interface's
+//     *link-local* address into IPv6 routes and selects the real source at transmit
+//     (in6_selectsrc), so requiring equality with the TUN's global address would be
+//     permanently false: every route-watcher push would reinstall every IPv6 route, and the
+//     watchdog would cry "dead source address" at a perfectly healthy tunnel. Membership still
+//     catches the thing that matters — a source address that has been removed.
+//
+// Measured, not assumed: on macOS an IPv6 route reports rt_ifa fe80::… while a socket to the
+// same destination sources from 2001:2::…; on Linux both report the global address. See
+// docs/52-stale-route-src-after-ip-change.md.
+//
+// A family we never allocated has nothing to compare against, so it reports true and leaves
+// the caller's behaviour as it was before source checking existed.
 func (nm *NetworkManager) srcIsCurrentTunIP(src, dst net.IP) bool {
-	want := nm.localTunIPv4
 	if dst.To4() == nil {
-		want = nm.localTunIPv6
+		if nm.localTunIPv6 == nil {
+			return true
+		}
+		return src != nil && nm.tunHasAddr(src)
 	}
-	if want == nil {
+	if nm.localTunIPv4 == nil {
 		return true
 	}
-	return src != nil && src.Equal(want.IP)
+	return src != nil && src.Equal(nm.localTunIPv4.IP)
+}
+
+// tunHasAddr reports whether ip is currently assigned to the TUN device. Reads the OS each
+// call so it follows ChangeTunIP; the caller sites are per-route-batch, not per-packet.
+// When the device cannot be read it reports true: "cannot tell" must not turn into endless
+// reinstalls, and a TUN that has really gone away is a different fault with its own path.
+func (nm *NetworkManager) tunHasAddr(ip net.IP) bool {
+	addrs, err := nm.deviceAddrs()
+	if err != nil {
+		return true
+	}
+	for _, a := range addrs {
+		if a.Equal(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// deviceAddrs lists the addresses currently on the TUN device.
+func (nm *NetworkManager) deviceAddrs() ([]net.IP, error) {
+	if nm.tunDeviceAddrs != nil {
+		return nm.tunDeviceAddrs(nm.tunName)
+	}
+	ifi, err := net.InterfaceByName(nm.tunName)
+	if err != nil {
+		return nil, err
+	}
+	addrs, err := ifi.Addrs()
+	if err != nil {
+		return nil, err
+	}
+	var out []net.IP
+	for _, a := range addrs {
+		if ipNet, ok := a.(*net.IPNet); ok {
+			out = append(out, ipNet.IP)
+		}
+	}
+	return out, nil
 }
 
 // refreshTunRoutes re-asserts every route the kernel currently holds on the TUN device.

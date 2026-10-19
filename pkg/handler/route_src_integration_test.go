@@ -42,15 +42,29 @@ type fakeRouteTable struct {
 	// already installed — that asymmetry is the bug.
 	deviceV4 net.IP
 	deviceV6 net.IP
-	entries  []fakeRouteEntry
-	installs int
+	// linkLocal is the fe80:: address every device carries. macOS pins it into IPv6 routes as
+	// their recorded source while packets are still sourced from the global address, so a check
+	// that demanded equality with deviceV6 would call a healthy device broken forever.
+	linkLocal net.IP
+	entries   []fakeRouteEntry
+	installs  int
+}
+
+// deviceAddrs is the seam NetworkManager uses to ask what the device currently holds.
+func (f *fakeRouteTable) deviceAddrs(string) ([]net.IP, error) {
+	addrs := []net.IP{f.deviceV4, f.deviceV6}
+	if f.linkLocal != nil {
+		addrs = append(addrs, f.linkLocal)
+	}
+	return addrs, nil
 }
 
 func newFakeRouteTable(tunName string, v4, v6 net.IP) *fakeRouteTable {
 	return &fakeRouteTable{
-		ifi:      &net.Interface{Index: 42, Name: tunName, MTU: 1500},
-		deviceV4: v4,
-		deviceV6: v6,
+		ifi:       &net.Interface{Index: 42, Name: tunName, MTU: 1500},
+		deviceV4:  v4,
+		deviceV6:  v6,
+		linkLocal: net.ParseIP("fe80::a4e0:bb39:154f:25fe"),
 	}
 }
 
@@ -113,12 +127,25 @@ func (f *fakeRouteTable) indexOf(dst net.IPNet) int {
 	return -1
 }
 
-// staleSources returns the destinations whose pinned source is no longer the device's address
-// for that family — i.e. the routes that would send packets from a dead address.
+// staleSources returns the destinations whose recorded source is a dead address: for IPv4 one
+// that is not the device's current address, for IPv6 one the device no longer holds at all.
+// The asymmetry mirrors srcIsCurrentTunIP, and for the same measured reason.
 func (f *fakeRouteTable) staleSources() []string {
+	current, _ := f.deviceAddrs("")
 	var bad []string
 	for _, e := range f.entries {
-		if !e.src.Equal(f.deviceAddrFor(e.dst.IP)) {
+		var ok bool
+		if e.dst.IP.To4() != nil {
+			ok = e.src.Equal(f.deviceV4)
+		} else {
+			for _, a := range current {
+				if a.Equal(e.src) {
+					ok = true
+					break
+				}
+			}
+		}
+		if !ok {
 			bad = append(bad, fmt.Sprintf("%s(src=%s)", e.dst.String(), e.src))
 		}
 	}
@@ -141,6 +168,7 @@ func (f *fakeRouteTable) attach(nm *NetworkManager) {
 	nm.newRouteResolver = func() routeResolver { return f }
 	nm.addTunRoutes = f.AddRoutes
 	nm.listTunRoutes = f.ListRoutes
+	nm.tunDeviceAddrs = f.deviceAddrs
 }
 
 func mustCIDR(t *testing.T, s string) *net.IPNet {
@@ -274,26 +302,52 @@ func TestIntegration_RouteSrc_SurvivesTunIPChange(t *testing.T) {
 		t.Fatalf("repair must name both the dead and the current address, got: %q", out)
 	}
 
-	// Phase 8: IPv6 alone goes stale. The repair originally probed only IPv4, so this state was
-	// invisible: v4 traffic fine, v6 traffic dead, watchdog silent. The two families are
-	// renumbered together in practice, which is exactly why an asymmetry here would go unnoticed
-	// for as long as the one in docs/51 did.
+	// Phase 8: the IPv6 routes record the device's link-local address. This is the normal,
+	// healthy state on macOS — the kernel pins fe80:: into IPv6 routes and picks the real source
+	// at transmit — and an earlier version of this check called it broken, which would have made
+	// the watchdog cry "dead source address" at a working tunnel on every teardown and made the
+	// route watcher reinstall every IPv6 route on every push.
+	for i, e := range table.entries {
+		if e.dst.IP.To4() == nil {
+			table.entries[i].src = table.linkLocal
+		}
+	}
+	if bad := table.staleSources(); len(bad) != 0 {
+		t.Fatalf("a link-local source on an IPv6 route is healthy, flagged: %v", bad)
+	}
+	before = table.installs
+	out = repairWithLog(t, nm)
+	if table.installs != before {
+		t.Fatalf("link-local IPv6 sources triggered %d reinstalls", table.installs-before)
+	}
+	if out != "" {
+		t.Fatalf("link-local IPv6 sources produced a warning: %q", out)
+	}
+	if err := nm.AddRouteCIDR("2001:db8:42::/64"); err != nil {
+		t.Fatalf("AddRouteCIDR (link-local src): %v", err)
+	}
+	if table.installs != before {
+		t.Fatalf("route watcher reinstalled an IPv6 route whose source is merely link-local")
+	}
+
+	// Phase 9: an IPv6 route recording an address the device no longer holds is the real
+	// failure, and membership still catches it.
 	table.pinSources(oldV6)
 	if bad := table.staleSources(); len(bad) == 0 {
-		t.Fatal("precondition: IPv6 routes should be stale")
+		t.Fatal("precondition: an IPv6 source that left the device should be stale")
 	}
 	out = repairWithLog(t, nm)
 	if bad := table.staleSources(); len(bad) != 0 {
 		t.Fatalf("IPv6-only staleness was not repaired: %v", bad)
 	}
-	if !strings.Contains(out, oldV6.String()) || !strings.Contains(out, newV6.String()) {
-		t.Fatalf("repair must name the stale IPv6 addresses, got: %q", out)
+	if !strings.Contains(out, oldV6.String()) {
+		t.Fatalf("repair must name the dead IPv6 address, got: %q", out)
 	}
 	if strings.Contains(out, newV4.String()) {
 		t.Fatalf("repair blamed IPv4, which was healthy: %q", out)
 	}
 
-	// Phase 9: a healthy table must not trip the repair, or the warning becomes noise.
+	// Phase 10: a healthy table must not trip the repair, or the warning becomes noise.
 	before = table.installs
 	out = repairWithLog(t, nm)
 	if table.installs != before {
