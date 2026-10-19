@@ -499,7 +499,11 @@ func (nm *NetworkManager) ChangeTunIP(ctx context.Context, newIPv4, newIPv6 *net
 		if oldV6 != nil {
 			_ = tun.DeleteRoutes(nm.tunName, types.Route{Dst: net.IPNet{IP: oldV6.IP, Mask: net.CIDRMask(128, 128)}})
 		}
-		_ = tun.AddRoutes(nm.tunName, types.Route{Dst: net.IPNet{IP: newIPv6.IP, Mask: net.CIDRMask(128, 128)}})
+		// Reported like the IPv4 host route above: the same failure must not be audible in one
+		// family and silent in the other.
+		if err := tun.AddRoutes(nm.tunName, types.Route{Dst: net.IPNet{IP: newIPv6.IP, Mask: net.CIDRMask(128, 128)}}); err != nil {
+			plog.G(ctx).Warnf("[NetworkManager] add host route for %s failed: %v", newIPv6.IP, err)
+		}
 	}
 
 	// On macOS the kernel stamps RT_IFA (source address) from the interface's primary
@@ -1001,43 +1005,92 @@ var staleRouteSrcWarn = plog.NewThrottle(5 * time.Minute)
 // Anything else that detaches the address — and any route source we have not thought of —
 // lands here instead of going silently dark for hours, which is how this bug was found.
 // Callers gate this on macOS, the only platform that pins a source address into a route.
+//
+// Both address families are probed. They are renumbered by the same ChangeTunIP call and
+// refreshed together, so a split is unlikely — but "unlikely asymmetry between v4 and v6" is
+// exactly the shape of the bug in docs/51, where one path cached an address and its twin did
+// not, and the half that still worked is what sent the diagnosis down the wrong road.
 func (nm *NetworkManager) repairStaleRouteSrc(ctx context.Context) {
-	if nm.tunName == "" || nm.localTunIPv4 == nil {
+	if nm.tunName == "" || (nm.localTunIPv4 == nil && nm.localTunIPv6 == nil) {
 		return
 	}
-	probe := nm.routeSrcProbeIP()
-	if probe == nil {
+	probes := nm.routeSrcProbeIPs()
+	if len(probes) == 0 {
 		return
 	}
 	r := nm.routes()
 	if r == nil {
 		return
 	}
-	ifi, _, src, err := r.Route(probe)
-	if err != nil || ifi == nil || ifi.Name != nm.tunName {
-		// Not routed through us at all — a different fault, and not one re-adding routes fixes.
-		return
+	var stale bool
+	for _, probe := range probes {
+		ifi, _, src, err := r.Route(probe)
+		if err != nil || ifi == nil || ifi.Name != nm.tunName {
+			// Not routed through us at all — a different fault, and not one re-adding fixes.
+			continue
+		}
+		if nm.srcIsCurrentTunIP(src, probe) {
+			continue
+		}
+		stale = true
+		staleRouteSrcWarn.Warnf(ctx, "stale-route-src-"+familyOf(probe),
+			"Route to %s via %s still sources from %s, but this TUN now holds %s — outbound packets "+
+				"carry a dead address and every reply is dropped; re-asserting routes",
+			probe, nm.tunName, src, nm.currentTunIP(probe))
 	}
-	if nm.srcIsCurrentTunIP(src, probe) {
-		return
+	// One refresh covers both families, so do it once however many probes complained.
+	if stale {
+		nm.refreshTunRoutes(ctx)
 	}
-	staleRouteSrcWarn.Warnf(ctx, "stale-route-src",
-		"Route to %s via %s still sources from %s, but this TUN now holds %s — outbound packets "+
-			"carry a dead address and every reply is dropped; re-asserting routes",
-		probe, nm.tunName, src, nm.localTunIPv4.IP)
-	nm.refreshTunRoutes(ctx)
 }
 
-// routeSrcProbeIP picks a cluster destination to ask the kernel about. Any address routed
-// through the TUN answers "would our packets leave with the right source", so the first
-// cluster CIDR serves; it is always present once Start has run.
-func (nm *NetworkManager) routeSrcProbeIP() net.IP {
+// routeSrcProbeIPs picks one cluster destination per address family to ask the kernel about.
+// Any address routed through the TUN answers "would our packets leave with the right source",
+// so the first cluster CIDR of each family serves; they are present once Start has run.
+func (nm *NetworkManager) routeSrcProbeIPs() []net.IP {
+	var v4, v6 net.IP
 	for _, cidr := range nm.dedupAndFilterCIDRs(nm.cfg.CIDRs) {
-		if cidr != nil && !cidr.IP.IsLoopback() && cidr.IP.To4() != nil {
-			return cidr.IP
+		if cidr == nil || cidr.IP.IsLoopback() {
+			continue
+		}
+		if cidr.IP.To4() != nil {
+			if v4 == nil {
+				v4 = cidr.IP
+			}
+		} else if v6 == nil {
+			v6 = cidr.IP
 		}
 	}
-	return nil
+	var probes []net.IP
+	if v4 != nil && nm.localTunIPv4 != nil {
+		probes = append(probes, v4)
+	}
+	if v6 != nil && nm.localTunIPv6 != nil {
+		probes = append(probes, v6)
+	}
+	return probes
+}
+
+// currentTunIP returns the TUN address of ip's family, for reporting. Nil-safe: a family we
+// never allocated is not probed, so this is only reached with the matching address present.
+func (nm *NetworkManager) currentTunIP(ip net.IP) net.IP {
+	want := nm.localTunIPv4
+	if ip.To4() == nil {
+		want = nm.localTunIPv6
+	}
+	if want == nil {
+		return nil
+	}
+	return want.IP
+}
+
+// familyOf labels a log throttle key so a stale IPv4 route and a stale IPv6 route cannot
+// silence each other.
+func familyOf(ip net.IP) string {
+	if ip.To4() != nil {
+		return "v4"
+	}
+	return "v6"
 }
 
 // watchLiveness force-reconnects (cancelFunc) a black-holed session using the data-plane heartbeat
