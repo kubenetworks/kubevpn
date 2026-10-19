@@ -17,7 +17,6 @@ import (
 	"testing"
 
 	"github.com/containernetworking/cni/pkg/types"
-	"github.com/libp2p/go-netroute"
 	netlink1 "github.com/vishvananda/netlink"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -123,8 +122,30 @@ func linuxRouteDsts(t *testing.T, ifName string) map[string]bool {
 	return got
 }
 
-// TestTUN_ChangeIP_RoutesSurviveAndFollowNewAddress answers, on a real device, whether Linux
-// shares the macOS failure in docs/52-stale-route-src-after-ip-change.md.
+// linuxRouteSrc asks the kernel which interface and source address a packet to dst would get —
+// the question `ip route get` answers, and the Linux counterpart of reading RTAX_IFA on macOS.
+// netlink rather than netroute on purpose: for a route carrying no prefsrc, netroute substitutes
+// the first address it finds on the interface, which for IPv6 is usually the link-local one, so
+// it would answer a different question than the one under test.
+func linuxRouteSrc(t *testing.T, dst string) (string, net.IP) {
+	t.Helper()
+	rs, err := netlink1.RouteGet(net.ParseIP(dst))
+	if err != nil {
+		t.Fatalf("RouteGet(%s): %v", dst, err)
+	}
+	if len(rs) == 0 {
+		t.Fatalf("RouteGet(%s): kernel returned no route", dst)
+	}
+	link, err := netlink1.LinkByIndex(rs[0].LinkIndex)
+	if err != nil {
+		t.Fatalf("LinkByIndex(%d): %v", rs[0].LinkIndex, err)
+	}
+	return link.Attrs().Name, rs[0].Src
+}
+
+// TestTUN_ChangeIP_RoutesSurviveAndFollowNewAddress answers, on a real device and for both
+// address families, whether Linux shares the macOS failure in
+// docs/52-stale-route-src-after-ip-change.md.
 //
 // macOS resolves a route's source address once, when the entry is created, so an IP change
 // leaves every earlier route sourcing from an address that is gone. Linux installs these routes
@@ -134,25 +155,48 @@ func linuxRouteDsts(t *testing.T, ifName string) map[string]bool {
 // deletion of the address they were installed under, and the source the kernel would now choose
 // must be the new address.
 //
-// This is the test that lets the Linux and Windows halves of docs/52 be stated as fact rather
-// than as an argument about what the kernel probably does. Its failure means Linux needs the
-// refresh that ChangeTunIP currently performs only on darwin.
+// Both were false for IPv4 before changeIP was reordered to add-before-delete: losing its last
+// IPv4 address made the kernel flush the device's whole IPv4 route table, and cluster traffic
+// fell back to the default route and left over the physical NIC. The IPv6 leg is here because
+// that outcome was guessed wrong once already — a device keeps its fe80::/64 link-local address
+// throughout, so it never loses its last IPv6 address, which predicts no flush. Predictions
+// about this kernel have not earned any trust; the test is the answer.
 func TestTUN_ChangeIP_RoutesSurviveAndFollowNewAddress(t *testing.T) {
 	const (
-		v4old       = "198.18.0.151/32"
-		v4new       = "198.18.0.152/32"
-		clusterCIDR = "10.151.0.0/16"
-		serviceIP   = "10.152.0.10/32"
+		v4old = "198.18.0.151/32"
+		v4new = "198.18.0.152/32"
+		v6old = "2001:2::151/128"
+		v6new = "2001:2::152/128"
+		cidr4 = "10.151.0.0/16"
+		host4 = "10.152.0.10/32"
+		cidr6 = "2001:db8:151::/64"
 	)
 
-	ln, err := Listener(Config{Addr: v4old, MTU: config.DefaultMTU})
+	ln, err := Listener(Config{Addr: v4old, Addr6: v6old, MTU: config.DefaultMTU})
 	if err != nil {
 		t.Fatalf("create tun: %v", err)
 	}
 	defer ln.Close()
 
 	name := linuxFindTunName(t, netip.MustParsePrefix(v4old).Addr())
-	for _, p := range []string{clusterCIDR, serviceIP} {
+	hasV6 := linuxIfaceHasAddr(name, netip.MustParsePrefix(v6old).Addr())
+	if !hasV6 {
+		t.Logf("IPv6 %s not assigned (IPv6 may be disabled); checking the IPv4 leg only", v6old)
+	}
+
+	// Each probe is a destination plus the source address the kernel must pick for it once the
+	// device has been renumbered.
+	prefixes := []string{cidr4, host4}
+	probes := []struct{ dst, wantSrc string }{
+		{"10.151.0.1", v4new},
+		{"10.152.0.10", v4new},
+	}
+	if hasV6 {
+		prefixes = append(prefixes, cidr6)
+		probes = append(probes, struct{ dst, wantSrc string }{"2001:db8:151::1", v6new})
+	}
+
+	for _, p := range prefixes {
 		_, dst, perr := net.ParseCIDR(p)
 		if perr != nil {
 			t.Fatalf("ParseCIDR(%s): %v", p, perr)
@@ -161,45 +205,47 @@ func TestTUN_ChangeIP_RoutesSurviveAndFollowNewAddress(t *testing.T) {
 			t.Fatalf("AddRoutes(%s): %v", p, err)
 		}
 	}
-	if got := linuxRouteDsts(t, name); !got[clusterCIDR] || !got[serviceIP] {
-		t.Fatalf("precondition: routes not installed on %s, got %v", name, got)
+	installed := linuxRouteDsts(t, name)
+	for _, p := range prefixes {
+		if !installed[p] {
+			t.Fatalf("precondition: route %s not installed on %s, got %v", p, name, installed)
+		}
 	}
 
 	if err = ChangeIP(name, v4old, v4new); err != nil {
 		t.Fatalf("ChangeIP %s -> %s: %v", v4old, v4new, err)
 	}
+	if hasV6 {
+		if err = ChangeIP(name, v6old, v6new); err != nil {
+			t.Fatalf("ChangeIP %s -> %s: %v", v6old, v6new, err)
+		}
+	}
 
-	// A: deleting the address must not take the routes with it. If it does, Linux loses every
-	// cluster route on an IP change and nothing puts them back.
+	// A: renumbering must not take the routes with it. If it does, Linux loses its cluster
+	// routes on an IP change and nothing puts them back.
 	got := linuxRouteDsts(t, name)
-	for _, p := range []string{clusterCIDR, serviceIP} {
+	for _, p := range prefixes {
 		if !got[p] {
 			t.Errorf("route %s vanished when the address changed; Linux needs the darwin-only "+
 				"route refresh in NetworkManager.ChangeTunIP (got %v)", p, got)
 		}
 	}
 
-	// B: the source address the kernel would now use must be the new one. This is the same
-	// invariant TestTUN_ChangeIP_RouteSrcFollowsNewAddress checks on macOS, and the same value
-	// `kubevpn route search` prints as RT_IFA.
-	r, err := netroute.New()
-	if err != nil {
-		t.Fatalf("netroute.New: %v", err)
-	}
-	wantSrc := net.IP(netip.MustParsePrefix(v4new).Addr().AsSlice())
-	for _, probe := range []string{"10.151.0.1", "10.152.0.10"} {
-		ifi, _, src, rerr := r.Route(net.ParseIP(probe))
-		if rerr != nil {
-			t.Errorf("Route(%s): %v", probe, rerr)
+	// B: the source the kernel would now use must be the new address — the same invariant
+	// TestTUN_ChangeIP_RouteSrcFollowsNewAddress checks on macOS, and the value
+	// `kubevpn route search` prints as RT_IFA. A wrong interface here means the traffic is
+	// leaving the tunnel entirely.
+	for _, probe := range probes {
+		ifName, src := linuxRouteSrc(t, probe.dst)
+		if ifName != name {
+			t.Errorf("packets to %s would leave via %s, not %s — cluster traffic is escaping the tunnel",
+				probe.dst, ifName, name)
 			continue
 		}
-		if ifi.Name != name {
-			t.Errorf("Route(%s) resolved to %s, want %s", probe, ifi.Name, name)
-			continue
-		}
-		if !src.Equal(wantSrc) {
-			t.Errorf("Route(%s) sources from %s, want %s — Linux pins the source like macOS does",
-				probe, src, wantSrc)
+		want := net.IP(netip.MustParsePrefix(probe.wantSrc).Addr().AsSlice())
+		if !src.Equal(want) {
+			t.Errorf("packets to %s would source from %s, want %s — Linux pins the source like macOS does",
+				probe.dst, src, want)
 		}
 	}
 }
