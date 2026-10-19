@@ -101,7 +101,36 @@ macOS keeps the opposite order deliberately — see
 alias first is what the fix was — and does not need this one: its routes survive, which is how
 they come to be stale in the first place.
 
-### 3.2 Windows: unverified
+### 3.2 IPv6
+
+The mechanism does not distinguish address families: macOS pins `RTAX_IFA` into an IPv6 route
+exactly as it does an IPv4 one, so a `2001:2::` TUN address that is replaced leaves IPv6 cluster
+routes sourcing from an address the device no longer has. The fix carries both families —
+`FetchRIB` is called with `AF_UNSPEC`, the address helpers have `Inet6Addr` branches, and
+`newRouteMessage` already split on family — and both root tests now install and verify IPv6
+prefixes, which nothing had ever done.
+
+Linux's route flush, by contrast, is IPv4-only, and measurably so. A device keeps its
+`fe80::/64` link-local address for its whole life, so it never loses its *last* IPv6 address and
+the flush never fires. Running the dual-stack test against the old delete-first ordering shows
+the asymmetry directly: the IPv4 routes are gone and `2001:db8:151::/64` is still there.
+
+```
+route 10.151.0.0/16 vanished when the address changed
+  (remaining: 2001:2::152/128, 2001:db8:151::/64, fe80::/64)
+packets to 10.151.0.1 would leave via eth0, not utun0
+```
+
+One IPv4-only blind spot was real and is fixed: `repairStaleRouteSrc` probed a single IPv4
+cluster CIDR, so "IPv4 fine, IPv6 stale" was invisible — v6 traffic dead, watchdog silent. It
+now probes one destination per family and names the family in the throttle key, so a stale IPv4
+route and a stale IPv6 route cannot silence each other. The families are renumbered by the same
+`ChangeTunIP` call and refreshed together, so the split is unlikely; "unlikely asymmetry between
+two near-identical paths" is also precisely the shape of the bug in
+[51-idle-client-route-registration.md](51-idle-client-route-registration.md), where the half
+that still worked is what sent the diagnosis down the wrong road.
+
+### 3.3 Windows: unverified
 
 Windows is reasoned about, not measured. Its routes are bound to the interface LUID and
 `MIB_IPFORWARD_ROW2` carries no source address, so neither failure mode should apply; `changeIP`
@@ -158,14 +187,17 @@ appearing later lands here too, visibly, instead of going dark.
   (`-tags tun`, root, macOS) — real utun, a cluster prefix and a `/32`, a real `ChangeIP`, then
   `RTAX_IFA` read back from the kernel. The only test that exercises the `RTM_CHANGE` fallback.
 - `pkg/tun/ip_change_root_linux_test.go: TestTUN_ChangeIP_RoutesSurviveAndFollowNewAddress`
-  (`-tags tun`, root, Linux) — the test that found section 3.1. It asserts both halves of the
-  claim that Linux is unaffected: the routes still exist after an address change, and the source
-  the kernel would now pick is the new address. It runs anywhere with `/dev/net/tun`.
+  (`-tags tun`, root, Linux) — the test that found section 3.1. Dual stack, and it asserts both
+  halves of the claim that Linux is unaffected: the routes still exist after an address change,
+  and the source the kernel would now pick is the new address. It asks the kernel directly
+  (`netlink.RouteGet`, i.e. `ip route get`) rather than going through netroute, which substitutes
+  the interface's first address when a route carries no prefsrc — for IPv6 usually the
+  link-local one, which would answer a different question. It runs anywhere with `/dev/net/tun`.
 - `pkg/handler/route_src_integration_test.go: TestIntegration_RouteSrc_SurvivesTunIPChange` —
   renting an IP over the real gRPC `TunConfigService`, then an eight-phase story (install from all
-  three sources → healthy re-announcement must not churn → IP change → refresh → regression to the
-  stale state → watcher push repairs it → watchdog repairs it unprompted → healthy table stays
-  quiet). The routing table is faked, but faked around the one rule that causes the bug: an entry
+  three sources, both families → healthy re-announcement must not churn → IP change → refresh →
+  regression to the stale state → watcher push repairs it → watchdog repairs it unprompted →
+  IPv6 alone goes stale and must still be caught → healthy table stays quiet). The routing table is faked, but faked around the one rule that causes the bug: an entry
   remembers the address present when it was installed. That makes the whole path reproducible on
   any platform, without root and without a device.
 
