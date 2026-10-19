@@ -59,16 +59,67 @@ Individually each is reasonable. Together they make the damage permanent: the on
 could repair the table (installing the route again) was both out of scope and short-circuited,
 and the short circuit left no trace.
 
-## 3. Fix
+## 3. The Same Trigger on Other Platforms
 
-### 3.1 Re-assert, do not just add (`pkg/tun/route_darwin.go`)
+The pinned-source mechanism is specific to macOS. The **trigger** — replacing the TUN address on
+a live device — is not, and on Linux it produces an outage that looks identical from the outside
+and is in one respect worse.
+
+| | How routes are installed | When the source address is chosen |
+|---|---|---|
+| macOS | `route_darwin.go` writes `RTM_ADD`; the kernel stamps `RTAX_IFA` into the entry | At creation, never recomputed — the bug above |
+| Linux | `route_linux.go` calls `netlink.AddRoute` with no source, so the entry has no prefsrc | At transmit, by `inet_select_addr` |
+| Windows | `route_windows.go` calls `AddRoute` on the interface LUID; `MIB_IPFORWARD_ROW2` has no source field at all | At transmit, by the stack |
+
+### 3.1 Linux: the routes do not go stale, they disappear
+
+`changeIP` deleted the old address before adding the new one. Linux flushes a device's entire
+IPv4 route table the instant it loses its **last** IPv4 address, so that ordering did not leave a
+stale route — it left no route. Nothing puts them back: the refresh is gated on darwin, and the
+cluster CIDR installed at connect is never re-pushed by anything.
+
+Worse than the outage: while the device is unaddressed, destinations that belonged to the tunnel
+match the default route instead, so cluster traffic **leaves over the physical NIC** rather than
+failing closed.
+
+Measured on a real TUN device (`TestTUN_ChangeIP_RoutesSurviveAndFollowNewAddress`, before the
+fix):
+
+```
+route 10.151.0.0/16 vanished when the address changed  (remaining: fe80::/64)
+route 10.152.0.10/32 vanished when the address changed
+Route(10.151.0.1) resolved to eth0, want utun0
+```
+
+The fix is ordering, not restoration: add the new address first, then delete the old one
+(`pkg/tun/ip_linux.go`). The device is addressed throughout, the routes are never flushed, and
+there is no window in which traffic can leak. Restoring the routes afterwards would have left
+that window open.
+
+macOS keeps the opposite order deliberately — see
+[45-tun-ip-change-stale-address.md](45-tun-ip-change-stale-address.md), where deleting the old
+alias first is what the fix was — and does not need this one: its routes survive, which is how
+they come to be stale in the first place.
+
+### 3.2 Windows: unverified
+
+Windows is reasoned about, not measured. Its routes are bound to the interface LUID and
+`MIB_IPFORWARD_ROW2` carries no source address, so neither failure mode should apply; `changeIP`
+there still deletes before adding. No Windows machine was available, and the Windows CI job
+(`make ut-no-cluster`) cannot create a TUN device, so this is stated as an open item rather than
+a conclusion. If a Windows user ever reports the symptom in section 1, check first whether the
+device's routes survive an IP change.
+
+## 4. Fix
+
+### 4.1 Re-assert, do not just add (`pkg/tun/route_darwin.go`)
 
 `addRoute` no longer swallows `EEXIST`. It retries the same prefix as `RTM_CHANGE`, which makes
 the kernel re-derive the ifa from the gateway. Re-asserting is now the operation that corrects a
 stale source, and it corrects it **in place** — unlike a delete/add pair, the route is never
 briefly absent.
 
-### 3.2 Refresh what the kernel has, not what we remember (`pkg/handler/network.go`)
+### 4.2 Refresh what the kernel has, not what we remember (`pkg/handler/network.go`)
 
 `refreshCIDRRoutes` became `refreshTunRoutes`, driven by `tun.ListRoutes` — the routes the kernel
 currently holds on the device, identified by `RTF_STATIC` (the flag kubevpn always sets; the
@@ -78,16 +129,17 @@ The kernel is the source of truth here on purpose. Routes reach a TUN device fro
 device creation in `tun_darwin.go`, `AddRoute`, `AddRouteCIDR`, and the `kubevpn route add` RPC in
 `daemon/action/route.go` — and a remembered list stops covering them the moment a fifth appears,
 which is exactly how the first gap came about. Linux and Windows choose the source address at
-transmit time, so `ListRoutes` reports nothing there and the refresh is a no-op.
+transmit time, so `ListRoutes` reports nothing there and the refresh is a no-op — Linux needs the
+ordering fix in section 3.1 instead.
 
-### 3.3 Judge a route by its source, not just its device (`pkg/handler/network.go`)
+### 4.3 Judge a route by its source, not just its device (`pkg/handler/network.go`)
 
 `routedViaTunWithCurrentSrc` replaces the `ifi.Name == nm.tunName` test in `AddRoute` and
 `AddRouteCIDR`. `netroute` already returned the source address; it was being discarded. A route
 whose source is not the TUN's current address is no longer "already installed", so the ordinary
 route-watcher push repairs it.
 
-### 3.4 Notice it without being asked (`pkg/handler/network.go`)
+### 4.4 Notice it without being asked (`pkg/handler/network.go`)
 
 `repairStaleRouteSrc` runs in `watchDataPlaneLiveness` whenever the watchdog tears a session
 down. Before blaming the port-forward it asks the kernel which source a cluster destination would
@@ -100,11 +152,15 @@ wrong remedy indefinitely — 20 hours of it in the incident behind
 [51-idle-client-route-registration.md](51-idle-client-route-registration.md). A fifth route source
 appearing later lands here too, visibly, instead of going dark.
 
-## 4. Tests
+## 5. Tests
 
 - `pkg/tun/ip_change_root_darwin_test.go: TestTUN_ChangeIP_RouteSrcFollowsNewAddress`
   (`-tags tun`, root, macOS) — real utun, a cluster prefix and a `/32`, a real `ChangeIP`, then
   `RTAX_IFA` read back from the kernel. The only test that exercises the `RTM_CHANGE` fallback.
+- `pkg/tun/ip_change_root_linux_test.go: TestTUN_ChangeIP_RoutesSurviveAndFollowNewAddress`
+  (`-tags tun`, root, Linux) — the test that found section 3.1. It asserts both halves of the
+  claim that Linux is unaffected: the routes still exist after an address change, and the source
+  the kernel would now pick is the new address. It runs anywhere with `/dev/net/tun`.
 - `pkg/handler/route_src_integration_test.go: TestIntegration_RouteSrc_SurvivesTunIPChange` —
   renting an IP over the real gRPC `TunConfigService`, then an eight-phase story (install from all
   three sources → healthy re-announcement must not churn → IP change → refresh → regression to the
@@ -113,7 +169,7 @@ appearing later lands here too, visibly, instead of going dark.
   remembers the address present when it was installed. That makes the whole path reproducible on
   any platform, without root and without a device.
 
-## 5. Field Checklist
+## 6. Field Checklist
 
 When a connection is "connected" and carries nothing on macOS:
 
