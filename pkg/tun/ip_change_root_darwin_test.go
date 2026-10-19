@@ -189,8 +189,13 @@ func addrOf(cidr string) net.IP {
 //
 // It covers the things the earlier fix missed: that host routes are refreshed and not just the
 // cluster CIDR, that re-asserting an existing route actually rewrites its source address
-// instead of being swallowed as EEXIST, and that both address families are carried through —
-// the kernel pins IPv6 the same way, and nothing had ever exercised it.
+// instead of being swallowed as EEXIST, and that both address families come through.
+//
+// The assertion is on the source address the kernel would actually use (kernelSourceFor), not
+// on the route's stored ifa field. The two differ on this platform: BSD hands rt_ifa straight
+// to ip_output for IPv4, but for IPv6 it pins the interface's link-local address into the route
+// and runs in6_selectsrc at transmit instead. An earlier version of this test asserted on the
+// field and failed against a perfectly healthy device.
 func TestTUN_ChangeIP_RouteSrcFollowsNewAddress(t *testing.T) {
 	const (
 		v4old = "198.18.0.141/32"
@@ -198,13 +203,13 @@ func TestTUN_ChangeIP_RouteSrcFollowsNewAddress(t *testing.T) {
 		v6old = "2001:2::141/128"
 		v6new = "2001:2::142/128"
 	)
-	// Each cluster prefix, with the TUN address its route must source from before and after the
-	// device is renumbered.
-	routeCases := []struct{ prefix, oldSrc, newSrc string }{
-		{"10.144.0.0/16", v4old, v4new},
-		{"10.145.0.10/32", v4old, v4new},
-		{"2001:db8:144::/64", v6old, v6new},
-		{"2001:db8:145::10/128", v6old, v6new},
+	// Each cluster prefix, a destination inside it, and the TUN address packets to that
+	// destination must be sourced from before and after the device is renumbered.
+	routeCases := []struct{ prefix, probe, oldSrc, newSrc string }{
+		{"10.144.0.0/16", "10.144.0.1", v4old, v4new},
+		{"10.145.0.10/32", "10.145.0.10", v4old, v4new},
+		{"2001:db8:144::/64", "2001:db8:144::1", v6old, v6new},
+		{"2001:db8:145::10/128", "2001:db8:145::10", v6old, v6new},
 	}
 
 	name, closeTun := newTestTun(t, v4old, v6old)
@@ -236,9 +241,14 @@ func TestTUN_ChangeIP_RouteSrcFollowsNewAddress(t *testing.T) {
 	}
 
 	for _, rc := range routeCases {
-		if got := routeSrcFor(t, name, rc.prefix); !got.Equal(addrOf(rc.oldSrc)) {
-			t.Fatalf("precondition: route %s sources from %s, want %s", rc.prefix, got, addrOf(rc.oldSrc))
+		if got := kernelSourceFor(t, rc.probe); !got.Equal(addrOf(rc.oldSrc)) {
+			t.Fatalf("precondition: packets to %s would source from %s, want %s",
+				rc.probe, got, addrOf(rc.oldSrc))
 		}
+		// Informational: shows which address the kernel pinned into the route, which for IPv6
+		// is the link-local one. Recorded, not asserted — see the doc comment.
+		t.Logf("route %s rt_ifa=%s (kernel source: %s)",
+			rc.prefix, routeSrcFor(t, name, rc.prefix), addrOf(rc.oldSrc))
 	}
 
 	if err = ChangeIP(name, v4old, v4new); err != nil {
@@ -257,8 +267,20 @@ func TestTUN_ChangeIP_RouteSrcFollowsNewAddress(t *testing.T) {
 		t.Fatalf("re-assert routes: %v", err)
 	}
 	for _, rc := range routeCases {
+		if got := kernelSourceFor(t, rc.probe); !got.Equal(addrOf(rc.newSrc)) {
+			t.Errorf("packets to %s would source from %s after the refresh, want %s",
+				rc.probe, got, addrOf(rc.newSrc))
+		}
+	}
+
+	// IPv4 only: the kernel really does hand rt_ifa to ip_output, so for that family the stored
+	// field has to have been rewritten too — that is what the RTM_CHANGE fallback exists for.
+	for _, rc := range routeCases {
+		if addrOf(rc.newSrc).To4() == nil {
+			continue
+		}
 		if got := routeSrcFor(t, name, rc.prefix); !got.Equal(addrOf(rc.newSrc)) {
-			t.Fatalf("route %s still sources from %s after refresh, want %s",
+			t.Errorf("route %s still has rt_ifa=%s after the refresh, want %s",
 				rc.prefix, got, addrOf(rc.newSrc))
 		}
 	}

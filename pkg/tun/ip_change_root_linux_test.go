@@ -236,16 +236,23 @@ func TestTUN_ChangeIP_RoutesSurviveAndFollowNewAddress(t *testing.T) {
 	// `kubevpn route search` prints as RT_IFA. A wrong interface here means the traffic is
 	// leaving the tunnel entirely.
 	for _, probe := range probes {
-		ifName, src := linuxRouteSrc(t, probe.dst)
+		ifName, routeSrc := linuxRouteSrc(t, probe.dst)
 		if ifName != name {
 			t.Errorf("packets to %s would leave via %s, not %s — cluster traffic is escaping the tunnel",
 				probe.dst, ifName, name)
 			continue
 		}
 		want := net.IP(netip.MustParsePrefix(probe.wantSrc).Addr().AsSlice())
-		if !src.Equal(want) {
+		if !routeSrc.Equal(want) {
 			t.Errorf("packets to %s would source from %s, want %s — Linux pins the source like macOS does",
-				probe.dst, src, want)
+				probe.dst, routeSrc, want)
+		}
+		// Cross-check against what the kernel picks when a socket actually connects. On Linux
+		// the two agree for both families; on macOS they diverge for IPv6, which is why the
+		// darwin test asserts on this one. Keeping both here is what makes that claim checkable
+		// rather than asserted.
+		if dialSrc := kernelSourceFor(t, probe.dst); !dialSrc.Equal(want) {
+			t.Errorf("a socket to %s would source from %s, want %s", probe.dst, dialSrc, want)
 		}
 	}
 }
