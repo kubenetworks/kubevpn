@@ -16,6 +16,10 @@ import (
 	"net/netip"
 	"testing"
 
+	"github.com/containernetworking/cni/pkg/types"
+	"golang.org/x/net/route"
+	"golang.org/x/sys/unix"
+
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
@@ -123,4 +127,161 @@ func TestTUN_ChangeIP_DualStack(t *testing.T) {
 	mustNotHave(t, name, v6old)
 	mustHave(t, name, v4new)
 	mustHave(t, name, v6new)
+}
+
+// routeSrcFor returns the source address the kernel pinned into the route for prefix on
+// ifName (RTAX_IFA) — the value `kubevpn route search` prints as RT_IFA, and the address
+// outbound packets matching that route actually carry.
+func routeSrcFor(t *testing.T, ifName, prefix string) net.IP {
+	t.Helper()
+	ifi, err := net.InterfaceByName(ifName)
+	if err != nil {
+		t.Fatalf("InterfaceByName(%s): %v", ifName, err)
+	}
+	rib, err := route.FetchRIB(unix.AF_UNSPEC, route.RIBTypeRoute, 0)
+	if err != nil {
+		t.Fatalf("FetchRIB: %v", err)
+	}
+	msgs, err := route.ParseRIB(route.RIBTypeRoute, rib)
+	if err != nil {
+		t.Fatalf("ParseRIB: %v", err)
+	}
+	want := netip.MustParsePrefix(prefix)
+	for _, msg := range msgs {
+		m, ok := msg.(*route.RouteMessage)
+		if !ok || m.Index != ifi.Index {
+			continue
+		}
+		dst, ok := ipFromRouteAddr(routeAddrAt(m.Addrs, unix.RTAX_DST))
+		if !ok || !dst.Equal(net.IP(want.Addr().AsSlice())) {
+			continue
+		}
+		if ones, _ := maskFromRouteAddr(routeAddrAt(m.Addrs, unix.RTAX_NETMASK), len(dst)).Size(); ones != want.Bits() {
+			continue
+		}
+		ifa, _ := ipFromRouteAddr(routeAddrAt(m.Addrs, unix.RTAX_IFA))
+		return ifa
+	}
+	t.Fatalf("no route for %s on %s", prefix, ifName)
+	return nil
+}
+
+func mustIPNet(t *testing.T, cidr string) net.IPNet {
+	t.Helper()
+	_, n, err := net.ParseCIDR(cidr)
+	if err != nil {
+		t.Fatalf("ParseCIDR(%s): %v", cidr, err)
+	}
+	return *n
+}
+
+// addrOf returns the bare address of a CIDR string, as net.IP, for comparing against a route's
+// pinned source.
+func addrOf(cidr string) net.IP {
+	return net.IP(netip.MustParsePrefix(cidr).Addr().AsSlice())
+}
+
+// TestTUN_ChangeIP_RouteSrcFollowsNewAddress is the regression for
+// docs/52-stale-route-src-after-ip-change.md: deleting the old address is not enough, because
+// routes installed before the change keep sourcing packets from it. A connection in that state
+// looks perfectly healthy — the device holds the new address, every cluster prefix still routes
+// through the TUN — and carries nothing in either direction.
+//
+// It covers the things the earlier fix missed: that host routes are refreshed and not just the
+// cluster CIDR, that re-asserting an existing route actually rewrites its source address
+// instead of being swallowed as EEXIST, and that both address families come through.
+//
+// The assertion is on the source address the kernel would actually use (kernelSourceFor), not
+// on the route's stored ifa field. The two differ on this platform: BSD hands rt_ifa straight
+// to ip_output for IPv4, but for IPv6 it pins the interface's link-local address into the route
+// and runs in6_selectsrc at transmit instead. An earlier version of this test asserted on the
+// field and failed against a perfectly healthy device.
+func TestTUN_ChangeIP_RouteSrcFollowsNewAddress(t *testing.T) {
+	const (
+		v4old = "198.18.0.141/32"
+		v4new = "198.18.0.142/32"
+		v6old = "2001:2::141/128"
+		v6new = "2001:2::142/128"
+	)
+	// Each cluster prefix, a destination inside it, and the TUN address packets to that
+	// destination must be sourced from before and after the device is renumbered.
+	routeCases := []struct{ prefix, probe, oldSrc, newSrc string }{
+		{"10.144.0.0/16", "10.144.0.1", v4old, v4new},
+		{"10.145.0.10/32", "10.145.0.10", v4old, v4new},
+		{"2001:db8:144::/64", "2001:db8:144::1", v6old, v6new},
+		{"2001:db8:145::10/128", "2001:db8:145::10", v6old, v6new},
+	}
+
+	name, closeTun := newTestTun(t, v4old, v6old)
+	defer closeTun()
+
+	for _, rc := range routeCases {
+		dst := mustIPNet(t, rc.prefix)
+		if err := AddRoutes(name, types.Route{Dst: dst}); err != nil {
+			t.Fatalf("AddRoutes(%s): %v", rc.prefix, err)
+		}
+		t.Cleanup(func() { _ = DeleteRoutes(name, types.Route{Dst: dst}) })
+	}
+
+	// listTunRoutes must find all of them, in both families, and only ours: the kernel's own
+	// scope entries for the device addresses carry no RTF_STATIC and must not be dragged into
+	// a refresh.
+	routes, err := listTunRoutes(name)
+	if err != nil {
+		t.Fatalf("listTunRoutes: %v", err)
+	}
+	listed := map[string]bool{}
+	for _, r := range routes {
+		listed[r.Dst.String()] = true
+	}
+	for _, rc := range routeCases {
+		if !listed[rc.prefix] {
+			t.Fatalf("listTunRoutes missed %s, got %v", rc.prefix, listed)
+		}
+	}
+
+	for _, rc := range routeCases {
+		if got := kernelSourceFor(t, rc.probe); !got.Equal(addrOf(rc.oldSrc)) {
+			t.Fatalf("precondition: packets to %s would source from %s, want %s",
+				rc.probe, got, addrOf(rc.oldSrc))
+		}
+		// Informational: shows which address the kernel pinned into the route, which for IPv6
+		// is the link-local one. Recorded, not asserted — see the doc comment.
+		t.Logf("route %s rt_ifa=%s (kernel source: %s)",
+			rc.prefix, routeSrcFor(t, name, rc.prefix), addrOf(rc.oldSrc))
+	}
+
+	if err = ChangeIP(name, v4old, v4new); err != nil {
+		t.Fatalf("ChangeIP(%s -> %s): %v", v4old, v4new, err)
+	}
+	if err = ChangeIP(name, v6old, v6new); err != nil {
+		t.Fatalf("ChangeIP(%s -> %s): %v", v6old, v6new, err)
+	}
+	mustNotHave(t, name, v4old)
+	mustHave(t, name, v4new)
+	mustNotHave(t, name, v6old)
+	mustHave(t, name, v6new)
+
+	// What NetworkManager.refreshTunRoutes does: re-assert every route the device carries.
+	if err = AddRoutes(name, routes...); err != nil {
+		t.Fatalf("re-assert routes: %v", err)
+	}
+	for _, rc := range routeCases {
+		if got := kernelSourceFor(t, rc.probe); !got.Equal(addrOf(rc.newSrc)) {
+			t.Errorf("packets to %s would source from %s after the refresh, want %s",
+				rc.probe, got, addrOf(rc.newSrc))
+		}
+	}
+
+	// IPv4 only: the kernel really does hand rt_ifa to ip_output, so for that family the stored
+	// field has to have been rewritten too — that is what the RTM_CHANGE fallback exists for.
+	for _, rc := range routeCases {
+		if addrOf(rc.newSrc).To4() == nil {
+			continue
+		}
+		if got := routeSrcFor(t, name, rc.prefix); !got.Equal(addrOf(rc.newSrc)) {
+			t.Errorf("route %s still has rt_ifa=%s after the refresh, want %s",
+				rc.prefix, got, addrOf(rc.newSrc))
+		}
+	}
 }

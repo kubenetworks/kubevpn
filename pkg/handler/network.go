@@ -83,6 +83,59 @@ type NetworkManager struct {
 	extraHost             []dns.Entry
 	dnsConfig             *dns.Config
 	heartbeatStats        *core.HeartbeatStats // data-plane liveness from observed heartbeat replies
+
+	// The four seams onto the OS routing table and the device's own addresses. Indirected together so the stale-source repair
+	// path can be driven on any platform, without root and without a real TUN device; each
+	// falls back to the real implementation when unset.
+	//
+	// newRouteResolver opens a *snapshot* of the table — go-netroute parses the RIB once in
+	// New(), so a fresh one per batch is what keeps answers current.
+	newRouteResolver func() routeResolver
+	addTunRoutes     func(tunName string, routes ...types.Route) error
+	listTunRoutes    func(tunName string) ([]types.Route, error)
+	tunDeviceAddrs   func(tunName string) ([]net.IP, error)
+}
+
+// routeResolver is the slice of the OS routing table NetworkManager consults: for a destination,
+// which interface the kernel would send it out of and which source address it would carry.
+// *netroute.router satisfies it structurally.
+type routeResolver interface {
+	Route(dst net.IP) (iface *net.Interface, gateway, preferredSrc net.IP, err error)
+}
+
+// defaultRouteResolver reads the live OS routing table. It returns nil (rather than an error)
+// when the table cannot be opened, because every caller's fallback for "cannot tell" is the
+// same: do the work rather than skip it.
+func defaultRouteResolver() routeResolver {
+	r, err := netroute.New()
+	if err != nil || r == nil {
+		return nil
+	}
+	return r
+}
+
+// routes opens a routing-table snapshot, or nil if unavailable.
+func (nm *NetworkManager) routes() routeResolver {
+	if nm.newRouteResolver == nil {
+		return defaultRouteResolver()
+	}
+	return nm.newRouteResolver()
+}
+
+// addRoutes installs routes on the TUN device.
+func (nm *NetworkManager) addRoutes(routes ...types.Route) error {
+	if nm.addTunRoutes == nil {
+		return tun.AddRoutes(nm.tunName, routes...)
+	}
+	return nm.addTunRoutes(nm.tunName, routes...)
+}
+
+// listRoutes reports the routes kubevpn installed on the TUN device.
+func (nm *NetworkManager) listRoutes() ([]types.Route, error) {
+	if nm.listTunRoutes == nil {
+		return tun.ListRoutes(nm.tunName)
+	}
+	return nm.listTunRoutes(nm.tunName)
 }
 
 const (
@@ -447,16 +500,20 @@ func (nm *NetworkManager) ChangeTunIP(ctx context.Context, newIPv4, newIPv6 *net
 		if oldV6 != nil {
 			_ = tun.DeleteRoutes(nm.tunName, types.Route{Dst: net.IPNet{IP: oldV6.IP, Mask: net.CIDRMask(128, 128)}})
 		}
-		_ = tun.AddRoutes(nm.tunName, types.Route{Dst: net.IPNet{IP: newIPv6.IP, Mask: net.CIDRMask(128, 128)}})
+		// Reported like the IPv4 host route above: the same failure must not be audible in one
+		// family and silent in the other.
+		if err := tun.AddRoutes(nm.tunName, types.Route{Dst: net.IPNet{IP: newIPv6.IP, Mask: net.CIDRMask(128, 128)}}); err != nil {
+			plog.G(ctx).Warnf("[NetworkManager] add host route for %s failed: %v", newIPv6.IP, err)
+		}
 	}
 
 	// On macOS the kernel stamps RT_IFA (source address) from the interface's primary
 	// address at route-add time. After an IP change the old RT_IFA no longer exists on
-	// the device, so outbound packets matching those routes fail with EADDRNOTAVAIL.
-	// Delete + re-add forces the kernel to re-derive RT_IFA from the new address.
+	// the device, so outbound packets matching those routes leave with a stale source and
+	// every reply is discarded. Re-asserting them makes the kernel re-derive RT_IFA.
 	// Linux and Windows routes are device-scoped and unaffected.
 	if runtime.GOOS == "darwin" {
-		nm.refreshCIDRRoutes(ctx)
+		nm.refreshTunRoutes(ctx)
 	}
 
 	plog.G(ctx).Debugf("[NetworkManager] TUN IP changed: v4=%s v6=%s on %s", newIPv4, newIPv6, nm.tunName)
@@ -926,6 +983,116 @@ func (nm *NetworkManager) watchDataPlaneLiveness(ctx context.Context, cancelFunc
 		return
 	}
 	watchLiveness(ctx, cancelFunc, sessionStart, livenessCheckInterval, livenessStartupDeadline, livenessSteadyThreshold, nm.heartbeatStats.LastReply, outcome)
+	// watchLiveness only returns once it has torn the session down (or ctx died). A dark data
+	// plane is not always a sick port-forward: on macOS a route whose pinned source address went
+	// stale produces exactly the same silence, and reconnecting cannot fix it — so check for that
+	// here, between sessions, before the loop tries again. macOS is the only platform that pins a
+	// source address into a route; the check is gated here rather than inside so the repair logic
+	// itself stays exercisable everywhere.
+	if ctx.Err() == nil && runtime.GOOS == "darwin" {
+		nm.repairStaleRouteSrc(ctx)
+	}
+}
+
+// staleRouteSrcWarn rate-limits the stale-source report. The watchdog can fire every 30s for
+// hours; one line per occurrence would bury the log the way docs/51 describes.
+var staleRouteSrcWarn = plog.NewThrottle(5 * time.Minute)
+
+// repairStaleRouteSrc checks whether traffic to the cluster would still leave with the TUN's
+// current address and re-asserts the routes if it would not.
+//
+// This is the self-healing half of the stale-source fix: ChangeTunIP already refreshes the
+// routes when it changes the IP, but that only covers the transitions we perform ourselves.
+// Anything else that detaches the address — and any route source we have not thought of —
+// lands here instead of going silently dark for hours, which is how this bug was found.
+// Callers gate this on macOS, the only platform that pins a source address into a route.
+//
+// Both address families are probed. They are renumbered by the same ChangeTunIP call and
+// refreshed together, so a split is unlikely — but "unlikely asymmetry between v4 and v6" is
+// exactly the shape of the bug in docs/51, where one path cached an address and its twin did
+// not, and the half that still worked is what sent the diagnosis down the wrong road.
+func (nm *NetworkManager) repairStaleRouteSrc(ctx context.Context) {
+	if nm.tunName == "" || (nm.localTunIPv4 == nil && nm.localTunIPv6 == nil) {
+		return
+	}
+	probes := nm.routeSrcProbeIPs()
+	if len(probes) == 0 {
+		return
+	}
+	r := nm.routes()
+	if r == nil {
+		return
+	}
+	var stale bool
+	for _, probe := range probes {
+		ifi, _, src, err := r.Route(probe)
+		if err != nil || ifi == nil || ifi.Name != nm.tunName {
+			// Not routed through us at all — a different fault, and not one re-adding fixes.
+			continue
+		}
+		if nm.srcIsCurrentTunIP(src, probe) {
+			continue
+		}
+		stale = true
+		// The two families fail in different ways, so they are reported differently — see
+		// srcIsCurrentTunIP. Saying "sources from X" about an IPv6 route would be wrong: the
+		// kernel picks that source at transmit, and what is broken is the recorded address.
+		if probe.To4() != nil {
+			staleRouteSrcWarn.Warnf(ctx, "stale-route-src-v4",
+				"Route to %s via %s still sources from %s, but this TUN now holds %s — outbound "+
+					"packets carry a dead address and every reply is dropped; re-asserting routes",
+				probe, nm.tunName, src, nm.currentTunIP(probe))
+		} else {
+			staleRouteSrcWarn.Warnf(ctx, "stale-route-src-v6",
+				"Route to %s via %s records source %s, which is no longer assigned to this TUN "+
+					"(now %s); re-asserting routes",
+				probe, nm.tunName, src, nm.currentTunIP(probe))
+		}
+	}
+	// One refresh covers both families, so do it once however many probes complained.
+	if stale {
+		nm.refreshTunRoutes(ctx)
+	}
+}
+
+// routeSrcProbeIPs picks one cluster destination per address family to ask the kernel about.
+// Any address routed through the TUN answers "would our packets leave with the right source",
+// so the first cluster CIDR of each family serves; they are present once Start has run.
+func (nm *NetworkManager) routeSrcProbeIPs() []net.IP {
+	var v4, v6 net.IP
+	for _, cidr := range nm.dedupAndFilterCIDRs(nm.cfg.CIDRs) {
+		if cidr == nil || cidr.IP.IsLoopback() {
+			continue
+		}
+		if cidr.IP.To4() != nil {
+			if v4 == nil {
+				v4 = cidr.IP
+			}
+		} else if v6 == nil {
+			v6 = cidr.IP
+		}
+	}
+	var probes []net.IP
+	if v4 != nil && nm.localTunIPv4 != nil {
+		probes = append(probes, v4)
+	}
+	if v6 != nil && nm.localTunIPv6 != nil {
+		probes = append(probes, v6)
+	}
+	return probes
+}
+
+// currentTunIP returns the TUN address of ip's family, for reporting. Nil-safe: a family we
+// never allocated is not probed, so this is only reached with the matching address present.
+func (nm *NetworkManager) currentTunIP(ip net.IP) net.IP {
+	want := nm.localTunIPv4
+	if ip.To4() == nil {
+		want = nm.localTunIPv6
+	}
+	if want == nil {
+		return nil
+	}
+	return want.IP
 }
 
 // watchLiveness force-reconnects (cancelFunc) a black-holed session using the data-plane heartbeat
@@ -1220,7 +1387,7 @@ func (nm *NetworkManager) AddRoute(ipStrList ...string) error {
 		return nil
 	}
 	var routes []types.Route
-	r, _ := netroute.New()
+	r := nm.routes()
 	for _, ipStr := range ipStrList {
 		ip := net.ParseIP(ipStr)
 		if ip == nil {
@@ -1243,18 +1410,15 @@ func (nm *NetworkManager) AddRoute(ipStrList ...string) error {
 		} else {
 			mask = net.CIDRMask(128, 128)
 		}
-		if r != nil {
-			ifi, _, _, err := r.Route(ip)
-			if err == nil && ifi.Name == nm.tunName {
-				continue
-			}
+		if nm.routedViaTunWithCurrentSrc(r, ip) {
+			continue
 		}
 		routes = append(routes, types.Route{Dst: net.IPNet{IP: ip, Mask: mask}})
 	}
 	if len(routes) == 0 {
 		return nil
 	}
-	return tun.AddRoutes(nm.tunName, routes...)
+	return nm.addRoutes(routes...)
 }
 
 // addTrafficManagerServiceRoute adds /32 TUN routes for the traffic manager's
@@ -1280,24 +1444,126 @@ func (nm *NetworkManager) addTrafficManagerServiceRoute(ctx context.Context) err
 	return nm.AddRoute(ips...)
 }
 
-// refreshCIDRRoutes deletes and re-adds all cluster CIDR routes on the TUN device.
-// On macOS the kernel pins RT_IFA (the source address for outbound packets) from the
-// interface's primary address at route-add time; after a TUN IP change the stale
-// RT_IFA causes EADDRNOTAVAIL. Re-adding forces the kernel to stamp the new address.
-func (nm *NetworkManager) refreshCIDRRoutes(ctx context.Context) {
-	var routes []types.Route
-	for _, cidr := range nm.dedupAndFilterCIDRs(nm.cfg.CIDRs) {
-		if cidr != nil && !cidr.IP.IsLoopback() {
-			routes = append(routes, types.Route{Dst: *cidr})
+// routedViaTunWithCurrentSrc reports whether ip already routes through our TUN device *and*
+// the kernel would source those packets from the TUN's current address.
+//
+// The second half is what makes this more than an "is it already installed?" check. On macOS
+// the source address is pinned into the route when it is created, so after a TUN IP change a
+// route can still point at the right device while sourcing from an address that no longer
+// exists. Packets then leave carrying another client's identity, the server has no route back
+// for it, and the whole connection goes dark while the route table still looks correct.
+// Accepting such a route as "already installed" is what made that state unrecoverable.
+func (nm *NetworkManager) routedViaTunWithCurrentSrc(r routeResolver, ip net.IP) bool {
+	if r == nil {
+		return false
+	}
+	ifi, _, src, err := r.Route(ip)
+	if err != nil || ifi == nil || ifi.Name != nm.tunName {
+		return false
+	}
+	return nm.srcIsCurrentTunIP(src, ip)
+}
+
+// srcIsCurrentTunIP reports whether a route's recorded source address is still good. The two
+// families are judged differently because the kernels treat them differently:
+//
+//   - IPv4 demands equality with the TUN's current address. BSD hands the route's rt_ifa
+//     straight to ip_output, so that address is literally what packets will carry, and nothing
+//     weaker catches the case in docs/45 where the dead address is still on the device.
+//   - IPv6 only demands that the address still exists on the device. macOS pins the interface's
+//     *link-local* address into IPv6 routes and selects the real source at transmit
+//     (in6_selectsrc), so requiring equality with the TUN's global address would be
+//     permanently false: every route-watcher push would reinstall every IPv6 route, and the
+//     watchdog would cry "dead source address" at a perfectly healthy tunnel. Membership still
+//     catches the thing that matters — a source address that has been removed.
+//
+// Measured, not assumed: on macOS an IPv6 route reports rt_ifa fe80::… while a socket to the
+// same destination sources from 2001:2::…; on Linux both report the global address. See
+// docs/52-stale-route-src-after-ip-change.md.
+//
+// A family we never allocated has nothing to compare against, so it reports true and leaves
+// the caller's behaviour as it was before source checking existed.
+func (nm *NetworkManager) srcIsCurrentTunIP(src, dst net.IP) bool {
+	if dst.To4() == nil {
+		if nm.localTunIPv6 == nil {
+			return true
 		}
+		return src != nil && nm.tunHasAddr(src)
+	}
+	if nm.localTunIPv4 == nil {
+		return true
+	}
+	return src != nil && src.Equal(nm.localTunIPv4.IP)
+}
+
+// tunHasAddr reports whether ip is currently assigned to the TUN device. Reads the OS each
+// call so it follows ChangeTunIP; the caller sites are per-route-batch, not per-packet.
+// When the device cannot be read it reports true: "cannot tell" must not turn into endless
+// reinstalls, and a TUN that has really gone away is a different fault with its own path.
+func (nm *NetworkManager) tunHasAddr(ip net.IP) bool {
+	addrs, err := nm.deviceAddrs()
+	if err != nil {
+		return true
+	}
+	for _, a := range addrs {
+		if a.Equal(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// deviceAddrs lists the addresses currently on the TUN device.
+func (nm *NetworkManager) deviceAddrs() ([]net.IP, error) {
+	if nm.tunDeviceAddrs != nil {
+		return nm.tunDeviceAddrs(nm.tunName)
+	}
+	ifi, err := net.InterfaceByName(nm.tunName)
+	if err != nil {
+		return nil, err
+	}
+	addrs, err := ifi.Addrs()
+	if err != nil {
+		return nil, err
+	}
+	var out []net.IP
+	for _, a := range addrs {
+		if ipNet, ok := a.(*net.IPNet); ok {
+			out = append(out, ipNet.IP)
+		}
+	}
+	return out, nil
+}
+
+// refreshTunRoutes re-asserts every route the kernel currently holds on the TUN device.
+//
+// On macOS the kernel pins RT_IFA — the source address outbound packets carry — when a route
+// is created, so after a TUN IP change every route installed earlier keeps sourcing from the
+// address that was just removed. tun.AddRoutes re-asserts in place (RTM_ADD, falling back to
+// RTM_CHANGE when the entry exists), so the route is never briefly absent the way a
+// delete-then-add pair would leave it.
+//
+// The route list comes from the kernel rather than from a list of what we remember adding,
+// because routes reach this device from four places — device creation, AddRoute, AddRouteCIDR
+// and the `kubevpn route add` RPC — and a remembered list would quietly stop covering them.
+// On Linux and Windows tun.ListRoutes reports nothing, making this a no-op.
+func (nm *NetworkManager) refreshTunRoutes(ctx context.Context) {
+	if nm.tunName == "" {
+		return
+	}
+	routes, err := nm.listRoutes()
+	if err != nil {
+		plog.G(ctx).Warnf("[NetworkManager] list TUN routes for refresh failed: %v", err)
+		return
 	}
 	if len(routes) == 0 {
 		return
 	}
-	_ = tun.DeleteRoutes(nm.tunName, routes...)
-	if err := tun.AddRoutes(nm.tunName, routes...); err != nil {
-		plog.G(ctx).Warnf("[NetworkManager] refresh CIDR routes after IP change failed: %v", err)
+	if err = nm.addRoutes(routes...); err != nil {
+		plog.G(ctx).Warnf("[NetworkManager] refresh TUN routes after IP change failed: %v", err)
+		return
 	}
+	plog.G(ctx).Debugf("[NetworkManager] re-asserted %d routes on %s", len(routes), nm.tunName)
 }
 
 // AddRouteCIDR adds CIDR prefixes (e.g. server-pushed aggregated pod prefixes like
@@ -1310,23 +1576,21 @@ func (nm *NetworkManager) AddRouteCIDR(cidrs ...string) error {
 		return nil
 	}
 	var routes []types.Route
-	r, _ := netroute.New()
+	r := nm.routes()
 	for _, cidr := range cidrs {
 		_, ipNet, err := net.ParseCIDR(cidr)
 		if err != nil || ipNet == nil || ipNet.IP.IsLoopback() {
 			continue
 		}
-		if r != nil {
-			if ifi, _, _, rerr := r.Route(ipNet.IP); rerr == nil && ifi.Name == nm.tunName {
-				continue
-			}
+		if nm.routedViaTunWithCurrentSrc(r, ipNet.IP) {
+			continue
 		}
 		routes = append(routes, types.Route{Dst: *ipNet})
 	}
 	if len(routes) == 0 {
 		return nil
 	}
-	return tun.AddRoutes(nm.tunName, routes...)
+	return nm.addRoutes(routes...)
 }
 
 // StartRouteWatcher subscribes to the traffic manager's WatchNamespaceRoutes stream

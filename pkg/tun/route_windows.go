@@ -88,3 +88,9 @@ func deleteTunRoutes(tunName string, routes ...types.Route) error {
 	}
 	return nil
 }
+
+// listTunRoutes has nothing to report on Windows: routes are bound to the interface LUID and
+// the source address is chosen at transmit time. See the doc comment on ListRoutes.
+func listTunRoutes(string) ([]types.Route, error) {
+	return nil, nil
+}
