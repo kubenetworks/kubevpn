@@ -112,11 +112,21 @@ calling `runDaemon` for whichever is absent.
 `runDaemon(exe, isSudo)`:
 1. Short-circuit if `GetClient` already succeeds.
 2. Remove any stale PID file.
-3. Launch via `pkg/daemon/elevate` (see [34-privilege-escalation.md](34-privilege-escalation.md)):
-   - sudo + not admin → `RunCmdWithElevated(exe, ["daemon","--sudo"])` (UAC/sudo prompt)
-   - sudo + admin → `RunCmd(exe, ["daemon","--sudo"])`
-   - user → `RunCmd(exe, ["daemon"])`
-4. Poll for the PID file every **50ms** until it appears, then re-acquire the client.
+3. Call the platform-specific `startDaemonProcess`, which launches via `pkg/daemon/elevate`
+   (see [34-privilege-escalation.md](34-privilege-escalation.md)):
+   - sudo + not admin → `RunCmdWithElevated(exe, ["daemon","--sudo"], output)` (UAC/sudo prompt)
+   - sudo + admin → `RunCmd(exe, ["daemon","--sudo"], output)`
+   - user → `RunCmd(exe, ["daemon"], output)`
+   - Unix supplies a private regular startup-log file; Windows passes nil and keeps ShellExecute.
+4. After launch/authentication returns, wait for the PID file every **50ms**, with a **30-second**
+   maximum (or the caller's earlier deadline). Cancellation and filesystem errors return directly;
+   a failed wait does not proceed to client acquisition. On success, re-acquire the client.
+
+Launch/readiness/client-acquisition failures include the daemon role and diagnostic log paths.
+The readiness limit starts **after** sudo authentication, not while a user enters their password.
+This is a PID-wait limit, **not** a complete `StartupDaemon` deadline: existing `GetClient`
+health/version probes still use their own background context. A readiness timeout does not kill
+an independently running daemon.
 
 ## 8. Logging & pprof
 

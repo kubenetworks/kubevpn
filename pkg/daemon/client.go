@@ -16,7 +16,6 @@ import (
 	_ "google.golang.org/grpc/resolver/passthrough"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/elevate"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
@@ -200,31 +199,49 @@ func runDaemon(ctx context.Context, exe string, isSudo bool) error {
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
+	role := "user"
 	if isSudo {
-		if !elevate.IsAdmin() {
-			err = elevate.RunCmdWithElevated(exe, []string{"daemon", "--sudo"})
-		} else {
-			err = elevate.RunCmd(exe, []string{"daemon", "--sudo"})
-		}
-	} else {
-		err = elevate.RunCmd(exe, []string{"daemon"})
+		role = "root"
+	}
+	startupLogPath, err := startDaemonProcess(exe, isSudo)
+	diagnostics := "log: " + config.GetDaemonLogPath(isSudo)
+	if startupLogPath != "" {
+		diagnostics = "startup log: " + startupLogPath + "; " + diagnostics
 	}
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to launch %s daemon (%s): %w", role, diagnostics, err)
 	}
-	const pidPollInterval = 50 * time.Millisecond
-	for ctx.Err() == nil {
-		time.Sleep(pidPollInterval)
-		if _, err = os.Stat(pidPath); !errors.Is(err, os.ErrNotExist) {
-			break
-		}
+	// Authentication has finished. Bound only PID readiness, not the lifetime
+	// of the detached process or GetClient's existing RPC probes.
+	pidCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if err = waitForDaemonPID(pidCtx, pidPath); err != nil {
+		return fmt.Errorf("failed to wait for %s daemon pid (%s): %w", role, diagnostics, err)
 	}
 
 	_, err = GetClient(isSudo)
 	if err != nil {
-		return fmt.Errorf("failed to get daemon server client: %w", err)
+		return fmt.Errorf("failed to get %s daemon server client (%s): %w", role, diagnostics, err)
 	}
 	return nil
+}
+
+func waitForDaemonPID(ctx context.Context, pidPath string) error {
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if _, err := os.Stat(pidPath); !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 // GetTCPClient dials the daemon Unix socket and returns a raw net.Conn for HTTP/TCP traffic.
