@@ -40,7 +40,9 @@ func newTestEnv(t *testing.T) *testEnv {
 		},
 	)
 
-	s, err := NewTunConfigServer(context.Background(), clientset, "test-ns")
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	s, err := NewTunConfigServer(ctx, clientset, "test-ns")
 	if err != nil {
 		t.Fatalf("NewTunConfigServer: %v", err)
 	}

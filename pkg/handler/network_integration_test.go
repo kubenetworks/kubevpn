@@ -22,10 +22,21 @@ import (
 type networkTestEnv struct {
 	server     *xds.TunConfigServer
 	grpcServer *grpc.Server
+	clientset  *fake.Clientset
+	listener   net.Listener
 	port       int
 }
 
 func newNetworkTestEnv(t *testing.T) *networkTestEnv {
+	t.Helper()
+	env := newPendingNetworkTestEnv(t)
+	go env.grpcServer.Serve(env.listener)
+	return env
+}
+
+// newPendingNetworkTestEnv lets lifecycle tests withhold gRPC readiness while
+// keeping the same listening address throughout an outage and recovery.
+func newPendingNetworkTestEnv(t *testing.T, opts ...grpc.ServerOption) *networkTestEnv {
 	t.Helper()
 	clientset := fake.NewSimpleClientset(
 		&v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "test-ns", UID: "uid-net-test"}},
@@ -37,12 +48,14 @@ func newNetworkTestEnv(t *testing.T) *networkTestEnv {
 			},
 		},
 	)
-	s, err := xds.NewTunConfigServer(context.Background(), clientset, "test-ns")
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	s, err := xds.NewTunConfigServer(ctx, clientset, "test-ns")
 	if err != nil {
 		t.Fatalf("NewTunConfigServer: %v", err)
 	}
 
-	grpcServer := grpc.NewServer()
+	grpcServer := grpc.NewServer(opts...)
 	rpc.RegisterTunConfigServiceServer(grpcServer, s)
 
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
@@ -50,10 +63,9 @@ func newNetworkTestEnv(t *testing.T) *networkTestEnv {
 		t.Fatalf("listen: %v", err)
 	}
 	port := lis.Addr().(*net.TCPAddr).Port
-	go grpcServer.Serve(lis)
-
+	t.Cleanup(func() { _ = lis.Close() })
 	t.Cleanup(grpcServer.Stop)
-	return &networkTestEnv{server: s, grpcServer: grpcServer, port: port}
+	return &networkTestEnv{server: s, grpcServer: grpcServer, clientset: clientset, listener: lis, port: port}
 }
 
 func newTestNetworkManager(t *testing.T, env *networkTestEnv, ownerID string) *NetworkManager {

@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -141,6 +142,8 @@ func (nm *NetworkManager) listRoutes() ([]types.Route, error) {
 const (
 	// ipWatcherRetryInterval is the delay before reconnecting the cluster IP watcher.
 	ipWatcherRetryInterval = 10 * time.Second
+	// watcherDialTimeout bounds readiness only; watch streams retain the session context.
+	watcherDialTimeout = 30 * time.Second
 	// portForwardPodListTimeout bounds listing the traffic-manager pod before a port-forward session.
 	portForwardPodListTimeout = 10 * time.Second
 	// portForwardReconnectDelay is the initial/minimum pause between port-forward reconnect attempts.
@@ -273,6 +276,7 @@ func (nm *NetworkManager) Start(ctx context.Context) error {
 	nm.controlPlaneLocalPort = controlPlanePort
 
 	plog.StepStart(nm.ctx, "Forwarding ports")
+	plog.G(nm.ctx).Debugf("Allocated local ports: TCP=%d, UDP=%d, xDS=%d", gvisorTCPForwardPort, gvisorUDPForwardPort, controlPlanePort)
 	portPair := []string{
 		fmt.Sprintf("%d:%d", gvisorTCPForwardPort, config.PortTCP),
 		fmt.Sprintf("%d:%d", gvisorUDPForwardPort, config.PortUDP),
@@ -524,24 +528,38 @@ func (nm *NetworkManager) ChangeTunIP(ctx context.Context, newIPv4, newIPv6 *net
 // TunConfigService and watches for IP changes. When a change is detected, it calls ChangeTunIP.
 // Uses the OwnerID from NetworkConfig for identification.
 func (nm *NetworkManager) StartIPWatcher(ctx context.Context) {
+	if ctx.Err() != nil {
+		return
+	}
 	if nm.cfg.OwnerID == "" {
+		plog.G(ctx).Debug("[IPWatcher] OwnerID is empty; skipping IP watcher")
 		return
 	}
 	go nm.watchTunIPFromXDS(ctx)
 }
 
 func (nm *NetworkManager) watchTunIPFromXDS(ctx context.Context) {
+	if ctx.Err() != nil {
+		return
+	}
 	if nm.controlPlaneLocalPort == 0 {
+		plog.G(ctx).Warn("[IPWatcher] local xDS port is 0; IP watcher will not start")
 		return
 	}
 	target := fmt.Sprintf("127.0.0.1:%d", nm.controlPlaneLocalPort)
+	plog.G(ctx).Infof("[IPWatcher] Starting IP watcher for namespace %q at %s", nm.cfg.ManagerNamespace, target)
+	warnings := plog.NewThrottle(time.Minute)
 
 	var currentVersion int64
 
 	for ctx.Err() == nil {
 		err := nm.doWatchTunIP(ctx, target, &currentVersion)
 		if err != nil && ctx.Err() == nil {
-			plog.G(ctx).Debugf("[IPWatcher] Watch disconnected: %v, retrying in 10s", err)
+			if warnings.Allow("retry") {
+				plog.G(ctx).Warnf("[IPWatcher] %s (namespace %q) disconnected: %v, retrying in %s", target, nm.cfg.ManagerNamespace, err, ipWatcherRetryInterval)
+			} else {
+				plog.G(ctx).Debugf("[IPWatcher] %s (namespace %q) disconnected: %v, retrying in %s", target, nm.cfg.ManagerNamespace, err, ipWatcherRetryInterval)
+			}
 		}
 		select {
 		case <-time.After(ipWatcherRetryInterval):
@@ -552,14 +570,19 @@ func (nm *NetworkManager) watchTunIPFromXDS(ctx context.Context) {
 }
 
 func (nm *NetworkManager) doWatchTunIP(ctx context.Context, target string, currentVersion *int64) error {
-	conn, err := grpc.DialContext(ctx, target,
+	plog.G(ctx).Debugf("[IPWatcher] Attempting to dial xDS at %s (namespace %q, timeout %s)", target, nm.cfg.ManagerNamespace, watcherDialTimeout)
+	started := time.Now()
+	dialCtx, cancel := context.WithTimeout(ctx, watcherDialTimeout)
+	conn, err := grpc.DialContext(dialCtx, target,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithBlock(),
 	)
+	cancel()
 	if err != nil {
-		return fmt.Errorf("dial %s: %w", target, err)
+		return fmt.Errorf("dial %s after %s: %w", target, time.Since(started), err)
 	}
 	defer conn.Close()
+	plog.G(ctx).Debugf("[IPWatcher] connected to xDS at %s in %s", target, time.Since(started))
 
 	client := rpc.NewTunConfigServiceClient(conn)
 
@@ -567,17 +590,23 @@ func (nm *NetworkManager) doWatchTunIP(ctx context.Context, target string, curre
 	// disconnect the server may have reaped our lease (and won't push anything), so
 	// we proactively GetTunIP. ExcludeIPs omits our OWN current TUN IP so the server
 	// can hand it back (sticky via lastIPs) while still avoiding sibling/local IPs.
-	if resp, gerr := client.GetTunIP(ctx, &rpc.TunIPRequest{
+	callCtx, callCancel := context.WithTimeout(ctx, rentIPCallTimeout)
+	resp, gerr := client.GetTunIP(callCtx, &rpc.TunIPRequest{
 		OwnerID:    nm.cfg.OwnerID,
 		Namespace:  nm.cfg.ManagerNamespace,
 		ExcludeIPs: nm.excludesForReassert(),
 		Hostname:   nm.cfg.Hostname,
-	}); gerr == nil {
+	})
+	callCancel()
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if gerr == nil {
 		v4, v6 := parseTunIPResponse(resp)
 		nm.applyPushedTunIP(ctx, client, v4, v6)
 		*currentVersion = resp.Version
 	} else {
-		plog.G(ctx).Debugf("[IPWatcher] self-heal GetTunIP failed: %v", gerr)
+		plog.G(ctx).Warnf("[IPWatcher] self-heal GetTunIP at %s (namespace %q) failed: %v; continuing to WatchTunIP", target, nm.cfg.ManagerNamespace, gerr)
 	}
 
 	stream, err := client.WatchTunIP(ctx, &rpc.TunIPRequest{
@@ -1593,25 +1622,40 @@ func (nm *NetworkManager) AddRouteCIDR(cidrs ...string) error {
 	return nm.addRoutes(routes...)
 }
 
+var errRouteDiscoveryDisabled = errors.New("server route discovery disabled (no RBAC); using CIDR-only routing")
+
 // StartRouteWatcher subscribes to the traffic manager's WatchNamespaceRoutes stream
 // for the workload namespace and applies pushed pod route prefixes (to the route
 // table) and service records (to DNS), replacing the former client-side cluster-wide
 // pod/service informers. It runs in the background under ctx; on any failure it
 // degrades to CIDR-only routing (the cluster CIDRs are already routed).
 func (nm *NetworkManager) StartRouteWatcher(ctx context.Context) {
+	if ctx.Err() != nil {
+		return
+	}
 	if nm.controlPlaneLocalPort == 0 {
+		plog.G(ctx).Warn("[RouteWatcher] local xDS port is 0; route watcher will not start")
 		return
 	}
 	go nm.watchNamespaceRoutes(ctx)
 }
 
 func (nm *NetworkManager) watchNamespaceRoutes(ctx context.Context) {
+	if ctx.Err() != nil {
+		return
+	}
 	target := fmt.Sprintf("127.0.0.1:%d", nm.controlPlaneLocalPort)
+	plog.G(ctx).Infof("[RouteWatcher] Starting route watcher for namespace %q at %s", nm.cfg.WorkloadNamespace, target)
+	warnings := plog.NewThrottle(time.Minute)
 	var version int64
 	for ctx.Err() == nil {
 		err := nm.doWatchNamespaceRoutes(ctx, target, &version)
 		if err != nil && ctx.Err() == nil {
-			plog.G(ctx).Debugf("[RouteWatcher] disconnected: %v, retrying in %s", err, ipWatcherRetryInterval)
+			if warnings.Allow("retry") {
+				plog.G(ctx).Warnf("[RouteWatcher] %s (namespace %q) disconnected: %v, retrying in %s", target, nm.cfg.WorkloadNamespace, err, ipWatcherRetryInterval)
+			} else {
+				plog.G(ctx).Debugf("[RouteWatcher] %s (namespace %q) disconnected: %v, retrying in %s", target, nm.cfg.WorkloadNamespace, err, ipWatcherRetryInterval)
+			}
 		}
 		select {
 		case <-time.After(ipWatcherRetryInterval):
@@ -1622,15 +1666,20 @@ func (nm *NetworkManager) watchNamespaceRoutes(ctx context.Context) {
 }
 
 func (nm *NetworkManager) doWatchNamespaceRoutes(ctx context.Context, target string, version *int64) error {
-	conn, err := grpc.DialContext(ctx, target,
+	plog.G(ctx).Debugf("[RouteWatcher] Attempting to dial xDS at %s (namespace %q, timeout %s)", target, nm.cfg.WorkloadNamespace, watcherDialTimeout)
+	started := time.Now()
+	dialCtx, cancel := context.WithTimeout(ctx, watcherDialTimeout)
+	conn, err := grpc.DialContext(dialCtx, target,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithDefaultCallOptions(grpc.UseCompressor(gzip.Name)),
 		grpc.WithBlock(),
 	)
+	cancel()
 	if err != nil {
-		return fmt.Errorf("dial %s: %w", target, err)
+		return fmt.Errorf("dial %s after %s: %w", target, time.Since(started), err)
 	}
 	defer conn.Close()
+	plog.G(ctx).Debugf("[RouteWatcher] connected to xDS at %s in %s", target, time.Since(started))
 
 	client := rpc.NewTunConfigServiceClient(conn)
 	stream, err := client.WatchNamespaceRoutes(ctx, &rpc.NamespaceRoutesRequest{Namespace: nm.cfg.WorkloadNamespace})
@@ -1654,10 +1703,14 @@ func (nm *NetworkManager) doWatchNamespaceRoutes(ctx context.Context, target str
 			return err
 		}
 		if !resp.Enabled {
-			// Manager lacks RBAC to watch this namespace. Degrade to CIDR-only routing.
-			plog.G(ctx).Warnf("[RouteWatcher] server route discovery disabled for namespace %q (no RBAC); using CIDR-only routing", nm.cfg.WorkloadNamespace)
-			<-ctx.Done()
-			return nil
+			// Keep the existing routes/hosts and retry, so corrected permissions
+			// become effective without recreating the entire VPN connection.
+			return fmt.Errorf("namespace %q: %w", nm.cfg.WorkloadNamespace, errRouteDiscoveryDisabled)
+		}
+		if resp.Snapshot {
+			plog.G(ctx).Infof("[RouteWatcher] Received snapshot for namespace %q: %d services, %d pod CIDRs", nm.cfg.WorkloadNamespace, len(resp.UpsertedServices), len(resp.AddedPodCIDRs))
+		} else {
+			plog.G(ctx).Debugf("[RouteWatcher] Received delta for namespace %q: version=%d, %d service upserts, %d service removals", nm.cfg.WorkloadNamespace, resp.Version, len(resp.UpsertedServices), len(resp.RemovedServiceKeys))
 		}
 		applyRouteFrame(resp, services,
 			func(cidrs []string) {

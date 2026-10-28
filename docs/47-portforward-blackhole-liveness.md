@@ -133,6 +133,21 @@ hot-update pause, logged) until data-plane liveness or pod lifecycle triggers a 
 `config.ErrXDSNotServing` and its exit-code mapping are kept (defined sentinel / exit-code contract),
 now without a producer.
 
+### Watcher connection bounds (without tunnel teardown)
+
+`RouteWatcher` and `IPWatcher` bound each blocking gRPC dial to **30 seconds**, then retry after
+**10 seconds** while the session is active. Their first failure is visible at Warn without
+`--debug`; repeated warnings are limited to once per minute per watcher, with intervening attempts
+at Debug. Debug also includes dial readiness and elapsed time. Cancellation is a normal exit.
+
+IPWatcher's reconnect reassertion (`GetTunIP`) has its own **10-second** call deadline. Failure is
+logged and retains the existing fallback to `WatchTunIP`. Proposal confirmation/decline/rejection
+RPCs are separate operations and are not bounded by this initial reassertion deadline.
+
+These deadlines do not expire the watch streams themselves or detect a black-hole that develops
+after a stream has connected. They restore control to the watcher retry loop during connection
+establishment, not to the whole-tunnel reconnect path; ICMP liveness remains authoritative.
+
 ### 4.4 Bounded rentIP so startup can't hang (`pkg/handler/network.go`)
 
 With the xDS probe no longer cycling a black-holed startup session, `rentIP` drops `grpc.WithBlock`

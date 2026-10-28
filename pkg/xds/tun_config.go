@@ -211,7 +211,7 @@ func NewTunConfigServer(ctx context.Context, clientset kubernetes.Interface, nam
 		reapedAt:        make(map[string]time.Time),
 		pendingProposal: make(map[string]proposal),
 	}
-	s.routes = newRouteBroadcaster(clientset)
+	s.routes = newRouteBroadcaster(ctx, clientset)
 	s.loadAllocs(ctx)
 	// Reclaim any bitmap bits left orphaned by a prior crash before serving.
 	s.scrubOrphanBits(ctx)
