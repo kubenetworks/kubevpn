@@ -16,8 +16,8 @@ called very early in process startup, before any client or kube config exists.
 | Function | Platform | Purpose |
 |---|---|---|
 | `IsAdmin() bool` | both | Is the current process root/admin? |
-| `RunCmd(exe, args)` | both | Launch a detached child **without** elevation |
-| `RunCmdWithElevated(exe, args)` | both | Launch a detached child **with** elevation |
+| `RunCmd(exe, args, output)` | both | Launch a detached child **without** elevation |
+| `RunCmdWithElevated(exe, args, output)` | both | Launch a detached child **with** elevation |
 | `RunWithElevated()` | both | Re-exec **the current command** (`os.Args`) elevated, then wait |
 | `RunWithElevatedInnerExec()` | windows | Alternate elevation via PowerShell `Start -Verb Runas` |
 | `Kill(cmd)` | windows | `TASKKILL /T /F /PID` a process tree |
@@ -37,12 +37,20 @@ output instead of polluting stdout.
 
 ### Unix (`elevate_others.go`)
 
+- Both connect stdin to the null device and stdout/stderr to `output`, a regular `*os.File`
+  (nil means the null device), **before spawning**. Both append `LOGGER_DISCARD=1`.
 - `RunCmdWithElevated`: `sudo --preserve-env=HOME --background <exe> <args...>`. `--preserve-env=HOME`
-  keeps `$HOME` so the elevated process finds `~/.kube` / `~/.kubevpn`; `--background` detaches.
-- `RunCmd`: runs `<exe>` directly with `SysProcAttr{Setpgid: true}` so the child gets its own
-  process group and survives the parent.
-- Both wire stdio through, append `LOGGER_DISCARD=1`, `cmd.Start()`, then `cmd.Process.Release()`
-  to fully detach (no zombie, no parent wait).
+  keeps `$HOME` so the elevated process finds `~/.kube` / `~/.kubevpn`. `cmd.Run()` waits for sudo's
+  authentication and background-launch phase, not the daemon lifetime, and returns launch errors.
+  Sudo retains the foreground process group and authenticates through the controlling `/dev/tty`,
+  independently of redirected stdio. There is no extra `sudo -v`/`sudo -n` validation step to alter
+  command-specific `NOPASSWD` or timestamp policy.
+- `RunCmd`: runs `<exe>` directly with `SysProcAttr{Setpgid: true}`, `cmd.Start()`, then
+  `cmd.Process.Release()`. Releasing the process handle does **not** close inherited descriptors
+  or reap the child; explicit stream redirection is what prevents caller-pipe EOF hangs.
+- The daemon caller creates a private startup-log file and atomically replaces the prior pathname
+  before spawning, rather than following a symlink or opening a root-owned old log. It closes its
+  own descriptor after launch. Both daemon and sudo monitor inherit only the detached streams.
 
 ### Windows (`elevate_windows.go`)
 
@@ -70,13 +78,15 @@ directory is not writable.
 
 | Caller | Call | Why |
 |---|---|---|
-| `daemon/client.go` `runDaemon` (sudo, not admin) | `RunCmdWithElevated(exe, ["daemon","--sudo"])` | start the root daemon with elevation |
-| `daemon/client.go` `runDaemon` (sudo, already admin) | `RunCmd(exe, ["daemon","--sudo"])` | already root, no prompt needed |
-| `daemon/client.go` `runDaemon` (user) | `RunCmd(exe, ["daemon"])` | unprivileged user daemon |
+| `daemon/client_start_*.go` `startDaemonProcess` (sudo, not admin) | `RunCmdWithElevated(exe, ["daemon","--sudo"], output)` | start the root daemon with elevation |
+| `daemon/client_start_*.go` `startDaemonProcess` (sudo, already admin) | `RunCmd(exe, ["daemon","--sudo"], output)` | already root, no prompt needed |
+| `daemon/client_start_*.go` `startDaemonProcess` (user) | `RunCmd(exe, ["daemon"], output)` | unprivileged user daemon |
 | `upgrade/upgrade.go` `elevatePermission` | `RunWithElevated()` | re-exec the upgrade with write access |
 
-After launching the daemon, `runDaemon` polls the PID file (50ms ticks) until it appears, then
-re-acquires the gRPC client — see [35-daemon-bootstrap.md](35-daemon-bootstrap.md).
+After launching the daemon, `runDaemon` polls the PID file (50ms ticks, maximum 30 seconds,
+respecting caller cancellation) before re-acquiring the gRPC client. Errors identify the startup
+and structured logs — see [35-daemon-bootstrap.md](35-daemon-bootstrap.md). Windows ignores the
+output-file parameter and retains its existing UAC/ShellExecute behavior.
 
 ## 7. Related Files
 

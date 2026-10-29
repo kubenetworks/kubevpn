@@ -10,6 +10,20 @@ KubeVPN runs as three processes: **CLI** (user-facing command), **User Daemon** 
 | User/Root Daemon | Full structured log | `2006-01-02 15:04:05.000 file.go:42 info: message` | log file (lumberjack) |
 | Daemon → CLI | Progress streamed to user | `message\n` | gRPC stream → CLI stdout |
 
+### Detached Unix process streams
+
+Before launching either the daemon or sudo, the CLI redirects stdin to the null device and
+stdout/stderr to a private **0600 regular file**, `~/.kubevpn/log/user_daemon.startup.log` or
+`root_daemon.startup.log`. This includes sudo's background monitor: no long-lived process keeps
+CLI output pipes open after the foreground command exits. Sudo authentication uses the controlling
+terminal; normal CLI progress continues over gRPC.
+
+These startup logs capture raw output (including early panics and command errors) separately from
+the rotating structured logs. They remain available on success and failure and are atomically
+replaced at the next actual launch. They do not rotate, so unusually noisy raw stderr can grow the
+file; routine daemon logging still uses lumberjack. The CLI closes its copy of the descriptor after
+launch, but the child retains its own. See [35-daemon-bootstrap.md](35-daemon-bootstrap.md).
+
 ## Architecture
 
 ```
