@@ -75,8 +75,10 @@ func TestReadFromConn_HeartbeatReplyMarksAndDrops(t *testing.T) {
 	}
 	go slot.readFromConn(ctx, serverUDP, errChanOf())
 
-	// 1) Heartbeat echo reply from the gateway → recorded + dropped.
-	reply := buildICMPEchoReplyV4(config.RouterIP, net.IPv4(198, 18, 0, 2))
+	// 1) A genuinely sent heartbeat echoed by gVisor → recorded + dropped.
+	// An arbitrary application ping to the gateway must no longer prime health.
+	wire := newProbeWire(t, stats)
+	reply := wire.echo(wire.send(false))
 	clientSide.Write(frameDatagram(0, reply))
 
 	deadline := time.After(2 * time.Second)

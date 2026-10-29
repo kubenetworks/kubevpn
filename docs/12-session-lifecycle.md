@@ -2,7 +2,7 @@
 
 ## Overview
 
-KubeVPN daemon actions (Connect, Sync) use `context.Context` to manage the lifecycle of SSH tunnels and VPN connections. The `SessionLifecycle` struct centralizes the session context + teardown, replacing the previous ad-hoc pattern of scattered `ctx/cancel` calls. Teardown is entirely context-cancellation driven — daemon actions no longer materialize temp kubeconfig files (see [15-ssh-architecture.md](15-ssh-architecture.md); kubeconfig stays in memory as bytes), so there is no cleanup registry.
+KubeVPN daemon actions (Connect, Sync) use `context.Context` to manage the lifecycle of SSH tunnels and VPN connections. The `SessionLifecycle` struct centralizes the session context + teardown, replacing the previous ad-hoc pattern of scattered `ctx/cancel` calls. `SessionLifecycle.Teardown` cancels context and detaches the logger; it is not a join barrier. The separate `SessionBase`/`SyncOptions` rollback registry and `NetworkManager.Stop` own resource cleanup and joined shutdown. Daemon actions keep kubeconfig in memory, with no temp kubeconfig file to remove (see [15-ssh-architecture.md](15-ssh-architecture.md)).
 
 ## Why Not `resp.Context()`?
 
@@ -48,8 +48,9 @@ type SessionLifecycle struct {
 
 ### 1. Connect — Sudo Daemon (Data Plane)
 
-No SSH tunnel. Kubeconfig is built in-process from bytes (`util.InitFactoryByBytes`) —
-no temp kubeconfig file is written.
+Kubeconfig is built in-process from bytes (`util.InitFactoryByBytes`), without a temp file.
+The root daemon can also own SSH **data-plane** forwarding to the manager ClusterIP;
+this is separate from the user daemon's SSH API-server tunnel.
 
 ```
 session := NewSessionLifecycle(logger)
@@ -60,12 +61,12 @@ go grpcutil.ListenCancel(resp, session.Cancel)    ← client cancel → session 
 ds.InitClient(InitFactoryByBytes(req.KubeconfigBytes, ns))  ← Factory from bytes, no file
 ds.DoConnect(session.Ctx)                     ← DataSession, root daemon
     └── ds.ctx = WithCancel(session.Ctx)      ← internal lifecycle
-           ├── portForward(ds.ctx)
-           ├── startLocalTunServer(ds.ctx)
-           ├── addRouteDynamic(ds.ctx)
-           └── setupDNS(ds.ctx)
+           └── NetworkManager.Start(ds.ctx)
+                  ├── transport supervisor (SSH or port-forward generation)
+                  ├── TUN + current-generation heartbeat readiness (60s startup budget)
+                  └── network monitor, routes and DNS
 
-Teardown: session.Cancel() → ds.ctx cancelled → TUN/DNS/routes stop
+Teardown: cancellation requests shutdown; NetworkManager.Stop joins owned workers/resources
 ```
 
 ### 2. Connect — User Daemon (Control Plane + SSH)
@@ -141,9 +142,16 @@ ConnectOptions.Cleanup() — user daemon (ControlSession), ALWAYS control-plane:
 
 DataSession.Cleanup() — root daemon, ALWAYS data-plane:
     1. Execute rollback funcs
-    2. nm.Stop() → cancel DNS, cancel context
-    3. Context cancellation → stops TUN, port-forward, routes
+    2. nm.Stop() → reject new workers/events, cancel parent context
+    3. Retire/join active transport; wait startupDone, then join TUN handlers/workers
+    4. Clear DNS/state after joins
 ```
+
+`Stop` is idempotent and serializes worker admission with shutdown. Each generation owns
+joinable SSH/port-forward handles plus pending and returned data/xDS connections; late dials
+cannot publish after retirement. TUN serving routines join before their final queue drain.
+Terminal transport errors cancel the manager; `DataSession` observes cancellation outside
+the supervisor and runs cleanup, avoiding a supervisor self-join.
 
 ## Before & After
 

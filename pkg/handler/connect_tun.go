@@ -2,37 +2,80 @@ package handler
 
 import (
 	"context"
+	"net"
+	"sync"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/core"
 )
 
-func Run(ctx context.Context, servers []core.Server) error {
-	errChan := make(chan error, len(servers))
-	for i := range servers {
-		go func(i int) {
-			errChan <- func() error {
-				svr := servers[i]
-				defer svr.Listener.Close()
-				go func() {
-					<-ctx.Done()
-					svr.Listener.Close()
-				}()
-				for ctx.Err() == nil {
-					conn, err := svr.Listener.Accept()
-					if err != nil {
-						return err
-					}
-					go svr.Handler.Handle(ctx, conn)
-				}
-				return ctx.Err()
-			}()
-		}(i)
-	}
+// A TUN handler exiting is terminal even if its listener's Accept is still
+// blocked. Cancel the manager; its external owner performs joined cleanup.
+type tunCompletionHandler struct {
+	core.Handler
+	cancel context.CancelFunc
+}
 
-	select {
-	case err := <-errChan:
-		return err
-	case <-ctx.Done():
-		return ctx.Err()
+func (h *tunCompletionHandler) Handle(ctx context.Context, c net.Conn) {
+	defer h.cancel()
+	h.Handler.Handle(ctx, c)
+}
+
+// Run owns both the accept loops and accepted handlers. Cancellation closes the
+// listeners and connections, then waits for actual handler completion.
+func Run(ctx context.Context, servers []core.Server) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var accepts, handlers sync.WaitGroup
+	var mu sync.Mutex
+	active := map[net.Conn]struct{}{}
+	errors := make(chan error, len(servers))
+	for _, server := range servers {
+		accepts.Add(1)
+		go func(svr core.Server) {
+			defer accepts.Done()
+			for {
+				c, err := svr.Listener.Accept()
+				if err != nil {
+					errors <- err
+					return
+				}
+				mu.Lock()
+				if ctx.Err() != nil {
+					mu.Unlock()
+					c.Close()
+					return
+				}
+				active[c] = struct{}{}
+				handlers.Add(1)
+				mu.Unlock()
+				go func() {
+					defer handlers.Done()
+					defer func() { c.Close(); mu.Lock(); delete(active, c); mu.Unlock() }()
+					svr.Handler.Handle(ctx, c)
+				}()
+			}
+		}(server)
 	}
+	var err error
+	select {
+	case err = <-errors:
+	case <-ctx.Done():
+		err = ctx.Err()
+	}
+	cancel()
+	for _, svr := range servers {
+		svr.Listener.Close()
+	}
+	accepts.Wait()
+	mu.Lock()
+	conns := make([]net.Conn, 0, len(active))
+	for c := range active {
+		conns = append(conns, c)
+	}
+	mu.Unlock()
+	for _, c := range conns {
+		c.Close()
+	}
+	handlers.Wait()
+	return err
 }

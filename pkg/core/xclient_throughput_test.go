@@ -29,7 +29,9 @@ package core
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -257,6 +259,133 @@ func (h *xclientHarness) runFlows(b *testing.B, dstIP string, chunkSize, flows i
 	if got := h.sinkBytes.Load() - startSink; got < total {
 		b.Fatalf("A->%s (%d flows): sink received %d of %d bytes (stalled / lost)", dstIP, flows, got, total)
 	}
+}
+
+// BenchmarkCrossClientMixed reuses the production cross-client harness without
+// changing the baseline benchmark. Seven bulk flows compete with a serialized
+// request/echo flow; percentiles are actual round-trip samples, not write latency.
+func BenchmarkCrossClientMixed(b *testing.B) {
+	silenceDataPlaneLogs()
+	h := newXClientHarness(b, 0)
+	defer h.close()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			c, e := ln.Accept()
+			if e != nil {
+				return
+			}
+			go func() { defer c.Close(); _, _ = io.Copy(c, c) }()
+		}
+	}()
+	addr := tcpip.FullAddress{NIC: 1, Addr: tcpip.AddrFromSlice(net.ParseIP(xclientBIP).To4()), Port: uint16(ln.Addr().(*net.TCPAddr).Port)}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	request, err := gonet.DialContextTCP(ctx, h.clientA, addr, ipv4.ProtocolNumber)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer request.Close()
+	bulkAddr := addr
+	bulkAddr.Port = h.sinkPort
+	bulk := make([]*gonet.TCPConn, 7)
+	done := make(chan struct{}, len(bulk))
+	for i := range bulk {
+		bulk[i], err = gonet.DialContextTCP(ctx, h.clientA, bulkAddr, ipv4.ProtocolNumber)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+	defer func() {
+		for _, c := range bulk {
+			c.Close()
+		}
+		for range bulk {
+			<-done
+		}
+	}()
+	for _, c := range bulk {
+		go func(c *gonet.TCPConn) {
+			defer func() { done <- struct{}{} }()
+			data := make([]byte, 32*1024)
+			for {
+				if _, e := c.Write(data); e != nil {
+					return
+				}
+			}
+		}(c)
+	}
+	samples := make([]time.Duration, b.N)
+	payload := make([]byte, 64)
+	reply := make([]byte, 64)
+	startBytes := h.sinkBytes.Load()
+	b.ResetTimer()
+	start := time.Now()
+	for i := range samples {
+		_ = request.SetDeadline(time.Now().Add(5 * time.Second))
+		sent := time.Now()
+		if _, err := request.Write(payload); err != nil {
+			b.Fatal(err)
+		}
+		if _, err := io.ReadFull(request, reply); err != nil {
+			b.Fatal(err)
+		}
+		samples[i] = time.Since(sent)
+	}
+	elapsed := time.Since(start)
+	b.StopTimer()
+	slices.Sort(samples)
+	if len(samples) > 0 {
+		b.ReportMetric(float64(samples[(len(samples)-1)*95/100].Nanoseconds())/1000, "request-p95-us")
+		b.ReportMetric(float64(samples[(len(samples)-1)*99/100].Nanoseconds())/1000, "request-p99-us")
+	}
+	b.ReportMetric(float64(h.sinkBytes.Load()-startBytes)/elapsed.Seconds()/1e6, "bulk-MB/s")
+}
+
+// BenchmarkFramedBatchWrites measures deterministic writes per frame over a real
+// wrapped TCP socket; the wrapper deliberately takes the aggregation (TLS) path.
+func BenchmarkFramedBatchWrites(b *testing.B) {
+	raw, peer := batchTCPPair(b, false)
+	conn := &batchTestConn{Conn: raw, omitSizes: true}
+	drained := make(chan struct{})
+	go func() { io.Copy(io.Discard, peer); close(drained) }()
+	defer func() { raw.Close(); <-drained }()
+	q := make(chan *Packet, 32)
+	var packets []*Packet
+	for i := 0; i < 32; i++ {
+		p := batchPacket(1500, i)
+		p.release()
+		packets = append(packets, p)
+	}
+	defer func() {
+		for _, p := range packets {
+			p.release()
+		}
+	}()
+	var batch packetBatch
+	var writer frameBatchWriter
+	b.SetBytes(32 * 1500)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for _, p := range packets {
+			p.acquire()
+			q <- p
+		}
+		if !batch.next(context.Background(), q, 32, nil) {
+			b.Fatal("empty burst")
+		}
+		_, err := writer.write(conn, batch.packets[:batch.n])
+		batch.release()
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+	b.StopTimer()
+	b.ReportMetric(float64(conn.calls)/float64(b.N*32), "writes/frame")
 }
 
 // BenchmarkCrossClientThroughput compares throughput of A->B (cross-client: exercises B's single

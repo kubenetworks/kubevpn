@@ -27,7 +27,6 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/xds"
 )
 
-
 // cpEnv is a real in-process xds: TunConfigServer + gRPC on a fixed port,
 // backed by a fake clientset whose ConfigMap is the editable TUN_ALLOCS store.
 type cpEnv struct {
@@ -100,7 +99,7 @@ func (e *cpEnv) restart(t *testing.T, fresh bool) {
 func startOwner(t *testing.T, parent context.Context, env *cpEnv, owner string, used map[string]bool) (*NetworkManager, func()) {
 	t.Helper()
 	nm := newNetworkManager(NetworkConfig{ManagerNamespace: env.ns, OwnerID: owner})
-	nm.controlPlaneLocalPort = env.port
+	seedTransportEndpoint(t, nm, fmt.Sprintf("127.0.0.1:%d", env.port))
 	if err := nm.rentIP(parent); err != nil {
 		t.Fatalf("rentIP %s: %v", owner, err)
 	}

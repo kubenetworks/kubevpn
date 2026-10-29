@@ -97,4 +97,11 @@ func serve(ctx context.Context, dev *tunDevice) {
 	cancel()
 	dev.Close()
 	wg.Wait()
+	// A canceled select can still enqueue into a ready channel after its
+	// consumer's deferred drain. Only now have all device producers joined.
+	if closer, ok := dev.transport.(interface{ close() }); ok {
+		closer.close()
+	}
+	drainPacketChan(dev.tunInbound)
+	drainPacketChan(dev.tunOutbound)
 }

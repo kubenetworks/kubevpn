@@ -16,7 +16,7 @@ pkg/ssh/                       SSH client core library
 ├── sshconfig.go               ~/.ssh/config parsing (GetBastion, resolveProxyJumpChain, ProxyJump chain)
 ├── dial.go                    DialSshRemote/Dial/JumpTo/AliasRecursion/JumpRecursion + timeout constants + wrapDialError
 ├── pool.go                    connPool — single-flight SSH client cache with health-aware eviction
-├── tunnel.go                  PortMapUntil (local port forward) + copyStream
+├── tunnel.go                  StartPortMap/PortMap handle + PortMapUntil wrapper + copyStream
 ├── jump.go                    SshJumpBytes/SshJump/SshJumpAndSetEnv + apiserver reachability probe
 ├── exec.go                    RemoteRun (remote command execution)
 ├── remote_kubeconfig.go       embedRemoteCertFiles — inline remote cert/key/CA path refs over SSH
@@ -181,17 +181,24 @@ calls `SshJumpBytes` then materializes a temp file (auto-deleted on ctx cancel) 
 is used only where a real file is required (child process, container mount, or the
 `KUBECONFIG`/`SSH_JUMP_BY_KUBEVPN` env vars — see `SshJumpAndSetEnv`).
 
-#### 4. Port Forwarding — `PortMapUntil(ctx, conf, remote, local)`
+#### 4. Port Forwarding — `StartPortMap(ctx, conf, remote, local)`
 
-Implements local TCP port forwarding:
+Returns a joinable `*PortMap` with `Addr()`, `Done()`, `Err()` (after Done), and idempotent
+`Stop()`. Port zero allocates an ephemeral listener; listening alone does not prove remote reachability.
 
-- Listens on the `local` port locally
-- Each inbound connection dials the `remote` address through the tunnel's `connPool`
-- Bidirectional data copy via `copyStream`, closes both ends when either direction completes or ctx is cancelled
+- Each accepted connection dials `remote` through the handle's `connPool`
+- `copyStream` closes both ends and joins both copy directions on completion/cancellation
+- `Stop` cancels, closes the listener/active sockets/pool, and waits for forwarding workers
+- `PortMapUntil` remains the asynchronous context-owned compatibility wrapper; it discards the handle
+
+The root data-plane supervisor uses `StartPortMap` handles for all three manager ports, probes
+actual SSH channels before publication, and supplies generation-aware data/gRPC dialers with
+dynamic loopback endpoints. Healthy SSH or port-forward remains sticky; only failure switches
+paths. Authentication/trust failures are terminal, not a reason to bypass policy via fallback.
 
 ##### Connection pool — `connPool` (`pool.go`)
 
-`PortMapUntil` owns one `connPool` for the lifetime of the tunnel. The pool holds a
+Each `PortMap` owns one `connPool` for the lifetime of the tunnel. The pool holds a
 single, lazily-established SSH client (`sshClientWrap`, which couples the client with
 the cancel func scoping its lifetime) and enforces two invariants:
 
@@ -303,10 +310,11 @@ resolveKubeconfigBytes(ctx, jump, kubeconfigBytes, portForward)  // returns []by
  required: `kubevpn run` child process / KUBECONFIG env, via SshJumpAndSetEnv.)
 ```
 
-**Teardown:** When the session context is cancelled (disconnect, daemon exit, user ctrl+c), all resources are cleaned up automatically:
-- SSH client connection closed (via `sshClientWrap.Close()` calling cancel + client.Close)
-- Local listening port closed
-- Temp kubeconfig file deleted (`go func() { <-ctx.Done(); os.Remove(path) }()`)
+**Teardown:** Parent cancellation requests cleanup; it is not itself a join barrier. The root
+supervisor cancels the generation parent first (unblocking in-flight SSH channel opens), closes
+owned connections, then calls each handle's joined `Stop`. `PortMapUntil` callers retain the
+asynchronous context-owned behavior. Only the file-materializing `SshJump` wrapper removes a
+temp kubeconfig on cancellation; daemon byte-based paths have none.
 
 ## Feature 2: SSH Remote Terminal (`kubevpn ssh`)
 
@@ -604,5 +612,5 @@ message SshJump {
 ## Related Design Documents
 
 - `02-dual-daemon.md` — Dual daemon model (resolveKubeconfigBytes runs in user daemon)
-- `12-session-lifecycle.md` — SessionLifecycle (manages SSH tunnel temp file cleanup)
+- `12-session-lifecycle.md` — SessionLifecycle cancellation and separate joined resource cleanup
 - `14-rpc-daemon-mapping.md` — RPC to daemon mapping

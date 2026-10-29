@@ -11,6 +11,27 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
+func TestListenerCloseOwnsQueuedDevice(t *testing.T) {
+	a, b := net.Pipe()
+	defer b.Close()
+	defer a.Close()
+	ln := &tunListener{conns: make(chan net.Conn, 1), closed: make(chan struct{})}
+	ln.conns <- a
+	if err := ln.Close(); err != nil {
+		t.Fatal(err)
+	}
+	b.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+	if _, err := b.Read(make([]byte, 1)); err == nil {
+		t.Fatal("queued device survived Close")
+	} else if e, ok := err.(net.Error); ok && e.Timeout() {
+		t.Fatal("queued device was not closed")
+	}
+	if c, err := ln.Accept(); err == nil {
+		c.Close()
+		t.Fatal("closed listener returned queued device")
+	}
+}
+
 func TestConfigStructConstruction(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -280,7 +301,6 @@ func TestTunConnLocalRemoteAddr(t *testing.T) {
 		t.Fatalf("RemoteAddr().IP = %v, want nil", ipAddr.IP)
 	}
 }
-
 
 // mockConn is a minimal net.Conn implementation for testing the listener logic.
 type mockConn struct {

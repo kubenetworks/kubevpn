@@ -82,7 +82,9 @@ func (svr *Server) Status(ctx context.Context, req *rpc.StatusRequest) (*rpc.Sta
 			result.ProxyList, result.SyncList, err = buildProxyAndSyncStatus(ctx, options, options.GetSync())
 			if err != nil {
 				plog.G(ctx).Errorf("Error generating status: %v", err)
-				result.Status = StatusUnhealthy
+				if result.Status != StatusFailed {
+					result.Status = StatusUnhealthy
+				}
 			}
 			list[i] = result
 		}(i, options)
@@ -152,6 +154,11 @@ func resolveStatus(connect handler.Connection, ips map[string]tunIP, tunUp bool)
 	// heartbeat; the user daemon returns above via the sudo snapshot. Falling back
 	// to the zero time preserves the old control-plane stub behavior.
 	if dp, ok := connect.(handler.DataPlane); ok {
+		// A terminal session can still have a TUN while joined cleanup runs.
+		// Heartbeat staleness alone is not terminal: live recovery stays unhealthy.
+		if ctx := dp.Context(); ctx != nil && ctx.Err() != nil {
+			return StatusFailed
+		}
 		return deriveConnectionStatus(tunUp, dp.GetLastHeartbeat())
 	}
 	return deriveConnectionStatus(tunUp, time.Time{})

@@ -6,11 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"net/netip"
 	"runtime"
 	"slices"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/containernetworking/cni/pkg/types"
@@ -22,10 +20,10 @@ import (
 	"k8s.io/client-go/kubernetes"
 	v2 "k8s.io/client-go/kubernetes/typed/networking/v1"
 	"k8s.io/client-go/rest"
+	"tailscale.com/types/logger"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/encoding/gzip"
 	"google.golang.org/grpc/status"
 
@@ -75,15 +73,31 @@ type NetworkManager struct {
 	cfg NetworkConfig
 
 	// Runtime state (set by Start, cleared by Stop)
-	ctx                   context.Context
-	cancel                context.CancelFunc
-	localTunIPv4          *net.IPNet // allocated by RentIP, used by TUN/routes/DNS
-	localTunIPv6          *net.IPNet
-	tunName               string
-	controlPlaneLocalPort int // local port for TunConfigService (port-forwarded from 9002)
-	extraHost             []dns.Entry
-	dnsConfig             *dns.Config
-	heartbeatStats        *core.HeartbeatStats // data-plane liveness from observed heartbeat replies
+	ctx               context.Context
+	cancel            context.CancelFunc
+	localTunIPv4      *net.IPNet // allocated by RentIP, used by TUN/routes/DNS
+	localTunIPv6      *net.IPNet
+	tunName           string
+	transportMu       sync.Mutex
+	activeTransport   *transportGeneration
+	transportChanged  chan struct{}
+	transportFailures chan transportEvent
+	networkChecks     chan uint64
+	monitorChanges    chan struct{}
+	networkMonitor    *networkMonitor // published under transportMu
+	newNetworkMonitor func(logger.Logf) (networkMonitorSource, error)
+	transportStopped  bool
+	transportArmed    bool
+	transportErr      error
+	// Optional clock source for exercising health policy with real transports.
+	transportLastReply func() time.Time
+	workers            sync.WaitGroup
+	stopOnce           sync.Once
+	startupDone        chan struct{} // registered under transportMu before Start owns resources
+	newTunListener     func(tun.Config) (net.Listener, error)
+	extraHost          []dns.Entry
+	dnsConfig          *dns.Config
+	heartbeatStats     *core.HeartbeatStats // data-plane liveness from observed heartbeat replies
 
 	// The four seams onto the OS routing table and the device's own addresses. Indirected together so the stale-source repair
 	// path can be driven on any platform, without root and without a real TUN device; each
@@ -190,25 +204,6 @@ const (
 // every attempt (a flood).
 var blackHoleWarn = plog.NewThrottle(5 * time.Minute)
 
-// livenessOutcome records whether a port-forward session ever carried data-plane traffic, i.e.
-// produced a heartbeat echo reply of its own. The reconnect loop needs this to tell "the session
-// worked and then dropped" from "the session never came up": their backoff differs, and only the
-// former may reset it.
-type livenessOutcome struct{ primed atomic.Bool }
-
-// markPrimed records that this session carried traffic. Nil-safe for tests that drive the watchdog
-// without caring about the outcome.
-func (o *livenessOutcome) markPrimed() {
-	if o != nil {
-		o.primed.Store(true)
-	}
-}
-
-// wasPrimed reports whether the session ever carried traffic. A nil outcome reads as never primed.
-func (o *livenessOutcome) wasPrimed() bool {
-	return o != nil && o.primed.Load()
-}
-
 // livenessSteadyThreshold is how long an already-primed session (one that produced a fresh heartbeat
 // echo reply) may then go silent before it is treated as black-holed and force-reconnected. A small
 // multiple of config.HeartbeatInterval so a couple of missed beats trip it. It is a var (not a const)
@@ -217,12 +212,13 @@ var livenessSteadyThreshold = 3 * config.HeartbeatInterval
 
 // newNetworkManager creates a NetworkManager with the given configuration.
 func newNetworkManager(cfg NetworkConfig) *NetworkManager {
-	nm := &NetworkManager{cfg: cfg}
+	nm := &NetworkManager{cfg: cfg, transportChanged: make(chan struct{}), transportFailures: make(chan transportEvent, 1), networkChecks: make(chan uint64, 1)}
 	// Allocate here (once, before any goroutine) so the field is never nil and never re-assigned:
 	// the data-plane liveness watchdog spawned by the first port-forward session reads it before
 	// startTUN runs, and status queries read it concurrently. LastReply stays zero until the TUN
 	// heartbeat sender populates it (the watchdog's startup deadline tolerates that window).
 	nm.heartbeatStats = &core.HeartbeatStats{}
+	nm.monitorChanges = make(chan struct{}, 1)
 	return nm
 }
 
@@ -254,60 +250,59 @@ func (nm *NetworkManager) GetExtraHost() []dns.Entry {
 // 3. Allocate TUN IP + create local TUN device with gvisor stack
 // 4. Add dynamic routes (watch pods/services)
 // 5. Configure DNS
-func (nm *NetworkManager) Start(ctx context.Context) error {
+func (nm *NetworkManager) Start(ctx context.Context) (err error) {
+	nm.transportMu.Lock()
+	if nm.transportStopped {
+		nm.transportMu.Unlock()
+		return net.ErrClosed
+	}
 	nm.ctx, nm.cancel = context.WithCancel(ctx)
+	nm.startupDone = make(chan struct{})
+	nm.transportMu.Unlock()
+	defer func() {
+		nm.transportMu.Lock()
+		if nm.transportErr != nil {
+			err = nm.transportErr
+		}
+		nm.transportMu.Unlock()
+		close(nm.startupDone)
+		if err != nil {
+			nm.Stop()
+		}
+	}()
+	startupCtx, startupCancel := context.WithTimeout(nm.ctx, portForwardStartTimeout)
+	stopStartup := context.AfterFunc(startupCtx, nm.cancel)
+	defer func() { stopStartup(); startupCancel() }()
 
 	if err := nm.AddExtraNodeIP(nm.ctx); err != nil {
 		return err
 	}
 
-	gvisorTCPForwardPort, err := util.GetAvailableTCPPort()
-	if err != nil {
-		return err
-	}
-	gvisorUDPForwardPort, err := util.GetAvailableTCPPort()
-	if err != nil {
-		return err
-	}
-	controlPlanePort, err := util.GetAvailableTCPPort()
-	if err != nil {
-		return err
-	}
-	nm.controlPlaneLocalPort = controlPlanePort
-
 	plog.StepStart(nm.ctx, "Forwarding ports")
-	plog.G(nm.ctx).Debugf("Allocated local ports: TCP=%d, UDP=%d, xDS=%d", gvisorTCPForwardPort, gvisorUDPForwardPort, controlPlanePort)
-	portPair := []string{
-		fmt.Sprintf("%d:%d", gvisorTCPForwardPort, config.PortTCP),
-		fmt.Sprintf("%d:%d", gvisorUDPForwardPort, config.PortUDP),
-		fmt.Sprintf("%d:%d", controlPlanePort, config.PortXDS),
+	nm.launchTransportSupervisor()
+	generation, err := nm.waitTransport(startupCtx)
+	if err != nil {
+		return err
 	}
-
-	sshDataPlane := false
-	if clusterIP, ok := nm.probeSSHDataPlane(nm.ctx); ok {
-		plog.G(nm.ctx).Debugf("SSH host can reach ClusterIP %s, using SSH tunnel for data plane", clusterIP)
-		sshDataPlane = true
-		if err := nm.sshForward(nm.ctx, clusterIP, portPair); err != nil {
-			return err
-		}
-	} else {
-		if err := nm.portForward(nm.ctx, portPair); err != nil {
-			return err
-		}
-	}
-	if sshDataPlane {
-		plog.StepDone(nm.ctx, "Forwarded ports via SSH data-plane tunnel (TCP/UDP/xDS)")
-	} else {
-		plog.StepDone(nm.ctx, "Forwarded ports (TCP/UDP/xDS)")
+	plog.G(nm.ctx).Debugf("Allocated local endpoints: TCP=%s, UDP=%s, xDS=%s", generation.endpoints.tcp, generation.endpoints.udp, generation.endpoints.xds)
+	plog.StepDone(nm.ctx, "Forwarded ports (TCP/UDP/xDS)")
+	if err := nm.ensureTunIPAllocated(startupCtx); err != nil {
+		return err
 	}
 
 	if util.IsWindows() {
 		driver.InstallWireGuardTunDriver()
 	}
 
-	forward := fmt.Sprintf("tcp://127.0.0.1:%d", gvisorTCPForwardPort)
+	forward := "tcp://kubevpn-manager"
 	if err := nm.startTUN(nm.ctx, forward); err != nil {
 		return fmt.Errorf("start tun: %w: %w", err, config.ErrTunDeviceFailed)
+	}
+
+	nm.startNetworkMonitor()
+	nm.armTransportHealth()
+	if err := nm.waitTransportHealthy(startupCtx); err != nil {
+		return err
 	}
 
 	// Cluster pod/service CIDRs are already routed by startTUN. Per-IP pod routes and
@@ -331,7 +326,10 @@ func (nm *NetworkManager) Start(ctx context.Context) error {
 	// Runs in the background under nm.ctx; failures degrade to CIDR-only routing.
 	nm.StartRouteWatcher(nm.ctx)
 
-	return nil
+	if !stopStartup() {
+		return startupCtx.Err()
+	}
+	return nm.ctx.Err()
 }
 
 // rentIP allocates a TUN IP from the xds's TunConfigService via the
@@ -339,13 +337,7 @@ func (nm *NetworkManager) Start(ctx context.Context) error {
 // so the server avoids conflicts. Retries on the rare race where a new
 // interface appears between collecting addresses and receiving the allocation.
 func (nm *NetworkManager) rentIP(ctx context.Context) error {
-	target := fmt.Sprintf("127.0.0.1:%d", nm.controlPlaneLocalPort)
-	// No WithBlock: the local port-forward listener may momentarily be down across a reconnect, so
-	// each GetTunIP waits-for-ready within its own bounded timeout and retries, rather than blocking
-	// the dial forever on a black-holed session.
-	conn, err := grpc.DialContext(ctx, target,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
+	conn, err := grpc.DialContext(ctx, managerTarget, nm.xdsOptions()...)
 	if err != nil {
 		return fmt.Errorf("dial xds for RentIP: %w", err)
 	}
@@ -355,6 +347,10 @@ func (nm *NetworkManager) rentIP(ctx context.Context) error {
 
 	const maxRetries = 15
 	for i := 0; i < maxRetries; i++ {
+		generation, err := nm.waitTransport(ctx)
+		if err != nil {
+			return err
+		}
 		callCtx, callCancel := context.WithTimeout(ctx, rentIPCallTimeout)
 		resp, err := client.GetTunIP(callCtx, &rpc.TunIPRequest{
 			OwnerID:    nm.cfg.OwnerID,
@@ -369,6 +365,20 @@ func (nm *NetworkManager) rentIP(ctx context.Context) error {
 			// parent ctx is cancelled or retries are exhausted.
 			if ctx.Err() != nil {
 				return fmt.Errorf("get TUN IP from xds: %w", ctx.Err())
+			}
+			if terminalTransportError(err) {
+				nm.signalTransportFailure(generation.id, err)
+				return err
+			}
+			if status.Code(err) == codes.DeadlineExceeded || status.Code(err) == codes.Unavailable {
+				nm.signalTransportFailure(generation.id, err)
+				select {
+				case <-generation.ctx.Done():
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			} else {
+				return err
 			}
 			plog.G(ctx).Debugf("GetTunIP attempt %d/%d failed: %v; retrying", i+1, maxRetries, err)
 			continue
@@ -438,15 +448,32 @@ func isLocalIPConflict(ip net.IP) bool {
 
 // Stop tears down networking: cancels DNS, stops port-forward/informers, clears state.
 func (nm *NetworkManager) Stop() {
-	if nm.dnsConfig != nil {
-		nm.dnsConfig.CancelDNS()
-	}
-	if nm.cancel != nil {
-		nm.cancel()
-	}
-	nm.tunName = ""
-	nm.dnsConfig = nil
-	nm.extraHost = nil
+	nm.stopOnce.Do(func() {
+		nm.transportMu.Lock()
+		nm.transportStopped = true
+		g := nm.activeTransport
+		startupDone := nm.startupDone
+		if nm.transportChanged != nil {
+			nm.notifyTransportLocked()
+		}
+		nm.transportMu.Unlock()
+		if nm.cancel != nil {
+			nm.cancel()
+		}
+		if g != nil {
+			nm.retireTransport(g)
+		}
+		if startupDone != nil {
+			<-startupDone
+		}
+		nm.workers.Wait()
+		if nm.dnsConfig != nil {
+			nm.dnsConfig.CancelDNS()
+		}
+		nm.tunName = ""
+		nm.dnsConfig = nil
+		nm.extraHost = nil
+	})
 }
 
 // ChangeTunIP hot-updates the TUN device IP without restarting the network stack.
@@ -535,30 +562,25 @@ func (nm *NetworkManager) StartIPWatcher(ctx context.Context) {
 		plog.G(ctx).Debug("[IPWatcher] OwnerID is empty; skipping IP watcher")
 		return
 	}
-	go nm.watchTunIPFromXDS(ctx)
+	nm.startWatchWorker(ctx, nm.watchTunIPFromXDS)
 }
 
 func (nm *NetworkManager) watchTunIPFromXDS(ctx context.Context) {
 	if ctx.Err() != nil {
 		return
 	}
-	if nm.controlPlaneLocalPort == 0 {
-		plog.G(ctx).Warn("[IPWatcher] local xDS port is 0; IP watcher will not start")
-		return
-	}
-	target := fmt.Sprintf("127.0.0.1:%d", nm.controlPlaneLocalPort)
-	plog.G(ctx).Infof("[IPWatcher] Starting IP watcher for namespace %q at %s", nm.cfg.ManagerNamespace, target)
+	plog.G(ctx).Infof("[IPWatcher] Starting IP watcher for namespace %q at %s", nm.cfg.ManagerNamespace, managerTarget)
 	warnings := plog.NewThrottle(time.Minute)
 
 	var currentVersion int64
 
 	for ctx.Err() == nil {
-		err := nm.doWatchTunIP(ctx, target, &currentVersion)
+		err := nm.doWatchTunIP(ctx, &currentVersion)
 		if err != nil && ctx.Err() == nil {
 			if warnings.Allow("retry") {
-				plog.G(ctx).Warnf("[IPWatcher] %s (namespace %q) disconnected: %v, retrying in %s", target, nm.cfg.ManagerNamespace, err, ipWatcherRetryInterval)
+				plog.G(ctx).Warnf("[IPWatcher] %s (namespace %q) disconnected: %v, retrying in %s", managerTarget, nm.cfg.ManagerNamespace, err, ipWatcherRetryInterval)
 			} else {
-				plog.G(ctx).Debugf("[IPWatcher] %s (namespace %q) disconnected: %v, retrying in %s", target, nm.cfg.ManagerNamespace, err, ipWatcherRetryInterval)
+				plog.G(ctx).Debugf("[IPWatcher] %s (namespace %q) disconnected: %v, retrying in %s", managerTarget, nm.cfg.ManagerNamespace, err, ipWatcherRetryInterval)
 			}
 		}
 		select {
@@ -569,15 +591,19 @@ func (nm *NetworkManager) watchTunIPFromXDS(ctx context.Context) {
 	}
 }
 
-func (nm *NetworkManager) doWatchTunIP(ctx context.Context, target string, currentVersion *int64) error {
+func (nm *NetworkManager) doWatchTunIP(ctx context.Context, currentVersion *int64) error {
+	ctx, cancel, g, err := nm.watchGeneration(ctx)
+	if err != nil {
+		return err
+	}
+	defer cancel()
+	target := g.endpoints.xds
 	plog.G(ctx).Debugf("[IPWatcher] Attempting to dial xDS at %s (namespace %q, timeout %s)", target, nm.cfg.ManagerNamespace, watcherDialTimeout)
 	started := time.Now()
-	dialCtx, cancel := context.WithTimeout(ctx, watcherDialTimeout)
-	conn, err := grpc.DialContext(dialCtx, target,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithBlock(),
-	)
-	cancel()
+	dialCtx, dialCancel := context.WithTimeout(ctx, watcherDialTimeout)
+	opts := append(nm.watchXDSOptions(g), grpc.WithBlock())
+	conn, err := grpc.DialContext(dialCtx, managerTarget, opts...)
+	dialCancel()
 	if err != nil {
 		return fmt.Errorf("dial %s after %s: %w", target, time.Since(started), err)
 	}
@@ -590,21 +616,26 @@ func (nm *NetworkManager) doWatchTunIP(ctx context.Context, target string, curre
 	// disconnect the server may have reaped our lease (and won't push anything), so
 	// we proactively GetTunIP. ExcludeIPs omits our OWN current TUN IP so the server
 	// can hand it back (sticky via lastIPs) while still avoiding sibling/local IPs.
-	callCtx, callCancel := context.WithTimeout(ctx, rentIPCallTimeout)
-	resp, gerr := client.GetTunIP(callCtx, &rpc.TunIPRequest{
+	resp, gerr := watchGetTunIP(ctx, client, &rpc.TunIPRequest{
 		OwnerID:    nm.cfg.OwnerID,
 		Namespace:  nm.cfg.ManagerNamespace,
 		ExcludeIPs: nm.excludesForReassert(),
 		Hostname:   nm.cfg.Hostname,
 	})
-	callCancel()
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
 	if gerr == nil {
-		v4, v6 := parseTunIPResponse(resp)
-		nm.applyPushedTunIP(ctx, client, v4, v6)
-		*currentVersion = resp.Version
+		if err := nm.applyGeneration(ctx, g, func() error {
+			v4, v6 := parseTunIPResponse(resp)
+			if err := nm.applyPushedTunIP(ctx, client, v4, v6); err != nil {
+				return err
+			}
+			*currentVersion = resp.Version
+			return nil
+		}); err != nil {
+			return err
+		}
 	} else {
 		plog.G(ctx).Warnf("[IPWatcher] self-heal GetTunIP at %s (namespace %q) failed: %v; continuing to WatchTunIP", target, nm.cfg.ManagerNamespace, gerr)
 	}
@@ -622,17 +653,24 @@ func (nm *NetworkManager) doWatchTunIP(ctx context.Context, target string, curre
 		if err != nil {
 			return err
 		}
-		if resp.Version != *currentVersion && *currentVersion != 0 {
-			newV4, newV6 := parseTunIPResponse(resp)
-			if resp.DryRun {
-				// A proposal: validate locally, then confirm (→ server commits) or decline.
-				nm.handleProposal(ctx, client, newV4, newV6)
-			} else {
-				// A committed change: validate, then apply or reject for a safe IP.
-				nm.applyPushedTunIP(ctx, client, newV4, newV6)
+		if err := nm.applyGeneration(ctx, g, func() error {
+			if resp.Version != *currentVersion && *currentVersion != 0 {
+				v4, v6 := parseTunIPResponse(resp)
+				var err error
+				if resp.DryRun {
+					err = nm.handleProposal(ctx, client, v4, v6)
+				} else {
+					err = nm.applyPushedTunIP(ctx, client, v4, v6)
+				}
+				if err != nil {
+					return err
+				}
 			}
+			*currentVersion = resp.Version
+			return nil
+		}); err != nil {
+			return err
 		}
-		*currentVersion = resp.Version
 	}
 }
 
@@ -640,20 +678,26 @@ func (nm *NetworkManager) doWatchTunIP(ctx context.Context, target string, curre
 // confirms (GetTunIP{ConfirmIP}, whose committed response is then applied); if it
 // conflicts locally it declines (GetTunIP{ExcludeIPs:[candidate]}), so the server
 // drops the proposal without ever committing — no rollback needed.
-func (nm *NetworkManager) handleProposal(ctx context.Context, client rpc.TunConfigServiceClient, v4, v6 *net.IPNet) {
-	// Each family is validated and confirmed/declined independently, so an operator
-	// can edit v4, v6, or both.
+func watchGetTunIP(ctx context.Context, client rpc.TunConfigServiceClient, req *rpc.TunIPRequest) (*rpc.TunIPResponse, error) {
+	callCtx, cancel := context.WithTimeout(ctx, rentIPCallTimeout)
+	defer cancel()
+	return client.GetTunIP(callCtx, req)
+}
+func (nm *NetworkManager) handleProposal(ctx context.Context, client rpc.TunConfigServiceClient, v4, v6 *net.IPNet) error {
 	if v4 != nil {
-		nm.handleProposalFamily(ctx, client, v4)
+		if err := nm.handleProposalFamily(ctx, client, v4); err != nil {
+			return err
+		}
 	}
 	if v6 != nil {
-		nm.handleProposalFamily(ctx, client, v6)
+		return nm.handleProposalFamily(ctx, client, v6)
 	}
+	return nil
 }
 
 // handleProposalFamily validates one proposed family candidate and confirms it
 // (server then commits and returns the committed alloc to apply) or declines it.
-func (nm *NetworkManager) handleProposalFamily(ctx context.Context, client rpc.TunConfigServiceClient, cand *net.IPNet) {
+func (nm *NetworkManager) handleProposalFamily(ctx context.Context, client rpc.TunConfigServiceClient, cand *net.IPNet) error {
 	excludes := buildExcludeIPs(nm.cfg.ReservedTunIPs)
 	var pv4, pv6 *net.IPNet
 	if cand.IP.To4() == nil {
@@ -664,18 +708,18 @@ func (nm *NetworkManager) handleProposalFamily(ctx context.Context, client rpc.T
 	if tunIPConflicts(pv4, pv6, nm.localTunIPv4, nm.localTunIPv6, excludes) {
 		plog.G(ctx).Warnf("[IPWatcher] declining proposed TUN IP %s (conflicts with a local/sibling device)", cand.IP)
 		rej := append(append([]string{}, excludes...), cand.IP.String())
-		if _, err := client.GetTunIP(ctx, &rpc.TunIPRequest{
+		if _, err := watchGetTunIP(ctx, client, &rpc.TunIPRequest{
 			OwnerID:    nm.cfg.OwnerID,
 			Namespace:  nm.cfg.ManagerNamespace,
 			ExcludeIPs: rej,
 			Hostname:   nm.cfg.Hostname,
 		}); err != nil {
-			plog.G(ctx).Errorf("[IPWatcher] decline proposed IP %s: %v", cand.IP, err)
+			return err
 		}
-		return
+		return nil
 	}
 	// Usable → confirm; the committed response carries the full alloc to apply.
-	resp, err := client.GetTunIP(ctx, &rpc.TunIPRequest{
+	resp, err := watchGetTunIP(ctx, client, &rpc.TunIPRequest{
 		OwnerID:    nm.cfg.OwnerID,
 		Namespace:  nm.cfg.ManagerNamespace,
 		ConfirmIP:  cand.IP.String(),
@@ -683,11 +727,10 @@ func (nm *NetworkManager) handleProposalFamily(ctx context.Context, client rpc.T
 		Hostname:   nm.cfg.Hostname,
 	})
 	if err != nil {
-		plog.G(ctx).Errorf("[IPWatcher] confirm proposed IP %s: %v", cand.IP, err)
-		return
+		return err
 	}
 	cv4, cv6 := parseTunIPResponse(resp)
-	nm.applyPushedTunIP(ctx, client, cv4, cv6)
+	return nm.applyPushedTunIP(ctx, client, cv4, cv6)
 }
 
 // tunIPConflicts reports whether a server-pushed IP collides with another local
@@ -735,9 +778,12 @@ func (nm *NetworkManager) excludesForReassert() []string {
 // applyPushedTunIP adopts a server-pushed TUN IP, or rejects it (asking the server
 // for a different one, which rolls a manual change back to the prior IP) when it
 // conflicts with a local/sibling device. The client never blindly trusts a push.
-func (nm *NetworkManager) applyPushedTunIP(ctx context.Context, client rpc.TunConfigServiceClient, newV4, newV6 *net.IPNet) {
+func (nm *NetworkManager) applyPushedTunIP(ctx context.Context, client rpc.TunConfigServiceClient, newV4, newV6 *net.IPNet) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
 	if newV4 == nil {
-		return
+		return nil
 	}
 	excludes := buildExcludeIPs(nm.cfg.ReservedTunIPs)
 	if tunIPConflicts(newV4, newV6, nm.localTunIPv4, nm.localTunIPv6, excludes) {
@@ -746,26 +792,24 @@ func (nm *NetworkManager) applyPushedTunIP(ctx context.Context, client rpc.TunCo
 		if newV6 != nil {
 			rej = append(rej, newV6.IP.String())
 		}
-		if _, err := client.GetTunIP(ctx, &rpc.TunIPRequest{
+		if _, err := watchGetTunIP(ctx, client, &rpc.TunIPRequest{
 			OwnerID:    nm.cfg.OwnerID,
 			Namespace:  nm.cfg.ManagerNamespace,
 			ExcludeIPs: rej,
 			Hostname:   nm.cfg.Hostname,
 		}); err != nil {
-			plog.G(ctx).Errorf("[IPWatcher] reject pushed IP %s: %v", newV4.IP, err)
+			return err
 		}
-		return
+		return nil
 	}
 	// No-op only when BOTH families already match — otherwise a v6-only change (v4
 	// unchanged) would be wrongly skipped.
 	v4Same := nm.localTunIPv4 != nil && nm.localTunIPv4.IP.Equal(newV4.IP)
 	v6Same := newV6 == nil || (nm.localTunIPv6 != nil && nm.localTunIPv6.IP.Equal(newV6.IP))
 	if v4Same && v6Same {
-		return
+		return nil
 	}
-	if err := nm.ChangeTunIP(ctx, newV4, newV6); err != nil {
-		plog.G(ctx).Errorf("[IPWatcher] ChangeTunIP failed: %v", err)
-	}
+	return nm.ChangeTunIP(ctx, newV4, newV6)
 }
 
 func parseTunIPResponse(resp *rpc.TunIPResponse) (ipv4, ipv6 *net.IPNet) {
@@ -814,213 +858,6 @@ func nextPortForwardDelay(cur, sessionDuration time.Duration, primed bool) time.
 		next = maxDelay
 	}
 	return next
-}
-
-// probeSSHDataPlane checks whether the SSH host can reach the traffic manager's
-// ClusterIP directly (i.e., the SSH host is a K8s node with kube-proxy). Returns
-// the ClusterIP and true if reachable, ("", false) otherwise — the caller should
-// fall back to standard kubectl port-forward.
-func (nm *NetworkManager) probeSSHDataPlane(ctx context.Context) (string, bool) {
-	if nm.cfg.SshConf == nil || nm.cfg.SshConf.IsEmpty() {
-		return "", false
-	}
-	svc, err := nm.cfg.Clientset.CoreV1().Services(nm.cfg.ManagerNamespace).
-		Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
-	if err != nil {
-		plog.G(ctx).Debugf("SSH data-plane probe: failed to get service: %v", err)
-		return "", false
-	}
-	clusterIP := svc.Spec.ClusterIP
-	if clusterIP == "" || clusterIP == "None" {
-		return "", false
-	}
-
-	client, err := ssh.DialSshRemote(ctx, nm.cfg.SshConf, ctx.Done())
-	if err != nil {
-		plog.G(ctx).Debugf("SSH data-plane probe: failed to dial SSH: %v", err)
-		return "", false
-	}
-
-	probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-	target := net.JoinHostPort(clusterIP, fmt.Sprintf("%d", config.PortTCP))
-	conn, err := client.DialContext(probeCtx, "tcp", target)
-	if err != nil {
-		plog.G(ctx).Debugf("SSH data-plane probe: SSH host cannot reach %s: %v", target, err)
-		client.Close()
-		return "", false
-	}
-	conn.Close()
-	client.Close()
-	return clusterIP, true
-}
-
-// sshForward sets up SSH tunnels from local ports to the traffic manager's ClusterIP
-// ports. Each portPair entry is "localPort:remotePort"; the remote side is reached
-// through the SSH host via clusterIP.
-func (nm *NetworkManager) sshForward(ctx context.Context, clusterIP string, portPairs []string) error {
-	for _, pair := range portPairs {
-		var localPort, remotePort int
-		if _, err := fmt.Sscanf(pair, "%d:%d", &localPort, &remotePort); err != nil {
-			return fmt.Errorf("invalid port pair %q: %w", pair, err)
-		}
-		local := netip.MustParseAddrPort(fmt.Sprintf("127.0.0.1:%d", localPort))
-		remote := netip.MustParseAddrPort(fmt.Sprintf("%s:%d", clusterIP, remotePort))
-		if err := ssh.PortMapUntil(ctx, nm.cfg.SshConf, remote, local); err != nil {
-			return fmt.Errorf("ssh forward %s -> %s: %w", local, remote, err)
-		}
-		plog.G(ctx).Debugf("SSH tunnel: %s -> %s", local, remote)
-	}
-	return nil
-}
-
-// portForward sets up port-forwarding to the traffic manager pod with automatic
-// retry when the pod is recreated or the connection drops.
-func (nm *NetworkManager) portForward(ctx context.Context, portPair []string) error {
-	firstCtx, firstCancelFunc := context.WithCancel(ctx)
-	defer firstCancelFunc()
-	errChan := make(chan error, 1)
-	go func() {
-		first := true
-		delay := portForwardReconnectDelay
-		// Consecutive sessions that never carried data-plane traffic. Tracked separately from the
-		// backoff so a persistent black hole is reported instead of silently looping: in the field
-		// this ran 2221 rounds over 20 hours without a single line explaining why.
-		consecutiveDead := 0
-		var deadSince time.Time
-		for ctx.Err() == nil {
-			sessionStart := time.Now()
-			primed, err := nm.portForwardOnce(ctx, portPair, first, firstCancelFunc)
-			sessionDuration := time.Since(sessionStart)
-			if first {
-				if err != nil {
-					netutil.SafeWrite(errChan, err)
-					return
-				}
-			} else {
-				plog.G(ctx).Debugf("[Perf] Port-forward session ended after %v, reconnecting in %v...", sessionDuration, delay)
-			}
-			first = false
-			if primed {
-				consecutiveDead, deadSince = 0, time.Time{}
-			} else {
-				if consecutiveDead == 0 {
-					deadSince = sessionStart
-				}
-				consecutiveDead++
-				if consecutiveDead >= portForwardBlackHoleThreshold {
-					blackHoleWarn.Warnf(ctx, "port-forward-black-hole",
-						"Data plane has not come up across %d consecutive port-forward sessions (%v). Backing "+
-							"off to %v between attempts; `kubevpn status` reports this connection as unhealthy",
-						consecutiveDead, time.Since(deadSince).Round(time.Second), portForwardBlackHoleMaxDelay)
-				}
-			}
-			// Exponential backoff on consecutive short-lived sessions so a stalled
-			// apiserver is not hammered with a Pods.List + TLS handshake every 200ms
-			// (which prolongs the stall). A healthy session that then drops resets to
-			// the fast initial delay so normal pod recreation still reconnects quickly.
-			delay = nextPortForwardDelay(delay, sessionDuration, primed)
-			select {
-			case <-time.After(delay):
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-	ticker := time.NewTicker(portForwardStartTimeout)
-	defer ticker.Stop()
-	select {
-	case <-ticker.C:
-		return config.ErrPortForwardTimeout
-	case err := <-errChan:
-		return err
-	case <-firstCtx.Done():
-		return nil
-	}
-}
-
-// portForwardOnce runs a single port-forward session to the traffic manager pod.
-func (nm *NetworkManager) portForwardOnce(ctx context.Context, portPair []string, first bool, onReady func()) (primed bool, err error) {
-	ctx2, cancelFunc2 := context.WithTimeout(ctx, portForwardPodListTimeout)
-	defer cancelFunc2()
-	podList, err := nm.cfg.GetRunningPodList(ctx2)
-	if err != nil {
-		plog.G(ctx).Debugf("Failed to get running pod: %v", err)
-		return false, err
-	}
-	pod := podList[0]
-	// add route in case the pod was recreated with a new IP that is not yet routable
-	_ = nm.AddRoute(util.GetPodIP(pod)...)
-
-	childCtx, cancelFunc := context.WithCancel(ctx)
-	defer cancelFunc()
-
-	readyChan := make(chan struct{})
-	podName := pod.GetName()
-	// detect pod deletion so we can redo port-forward
-	go util.CheckPodStatus(childCtx, cancelFunc, podName, nm.cfg.Clientset.CoreV1().Pods(nm.cfg.ManagerNamespace))
-	// The data-plane heartbeat watchdog is the sole liveness-based reconnect trigger.
-	outcome := &livenessOutcome{}
-	go nm.watchDataPlaneLiveness(childCtx, cancelFunc, readyChan, outcome)
-	if first {
-		go func() {
-			select {
-			case <-readyChan:
-				onReady()
-			case <-childCtx.Done():
-			}
-		}()
-	}
-
-	pfStart := time.Now()
-	err = util.PortForwardPod(
-		nm.cfg.Config,
-		nm.cfg.RESTClient,
-		podName,
-		nm.cfg.ManagerNamespace,
-		portPair,
-		readyChan,
-		childCtx.Done(),
-		nil,
-		plog.G(ctx).Logger.Out,
-	)
-	plog.G(ctx).Debugf("[Perf] PortForwardPod for %s exited after %v, err=%v", podName, time.Since(pfStart), err)
-	return outcome.wasPrimed(), nil
-}
-
-// watchDataPlaneLiveness force-reconnects the current port-forward session when the data plane goes
-// silent while the session still looks alive. A k8s port-forward can "black-hole": the local TCP
-// connects and the session appears up, but no data traverses (seen against flaky cluster network
-// paths / SPDY proxies). The xDS health check catches most such cases, but it probes the
-// control-plane port; a data-only stall (only the TCP/UDP forward stream wedges) would slip past it.
-// HeartbeatStats records ICMP echo replies from the server gateway — a direct end-to-end data-plane
-// liveness signal — so a session that never produces a fresh reply (startupDeadline) or falls silent
-// after having produced one (steadyThreshold) is black-holed. cancelFunc tears the session down; the
-// portForward loop then reconnects. heartbeatStats is allocated in newNetworkManager (never nil).
-// This runs for every session, including the first (typically longest-lived) one. It is the sole
-// data-plane reconnect trigger — the xDS health check only reports control-plane status.
-func (nm *NetworkManager) watchDataPlaneLiveness(ctx context.Context, cancelFunc context.CancelFunc, readyChan <-chan struct{}, outcome *livenessOutcome) {
-	sessionStart := time.Now()
-	// A session that never even becomes ready is still black-holed: bound the wait so it reconnects.
-	select {
-	case <-readyChan:
-	case <-time.After(livenessStartupDeadline):
-		plog.G(ctx).Warnf("Port-forward not ready within %v; reconnecting", livenessStartupDeadline)
-		cancelFunc()
-		return
-	case <-ctx.Done():
-		return
-	}
-	watchLiveness(ctx, cancelFunc, sessionStart, livenessCheckInterval, livenessStartupDeadline, livenessSteadyThreshold, nm.heartbeatStats.LastReply, outcome)
-	// watchLiveness only returns once it has torn the session down (or ctx died). A dark data
-	// plane is not always a sick port-forward: on macOS a route whose pinned source address went
-	// stale produces exactly the same silence, and reconnecting cannot fix it — so check for that
-	// here, between sessions, before the loop tries again. macOS is the only platform that pins a
-	// source address into a route; the check is gated here rather than inside so the repair logic
-	// itself stays exercisable everywhere.
-	if ctx.Err() == nil && runtime.GOOS == "darwin" {
-		nm.repairStaleRouteSrc(ctx)
-	}
 }
 
 // staleRouteSrcWarn rate-limits the stale-source report. The watchdog can fire every 30s for
@@ -1124,49 +961,6 @@ func (nm *NetworkManager) currentTunIP(ip net.IP) net.IP {
 	return want.IP
 }
 
-// watchLiveness force-reconnects (cancelFunc) a black-holed session using the data-plane heartbeat
-// echo reply as the liveness signal. A session is "primed" once it produces a reply newer than
-// sessionStart — proving fresh data flowed on THIS session (lastReply is shared across sessions, so
-// an older timestamp does not count). Two independent deadlines, both measured so a healthy session
-// is never torn down prematurely:
-//   - not yet primed: reconnect if the session has run startupDeadline without any fresh reply
-//     (never came up, or black-holed from the start). startupDeadline must exceed the time a healthy
-//     reconnected session needs to prime (slot reconnect + RTT).
-//   - primed: reconnect if the last fresh reply is now older than steadyThreshold (went silent).
-//
-// Extracted so it can be driven with small timings and a fake reply source in tests.
-func watchLiveness(ctx context.Context, cancelFunc context.CancelFunc, sessionStart time.Time, interval, startupDeadline, steadyThreshold time.Duration, lastReply func() time.Time, outcome *livenessOutcome) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	primed := false
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			last := lastReply()
-			if !primed {
-				if last.After(sessionStart) {
-					primed = true
-					outcome.markPrimed()
-					continue
-				}
-				if time.Since(sessionStart) >= startupDeadline {
-					plog.G(ctx).Warnf("Data plane never came up (no heartbeat echo reply within %v); reconnecting port-forward", startupDeadline)
-					cancelFunc()
-					return
-				}
-				continue
-			}
-			if time.Since(last) >= steadyThreshold {
-				plog.G(ctx).Warnf("Data plane went silent (no heartbeat echo reply for %v); reconnecting port-forward", steadyThreshold)
-				cancelFunc()
-				return
-			}
-		}
-	}
-}
-
 // startTUN allocates a TUN IP and creates the local TUN device with a gvisor network stack.
 func (nm *NetworkManager) startTUN(ctx context.Context, forwardAddress string) error {
 	tlsSecret, err := nm.cfg.Clientset.CoreV1().Secrets(nm.cfg.ManagerNamespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
@@ -1266,7 +1060,7 @@ func (nm *NetworkManager) startTunServer(ctx context.Context, forwardNode *core.
 	forwarder := &core.Forwarder{
 		Addr:        forwardNode.Addr,
 		Connector:   core.NewUDPOverTCPConnector(),
-		Transporter: core.TCPTransporter(secretData),
+		Transporter: &generationTransporter{nm: nm, base: core.TCPTransporter(secretData), endpoint: endpointTCP},
 		MaxRetries:  5,
 	}
 
@@ -1274,7 +1068,11 @@ func (nm *NetworkManager) startTunServer(ctx context.Context, forwardNode *core.
 	// heartbeatStats is allocated once in newNetworkManager; reuse it (do not re-assign) so the
 	// liveness watchdog and status queries observe the same instance without a data race.
 	handler := core.TunHandler(forwarder, core.NewRouteHub(), nm.heartbeatStats)
-	listener, err := tun.Listener(tunConfig)
+	newListener := nm.newTunListener
+	if newListener == nil {
+		newListener = tun.Listener
+	}
+	listener, err := newListener(tunConfig)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to create tun listener: %v", err)
 		return fmt.Errorf("create tun listener: %w: %w", err, config.ErrTunDeviceFailed)
@@ -1282,18 +1080,23 @@ func (nm *NetworkManager) startTunServer(ctx context.Context, forwardNode *core.
 
 	server := core.Server{
 		Listener: listener,
-		Handler:  handler,
+		Handler:  &tunCompletionHandler{Handler: handler, cancel: nm.cancel},
 	}
 
-	go func() {
+	if !nm.startWorker(func() {
 		if err := Run(ctx, []core.Server{server}); err != nil && ctx.Err() == nil {
 			plog.G(ctx).Errorf("[Client] Local TUN server exited: %v", err)
+			nm.cancel()
 		}
-	}()
+	}) {
+		listener.Close()
+		return net.ErrClosed
+	}
 	plog.G(ctx).Debugf("[Client] TUN server started, forwarding to %s", forwardAddress)
 
 	nm.tunName, err = nm.getTunDeviceName()
 	if err != nil {
+		listener.Close()
 		return err
 	}
 	plog.StepDone(ctx, "Created TUN device %q", nm.tunName)
@@ -1633,28 +1436,23 @@ func (nm *NetworkManager) StartRouteWatcher(ctx context.Context) {
 	if ctx.Err() != nil {
 		return
 	}
-	if nm.controlPlaneLocalPort == 0 {
-		plog.G(ctx).Warn("[RouteWatcher] local xDS port is 0; route watcher will not start")
-		return
-	}
-	go nm.watchNamespaceRoutes(ctx)
+	nm.startWatchWorker(ctx, nm.watchNamespaceRoutes)
 }
 
 func (nm *NetworkManager) watchNamespaceRoutes(ctx context.Context) {
 	if ctx.Err() != nil {
 		return
 	}
-	target := fmt.Sprintf("127.0.0.1:%d", nm.controlPlaneLocalPort)
-	plog.G(ctx).Infof("[RouteWatcher] Starting route watcher for namespace %q at %s", nm.cfg.WorkloadNamespace, target)
+	plog.G(ctx).Infof("[RouteWatcher] Starting route watcher for namespace %q at %s", nm.cfg.WorkloadNamespace, managerTarget)
 	warnings := plog.NewThrottle(time.Minute)
 	var version int64
 	for ctx.Err() == nil {
-		err := nm.doWatchNamespaceRoutes(ctx, target, &version)
+		err := nm.doWatchNamespaceRoutes(ctx, &version)
 		if err != nil && ctx.Err() == nil {
 			if warnings.Allow("retry") {
-				plog.G(ctx).Warnf("[RouteWatcher] %s (namespace %q) disconnected: %v, retrying in %s", target, nm.cfg.WorkloadNamespace, err, ipWatcherRetryInterval)
+				plog.G(ctx).Warnf("[RouteWatcher] %s (namespace %q) disconnected: %v, retrying in %s", managerTarget, nm.cfg.WorkloadNamespace, err, ipWatcherRetryInterval)
 			} else {
-				plog.G(ctx).Debugf("[RouteWatcher] %s (namespace %q) disconnected: %v, retrying in %s", target, nm.cfg.WorkloadNamespace, err, ipWatcherRetryInterval)
+				plog.G(ctx).Debugf("[RouteWatcher] %s (namespace %q) disconnected: %v, retrying in %s", managerTarget, nm.cfg.WorkloadNamespace, err, ipWatcherRetryInterval)
 			}
 		}
 		select {
@@ -1665,16 +1463,19 @@ func (nm *NetworkManager) watchNamespaceRoutes(ctx context.Context) {
 	}
 }
 
-func (nm *NetworkManager) doWatchNamespaceRoutes(ctx context.Context, target string, version *int64) error {
+func (nm *NetworkManager) doWatchNamespaceRoutes(ctx context.Context, version *int64) error {
+	ctx, cancel, g, err := nm.watchGeneration(ctx)
+	if err != nil {
+		return err
+	}
+	defer cancel()
+	target := g.endpoints.xds
 	plog.G(ctx).Debugf("[RouteWatcher] Attempting to dial xDS at %s (namespace %q, timeout %s)", target, nm.cfg.WorkloadNamespace, watcherDialTimeout)
 	started := time.Now()
-	dialCtx, cancel := context.WithTimeout(ctx, watcherDialTimeout)
-	conn, err := grpc.DialContext(dialCtx, target,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithDefaultCallOptions(grpc.UseCompressor(gzip.Name)),
-		grpc.WithBlock(),
-	)
-	cancel()
+	dialCtx, dialCancel := context.WithTimeout(ctx, watcherDialTimeout)
+	opts := append(nm.watchXDSOptions(g), grpc.WithDefaultCallOptions(grpc.UseCompressor(gzip.Name)), grpc.WithBlock())
+	conn, err := grpc.DialContext(dialCtx, managerTarget, opts...)
+	dialCancel()
 	if err != nil {
 		return fmt.Errorf("dial %s after %s: %w", target, time.Since(started), err)
 	}
@@ -1712,24 +1513,29 @@ func (nm *NetworkManager) doWatchNamespaceRoutes(ctx context.Context, target str
 		} else {
 			plog.G(ctx).Debugf("[RouteWatcher] Received delta for namespace %q: version=%d, %d service upserts, %d service removals", nm.cfg.WorkloadNamespace, resp.Version, len(resp.UpsertedServices), len(resp.RemovedServiceKeys))
 		}
-		applyRouteFrame(resp, services,
-			func(cidrs []string) {
-				if err := nm.AddRouteCIDR(cidrs...); err != nil {
-					plog.G(ctx).Debugf("[RouteWatcher] add pod CIDR routes failed: %v", err)
-				}
-			},
-			func(ips []string) {
-				if err := nm.AddRoute(ips...); err != nil {
-					plog.G(ctx).Debugf("[RouteWatcher] add service IP routes failed: %v", err)
-				}
-			},
-			func(svcs []v1.Service) {
-				if nm.dnsConfig != nil {
-					nm.dnsConfig.UpdateServices(ctx, svcs)
-				}
-			},
-		)
-		*version = resp.Version
+		if err := nm.applyGeneration(ctx, g, func() error {
+			applyRouteFrame(resp, services,
+				func(cidrs []string) {
+					if err := nm.AddRouteCIDR(cidrs...); err != nil {
+						plog.G(ctx).Debugf("[RouteWatcher] add pod CIDR routes failed: %v", err)
+					}
+				},
+				func(ips []string) {
+					if err := nm.AddRoute(ips...); err != nil {
+						plog.G(ctx).Debugf("[RouteWatcher] add service IP routes failed: %v", err)
+					}
+				},
+				func(svcs []v1.Service) {
+					if nm.dnsConfig != nil {
+						nm.dnsConfig.UpdateServices(ctx, svcs)
+					}
+				},
+			)
+			*version = resp.Version
+			return nil
+		}); err != nil {
+			return err
+		}
 	}
 }
 

@@ -79,6 +79,17 @@ func (svr *Server) removeConnection(connectionID string) handler.Connects {
 	return removed
 }
 
+// removeConnectionInstance removes only the observed session, never a replacement
+// that happens to have the same ConnectionID. The caller must hold connMu.
+func (svr *Server) removeConnectionInstance(connection handler.Connection) {
+	for i, current := range svr.connections {
+		if current == connection {
+			svr.connections = append(svr.connections[:i], svr.connections[i+1:]...)
+			return
+		}
+	}
+}
+
 // resetCurrentConnection updates currentConnectionID after the given ID was
 // removed. It picks the first remaining connection, or clears the field.
 // The caller must hold svr.connMu (write lock).

@@ -53,15 +53,24 @@ type connPool struct {
 	conf     *SshConfig
 	dialFunc func(context.Context, *SshConfig, <-chan struct{}) (tunnelClient, error)
 
-	mu     sync.Mutex
-	client *sshClientWrap
+	mu           sync.Mutex
+	client       *sshClientWrap
+	closed       bool
+	creating     chan struct{}
+	createCancel context.CancelFunc
+	workers      sync.WaitGroup
+	closeOnce    sync.Once
 }
 
 func newConnPool(conf *SshConfig) *connPool {
 	return &connPool{
 		conf: conf,
 		dialFunc: func(ctx context.Context, c *SshConfig, stop <-chan struct{}) (tunnelClient, error) {
-			return DialSshRemote(ctx, c, stop)
+			client, err := DialSshRemote(ctx, c, stop)
+			if err != nil {
+				return nil, err
+			}
+			return client, nil
 		},
 	}
 }
@@ -105,26 +114,63 @@ func (p *connPool) dial(ctx context.Context, remote netip.AddrPort) (net.Conn, e
 // serialized by p.mu so concurrent callers reuse a single client (single-flight).
 func (p *connPool) getClient(ctx context.Context) (*sshClientWrap, error) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.client != nil {
-		return p.client, nil
+	for {
+		if p.closed {
+			p.mu.Unlock()
+			return nil, net.ErrClosed
+		}
+		if err := ctx.Err(); err != nil {
+			p.mu.Unlock()
+			return nil, err
+		}
+		if p.client != nil {
+			client := p.client
+			p.mu.Unlock()
+			return client, nil
+		}
+		if p.creating == nil {
+			break
+		}
+		creating := p.creating
+		p.mu.Unlock()
+		select {
+		case <-creating:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		p.mu.Lock()
 	}
-
-	// Scope the client to its own cancelable context so it can be torn down
-	// independently on eviction, or together with the tunnel when ctx is done.
 	clientCtx, cancel := context.WithCancel(ctx)
+	p.creating = make(chan struct{})
+	p.createCancel = cancel
+	p.workers.Add(1)
+	p.mu.Unlock()
+	defer p.workers.Done()
 	client, err := p.dialFunc(clientCtx, p.conf, clientCtx.Done())
-	if err != nil {
+	p.mu.Lock()
+	close(p.creating)
+	p.creating = nil
+	p.createCancel = nil
+	if p.closed || err != nil || clientCtx.Err() != nil {
+		if p.closed {
+			err = net.ErrClosed
+		} else if err == nil {
+			err = clientCtx.Err()
+		}
+		p.mu.Unlock()
 		cancel()
-		plog.G(ctx).Debugf("failed to dial remote SSH server: %v", err)
+		if client != nil {
+			_ = client.Close()
+		}
 		return nil, err
 	}
 	wrap := newSshClientWrap(client, cancel)
 	p.client = wrap
-	plog.G(ctx).Debug("connected to remote SSH server")
-
+	p.workers.Add(1)
+	p.mu.Unlock()
 	go func() {
-		<-ctx.Done()
+		defer p.workers.Done()
+		<-clientCtx.Done()
 		p.evict(wrap)
 	}()
 	return wrap, nil
@@ -146,13 +192,20 @@ func (p *connPool) evict(w *sshClientWrap) {
 
 // Close tears down the pool's SSH client, if any.
 func (p *connPool) Close() {
-	p.mu.Lock()
-	w := p.client
-	p.client = nil
-	p.mu.Unlock()
-	if w != nil {
-		_ = w.Close()
-	}
+	p.closeOnce.Do(func() {
+		p.mu.Lock()
+		p.closed = true
+		w := p.client
+		p.client = nil
+		if p.createCancel != nil {
+			p.createCancel()
+		}
+		p.mu.Unlock()
+		if w != nil {
+			_ = w.Close()
+		}
+		p.workers.Wait()
+	})
 }
 
 func isContextError(err error) bool {

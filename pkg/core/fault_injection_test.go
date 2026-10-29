@@ -289,8 +289,9 @@ func TestFault_WriteFailsMidStream_CleanExit(t *testing.T) {
 		}
 	}()
 
-	// Send 10 packets — should fail after 3
-	for i := 0; i < 10; i++ {
+	// Queue enough frames to require at least four bounded writes, even when
+	// the writer drains a full batch on every iteration.
+	for i := 0; i < 4*maxBatchFrames; i++ {
 		buf := config.LPool.Get().([]byte)
 		buf[2] = 1
 		n := copy(buf[3:], buildIPv4Packet(net.IPv4(10, 0, 0, 1), net.IPv4(10, 0, 0, 2), []byte("x")))

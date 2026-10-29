@@ -3,12 +3,13 @@ package tun
 import (
 	"context"
 	"errors"
+	"io"
+	"runtime"
 	"sync"
 
 	"golang.zx2c4.com/wireguard/device"
 	"golang.zx2c4.com/wireguard/tun"
 
-	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
@@ -38,6 +39,9 @@ type batchDevice struct {
 	rmu    sync.Mutex
 	rbufs  [][]byte
 	rsizes []int
+
+	wmu   sync.Mutex
+	wbufs [][]byte
 
 	// net.Conn Read compatibility: surplus packets from a batched read, one per Read call.
 	lmu      sync.Mutex
@@ -139,16 +143,62 @@ func (d *batchDevice) Write(b []byte) (int, error) {
 	if len(b) == 0 {
 		return 0, nil
 	}
-	buf := config.LPool.Get().([]byte)[:]
-	defer config.LPool.Put(buf[:])
-	if tunOffset+len(b) > len(buf) {
-		return 0, errors.New("tun packet too large to write")
+	n, err := d.WritePackets([][]byte{b})
+	if n == 1 {
+		return len(b), err
 	}
-	copy(buf[tunOffset:tunOffset+len(b)], b)
-	if _, err := d.dev.Write([][]byte{buf[:tunOffset+len(b)]}, tunOffset); err != nil {
-		return 0, err
+	return 0, err
+}
+
+// WritePackets copies IP packets into per-device scratch, preserving the caller's
+// buffers even when Linux GRO mutates/coalesces them. It never retries a failed
+// device write: on Linux an error provides bytes, not a trustworthy packet prefix.
+func (d *batchDevice) WritePackets(packets [][]byte) (int, error) {
+	d.wmu.Lock()
+	defer d.wmu.Unlock()
+	limit := max(1, d.dev.BatchSize())
+	complete := 0
+	for len(packets) > 0 {
+		n := min(limit, len(packets))
+		if len(d.wbufs) < n {
+			d.wbufs = append(d.wbufs, make([][]byte, n-len(d.wbufs))...)
+		}
+		for i, p := range packets[:n] {
+			if len(p) > device.MaxSegmentSize {
+				return complete, errors.New("tun packet too large to write")
+			}
+			if cap(d.wbufs[i]) < d.scratchLen() {
+				d.wbufs[i] = make([]byte, d.scratchLen())
+			}
+			d.wbufs[i] = d.wbufs[i][:tunOffset+len(p)]
+			clear(d.wbufs[i][:tunOffset])
+			copy(d.wbufs[i][tunOffset:], p)
+		}
+		written, err := d.dev.Write(d.wbufs[:n], tunOffset)
+		written, err = normalizeWriteResult(runtime.GOOS, n, written, err)
+		complete += written
+		if err != nil {
+			return complete, err
+		}
+		packets = packets[n:]
 	}
-	return len(b), nil
+	return complete, nil
+}
+
+func normalizeWriteResult(goos string, packets, written int, err error) (int, error) {
+	if goos == "linux" {
+		if err != nil {
+			return 0, err // byte total cannot identify which packets succeeded after GRO
+		}
+		return packets, nil
+	}
+	if written < 0 || written > packets {
+		return 0, errors.Join(err, io.ErrShortWrite)
+	}
+	if err == nil && written != packets {
+		err = io.ErrShortWrite
+	}
+	return written, err
 }
 
 // Close closes the underlying device.

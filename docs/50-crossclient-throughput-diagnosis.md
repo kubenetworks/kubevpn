@@ -1,5 +1,8 @@
 # Cross-Client (A→B) Throughput Diagnosis
 
+> The original path, bottleneck measurements and direct-injection results below are
+> historical evidence. They are not benchmarks of the current batching implementation.
+
 ## Symptom
 
 Two kubevpn clients; client **A** accessing a service on client **B**'s machine (A → B's TUN IP)
@@ -172,6 +175,38 @@ Debug. Per-packet logging then follows naturally, per connection:
 Effect: without `--debug`, per-packet logging is fully off and the hot path pays only the
 `IsDebugEnabled` check. With `connect --debug`, that connection logs packets (file + stream); other
 concurrent non-debug connections stay silent.
+
+## Current implementation — bounded batching
+
+TCP writers and the TUN write path now drain only immediately available queued packets,
+without a batching timer: at most **32 frames / 64 KiB** per batch (a single legal maximum
+framed TCP packet may occupy **65,537 bytes**). `conn_batch.go` uses `net.Buffers`/writev for
+raw `*net.TCPConn`; TLS/wrapped connections use a reusable bounded aggregate buffer rather
+than one TLS write per frame. Partial writes continue only on the same connection, never
+replay a partial frame after reconnect. `batchDevice.WritePackets` normalizes the platform
+contract (Linux reports bytes, other platforms packet counts) and handles device batch limits.
+Serving routines join before final queue drain, so pooled packets are not stranded by late
+producers. No wire-format, CLI, protobuf or dependency change is needed.
+
+### Local verification after batching
+
+Measured on Apple M4, darwin/arm64, Go 1.26.3, CGO disabled, using the same
+`BenchmarkCrossClientThroughput` command (`-benchtime=2s -count=3`) before and after
+implementation, with no concurrent test/build workload. Values below are medians of three
+runs in MB/s, not predictions for SSH, port-forward, or WAN throughput:
+
+| Path | Flows | Baseline | After |
+|---|---:|---:|---:|
+| A→B | 1 | 21.10 | 69.65 |
+| A→B | 8 | 22.74 | 49.94 |
+| A→cluster | 1 | 42.42 | 133.68 |
+| A→cluster | 8 | 36.82 | 95.34 |
+
+Single-flow post-change results varied substantially (A→B: 64.74–127.33 MB/s;
+A→cluster: 131.88–311.72 MB/s). These clean-loopback measurements support reduced
+per-packet I/O overhead, but do not isolate every change or establish a production speedup.
+Mixed interactive/bulk latency has no pre-change baseline; real RTT/loss and native TUN
+performance remain unverified.
 
 ## Remaining work
 

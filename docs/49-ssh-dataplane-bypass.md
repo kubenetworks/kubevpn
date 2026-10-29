@@ -12,7 +12,43 @@ happens to be a Kubernetes node, kube-proxy rules on the node make the traffic m
 ClusterIP directly reachable. We can tunnel the data plane through SSH instead, bypassing
 the API server entirely.
 
-## Design
+## Current transport lifecycle
+
+`NetworkManager` now owns a single supervisor in `pkg/handler/network_transport.go`.
+The older `probeSSHDataPlane`/`sshForward`/`portForward` flow described below is
+superseded by generation-scoped sessions:
+
+- With SSH configured, bounded `DialSshRemote` and direct-tcpip channel opens check
+  all three destinations before creating `StartPortMap` handles. A local listener
+  alone is not evidence of SSH reachability.
+- Otherwise `StartPortForwardSession` creates all three ephemeral loopback
+  endpoints using one Kubernetes upgrade. The original REST configuration,
+  including any SSH-backed API-server route, is preserved.
+- A generation owns its forwarding handles, pending dials, and returned data/xDS
+  connections. Retirement unpublishes it and resets heartbeat generation before
+  closing connections and joining handles. Late dial results cannot be published.
+- On network failure the supervisor tries the other configured path, then uses
+  bounded backoff. Authentication, trust, configuration, HTTP 401/403, and SSH
+  administratively-prohibited failures terminate instead of falling back.
+- A healthy current path is sticky. Both paths use the same data-plane heartbeat
+  policy; runtime xDS watcher errors alone do not retire the data path.
+- Bootstrap waits for a correlated current-generation heartbeat after TUN startup,
+  within the 60-second total startup budget; listener readiness alone is insufficient.
+- The integrated vendored netmon monitor only wakes the supervisor to compare current
+  underlay routes/interfaces, with sticky time-jump detection. Relevant changes clear
+  pending probes without changing generation, then request fresh evidence with a bounded
+  recovery deadline. See [47](47-portforward-blackhole-liveness.md) for route sampling.
+- Replacement retains the TUN and client gVisor stacks. IP watcher reconnects still
+  reassert the DHCP lease and can legitimately update the address. Shutdown cancels the
+  parent first, retires the active generation, then waits startup/workers before clearing state.
+- No CLI flags, proto fields or dependency changes were added for this lifecycle.
+
+## Original design (historical)
+
+The following auto-detection flow, comparison, liveness notes and code-location table
+preserve the original implementation. `probeSSHDataPlane`/`sshForward`/`portForwardOnce`
+and `PortMapUntil` recovery are superseded by the current supervisor above; SSH is not
+assumed immune to black holes.
 
 ### Auto-detection (zero new flags)
 

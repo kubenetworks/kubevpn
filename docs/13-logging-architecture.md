@@ -40,7 +40,7 @@ launch, but the child retains its own. See [35-daemon-bootstrap.md](35-daemon-bo
 │  plog.G(context.Background()) ──→ global L ──→ stderr        │
 │                                   (server-format, InfoLevel) │
 └─────────────────────────────────────────────────────────────┘
-                          ▲ gRPC stream (Info+ only)
+                          ▲ gRPC stream (req.Level)
                           │
 ┌─────────────────────────┼───────────────────────────────────┐
 │ Daemon Process           │                                    │
@@ -79,7 +79,7 @@ without polluting the log file — see [30-connect-progress.md](30-connect-progr
 
 ```go
 // Daemon per-RPC setup (writer.go newServerStreamLogger / initStreamLogger):
-logger := plog.GetLoggerForServer(int32(log.DebugLevel), svr.LogFile) // file: ALL levels, always
+logger := plog.GetLoggerForServer(streamLevel, svr.LogFile) // file: req.Level (default Info)
 logger.AddHook(&plog.StreamHook{                                      // message-only → gRPC stream
     Writer: newStreamWriter(sendMsg),
     Level:  log.Level(streamLevel),  // req.Level: Info default, Debug with --debug
@@ -185,7 +185,7 @@ holds at Debug (Rule 1) — a small number of one-time setup lines that are not 
 | `GetLoggerForClient(level, out)` | `pkg/log/logger.go` | Create client-format logger for custom output |
 | `GetLoggerForServer(level, out)` | `pkg/log/logger.go` | Create server-format logger (timestamp+file:line) |
 | `StreamHook` | `pkg/log/logger.go` | Logrus hook: sends message-only text to a writer at its configured Level |
-| `newServerStreamLogger` | `pkg/daemon/action/writer.go` | Build per-RPC logger: file always Debug + StreamHook at streamLevel (req.Level) |
+| `newServerStreamLogger` | `pkg/daemon/action/writer.go` | Build per-RPC logger: file and StreamHook both at streamLevel (req.Level) |
 | `initStreamLogger` | `pkg/daemon/action/writer.go` | `newServerStreamLogger` + `WithLogger(resp.Context())` |
 | `LogFieldConnID` | `pkg/daemon/action/writer.go` | ctx field key `"connID"` → `[connID=xxxx]` prefix for per-connection isolation |
 | `serverFormat` | `pkg/log/logger.go` | `2006-01-02 15:04:05.000 file.go:42 level: message` |
@@ -203,7 +203,7 @@ Configuring DNS service...
 Now you can access resources in the kubernetes cluster !
 ```
 
-**Daemon log file** (`~/.kubevpn/daemon/daemon.log`):
+**Daemon log file with `connect --debug`** (`~/.kubevpn/daemon/daemon.log`):
 ```
 2026-06-10 08:15:23.456 connect_elevate.go:89 info: Use manager namespace default
 2026-06-10 08:15:23.567 connect.go:143 info: Starting connect to cluster
@@ -218,9 +218,9 @@ Now you can access resources in the kubernetes cluster !
 2026-06-10 08:15:26.456 network.go:142 info: Adding Pod IP and Service IP to route table...
 ```
 
-Note: debug lines (`[Gvisor-TCP]`, `[Transport]`, `[Client-0]`) always go to the log file; they reach
-CLI stdout only when the user passed `--debug`. With multiple concurrent operations, each line in the
-file carries a `[connID=xxxx]` prefix so they can be filtered apart.
+Note: connection-scoped debug lines (`[Gvisor-TCP]`, `[Transport]`, `[Client-0]`) reach both the
+file and CLI only with `--debug`; global fallback logs are the exception described above.
+Connection-scoped lines carry `[connID=xxxx]` so concurrent operations can be filtered apart.
 
 At Debug, the client logs **every** packet on both directions of the data path: `OUTBOUND` in the
 client read-tun path (`clientTransport.routeOutbound`, local app → cluster) and `INBOUND` in the
