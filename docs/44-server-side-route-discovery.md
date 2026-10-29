@@ -67,14 +67,69 @@ The client no longer runs any pod/service informer. DNS (`pkg/dns`) dropped its
 `SvcInformer` dependency: hosts are written push-driven by `UpdateServices` (add-only,
 matching prior behavior) and macOS resolver files are refreshed via `applyResolvers`.
 
-### Degradation (no client fallback)
+### Connection deadlines and diagnostics
+
+The route watcher starts **after** TUN IP allocation and DNS setup. A `Forwarded ports`
+progress message alone does not mean discovery has started. Startup logs identify the workload
+namespace and local xDS target; `--debug` also records allocated ports, dial attempts and dial
+readiness with elapsed time. Readiness is not evidence that a service snapshot has arrived.
+
+Each blocking gRPC dial has a **30-second** deadline. On failure the existing outer loop waits
+**10 seconds** before retrying; the session remains alive. Failures include the target, namespace
+and retry delay at Warn, with repeated warnings limited to once per minute per watcher (every
+attempt is visible at Debug). Parent cancellation stops dialing, waiting and streaming without
+reporting a connection failure. An unset local xDS port warns that the watcher cannot start.
+
+The deadline applies **only to dialing**, not to the long-lived watch stream: an idle namespace
+can legitimately produce no updates for hours. It is not a keepalive or an established-stream
+black-hole detector, and cannot repair a persistently unreachable port. xDS failure still does
+not tear down a healthy data tunnel (see [47-portforward-blackhole-liveness.md](47-portforward-blackhole-liveness.md)).
+
+### Discovery initialization and isolation
+
+A successful `GetTunIP` or gRPC dial does not establish that service discovery works. Each
+namespace's first subscription initializes one shared hub outside the broadcaster's map lock.
+Other namespaces can initialize independently. References include callers waiting for readiness
+as well as active streams: one client leaving cannot cancel initialization another client needs.
+The hub belongs to the manager lifetime, not to the first client's stream. Last-reference cleanup
+cancels API requests and informers, stops pending debounce work, and removes that generation;
+a later subscription creates a new one.
+
+One **30-second initialization budget** covers both Pods and Services List probes and both
+informer caches warming. An enabled snapshot is sent only after both caches synchronize; an
+empty snapshot then really means there were no cached records, not a hidden List failure.
+Generated informers use uncancellable request contexts, so these informers use private ListWatch
+callbacks: Lists have bounded hub-derived contexts; Watches use the hub lifetime without the
+initialization deadline. Successful initialization therefore does not expire a healthy watch.
+
+Initialization failure cancels its resources and removes the failed hub before notifying waiters:
+
+- A Forbidden List probe for either resource produces one `Snapshot=true, Enabled=false` frame,
+  then ends the server RPC (compatible with older clients' CIDR-only degradation).
+- Other probe failures return `Unavailable`; exhausting the initialization budget returns
+  `DeadlineExceeded`. Neither produces an enabled partial snapshot.
+- Server logs identify the namespace and failed phase/resource. The client logs a successful
+  snapshot's service/pod-CIDR counts; this reports discovery, not successful hosts writes or DNS
+  resolution. Hosts write success is reported separately by the DNS layer.
+
+The List probes/cache sync do **not** certify Watch permission or continuing API availability.
+Once initialized, informers retain their normal retry behavior. Runtime permission revocation,
+stalled established watches, and downstream slow-consumer frame loss are not newly detected by
+these initialization deadlines.
+
+### Degradation and recovery (no client fallback)
 
 `kubevpn` upgrades an older traffic manager to match the client before connecting
-(`UpgradeDeploy`), so `WatchNamespaceRoutes` is normally available. If it is not
-(`codes.Unimplemented` on an old manager, or `Enabled=false` when the manager lacks RBAC),
-the client **degrades to CIDR-only routing** — the cluster pod/service CIDRs already cover
-routing; only per-pod-IP catch-all and short-name hosts entries are absent. There is **no
-client-side fallback informer**.
+(`UpgradeDeploy`), so `WatchNamespaceRoutes` is normally available. When discovery is disabled or
+initialization fails, existing CIDR routes and hosts are retained; the VPN is not torn down.
+New clients return to the **10-second retry loop**, including after `Enabled=false`, so corrected
+permissions or restored API access take effect without reconnecting the whole VPN. Failed hubs
+are not retained, even when an older client parks on a disabled response instead of retrying.
+A healthy subscription still uses snapshot/delta updates rather than periodic reconnection.
+
+Without discovery, per-pod catch-all routes and new short-name hosts entries are absent. There
+is **no client-side fallback informer**. The existing old-manager `Unimplemented` compatibility
+handling is unchanged by this initialization repair.
 
 ## 3. RBAC
 

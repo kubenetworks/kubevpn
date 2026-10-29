@@ -37,6 +37,10 @@ type Config struct {
 	// preserved so a push-driven UpdateServices can re-fold them in.
 	extra []Entry
 
+	// Hosts I/O defaults to the system file and lock; tests can isolate both.
+	readHosts  func() ([]byte, error)
+	writeHosts func(string) error
+
 	HowToGetExternalName func(name string) (string, error)
 
 	// only set it on linux
@@ -68,10 +72,15 @@ func (c *Config) UpdateServices(ctx context.Context, services []corev1.Service) 
 	c.Lock.Lock()
 	c.Services = services
 	appendHosts := c.generateAppendHosts(services, c.extra)
+	plog.G(ctx).Debugf("UpdateServices: processing %d services, %d hosts entries to append", len(services), len(appendHosts))
 	err := c.appendHosts(appendHosts)
 	c.Lock.Unlock()
-	if err != nil && !errors.Is(err, context.Canceled) {
-		plog.G(ctx).Errorf("Failed to add hosts(%s) to hosts: %v", c.entryList2String(appendHosts), err)
+	if err != nil {
+		if !errors.Is(err, context.Canceled) {
+			plog.G(ctx).Errorf("Failed to add hosts(%s) to hosts: %v", c.entryList2String(appendHosts), err)
+		}
+	} else if ctx.Err() == nil && len(appendHosts) > 0 {
+		plog.G(ctx).Infof("Added %d hosts entries from service discovery", len(appendHosts))
 	}
 	c.applyResolvers(ctx)
 }
@@ -93,7 +102,20 @@ func (c *Config) appendHosts(appendHosts []Entry) error {
 		}
 	}
 
-	str := c.entryList2String(appendHosts)
+	return c.appendHostsFile(c.entryList2String(appendHosts))
+}
+
+func (c *Config) readHostsFile() ([]byte, error) {
+	if c.readHosts != nil {
+		return c.readHosts()
+	}
+	return os.ReadFile(getHostFile())
+}
+
+func (c *Config) appendHostsFile(content string) error {
+	if c.writeHosts != nil {
+		return c.writeHosts(content)
+	}
 	return withHostsFileLock(func() error {
 		hostFile := getHostFile()
 		f, err := os.OpenFile(hostFile, os.O_APPEND|os.O_WRONLY, config.FileModeFile)
@@ -101,7 +123,7 @@ func (c *Config) appendHosts(appendHosts []Entry) error {
 			return err
 		}
 		defer f.Close()
-		_, err = f.WriteString(str)
+		_, err = f.WriteString(content)
 		return err
 	})
 }
@@ -159,8 +181,7 @@ func (c *Config) generateAppendHosts(serviceList []corev1.Service, hosts []Entry
 	}
 
 	// 2) if hosts file already contains item, not needs to add it to hosts file
-	hostFile := getHostFile()
-	content, err2 := os.ReadFile(hostFile)
+	content, err2 := c.readHostsFile()
 	if err2 == nil {
 		reader := bufio.NewReader(strings.NewReader(string(content)))
 		for {

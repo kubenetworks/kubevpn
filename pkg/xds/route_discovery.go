@@ -2,15 +2,20 @@ package xds
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net"
 	"sort"
 	"sync"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	informerv1 "k8s.io/client-go/informers/core/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 
@@ -26,6 +31,10 @@ const routeDiscoveryDebounce = 300 * time.Millisecond
 // routeSubBuffer is the per-subscriber channel depth. A slow client that fills it
 // drops frames (non-blocking send); it re-syncs via a fresh snapshot on reconnect.
 const routeSubBuffer = 4
+
+// routeDiscoveryInitTimeout covers both permission probes and the initial cache sync.
+// Relists use the same budget, but active watches have only the hub lifetime as a bound.
+const routeDiscoveryInitTimeout = 30 * time.Second
 
 // podIPToPrefix aggregates a pod IP to a fixed-granularity route prefix: IPv4 -> /24,
 // IPv6 -> /64. This collapses the many per-pod /32 the client used to route into a
@@ -89,7 +98,7 @@ func stripSvcTransform(obj any) (any, error) {
 
 // routeSnapshot is the full route/DNS state for one namespace.
 type routeSnapshot struct {
-	podCIDRs map[string]struct{}      // set of aggregated pod prefixes
+	podCIDRs map[string]struct{}           // set of aggregated pod prefixes
 	services map[string]*rpc.ServiceRecord // key "namespace/name"
 }
 
@@ -100,14 +109,23 @@ func newRouteSnapshot() routeSnapshot {
 // nsRouteHub owns the pod+service informers for a single namespace and fans out
 // snapshot/delta frames to all subscribers of that namespace.
 type nsRouteHub struct {
-	ns      string
-	enabled bool // false => manager lacks RBAC to watch this namespace
+	ns     string
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	// refs includes callers waiting for initialization as well as active streams;
+	// it is protected by the broadcaster mutex, not mu. Closing ready publishes initErr.
+	refs       int
+	ready      chan struct{}
+	initErr    error
+	deadline   time.Time
+	stopParent func() bool
 
 	podInformer cache.SharedIndexInformer
 	svcInformer cache.SharedIndexInformer
-	stop        chan struct{}
 
 	mu       sync.Mutex
+	synced   bool
 	subs     map[chan *rpc.NamespaceRoutesResponse]struct{}
 	last     routeSnapshot
 	version  int64
@@ -117,120 +135,224 @@ type nsRouteHub struct {
 // routeBroadcaster manages one nsRouteHub per subscribed namespace, creating them
 // lazily on first subscribe and garbage-collecting them when the last subscriber leaves.
 type routeBroadcaster struct {
+	ctx       context.Context
 	clientset kubernetes.Interface
 
 	mu   sync.Mutex
 	hubs map[string]*nsRouteHub
 }
 
-func newRouteBroadcaster(clientset kubernetes.Interface) *routeBroadcaster {
-	return &routeBroadcaster{clientset: clientset, hubs: map[string]*nsRouteHub{}}
+func newRouteBroadcaster(ctx context.Context, clientset kubernetes.Interface) *routeBroadcaster {
+	return &routeBroadcaster{ctx: ctx, clientset: clientset, hubs: map[string]*nsRouteHub{}}
 }
 
-// subscribe registers a channel for the namespace, creating the hub (and its
-// informers) on first use. It returns the channel (pre-loaded with a Snapshot
-// frame) and an unsubscribe func. ctx bounds the initial RBAC probe / cache sync.
-func (b *routeBroadcaster) subscribe(ctx context.Context, ns string) (chan *rpc.NamespaceRoutesResponse, func()) {
+// subscribe reserves a reference before waiting, so cancellation/GC cannot stop
+// a hub another caller is about to use. Kubernetes work never holds b.mu.
+func (b *routeBroadcaster) subscribe(ctx context.Context, ns string) (chan *rpc.NamespaceRoutesResponse, func(), error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
 	b.mu.Lock()
+	if err := b.ctx.Err(); err != nil {
+		b.mu.Unlock()
+		return nil, nil, err
+	}
 	hub := b.hubs[ns]
-	if hub == nil {
-		hub = b.newHub(ctx, ns)
+	created := hub == nil
+	if created {
+		hubCtx, cancel := context.WithCancel(b.ctx)
+		hub = &nsRouteHub{
+			ns: ns, ctx: hubCtx, cancel: cancel,
+			ready: make(chan struct{}), deadline: time.Now().Add(routeDiscoveryInitTimeout),
+			subs: map[chan *rpc.NamespaceRoutesResponse]struct{}{}, last: newRouteSnapshot(),
+		}
+		// Parent cancellation also detaches the hub even if a stream's send is
+		// blocked. The callback takes b.mu, so it cannot run before assignment.
+		hub.stopParent = context.AfterFunc(b.ctx, func() {
+			b.mu.Lock()
+			if b.hubs[ns] == hub {
+				delete(b.hubs, ns)
+			}
+			b.mu.Unlock()
+			hub.stop()
+		})
 		b.hubs[ns] = hub
 	}
+	hub.refs++
 	b.mu.Unlock()
+	if created {
+		go b.initialize(hub)
+	}
+
+	select {
+	case <-ctx.Done():
+		b.release(hub)
+		return nil, nil, ctx.Err()
+	case <-b.ctx.Done():
+		b.release(hub)
+		return nil, nil, b.ctx.Err()
+	case <-hub.ready:
+	}
+	if err := ctx.Err(); err != nil {
+		b.release(hub)
+		return nil, nil, err
+	}
+	if hub.initErr != nil {
+		b.release(hub)
+		return nil, nil, hub.initErr
+	}
+	if err := hub.ctx.Err(); err != nil {
+		b.release(hub)
+		return nil, nil, err
+	}
 
 	ch := make(chan *rpc.NamespaceRoutesResponse, routeSubBuffer)
-
 	hub.mu.Lock()
 	hub.subs[ch] = struct{}{}
-	// Deliver the current full state as the first frame so a new subscriber is
-	// consistent with the delta stream that follows (both under hub.mu).
 	ch <- hub.snapshotFrameLocked()
 	hub.mu.Unlock()
 
+	var once sync.Once
 	unsub := func() {
-		hub.mu.Lock()
-		delete(hub.subs, ch)
-		empty := len(hub.subs) == 0
-		hub.mu.Unlock()
-		if empty {
-			b.gc(ns, hub)
-		}
+		once.Do(func() {
+			hub.mu.Lock()
+			delete(hub.subs, ch)
+			hub.mu.Unlock()
+			b.release(hub)
+		})
 	}
-	return ch, unsub
+	return ch, unsub, nil
 }
 
-// gc stops and removes a hub if it still has no subscribers.
-func (b *routeBroadcaster) gc(ns string, hub *nsRouteHub) {
+func (b *routeBroadcaster) release(hub *nsRouteHub) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
-	hub.mu.Lock()
-	empty := len(hub.subs) == 0
-	hub.mu.Unlock()
-	if !empty || b.hubs[ns] != hub {
-		return
+	hub.refs--
+	last := hub.refs == 0
+	if last && b.hubs[hub.ns] == hub {
+		delete(b.hubs, hub.ns)
 	}
-	if hub.stop != nil {
-		close(hub.stop)
+	b.mu.Unlock()
+	if last {
+		hub.stop()
 	}
-	delete(b.hubs, ns)
 }
 
-// newHub creates a hub for ns. It probes RBAC first: if the manager cannot list
-// pods/services in ns, the hub is disabled (subscribers get a single Enabled=false
-// frame and no informers run) so the client degrades to CIDR-only routing.
-func (b *routeBroadcaster) newHub(ctx context.Context, ns string) *nsRouteHub {
-	hub := &nsRouteHub{
-		ns:      ns,
-		subs:    map[chan *rpc.NamespaceRoutesResponse]struct{}{},
-		last:    newRouteSnapshot(),
-		enabled: true,
+func (h *nsRouteHub) stop() {
+	h.stopParent()
+	h.cancel()
+	h.mu.Lock()
+	if h.debounce != nil {
+		h.debounce.Stop()
+		h.debounce = nil
 	}
-	if _, err := b.clientset.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{Limit: 1}); apierrors.IsForbidden(err) {
-		plog.G(ctx).Warnf("[RouteDiscovery] no RBAC to list pods in namespace %q; serving Enabled=false", ns)
-		hub.enabled = false
-		return hub
+	h.mu.Unlock()
+}
+
+// initialize alone publishes ready/initErr. Failed generations are evicted
+// before publication, allowing a new subscriber to retry without being removed
+// by a late release from this generation.
+func (b *routeBroadcaster) initialize(hub *nsRouteHub) {
+	initCtx, cancel := context.WithDeadline(hub.ctx, hub.deadline)
+	err := b.initHub(initCtx, hub)
+	cancel()
+	if err != nil {
+		if hub.ctx.Err() == nil {
+			plog.G(b.ctx).Warnf("[RouteDiscovery] initialize namespace %q failed: %v", hub.ns, err)
+		}
+		hub.stop()
+		b.mu.Lock()
+		if b.hubs[hub.ns] == hub {
+			delete(b.hubs, hub.ns)
+		}
+		b.mu.Unlock()
+	} else {
+		hub.mu.Lock()
+		plog.G(b.ctx).Debugf("[RouteDiscovery] namespace %q ready: %d services, %d pod CIDRs", hub.ns, len(hub.last.services), len(hub.last.podCIDRs))
+		hub.mu.Unlock()
+	}
+	hub.initErr = err
+	close(hub.ready)
+}
+
+func (b *routeBroadcaster) initHub(ctx context.Context, hub *nsRouteHub) error {
+	pods := b.clientset.CoreV1().Pods(hub.ns)
+	services := b.clientset.CoreV1().Services(hub.ns)
+	if _, err := pods.List(ctx, metav1.ListOptions{Limit: 1}); err != nil {
+		return fmt.Errorf("list pods in namespace %q: %w", hub.ns, err)
+	}
+	if _, err := services.List(ctx, metav1.ListOptions{Limit: 1}); err != nil {
+		return fmt.Errorf("list services in namespace %q: %w", hub.ns, err)
 	}
 
-	hub.stop = make(chan struct{})
-	hub.podInformer = informerv1.NewFilteredPodInformer(b.clientset, ns, 0, cache.Indexers{}, nil)
-	hub.svcInformer = informerv1.NewFilteredServiceInformer(b.clientset, ns, 0, cache.Indexers{}, nil)
-	_ = hub.podInformer.SetTransform(stripPodTransform)
-	_ = hub.svcInformer.SetTransform(stripSvcTransform)
-
+	hub.podInformer = cache.NewSharedIndexInformer(&cache.ListWatch{
+		ListFunc: func(opts metav1.ListOptions) (runtime.Object, error) {
+			listCtx, cancel := hub.listContext()
+			defer cancel()
+			return pods.List(listCtx, opts)
+		},
+		WatchFunc: func(opts metav1.ListOptions) (watch.Interface, error) { return pods.Watch(hub.ctx, opts) },
+	}, &v1.Pod{}, 0, cache.Indexers{})
+	hub.svcInformer = cache.NewSharedIndexInformer(&cache.ListWatch{
+		ListFunc: func(opts metav1.ListOptions) (runtime.Object, error) {
+			listCtx, cancel := hub.listContext()
+			defer cancel()
+			return services.List(listCtx, opts)
+		},
+		WatchFunc: func(opts metav1.ListOptions) (watch.Interface, error) { return services.Watch(hub.ctx, opts) },
+	}, &v1.Service{}, 0, cache.Indexers{})
+	if err := hub.podInformer.SetTransform(stripPodTransform); err != nil {
+		return fmt.Errorf("set pod transform: %w", err)
+	}
+	if err := hub.svcInformer.SetTransform(stripSvcTransform); err != nil {
+		return fmt.Errorf("set service transform: %w", err)
+	}
 	handler := cache.ResourceEventHandlerFuncs{
-		AddFunc:    func(any) { hub.scheduleRecompute() },
-		UpdateFunc: func(any, any) { hub.scheduleRecompute() },
-		DeleteFunc: func(any) { hub.scheduleRecompute() },
+		AddFunc: func(any) { hub.scheduleRecompute() }, UpdateFunc: func(any, any) { hub.scheduleRecompute() }, DeleteFunc: func(any) { hub.scheduleRecompute() },
 	}
-	_, _ = hub.podInformer.AddEventHandler(handler)
-	_, _ = hub.svcInformer.AddEventHandler(handler)
-
-	go hub.podInformer.Run(hub.stop)
-	go hub.svcInformer.Run(hub.stop)
-
-	// Warm the cache before the first subscribe reads it, so the initial snapshot is
-	// complete. Bounded by ctx; if it times out we still serve whatever synced.
-	syncCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	cache.WaitForCacheSync(syncCtx.Done(), hub.podInformer.HasSynced, hub.svcInformer.HasSynced)
+	if _, err := hub.podInformer.AddEventHandler(handler); err != nil {
+		return fmt.Errorf("register pod handler: %w", err)
+	}
+	if _, err := hub.svcInformer.AddEventHandler(handler); err != nil {
+		return fmt.Errorf("register service handler: %w", err)
+	}
+	go hub.podInformer.Run(hub.ctx.Done())
+	go hub.svcInformer.Run(hub.ctx.Done())
+	if !cache.WaitForCacheSync(ctx.Done(), hub.podInformer.HasSynced, hub.svcInformer.HasSynced) {
+		return fmt.Errorf("sync namespace %q caches (pods=%t services=%t): %w", hub.ns, hub.podInformer.HasSynced(), hub.svcInformer.HasSynced(), ctx.Err())
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	hub.mu.Lock()
 	hub.last = hub.computeLocked()
+	hub.synced = true
 	hub.mu.Unlock()
-	return hub
+	return nil
+}
+
+func (h *nsRouteHub) listContext() (context.Context, context.CancelFunc) {
+	h.mu.Lock()
+	synced := h.synced
+	h.mu.Unlock()
+	if !synced {
+		return context.WithDeadline(h.ctx, h.deadline)
+	}
+	return context.WithTimeout(h.ctx, routeDiscoveryInitTimeout)
 }
 
 // scheduleRecompute debounces informer events into a single recompute+broadcast.
 func (h *nsRouteHub) scheduleRecompute() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.debounce != nil {
+	if !h.synced || h.ctx.Err() != nil || h.debounce != nil {
 		return
 	}
 	h.debounce = time.AfterFunc(routeDiscoveryDebounce, func() {
 		h.mu.Lock()
 		h.debounce = nil
-		h.broadcastDeltaLocked()
+		if h.ctx.Err() == nil {
+			h.broadcastDeltaLocked()
+		}
 		h.mu.Unlock()
 	})
 }
@@ -306,9 +428,6 @@ func (h *nsRouteHub) broadcastDeltaLocked() {
 
 // snapshotFrameLocked builds a full Snapshot=true frame from current state. Caller holds h.mu.
 func (h *nsRouteHub) snapshotFrameLocked() *rpc.NamespaceRoutesResponse {
-	if !h.enabled {
-		return &rpc.NamespaceRoutesResponse{Snapshot: true, Enabled: false}
-	}
 	resp := &rpc.NamespaceRoutesResponse{Snapshot: true, Enabled: true, Version: h.version}
 	for cidr := range h.last.podCIDRs {
 		resp.AddedPodCIDRs = append(resp.AddedPodCIDRs, cidr)
@@ -374,7 +493,16 @@ func sameServiceRecord(a, b *rpc.ServiceRecord) bool {
 
 // WatchNamespaceRoutes streams pod route prefixes and service records for a namespace.
 func (s *TunConfigServer) WatchNamespaceRoutes(req *rpc.NamespaceRoutesRequest, stream rpc.TunConfigService_WatchNamespaceRoutesServer) error {
-	ch, unsub := s.routes.subscribe(stream.Context(), req.GetNamespace())
+	ch, unsub, err := s.routes.subscribe(stream.Context(), req.GetNamespace())
+	if err != nil {
+		if apierrors.IsForbidden(err) {
+			return stream.Send(&rpc.NamespaceRoutesResponse{Snapshot: true, Enabled: false})
+		}
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return status.FromContextError(err).Err()
+		}
+		return status.Error(codes.Unavailable, err.Error())
+	}
 	defer unsub()
 	for {
 		select {
@@ -382,6 +510,8 @@ func (s *TunConfigServer) WatchNamespaceRoutes(req *rpc.NamespaceRoutesRequest, 
 			if err := stream.Send(resp); err != nil {
 				return err
 			}
+		case <-s.routes.ctx.Done():
+			return status.FromContextError(s.routes.ctx.Err()).Err()
 		case <-stream.Context().Done():
 			return nil
 		}
