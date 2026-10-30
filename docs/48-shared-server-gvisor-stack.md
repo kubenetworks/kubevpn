@@ -6,8 +6,9 @@ The server (traffic manager) needs to balance three concerns:
 
 1. **Session continuity**: pool-slot tunnel drops must not kill gvisor TCP sessions (SSH, SCP).
 2. **Client isolation**: one slow client must not block other clients' gvisor stacks.
-3. **Liveness independence**: data-plane congestion must not starve heartbeat probes, which would
-   cause the watchdog to misjudge the tunnel as dead and trigger a reconnect mid-transfer.
+3. **Heartbeat request isolation**: business-queue congestion should not prevent sending probes.
+   Replies and the outer transport still depend on data-path progress, so this cannot guarantee
+   liveness during congestion.
 
 Additionally, packet drops on the client side (from `trySendToSlot` when a slot buffer is full)
 cause OS TCP to enter RTO exponential backoff (1–7 s stalls), degrading SCP throughput.
@@ -20,11 +21,11 @@ Each client (identified by TUN IP) gets an independent gvisor stack whose lifeti
 **client session** — outliving individual pool-slot connections but isolated from other clients.
 
 ```
-Client A (4 data slots) ─┐
+Client A (1 data slot) ─┐
                          ├→ Stack-A (lifetime: client A session) → TCPForwarder → cluster
 Client A reconnects ─────┘
 
-Client B (4 data slots) ─┐
+Client B (1 data slot) ─┐
                          ├→ Stack-B (lifetime: client B session) → TCPForwarder → cluster
 Client B reconnects ─────┘
 
@@ -35,18 +36,24 @@ Inter-client (A→B): direct forwarding via RouteHub (no gvisor stack involved)
 
 ```
 Data Plane:
-  TUN → routeOutbound → tunInbound → runConnPool → slots[0..3].inbound (blocking) → writeToConn
+  TUN → routeOutbound → tunInbound → runConnPool → slot[0].inbound (blocking) → writeToConn
                                                          ↑ backpressure propagates to OS TCP
 
 Control Plane:
   heartbeats() → controlSlot.inbound → writeToConn (independent TCP conn)
-                      ↑ never blocked by data congestion
+                      ↑ requests bypass the business queue
 ```
 
 | Connection | Type Prefix | Server Behavior | RouteHub |
 |------------|-------------|-----------------|----------|
-| Data slots (×4) | `packetTypeToGvisor` (0x01) | `AddRoute` + gvisor inject | Registered |
+| Data slot (×1) | `packetTypeToGvisor` (0x01) | `AddRoute` + gvisor inject | Registered |
 | Control slot (×1) | `packetTypeControl` (0x02) | `handleControlConn` | NOT registered |
+
+Both conns use the **same TCP forwarding endpoint 10801**, not xDS 9002. SSH/port-forward
+still shares an outer TCP transport. The default uses direct slot-0 dispatch with no
+slot-selection parsing/hash; the private data-only `poolSize` override supports nil-stats
+1/2/4/8-slot comparisons, with no new CLI or environment flag. `connSlot` lifecycle, queues,
+deadlines and batching are retained, as is concurrent handling of business flows.
 
 ## 3. Protocol: `packetTypeControl`
 
@@ -65,8 +72,9 @@ The **first datagram** on a conn declares its type:
 - Does **NOT** call `AddRoute` (conn never appears in RouteHub)
 - Does **NOT** participate in data routing
 - Reads heartbeat ICMP echo → injects into per-client gvisor stack → stack generates reply
-- Reply routes back via data conns (through RouteHub)
-- Read deadline: KeepAliveTime×3 (client sends heartbeat every 5 s, never times out)
+- Reply routes back via registered data conns (through RouteHub): first writable with fallback,
+  not per-flow load balancing; the default has one registered conn per client address in steady state
+- Read deadline: KeepAliveTime×3 (5 s heartbeats normally keep it active; stalls can still time out)
 
 ### Client `controlSlot`
 
@@ -81,7 +89,7 @@ The **first datagram** on a conn declares its type:
 
 ```go
 select {
-case t.slots[flowHash(key, packet.dst, n)].inbound <- packet:
+case t.slots[0].inbound <- packet: // default; only multi-slot tests hash for selection
 case <-ctx.Done():
     packet.release()
     return
@@ -107,16 +115,20 @@ Previously `trySendToSlot` silently dropped packets → OS TCP saw loss → RTO 
 
 ### Why 180 s grace period
 
-Port-forward reconnections typically complete in 10–15 s. The grace period (3× heartbeat cycle)
+Port-forward reconnections typically complete in 10–15 s. The grace period (3× `KeepAliveTime`, not the 5 s heartbeat interval)
 covers network glitches and brief laptop sleep. After 180 s without any data conn, the client
 is genuinely gone and its stack memory can be reclaimed.
 
-### Why idle data slot timeout is safe
+### Data slot timeout and session retention
 
-1. Watchdog only checks `HeartbeatStats.LastReply()`, driven by controlSlot → never misjudges
-2. Other active data conns remain in RouteHub → routing unaffected
-3. Slot auto-reconnects (`connSlot.run` loop), registers route immediately on reconnect
-4. No in-flight TCP sessions on an idle slot (sessions hash to the active slots)
+1. The watchdog requires a correlated reply over a registered data conn; control requests alone
+   do not prove liveness.
+2. With the single-data-slot default, losing that conn temporarily removes the return route;
+   there are no other active data slots to guarantee uninterrupted routing.
+3. The slot auto-reconnects (`connSlot.run` loop) and registers its route immediately.
+4. The shared per-client gvisor stack and grace timer retain TCP session state across brief gaps,
+   including idle sessions. Retention does not depend on four slots and cannot guarantee that
+   application timeouts or a prolonged outage will not end a session.
 
 ## 6. Safety Properties
 
@@ -133,9 +145,11 @@ one client stalls only that client's gvisor stack. Other clients are unaffected.
 
 ### 6.3 Heartbeat independence
 
-controlSlot has its own TCP conn. Even if all 4 data slots are congestion-blocked for 30 s,
-heartbeat ICMP still flows → `MarkReply()` still fires → watchdog sees liveness → no false
-reconnect trigger.
+`controlSlot` has its own queue and TCP conn, so heartbeat requests bypass the business queue.
+It uses the same forwarding endpoint (10801), not xDS (9002), and the outer SSH/port-forward
+TCP transport is still shared. Replies return through the registered data conn and must pass
+`HeartbeatStats.observeReply` correlation checks. Data congestion or an outer-transport stall
+can therefore still delay replies and trigger recovery; there is no absolute liveness guarantee.
 
 ## 7. Implementation
 
@@ -178,7 +192,7 @@ type connSlot struct {
 
 - Per-client stack ≈ 2–4 MB (TCP buffers, forwarder goroutines)
 - 50 clients ≈ 100–200 MB; traffic manager pod (512 MB–1 GB) handles this comfortably
-- 5 conns per client (4 data + 1 control) vs previous 4
+- 2 conns per client by default (1 data + 1 control), down from the historical 4 data + 1 control
 - Each client: 1 stack reader goroutine (lightweight)
 
 ## 9. Related

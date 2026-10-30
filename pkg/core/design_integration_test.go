@@ -106,14 +106,14 @@ func TestServerRouting_Path1_RouteExistsForwards(t *testing.T) {
 // ============================================================================
 
 func TestConnectionPool_SlotIsolation(t *testing.T) {
-	// Doc says: each slot has independent reconnect — if one dies, others work
-	slots := make([]chan *Packet, ConnPoolSize)
+	// Explicit multi-slot fixture: each queue owns its packets independently.
+	slots := make([]chan *Packet, 4)
 	for i := range slots {
 		slots[i] = make(chan *Packet, MaxSize)
 	}
 
 	// Put packets in different slots
-	for i := 0; i < ConnPoolSize; i++ {
+	for i := range slots {
 		buf := config.LPool.Get().([]byte)
 		slots[i] <- &Packet{data: buf, length: 1}
 	}

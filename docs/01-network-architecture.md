@@ -55,7 +55,7 @@ IP packets are encapsulated in a custom datagram framing protocol over TLS/TCP. 
 │ Length   │ Prefix │      IP Packet       │
 │ (2 bytes)│(1 byte)│   (variable length)  │
 ├──────────┼────────┼──────────────────────┤
-│ uint16   │ 0 or 1 │  IPv4/IPv6 packet    │
+│ uint16   │ 0/1/2  │  IPv4/IPv6 packet    │
 │ big-end  │        │                      │
 └──────────┴────────┴──────────────────────┘
 ```
@@ -72,8 +72,9 @@ IP packets are encapsulated in a custom datagram framing protocol over TLS/TCP. 
 | `1` | INJECT | server→client | Inject into client gvisor stack (rare: self-to-self traffic) |
 | `0` | DIRECT | server→client | Already processed by gvisor; write directly to TUN device |
 | `0` | FORWARD | server internal | Forward to another client via RouteHub (multi-client routing) |
+| `2` | CONTROL | client→server | Heartbeat control conn; handled separately, never registered in RouteHub |
 
-**Routing decision on server (per packet):**
+**Routing decision on server (data conn, per packet; control conns use `handleControlConn`):**
 ```go
 if buf[0] == 1 {
     // Inject into gvisor stack → TCP/UDP forwarder → dial real service
@@ -99,28 +100,34 @@ if buf[0] == 1 {
 
 ### Design
 
-The client maintains a pool of N parallel TCP connections to reduce head-of-line blocking:
+The client defaults to **one data `connSlot` plus one independent control slot**:
 
 ```
-                        ┌── slot[0] ──▶ conn[0] ──▶ port-forward ──▶ gvisor stack[0]
-TUN read                │
-  ↓                     │
-parseFiveTuple ─────────┼── slot[1] ──▶ conn[1] ──▶ port-forward ──▶ gvisor stack[1]
-  ↓                     │
-flowHash(5-tuple) % N ──┼── slot[2] ──▶ conn[2] ──▶ port-forward ──▶ gvisor stack[2]
-                        │
-                        └── slot[3] ──▶ conn[3] ──▶ port-forward ──▶ gvisor stack[3]
+TUN read → runConnPool → slot[0] → data conn ───────┐
+                                                 ├→ SSH / port-forward → TM:10801
+heartbeats() → controlSlot → control conn ────────┘
 
-
-Response path (all slots → shared channel → single TUN device):
-
-conn[0] ──▶ readFromConn ──┐
-conn[1] ──▶ readFromConn ──┤──▶ tunOutbound ──▶ writeToTun ──▶ TUN device
-conn[2] ──▶ readFromConn ──┤
-conn[3] ──▶ readFromConn ──┘
+Response path (including heartbeat replies):
+per-client gvisor stack → RouteHub → registered data conn
+  → readFromConn → tunOutbound → writeToTun → TUN device
 ```
 
-### Hash Function
+Protocol-owned heartbeat replies are consumed by the client rather than written to TUN.
+Default outbound dispatch goes directly to slot 0, without parsing or hashing for slot
+selection. `connSlot` retains its queue, dial/reconnect lifecycle, read/write loops, deadlines
+and bounded batching. One tunnel data connection still multiplexes concurrent business flows;
+it does not serialize application requests or reduce business concurrency to one.
+
+The control slot has a separate queue and connection to the **same TCP forwarding endpoint
+10801**, not xDS port 9002. Its requests bypass the business queue, but replies use the
+registered data conn. SSH/port-forward still shares an outer TCP transport, so separation
+is not an absolute liveness guarantee.
+
+### Hash Function (Multi-Slot Test Override)
+
+The private, data-only `poolSize` override is retained for nil-stats tests and benchmarks
+comparing 1/2/4/8 data slots. Only the multi-slot path uses the following hash; production
+single-slot dispatch skips it. There is no CLI or environment flag for pool size.
 
 A stateless FNV-1a hash of the flow's **five-tuple** — `(proto, dst IP, src port, dst port)`
 — mod N. Distinct connections to the same destination IP differ in source port, so they
@@ -151,28 +158,25 @@ func flowHash(key flowKey, dstIP net.IP, slots int) int {
 
 ### Why This Works
 
-1. **Same-flow guarantee**: All packets of one L4 flow (same five-tuple) hash to the same slot → same TCP connection → same server-side gvisor stack. This is a correctness requirement, not just ordering: the server runs an independent gvisor stack per pool connection, so splitting a flow across slots would land its SYN and data on different stacks and break the connection.
+1. **Same-flow ordering**: Default traffic uses slot 0. With the multi-slot test override, deterministic hashing retains slot affinity to avoid reordering; it is not a stack-correctness requirement.
 
-2. **Independent reconnect**: Each slot manages its own connection lifecycle. If slot[2] disconnects, only 1/4 of traffic is affected while it reconnects.
+2. **Independent reconnect**: Data and control slots manage their own connection lifecycles. Losing the sole data conn temporarily interrupts data routing until it reconnects and registers.
 
-3. **Server compatibility**: The server's accept loop (`go svr.Handler.Handle(ctx, conn)`) already handles multiple connections independently. Each connection gets its own gvisor stack — functionally correct, with acceptable memory overhead.
+3. **Session continuity**: The server shares one gvisor stack per client across that client's conns. Its grace period retains TCP state across brief transport gaps; this does not depend on four slots. See [48-shared-server-gvisor-stack.md](48-shared-server-gvisor-stack.md).
 
-4. **Shared response path**: All slots write responses to the same `tunOutbound` channel → same TUN device. Response packets arrive correctly regardless of which slot they came through.
+4. **Shared response path**: Data responses reach the same `tunOutbound` channel and TUN device. RouteHub chooses the first writable registered conn with fallback, not per-flow load balancing.
 
 ### Configuration
 
-```go
-var ConnPoolSize = 4  // pkg/core/tun_client.go, overridable via KUBEVPN_CONN_POOL_SIZE (range 1-16)
-```
+The default is one data slot plus one control slot. The private `poolSize` is a data-only,
+nil-stats test override, not a user-facing setting; no CLI or environment flag is added.
 
 ### Tradeoffs
 
-| Benefit | Cost |
-|---------|------|
-| 4x reduction in HOL blocking | 4x gvisor stacks on server (memory) |
-| Better bandwidth utilization | 4x port-forward goroutines |
-| Fault isolation (1 slot failure = 25% impact) | Slightly more complex client code |
-| Parallelism across CPU cores | — |
+Single-slot dispatch avoids slot-selection parsing/hashing and reduces tunnel connections
+while preserving batching and concurrent business flows. It removes spare data-slot fallback
+in steady state; neither the old four-slot topology nor the new default eliminates head-of-line
+blocking in the shared outer SSH/port-forward TCP transport. No throughput gain is claimed here.
 
 ## Buffer Memory Layout
 
@@ -235,36 +239,40 @@ ordered **newest-first**: `AddRoute` prepends, so the most recently established
 conn leads. Writes try the head first, so after a reconnect reverse traffic flows
 on the fresh conn immediately and any lingering half-open "ghost" conn sinks to
 the tail (where it is a last resort, and is evicted by the read/write deadlines —
-see [Write with Fallback](#write-with-fallback)). Because the connection pool
-creates N parallel connections per client, a single client IP has N entries (one
-per slot). Multiple clients coexist in the same table:
+see [Write with Fallback](#write-with-fallback)). The current default has one registered
+data conn per client address in steady state; the control conn is excluded. Multiple entries
+can still occur during reconnect overlap or with a multi-slot test override.
+Multiple clients coexist in the same table:
 
 ```
-Client A (198.18.0.2):  4 conns via connection pool
-Client B (198.18.0.3):  4 conns via connection pool
+Client A (198.18.0.2):  1 registered data conn
+Client B (198.18.0.3):  1 registered data conn
 
 RouteHub.routeMapTCP:
-  198.18.0.2 → ConnList[ conn_A0, conn_A1, conn_A2, conn_A3 ]
-  198.18.0.3 → ConnList[ conn_B0, conn_B1, conn_B2, conn_B3 ]
+  198.18.0.2 → ConnList[ conn_A0 ]
+  198.18.0.3 → ConnList[ conn_B0 ]
 ```
 
 ### Route Registration
 
 Routes are registered when the server receives a packet from a client connection:
 it calls `hub.AddRoute(srcIP, conn)`. Duplicate connections are ignored (dedup by
-pointer equality). Two things make registration prompt rather than lazy:
+pointer equality). Control connections are excluded. Registration comes from:
 
 - **Proactive registration** — a freshly dialed slot writes a registration packet
   (an ICMP echo to the gateway, carrying its TUN IP) on the new conn *before* any
   data, so the server registers the route immediately. This is sent directly on the
   conn (not via the heartbeat broadcast channel), so it cannot be dropped under load.
-- **Heartbeat ICMP** — every slot then keeps sending periodic heartbeats, so a route
-  is re-asserted each cycle even for idle conns.
+- **Business traffic** — outbound packets on a data conn also register its source IP.
+  Periodic heartbeat requests use only the control conn and do not register a route;
+  their replies depend on the data conn's registration.
 
 ### Write with Fallback
 
 When the server needs to forward a packet to a client (e.g., cross-client
-traffic A→B, or proxy response), it uses `WriteToRoute` or `WriteFuncToRoute`:
+traffic A→B, or proxy response), it uses `WriteToRoute` or `WriteFuncToRoute`.
+The following illustrates fallback when multiple entries exist (reconnect overlap or a
+multi-slot test override), not the normal single-data-conn topology:
 
 ```
 WriteFuncToRoute("198.18.0.3", dgram.Write):
@@ -275,8 +283,9 @@ WriteFuncToRoute("198.18.0.3", dgram.Write):
   try conn_B1 → write succeeds → return conn_B1, nil
 ```
 
-This eliminates packet loss during connection pool slot reconnections: when
-one slot dies and reconnects, the remaining 3 slots handle traffic seamlessly.
+This is first-writable-conn fallback, not per-flow load balancing or a packet-loss
+guarantee. With the default single data conn there is no spare registered data slot;
+routing resumes after reconnect and registration.
 
 The fallback walk also covers the **ghost conn** hazard: a write to a half-open
 TCP succeeds into the kernel send buffer (no error) until that buffer fills, so a
@@ -286,6 +295,9 @@ ghost is actively evicted by the deadlines below within `KeepAliveTime` (write) 
 `KeepAliveTime*3` (read).
 
 ### Cross-Client Data Flow (A→B)
+
+This multi-entry fallback example applies to reconnect overlap or a multi-slot test override;
+the default steady-state path has only `conn_A0` and `conn_B0`.
 
 ```
 1. Client A sends packet with dst=198.18.0.3

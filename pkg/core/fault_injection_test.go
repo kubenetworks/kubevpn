@@ -99,8 +99,8 @@ func TestFault_ClientDisconnect_PoolBuffersNotLeaked(t *testing.T) {
 // ============================================================================
 
 func TestFault_SlotDies_OtherSlotsWork(t *testing.T) {
-	// Simulate ConnPoolSize=4 slots, kill slot 0, verify slot 1-3 still work
-	n := ConnPoolSize
+	// Explicit multi-slot fixture; this tests separate queues, not dispatcher isolation.
+	const n = 4
 	slots := make([]chan *Packet, n)
 	for i := range slots {
 		slots[i] = make(chan *Packet, MaxSize)

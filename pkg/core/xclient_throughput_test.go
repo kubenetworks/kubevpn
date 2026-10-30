@@ -201,15 +201,10 @@ func buildOriginatorStack(ctx context.Context, b *testing.B, serverPort int, tun
 }
 
 // runFlows dials `flows` concurrent TCP flows from A to dstIP:sinkPort, pumps a total of b.N
-// chunks across them, and measures the wall time until the sink has received everything. Reports
-// aggregate MB/s (via b.SetBytes) and the inter-client drop delta over the run.
-//
-// The flows dimension probes two structural hypotheses:
-//   - Single flow (proto,dst,srcPort,dstPort five-tuple) is pinned to ONE of A's 4 pool slots, so
-//     it cannot use pool parallelism — expect ~no gain from the pool on one flow.
-//   - Cross-client traffic to B, regardless of flow count, funnels through B's SINGLE shared
-//     inter-client gvisor stack — a potential serialization point that concurrency cannot widen,
-//     unlike the server's per-source cluster stacks.
+// chunks across them, and measures the wall time until the sink has received everything.
+// Reports aggregate MB/s (via b.SetBytes). Both clients use the production default
+// of one data slot. Varying business flows does not vary the tunnel connection count;
+// docs/50's earlier batching results used the previous four-data-slot default.
 func (h *xclientHarness) runFlows(b *testing.B, dstIP string, chunkSize, flows int) {
 	ctx := context.Background()
 	ip := net.ParseIP(dstIP).To4()

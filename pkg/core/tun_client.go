@@ -12,24 +12,22 @@ import (
 )
 
 const (
-	// ConnPoolSize is the number of parallel data TCP connections to the server.
-	// Each connection handles a subset of traffic (partitioned by five-tuple hash —
-	// proto, dst IP, and both ports — falling back to dst IP hash for fragments/ICMP).
-	// Multiple connections reduce head-of-line blocking and improve throughput.
-	ConnPoolSize = 4
+	// ConnPoolSize is the default number of data connections to the server.
+	// All business flows share one connection; heartbeats use a separate control slot.
+	ConnPoolSize = 1
 )
 
 // clientTransport is the spoke/endpoint half of the tun device. Outbound packets read from the
-// TUN are distributed across a pool of dialed connections to the server (by five-tuple hash), or
-// looped back through a local gvisor stack when src == dst. Inbound packets from the server are
-// delivered to the device's tunOutbound by the per-connection readers.
+// TUN use the data connection, or loop back through a local gvisor stack when src == dst.
+// Inbound packets from the server are delivered to tunOutbound by the connection reader.
+// Data-only test pools can additionally distribute outbound packets by five-tuple hash.
 type clientTransport struct {
 	dev     *tunDevice
 	forward *Forwarder
 	// slots holds the data connection pool; built by runConnPool, read by routeOutbound.
 	slots []*connSlot
-	// controlSlot is a dedicated connection for heartbeat (control plane), independent of data
-	// slots so that data-plane congestion cannot block liveness probes.
+	// controlSlot sends heartbeat requests without waiting on the business packet queue.
+	// Replies still use the data connection, and the outer SSH/PF transport may be shared.
 	controlSlot *connSlot
 	controlMu   sync.RWMutex
 	// gvisorInbound carries src == dst packets to the local loopback (self-to-self) gvisor stack.
@@ -40,12 +38,12 @@ type clientTransport struct {
 	// transfer. Each slot's reader injects directly into it (interClientStack.InjectIP) — no
 	// intermediate bounded channel, so TCP's receive window (not a blind drop) throttles the peer.
 	// Created by runConnPool before the slots, whose readers reference it. Its output goes to the
-	// shared tunInbound (dispatched to a slot by five-tuple hash), decoupling it from any one slot.
+	// shared tunInbound, decoupling its lifetime from the data connection.
 	interClient *interClientStack
 	// stats records data-plane liveness from observed heartbeat echo replies; may be nil.
 	stats *HeartbeatStats
-	// poolSize overrides the number of parallel connections; <=0 means use ConnPoolSize.
-	// Production leaves it 0 (ConnPoolSize); only benchmarks/tests set it to compare sizes.
+	// poolSize overrides the data connection count; <=0 means use ConnPoolSize.
+	// Only data-only benchmarks/tests with nil stats override it; production uses the default.
 	poolSize int
 }
 
@@ -105,9 +103,9 @@ func (t *clientTransport) routeOutbound(ctx context.Context, buf []byte, n int, 
 	}
 }
 
-// runConnPool creates N parallel data connection slots and distributes packets by five-tuple hash.
-// Data packets use blocking sends to provide TCP backpressure (prevents packet drops that trigger
-// RTO stalls). Each slot runs independently — if one connection breaks, only that slot reconnects.
+// runConnPool creates the data slot (or an explicit multi-slot test pool).
+// Blocking sends provide backpressure; a full selected slot also stalls the shared dispatcher.
+// Each slot owns its reconnect lifecycle, independent of the shared inter-client stack.
 func (t *clientTransport) runConnPool(ctx context.Context) {
 	ctx, cancel := context.WithCancel(ctx)
 	n := t.poolSize
@@ -141,7 +139,7 @@ func (t *clientTransport) runConnPool(ctx context.Context) {
 	}
 	defer func() { cancel(); wg.Wait() }()
 
-	// Drain the shared tunInbound and distribute to slots by five-tuple hash.
+	// Drain the shared tunInbound; only multi-slot test pools require hash dispatch.
 	// Data packets block on the slot channel to propagate backpressure to the OS TCP stack,
 	// preventing silent drops that cause catastrophic RTO stalls.
 	for {
@@ -151,9 +149,13 @@ func (t *clientTransport) runConnPool(ctx context.Context) {
 				return
 			}
 			if packet.dst != nil {
-				key := parseFiveTupleInline(packet.data[tunReserve : datagramHeaderLen+packet.length])
+				slot := 0
+				if n > 1 {
+					key := parseFiveTupleInline(packet.data[tunReserve : datagramHeaderLen+packet.length])
+					slot = flowHash(key, packet.dst, n)
+				}
 				select {
-				case t.slots[flowHash(key, packet.dst, n)].inbound <- packet:
+				case t.slots[slot].inbound <- packet:
 				case <-ctx.Done():
 					packet.release()
 					return
@@ -169,10 +171,9 @@ func (t *clientTransport) runConnPool(ctx context.Context) {
 	}
 }
 
-// runControlSlot manages the dedicated control-plane connection. It carries only heartbeat
-// ICMP echo packets, isolated from data-plane congestion so the liveness watchdog is never
-// starved by a full data slot. The server recognizes this conn by the packetTypeControl prefix
-// on its first datagram and does NOT register it in RouteHub.
+// runControlSlot manages the dedicated heartbeat connection. Requests bypass a full data
+// queue, but their replies still depend on the data path. The server recognizes this conn
+// by the packetTypeControl prefix on its first datagram and does NOT register it in RouteHub.
 func (t *clientTransport) runControlSlot(ctx context.Context) {
 	slot := &connSlot{
 		id:          ConnPoolSize,

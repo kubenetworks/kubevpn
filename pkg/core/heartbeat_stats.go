@@ -26,8 +26,8 @@ func isHeartbeatEchoReply(ipPacket []byte) bool {
 		netutil.IsICMPEchoReplyFrom(ipPacket, config.RouterIP6)
 }
 
-// HeartbeatSnapshot is a value-only, bounded diagnostic snapshot. Slot indices
-// 0..3 are data slots; index ConnPoolSize is control. Counters are cumulative,
+// HeartbeatSnapshot is a value-only, bounded diagnostic snapshot. Slot 0 is data;
+// index ConnPoolSize is control. Counters are cumulative,
 // not health verdicts: reverse traffic need not arrive on the request's slot.
 type HeartbeatSnapshot struct {
 	Generation                                uint64

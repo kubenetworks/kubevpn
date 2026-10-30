@@ -2,15 +2,18 @@
 
 ## Overview
 
-The client maintains a pool of `ConnPoolSize = 4` parallel TCP connections to the server
+The client now defaults to **one data `connSlot` plus one independent control slot**
 (see [01-network-architecture.md](01-network-architecture.md) and
-[18-gvisor-network-stack.md](18-gvisor-network-stack.md)). Each outbound packet read from
-the TUN is assigned to one slot. This document describes how that assignment is made: a
-**stateless five-tuple hash**, modeled on IPVS source-hashing (`sh`) / Maglev rather than
-iptables/nf_conntrack's stateful flow table.
+[18-gvisor-network-stack.md](18-gvisor-network-stack.md)). Default data dispatch selects
+slot 0 directly, with no packet parsing or hashing for slot selection. The slot's lifecycle,
+queues, deadlines and bounded batching remain; concurrent business flows share that data conn.
 
-It supersedes the earlier dst-IP-only scheme (`ipHash(dst)`) documented in §"Connection
-Pool Architecture" of [01-network-architecture.md](01-network-architecture.md).
+The private `poolSize` remains a **data-only, nil-stats test override** for 1/2/4/8-slot
+comparisons, not a CLI or environment setting. With more than one data slot, assignment still
+uses the **stateless five-tuple hash**, modeled on IPVS source-hashing (`sh`) / Maglev rather
+than iptables/nf_conntrack's stateful flow table. The rationale and multi-slot examples below
+preserve that historical design and describe this explicit test override, not the production
+default. The hash replaced the earlier dst-IP-only scheme (`ipHash(dst)`).
 
 ## The Problem It Solves
 
@@ -26,13 +29,13 @@ gateway, one database — so all concurrent connections to that one service IP c
 **one** connection. The 4-connection pool degenerates to a single connection, and its whole
 reason for existing (reducing head-of-line blocking, parallelizing throughput) is lost.
 
-Because the server runs an independent gvisor stack per pool connection and the return path
-is symmetric (below), the down-link concentrates on that same slot too — so neither
-direction benefits from the pool for a hot destination.
+At the time of that design, the server ran an independent gvisor stack per pool connection
+with a symmetric return path, so the down-link concentrated on the same slot too.
+The current per-client shared stack and RouteHub return path no longer have that topology.
 
 ## Design: Stateless Five-Tuple Hash
 
-Dispatch now hashes the flow's five-tuple — `(proto, dst IP, src port, dst port)` — so that
+Multi-slot test dispatch hashes the flow's five-tuple — `(proto, dst IP, src port, dst port)` — so that
 distinct connections to the same hot destination IP (which differ in source port) spread
 across the pool:
 
@@ -43,7 +46,7 @@ parseFiveTupleInline(IP)         → flowKey{proto, srcPort, dstPort, hasPorts}
   ↓
 flowHash(flowKey, dst IP) % N    → slot index
   ↓
-trySendToSlot(slots[slot], pkt)
+blocking send to slots[slot].inbound (cancellation-aware)
 ```
 
 The **source IP is deliberately omitted** from the hash: a client has a single TUN IP, so
@@ -69,9 +72,11 @@ a live flow. No rehash, no flow migration.
 
 With the shared server-side gvisor stack, replies from the stack are routed via RouteHub by
 destination IP (the client's TUN IP). `readFromEndpointWriteToRoute` reads each response
-packet, parses its destination, and writes it to the first healthy conn in the client's
-ConnList — the slot is chosen by availability, not by five-tuple affinity. All of a client's
-slots deliver to the same TUN device, so the OS TCP stack handles any reordering.
+packet, parses its destination, and writes it to the first writable conn in the client's
+ConnList, with fallback — not per-flow load balancing or five-tuple affinity. The current
+default has one registered data conn per client address in steady state; control is excluded.
+Multiple entries can occur during reconnect overlap or an explicit multi-slot test override.
+All data slots deliver to the same TUN device, so the OS TCP stack handles any reordering.
 
 This is the same routing mechanism already used for inter-client traffic and the native-TUN
 path. See [48-shared-server-gvisor-stack.md](48-shared-server-gvisor-stack.md).
@@ -126,13 +131,15 @@ iptables/nf_conntrack keeps a stateful flow table: the first packet of a flow cr
 entry, later packets look it up. Its value is (a) NAT-mapping consistency and (b) keeping an
 established flow pinned to its backend when the backend set changes.
 
-Neither applies here. There is no NAT, and the slot set is **fixed** (`N = 4`, dead slots
+Neither applies here. There is no NAT, and the slot set is **fixed** (`N = 4` in the explicit test override below, dead slots
 reconnect in place). With a fixed `N`, `hash % N` is already perfectly stable per flow — the
 hash *is* the state. A flow table would add memory, expiry/GC, and a lookup lock on the
 per-packet hot path for zero benefit. So the design is deliberately stateless, in the spirit
 of Maglev/IPVS-`sh`.
 
-## Scope of Change
+## Historical Scope of the Hash Change
+
+The table records the original hash extraction; current default dispatch bypasses the hash.
 
 | File | Change |
 |---|---|
@@ -146,7 +153,8 @@ Server side, `RouteHub`, `ConnList`, `ParseIPFast`, the `Packet` type, and `pump
 
 ## Tests
 
-`pkg/core/flow_hash_test.go`:
+`pkg/core/flow_hash_test.go` (spread/integration examples explicitly use the private
+multi-slot override with nil stats; they do not describe the default topology):
 
 - **Parsing** — TCP/UDP/SCTP ports, IPv4 variable IHL (options), IPv6, and every fallback
   case (ICMP, MF fragment, offset fragment, truncated header, IPv6 extension header).
@@ -162,4 +170,8 @@ Server side, `RouteHub`, `ConnList`, `ParseIPFast`, the `Packet` type, and `pump
 
 See [18-gvisor-network-stack.md](18-gvisor-network-stack.md) for the surrounding pool and
 gvisor-stack architecture, and [08-heartbeat-health.md](08-heartbeat-health.md) for the
-heartbeat/route-liveness that keeps each slot's conn registered.
+heartbeat/route-liveness: data slots register on connect; periodic requests use a separate
+control queue/conn through the same TCP forwarding endpoint 10801, not xDS 9002. Requests
+bypass the business queue, while replies return over registered data conns. The outer
+SSH/port-forward TCP transport remains shared, so control separation is not an absolute
+liveness guarantee.

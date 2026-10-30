@@ -392,7 +392,7 @@ func TestTUN_ConnectionPool_MultiSlot(t *testing.T) {
 		}
 	}()
 
-	// Client with connection pool (ConnPoolSize=4)
+	// Client with the default data connection
 	forwarder := &Forwarder{
 		Addr:        fmt.Sprintf("127.0.0.1:%d", serverPort),
 		Connector:   NewUDPOverTCPConnector(),
@@ -893,14 +893,13 @@ func TestTUN_ClientDevice_FullPipeline(t *testing.T) {
 	t.Log("[Phase 7c] GET /headers → HTTP metadata preserved through gvisor")
 
 	// =========================================================================
-	// Phase 8: Multiple dest IPs — verify slot distribution via ipHash
+	// Phase 8: Multiple dest IPs share the default data connection
 	// =========================================================================
 
-	t.Log("[Phase 8] Multi-dest IP echo test (different dest IPs hash to slots)...")
+	t.Log("[Phase 8] Multi-dest IP echo test over the default data connection...")
 
 	destIPs := []string{"10.96.0.1", "10.96.0.2", "10.96.0.3", "10.96.0.4",
 		"10.96.1.1", "10.96.1.2", "10.96.2.1", "10.96.3.1"}
-	slotHits := make(map[int]int) // track which slots get hit
 
 	for i, destIP := range destIPs {
 		addr := fmt.Sprintf("%s:%d", destIP, echoPort)
@@ -908,9 +907,6 @@ func TestTUN_ClientDevice_FullPipeline(t *testing.T) {
 		if err != nil {
 			t.Fatalf("[Phase 8] dial %s: %v", addr, err)
 		}
-
-		slot := ipHash(net.ParseIP(destIP).To4(), ConnPoolSize)
-		slotHits[slot]++
 
 		msg := []byte(fmt.Sprintf("slot-test-%d-%s", i, destIP))
 		conn.Write(msg)
@@ -926,11 +922,7 @@ func TestTUN_ClientDevice_FullPipeline(t *testing.T) {
 		}
 	}
 
-	// Verify that multiple slots were used (not all traffic to one slot)
-	if len(slotHits) < 2 {
-		t.Fatalf("[Phase 8] ipHash used only %d slot(s) for %d different IPs; expected distribution", len(slotHits), len(destIPs))
-	}
-	t.Logf("[Phase 8] %d dest IPs distributed across %d/%d slots: %v", len(destIPs), len(slotHits), ConnPoolSize, slotHits)
+	t.Logf("[Phase 8] echoed traffic to all %d destinations", len(destIPs))
 
 	// =========================================================================
 	// Phase 9: Concurrent traffic — N goroutines sending simultaneously
@@ -947,7 +939,7 @@ func TestTUN_ClientDevice_FullPipeline(t *testing.T) {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			// Each goroutine dials a different dest IP to spread across slots
+			// Each goroutine dials a different destination over the shared data connection
 			destIP := fmt.Sprintf("10.96.%d.%d", id/256, id%256)
 			addr := fmt.Sprintf("%s:%d", destIP, echoPort)
 
@@ -1080,7 +1072,7 @@ func TestTUN_ClientDevice_FullPipeline(t *testing.T) {
 	t.Logf("  Connection pool: %d connections", poolConns)
 	t.Logf("  TCP echo: single request/response OK")
 	t.Logf("  HTTP: GET /health, POST /echo, GET /headers all OK")
-	t.Logf("  Slot distribution: %d IPs across %d slots", len(destIPs), len(slotHits))
+	t.Logf("  Multi-destination echo: %d IPs", len(destIPs))
 	t.Logf("  Concurrency: %d goroutines, %d succeeded", concurrency, successCount.Load())
 	t.Logf("  Large payload: %d bytes without corruption", largeSize)
 	t.Logf("  Sequential: %d requests on persistent connection", seqCount)

@@ -15,6 +15,10 @@ Symptoms as first reported:
 
 They were the same incident. Symptom 1 is a consequence of symptom 2.
 
+> **Historical topology:** The incident counts below were observed with four data slots plus
+> one control slot and are preserved as recorded. The current default is one data `connSlot`
+> plus one independent control slot; the missing-registration failure mechanism still applies.
+
 ## 2. The Causal Chain
 
 ```
@@ -46,7 +50,10 @@ what made the diagnosis confusing: the tunnel was demonstrably carrying client�
 
 Heartbeat ICMP goes out on the dedicated control conn, which the server deliberately does **not**
 register in `RouteHub` (`handleControlConn`): the echo must come back over a *data* conn, because
-that is what proves the data path works. See [08-heartbeat-health.md](08-heartbeat-health.md).
+that is what proves the data path works. Both conns use the same TCP forwarding endpoint
+10801, not xDS 9002. Requests bypass the business queue, but replies depend on the registered
+data conn and the outer SSH/port-forward TCP transport remains shared; this is not an absolute
+liveness guarantee. See [08-heartbeat-health.md](08-heartbeat-health.md).
 
 So the only things that can create a route for a client are a data slot's registration packet or
 real outbound user traffic. An idle client with broken registration is invisible to the server: it
@@ -158,17 +165,21 @@ Both pre-existing tests covering route registration hand-crafted the announcemen
 test has a `registerRoute()` helper). Neither ever executed `registrationPayloads()`. The mechanism
 with no test was the one that broke.
 
-`pkg/core/registration_integration_test.go` now drives the real data plane — 4 data slots plus the
-control slot, over loopback TCP, into the real gvisor handler and `RouteHub` — and asserts automatic
-registration, the heartbeat round trip, recovery after a port-forward teardown, and that a client
-which cannot determine its own addresses both fails to register **and says so**.
+`pkg/core/registration_integration_test.go` drives the real data plane over loopback TCP into
+the real gvisor handler and `RouteHub`. The original coverage used four data slots plus control;
+current default expectations are **one registered data conn per client address**, plus one
+control conn excluded from RouteHub. It covers automatic registration, the heartbeat round trip,
+recovery after a port-forward teardown, and a client which cannot determine its own addresses
+both failing to register **and saying so**. Multi-slot comparisons require the explicit private,
+data-only `poolSize` override with nil stats; they do not change production defaults.
 
 ## 5. Verification
 
 Against a real cluster, after connecting:
 
 ```bash
-# 4 pool conns per client, not 0
+# current default: 1 registered data conn per client address, not 0; control excluded
+# reconnects add log entries, so cumulative log counts are not the live conn count
 kubectl logs deploy/kubevpn-traffic-manager | grep -E 'Add route|Add pool conn'
 # must be empty (was 731/hour)
 kubectl logs deploy/kubevpn-traffic-manager | grep 'No route for stack output'

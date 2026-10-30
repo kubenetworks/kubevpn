@@ -12,9 +12,9 @@ The core package (`pkg/core`) implements the VPN tunnel network layer using Goog
 │                                             │     │                                          │
 │  App ──► TUN Device ──► ClientDevice        │     │      Device ◄── TUN Device               │
 │               ▲            │                │     │        │           ▲                      │
-│               │            │ flowHash(5tup) │     │        │           │                      │
+│               │            │ direct slot 0 │     │        │           │                      │
 │               │            ▼                │     │        ▼           │                      │
-│          tunOutbound    slots[0..3]          │     │     RouteHub ──► tunOutbound              │
+│          tunOutbound    slot[0]              │     │     RouteHub ──► tunOutbound              │
 │               ▲            │                │     │        ▲                                  │
 │               │            ▼                │     │        │                                  │
 │         readFromConn   writeToConn          │     │   readFromRemote                          │
@@ -91,7 +91,7 @@ parse error → drop + continue), then hands each packet to a per-side `dispatch
 
 ```
 HandleClient:
-  readFromTun ──► tunInbound ──► runConnPool ──► slots[flowHash(5tup)] ──► writeToConn ──► server
+  readFromTun ──► tunInbound ──► runConnPool ──► slot[0] (direct)     ──► writeToConn ──► server
                                                                                         │
   writeToTun  ◄── tunOutbound ◄──────────────── readFromConn ◄──────────────────────────┘
 ```
@@ -100,17 +100,19 @@ HandleClient:
 type prefix and either forwards locally (when `src == dst`, via the gvisor handler) or pushes
 to `tunInbound` for the pool to distribute.
 
-**Connection pool**: The client maintains `ConnPoolSize=4` parallel TCP connections to the server. Packets are distributed by `flowHash` — a stateless FNV-1a hash of the flow's five-tuple `(proto, dst IP, src port, dst port)` — so distinct connections to the same hot destination IP spread across slots, while every packet of one flow stays on the same connection (providing session affinity and avoiding reordering). The server shares a single gvisor stack across all connections (see [48-shared-server-gvisor-stack.md](48-shared-server-gvisor-stack.md)), so per-flow slot affinity is no longer a correctness requirement but is retained for load distribution. Packets with no usable ports (ICMP, IP fragments, unparsed IPv6 extension headers) fall back to `ipHash(dst)`. See [41-five-tuple-pool-dispatch.md](41-five-tuple-pool-dispatch.md).
+**Connection pool**: The default is **one data slot plus one independent control slot**. Outbound data goes directly to slot 0 without parsing/hashing for slot selection. The private `poolSize` remains a data-only override for nil-stats tests/benchmarks comparing 1/2/4/8 slots; there is no CLI or environment flag. Multi-slot tests retain `flowHash` affinity, falling back to `ipHash(dst)` for packets without usable ports. The server shares one gvisor stack per client across its conns, with grace retention across reconnects independent of slot count (see [48-shared-server-gvisor-stack.md](48-shared-server-gvisor-stack.md)). One data conn multiplexes concurrent business flows; it does not limit business concurrency to one. See [41-five-tuple-pool-dispatch.md](41-five-tuple-pool-dispatch.md).
 
-**`connSlot`**: each of the `ConnPoolSize` slots is a `connSlot` value that owns its inbound
-channel and connection lifecycle — `run` (dial + reconnect loop), `readFromConn`, and
-`writeToConn` are methods on it (rather than free functions threading a `slotID`). `runConnPool`
-builds the `[]*connSlot`, starts each `go slot.run(ctx)`, and routes inbound packets:
-`dst != nil → trySendToSlot(slots[flowHash(5-tuple)], pkt)`, else `broadcastToSlots(slots, pkt)` for
-heartbeats. Both `readFromConn` and `writeToConn` refresh their conn deadline lazily via a
-shared `periodicDeadline` (one `SetDeadline` syscall per half-timeout instead of per packet).
+**`connSlot`**: each slot retains its inbound queue, connection lifecycle (`run` dial/reconnect
+loop), `readFromConn`, `writeToConn`, deadlines and bounded batching. `runConnPool` starts
+`go slot.run(ctx)` and uses blocking data-queue sends to preserve backpressure. Default dispatch
+selects slot 0 directly; only multi-slot tests hash for selection. Both reader and writer refresh
+conn deadlines lazily via `periodicDeadline` rather than resetting them per packet.
 
-**Heartbeats**: Periodic ICMP packets sent to all connections to keep routes alive in the server's RouteHub.
+**Heartbeats**: Periodic ICMP requests use the independent control queue/conn to the **same
+TCP forwarding endpoint 10801**, not xDS 9002, bypassing the business queue. Control is excluded
+from RouteHub; replies use the registered data conn. The outer SSH/port-forward TCP transport
+is still shared and replies depend on data-path progress, so this is not an absolute liveness
+guarantee.
 
 **Reconnection**: Each slot reconnects independently on failure. After reconnecting, the slot proactively announces its TUN IP directly on the new conn (`registrationPayloads`), so the server re-registers the route immediately — no waiting for the next periodic heartbeat.
 
@@ -134,9 +136,9 @@ type RouteHub struct {
 }
 ```
 
-**ConnList**: Holds multiple connections for the same client IP (connection pool), ordered newest-first (`Add` prepends). `Write()` tries each connection from the head, removing dead ones on failure — automatic failover that also keeps reverse traffic on the freshest conn after a reconnect.
+**ConnList**: Holds registered data connections for the same client IP, ordered newest-first (`Add` prepends). The current default has one registered conn per client address in steady state; control is excluded. `Write()` tries the first writable conn, removing failed ones and falling back when another entry exists (reconnect overlap or multi-slot test override). This is not per-flow load balancing.
 
-**Route registration**: When the server receives a packet from a client (a data packet, the per-conn registration packet a slot sends right after dialing, or a periodic heartbeat), it calls `AddRoute(srcIP, conn)` to register the client's IP. Stale "ghost" conns are evicted by the server-side read/write deadlines (see [08-heartbeat-health.md](08-heartbeat-health.md) §#3).
+**Route registration**: When the server receives a data packet or the data slot's registration echo sent right after dialing, it calls `AddRoute(srcIP, conn)` to register the client's IP. Periodic control-slot heartbeats do not register routes. Stale "ghost" conns are evicted by the server-side read/write deadlines (see [08-heartbeat-health.md](08-heartbeat-health.md) §#3).
 
 ## 7. Protocol Encapsulation
 
@@ -187,7 +189,7 @@ wire frame = data[0 : datagramHeaderLen+length]
 ```
 
 Reference counting (`refs atomic.Int32`) lets one buffer be shared by N consumers **without
-copying** — e.g. heartbeat fan-out across all conn slots (`broadcastToSlots`) or an async
+copying** — e.g. explicit multi-slot test fan-out (`broadcastToSlots`) or an async
 `bufferedTCP` queue:
 
 - `refs` counts *extra* references beyond the implicit owner, so the zero value (a plain
@@ -198,7 +200,7 @@ copying** — e.g. heartbeat fan-out across all conn slots (`broadcastToSlots`) 
   use-after-free guard rather than silent corruption.
 
 This is modeled on gvisor's chunk refcount (`buffer.View.Clone`/`Release`). Type-prefix values
-`2..255` are reserved for future control/heartbeat frames.
+`2` identifies control/heartbeat frames; `3..255` remain reserved.
 
 ## 8. Gvisor Stack
 

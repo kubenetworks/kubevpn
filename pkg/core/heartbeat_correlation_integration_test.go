@@ -107,7 +107,7 @@ func newProbeWire(t *testing.T, stats *HeartbeatStats) *probeWire {
 	w := &probeWire{t: t, ctx: ctx, stats: stats, in: make(chan *Packet, 256), requests: make(chan []byte), server: framedServer, out: make(chan *Packet, 4), ep: ep, generation: stats.Generation()}
 	w.writeCount = stats.Snapshot().Slots[ConnPoolSize].WritePackets
 	w.writer = &connSlot{id: ConnPoolSize, isControl: true, stats: stats, inbound: w.in}
-	reader := &connSlot{id: 2, stats: stats, tunOutbound: w.out}
+	reader := &connSlot{id: 0, stats: stats, tunOutbound: w.out}
 	var wg sync.WaitGroup
 	wg.Add(3)
 	go func() { defer wg.Done(); w.writer.writeGeneration(ctx, client, errChanOf(), w.generation) }()
@@ -232,13 +232,13 @@ func TestHeartbeatIntegration_CorrelationLifecycle(t *testing.T) {
 		}
 	}
 	snap := stats.Snapshot()
-	if snap.Slots[ConnPoolSize].ProbesSent != 2 || snap.Slots[ConnPoolSize].ProbeReplies != 2 || snap.Slots[ConnPoolSize].RepliesArrived != 0 || snap.Slots[2].RepliesArrived != 2 || snap.Slots[2].ProbesSent != 0 {
+	if snap.Slots[ConnPoolSize].ProbesSent != 2 || snap.Slots[ConnPoolSize].ProbeReplies != 2 || snap.Slots[ConnPoolSize].RepliesArrived != 0 || snap.Slots[0].RepliesArrived != 2 || snap.Slots[0].ProbesSent != 0 {
 		t.Fatalf("origin/arrival confused: %+v", snap.Slots)
 	}
-	if snap.Slots[0].ReadPackets != 0 || snap.Slots[0].WritePackets != 0 {
-		t.Fatal("inactive slot activity invented")
+	if snap.Slots[ConnPoolSize].ReadPackets != 0 || snap.Slots[0].WritePackets != 0 {
+		t.Fatal("activity attributed to the wrong direction")
 	}
-	if snap.Slots[2].ReadBytes == 0 || snap.Slots[ConnPoolSize].WriteBytes == 0 {
+	if snap.Slots[0].ReadBytes == 0 || snap.Slots[ConnPoolSize].WriteBytes == 0 {
 		t.Fatal("missing byte counters")
 	}
 
@@ -309,8 +309,8 @@ func TestHeartbeatIntegration_CorrelationLifecycle(t *testing.T) {
 		t.Fatal("new generation failed to recover")
 	}
 	// Returned snapshots cannot mutate live diagnostics.
-	snap.Slots[2].RepliesArrived = 900
-	if stats.Snapshot().Slots[2].RepliesArrived == 900 {
+	snap.Slots[0].RepliesArrived = 900
+	if stats.Snapshot().Slots[0].RepliesArrived == 900 {
 		t.Fatal("snapshot aliases live state")
 	}
 }
@@ -407,7 +407,7 @@ func TestHeartbeatIntegration_WriteOutcome(t *testing.T) {
 			payload := (&clientTransport{dev: &tunDevice{addrsFn: func() (net.IP, net.IP, net.IP) { return net.ParseIP(regTestTunIPv4), nil, nil }}}).registrationPayloads(wire.ctx)[0]
 			done := make(chan error, 1)
 			go func() {
-				_, err := (&connSlot{id: 1, stats: stats}).writePayload(framed, payload, stats.Generation(), true)
+				_, err := (&connSlot{id: 0, stats: stats}).writePayload(framed, payload, stats.Generation(), true)
 				done <- err
 			}()
 			peer.SetReadDeadline(time.Now().Add(2 * time.Second))
@@ -435,7 +435,7 @@ func TestHeartbeatIntegration_WriteOutcome(t *testing.T) {
 			if s.Pending != 0 || s.LastReply.IsZero() != (fail || cleared) {
 				t.Fatalf("incorrect write outcome: %+v", s)
 			}
-			if !fail && !cleared && (s.Slots[1].ProbeReplies != 1 || s.Slots[2].RepliesArrived != 1) {
+			if !fail && !cleared && (s.Slots[0].ProbeReplies != 1 || s.Slots[0].RepliesArrived != 1) {
 				t.Fatal("registration origin not preserved")
 			}
 		})
@@ -501,6 +501,20 @@ func TestHeartbeatIntegration_RegistrationReconnectStats(t *testing.T) {
 		return !s.LastReply.IsZero()
 	}, "all registration writes recorded")
 	before := stats.Snapshot()
+	if len(before.Slots) != 2 {
+		t.Fatalf("default topology has %d diagnostic slots, want one data and one control", len(before.Slots))
+	}
+	stats.RequestProbe()
+	waitFor(t, 5*time.Second, func() bool { return stats.Snapshot().Slots[ConnPoolSize].ProbeReplies > 0 }, "control connection accepted and echoed")
+	srv.mu.Lock()
+	connections := len(srv.conns)
+	srv.mu.Unlock()
+	if connections != 2 {
+		t.Fatalf("default topology opened %d transport connections, want 2", connections)
+	}
+	if n := srv.routeConnCount(net.ParseIP(regTestTunIPv4)); n != 1 {
+		t.Fatalf("registered %d data connections, want 1 (control must be excluded)", n)
+	}
 	srv.dropAllConns()
 	waitFor(t, 10*time.Second, func() bool {
 		s := stats.Snapshot()
@@ -601,10 +615,10 @@ func TestHeartbeatIntegration_GenerationResetsSlotDiagnostics(t *testing.T) {
 			t.Errorf("slot %d lost cumulative counters", i)
 		}
 	}
-	stats.slotTransition(2, generation, true, "")
+	stats.slotTransition(0, generation, true, "")
 	current := stats.Snapshot()
-	stats.slotTransition(2, generation-1, false, "late old disconnect")
-	stats.slotActivity(2, generation-1, true, 999)
+	stats.slotTransition(0, generation-1, false, "late old disconnect")
+	stats.slotActivity(0, generation-1, true, 999)
 	if got := stats.Snapshot(); got != current {
 		t.Fatal("late old connection changed current diagnostics")
 	}

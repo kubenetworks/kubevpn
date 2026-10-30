@@ -2,6 +2,15 @@
 
 ## Current recovery ownership
 
+The client defaults to **one data `connSlot` plus one independent control slot**. Default
+business dispatch goes directly to slot 0 without slot-selection parsing/hashing; lifecycle,
+batching and business concurrency are preserved. Heartbeat requests bypass the business queue
+via a separate control queue/conn to the **same TCP forwarding endpoint 10801**, not xDS 9002.
+The control conn is excluded from RouteHub; replies use the registered data conn (first writable
+with fallback, not per-flow balancing). There is one registered conn per current client address
+in steady state. The outer SSH/port-forward TCP transport remains shared, and data-path stalls
+can delay replies: separation is not an absolute liveness guarantee.
+
 The historical watchdog/port-forward loops described below have been replaced by
 one transport supervisor in `pkg/handler/network_transport.go`, shared by SSH and
 Kubernetes port-forward. The 30-second unprimed and `3 * HeartbeatInterval` steady
@@ -50,7 +59,9 @@ The entire client data plane rides on a **single** Kubernetes port-forward:
 TUN device → 127.0.0.1:<local port> → (k8s port-forward, SPDY) → traffic-manager pod
 ```
 
-All four conn-pool slots dial `127.0.0.1:<local port>`. If that one port-forward session
+In the historical topology, all four data conn-pool slots dialed `127.0.0.1:<local port>`.
+The current one-data-plus-one-control topology still shares the forwarding endpoint and outer
+transport. If that one port-forward session
 drops, the **whole tunnel** is down until it reconnects. See
 [01-network-architecture.md](01-network-architecture.md) and
 [24-traffic-manager-deployment.md](24-traffic-manager-deployment.md).

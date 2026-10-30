@@ -12,7 +12,7 @@ package core
 //
 // The wiring is the real data plane:
 //
-//	client tunDevice (net.Pipe as TUN) + clientTransport (4 data slots + 1 control slot)
+//	client tunDevice (net.Pipe as TUN) + clientTransport (1 data slot + 1 control slot)
 //	  → loopback TCP → server gvisorTCPHandler + RouteHub
 //	    → per-client gvisor stack answers the gateway echo
 //	      → RouteHub routes the reply back over a DATA conn → client marks HeartbeatStats
@@ -289,6 +289,150 @@ func TestIntegration_DataSlotsAutoRegisterRouteAndPrimeLiveness(t *testing.T) {
 		}
 	}
 	t.Log("✅ Phase 4: no addresses ⇒ no route ⇒ every echo reply dropped ⇒ liveness never primes, loudly")
+}
+
+// A blocked data stream must not put heartbeat requests behind its queue. This
+// deliberately does not assert reply liveness: replies use the stalled data path.
+func TestIntegration_SingleDataSlot_ControlBypassesFullQueue(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	stats := &HeartbeatStats{}
+	dataReady := make(chan struct{})
+	resumeData := make(chan struct{})
+	controlFrames := make(chan []byte, 16)
+	dataFrames := make(chan []byte, 3*MaxSize)
+	var peers sync.WaitGroup
+	var connectionsMu sync.Mutex
+	var connections []net.Conn
+	forward := &Forwarder{
+		Addr: "pipe", MaxRetries: 1, Connector: NewUDPOverTCPConnector(),
+		Transporter: &mockTransporter{dialFn: func(_ context.Context, _ string) (net.Conn, error) {
+			client, server := net.Pipe()
+			connectionsMu.Lock()
+			connections = append(connections, server)
+			connectionsMu.Unlock()
+			peers.Add(1)
+			go func() {
+				defer peers.Done()
+				defer server.Close()
+				framed, _ := NewUDPConnOverTCP(ctx, server)
+				buf := make([]byte, config.LargeBufferSize)
+				n, err := framed.Read(buf)
+				if err != nil || n == 0 {
+					return
+				}
+				control := buf[0] == packetTypeControl
+				if !control {
+					close(dataReady)
+					select {
+					case <-resumeData:
+					case <-ctx.Done():
+						return
+					}
+				}
+				for {
+					n, err = framed.Read(buf)
+					if err != nil {
+						return
+					}
+					out := dataFrames
+					if control {
+						out = controlFrames
+					}
+					select {
+					case out <- bytes.Clone(buf[:n]):
+					case <-ctx.Done():
+						return
+					}
+				}
+			}()
+			return client, nil
+		}},
+	}
+	v4 := net.ParseIP(regTestTunIPv4)
+	dev := &tunDevice{
+		addrsFn:    func() (net.IP, net.IP, net.IP) { return v4, nil, nil },
+		tunInbound: make(chan *Packet, MaxSize), tunOutbound: make(chan *Packet, MaxSize),
+	}
+	ct := newClientTransport(dev, forward, stats)
+	var workers sync.WaitGroup
+	for _, run := range []func(context.Context){ct.runConnPool, ct.runControlSlot, ct.heartbeats} {
+		workers.Add(1)
+		go func() { defer workers.Done(); run(ctx) }()
+	}
+	var producers sync.WaitGroup
+	t.Cleanup(func() {
+		cancel()
+		workers.Wait()
+		producers.Wait()
+		ct.close()
+		drainPacketChan(dev.tunInbound)
+		drainPacketChan(dev.tunOutbound)
+		connectionsMu.Lock()
+		for _, c := range connections {
+			_ = c.Close()
+		}
+		connectionsMu.Unlock()
+		peers.Wait()
+	})
+	select {
+	case <-dataReady:
+	case <-time.After(5 * time.Second):
+		t.Fatal("data connection did not register")
+	}
+	if len(ct.slots) != 1 {
+		t.Fatalf("got %d data slots, want 1", len(ct.slots))
+	}
+	const count = 2*MaxSize + maxBatchFrames + 4
+	producers.Add(1)
+	go func() {
+		defer producers.Done()
+		for i := 0; i < count; i++ {
+			ip := buildIPv4PacketWithPorts(v4, net.IPv4(10, 0, 0, 5), 6, uint16(20000+i%8), 80)
+			pkt := makePoolPacket(ip)
+			select {
+			case dev.tunInbound <- pkt:
+			case <-ctx.Done():
+				pkt.release()
+				return
+			}
+		}
+	}()
+	waitFor(t, 5*time.Second, func() bool {
+		return len(ct.slots[0].inbound) == MaxSize && len(dev.tunInbound) == MaxSize
+	}, "blocked data writer filled both queues")
+	// Consume the initial probe, then demand another while data remains blocked.
+	select {
+	case <-controlFrames:
+	case <-time.After(5 * time.Second):
+		t.Fatal("initial control request missing")
+	}
+	stats.RequestProbe()
+	select {
+	case frame := <-controlFrames:
+		if len(frame) <= typePrefixLen || frame[0] != packetTypeControl {
+			t.Fatal("business traffic sent on control connection")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("full business queue blocked control request")
+	}
+	if len(ct.slots[0].inbound) != MaxSize {
+		t.Fatal("data queue unexpectedly drained during control probe")
+	}
+	close(resumeData)
+	for i := 0; i < count; i++ {
+		select {
+		case frame := <-dataFrames:
+			if len(frame) <= typePrefixLen || frame[0] != packetTypeToGvisor {
+				t.Fatal("control traffic entered business queue")
+			}
+			key := parseFiveTupleInline(frame[typePrefixLen:])
+			if !key.hasPorts || key.srcPort != uint16(20000+i%8) {
+				t.Fatalf("business packet %d reordered or corrupted", i)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("business traffic did not resume: received %d/%d packets", i, count)
+		}
+	}
 }
 
 // TestRegistrationPayloadsUseInjectedAddresses pins the contract that registration payloads are
