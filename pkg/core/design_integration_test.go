@@ -16,11 +16,11 @@ import (
 // readFromTCPConnWriteToEndpoint dispatches packets into 3 paths:
 //   Path 1: route exists → forward to destination conn (inter-client)
 //   Path 2: prefix=1 + no route → inject into gvisor stack
-//   Path 3: prefix=0 + no route → send to TCPPacketChan → TUN device
+//   Path 3: prefix=0 + no route → send to tunQueue → TUN device
 // ============================================================================
 
-func TestServerRouting_Path3_PrefixZeroToTCPPacketChan(t *testing.T) {
-	// Path 3: prefix=0, no route → goes to hub.TCPPacketChan
+func TestServerRouting_Path3_PrefixZeroTotunQueue(t *testing.T) {
+	// Path 3: prefix=0, no route → goes to hub.tunQueue
 	hub := NewRouteHub()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -41,11 +41,11 @@ func TestServerRouting_Path3_PrefixZeroToTCPPacketChan(t *testing.T) {
 
 	sendFramedPacket(clientConn, 0, ipPkt)
 
-	// Should arrive on TCPPacketChan
+	// Should arrive on tunQueue
 	select {
-	case pkt := <-hub.TCPPacketChan:
+	case pkt := <-hub.tunQueue:
 		if pkt == nil {
-			t.Fatal("got nil from TCPPacketChan")
+			t.Fatal("got nil from tunQueue")
 		}
 		// Verify src/dst parsed correctly
 		if !pkt.src.Equal(srcIP.To4()) {
@@ -56,7 +56,7 @@ func TestServerRouting_Path3_PrefixZeroToTCPPacketChan(t *testing.T) {
 		}
 		config.LPool.Put(pkt.data[:])
 	case <-time.After(2 * time.Second):
-		t.Fatal("timeout: prefix=0 packet should go to TCPPacketChan")
+		t.Fatal("timeout: prefix=0 packet should go to tunQueue")
 	}
 }
 

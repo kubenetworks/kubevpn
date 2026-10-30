@@ -13,16 +13,23 @@ import (
 
 type bufferedTCP struct {
 	net.Conn
-	ch       chan *Packet
-	closed   atomic.Bool
-	done     chan struct{} // stops enqueues; run joins producers before its final drain
-	enqueue  sync.RWMutex
-	stopOnce sync.Once
+	ch        chan *Packet
+	closed    atomic.Bool
+	done      chan struct{} // stops enqueues; run joins producers before its final drain
+	enqueue   sync.RWMutex
+	stopOnce  sync.Once
+	closeOnce sync.Once // separate from route stop callbacks; never closes under their locks
+	closeErr  error
+	onStop    func(*bufferedTCP) // immutable, installed before run starts
 }
 
 // NewBufferedTCP wraps a TCP connection with an async write buffer to reduce syscalls.
 func NewBufferedTCP(ctx context.Context, conn net.Conn) net.Conn {
-	c := &bufferedTCP{Conn: conn, ch: make(chan *Packet, MaxSize), done: make(chan struct{})}
+	return newBufferedTCP(ctx, conn, nil)
+}
+
+func newBufferedTCP(ctx context.Context, conn net.Conn, onStop func(*bufferedTCP)) *bufferedTCP {
+	c := &bufferedTCP{Conn: conn, ch: make(chan *Packet, MaxSize), done: make(chan struct{}), onStop: onStop}
 	go c.run(ctx)
 	return c
 }
@@ -30,17 +37,22 @@ func NewBufferedTCP(ctx context.Context, conn net.Conn) net.Conn {
 // writePacket transfers one reference only on success. The read lock joins an
 // enqueue already in flight with run's final drain, including a select choosing
 // the queue just as done closes. The channel itself is never closed.
-func (c *bufferedTCP) writePacket(pkt *Packet) bool {
+func (c *bufferedTCP) writePacket(ctx context.Context, pkt *Packet) error {
 	c.enqueue.RLock()
 	defer c.enqueue.RUnlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if c.closed.Load() {
-		return false
+		return net.ErrClosed
 	}
 	select {
 	case c.ch <- pkt:
-		return true
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	case <-c.done:
-		return false
+		return net.ErrClosed
 	}
 }
 
@@ -63,15 +75,21 @@ func (c *bufferedTCP) Write(b []byte) (int, error) {
 	}
 	n := copy(buf, b)
 	pkt := NewPacket(buf, n-datagramHeaderLen, nil, nil)
-	if !c.writePacket(pkt) {
+	if err := c.writePacket(context.Background(), pkt); err != nil {
 		pkt.release()
-		return 0, errors.New("tcp channel is closed")
+		return 0, err
 	}
 	return n, nil
 }
 
 func (c *bufferedTCP) stop() {
-	c.stopOnce.Do(func() { c.closed.Store(true); close(c.done) })
+	c.stopOnce.Do(func() {
+		c.closed.Store(true)
+		close(c.done)
+		if c.onStop != nil {
+			c.onStop(c)
+		}
+	})
 }
 
 func (c *bufferedTCP) run(ctx context.Context) {
@@ -79,7 +97,9 @@ func (c *bufferedTCP) run(ctx context.Context) {
 	defer stopClose()
 	var batch packetBatch
 	defer func() {
-		c.stop()
+		// An idle/pre-canceled run can finish before AfterFunc starts. Closing
+		// here is mandatory even if stopClose cancels that pending callback.
+		_ = c.Close()
 		batch.close()
 		// done unblocks even a producer holding RLock on a full queue. Once
 		// joined, no successful enqueue can escape this final drain.
@@ -107,5 +127,6 @@ func (c *bufferedTCP) run(ctx context.Context) {
 
 func (c *bufferedTCP) Close() error {
 	c.stop()
-	return c.Conn.Close()
+	c.closeOnce.Do(func() { c.closeErr = c.Conn.Close() })
+	return c.closeErr
 }

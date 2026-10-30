@@ -14,7 +14,7 @@ const slowPathWarnThreshold = 20 * time.Millisecond
 
 // serverTransport is the traffic-manager (hub) half of the tun device. Packets read from the
 // server's TUN are routed to the owning client connection via RouteHub; packets that the gvisor
-// stacks could not route locally arrive on RouteHub.TCPPacketChan and are written back to the TUN.
+// stacks could not route locally arrive on RouteHub.tunQueue and are written back to the TUN.
 type serverTransport struct {
 	dev *tunDevice
 	hub *RouteHub
@@ -41,7 +41,13 @@ func (t *serverTransport) routeOutbound(ctx context.Context, buf []byte, n int, 
 	logIPPacket(ctx, "[TUN]", buf[tunReserve:tunReserve+n])
 	buf[datagramHeaderLen] = packetTypeToGvisor
 	sendStart := time.Now()
-	t.dev.tunInbound <- NewPacket(buf[:], n+typePrefixLen, src, dst)
+	packet := NewPacket(buf[:], n+typePrefixLen, src, dst)
+	select {
+	case t.dev.tunInbound <- packet:
+	case <-ctx.Done():
+		packet.release()
+		return
+	}
 	if elapsed := time.Since(sendStart); elapsed > slowPathWarnThreshold {
 		plog.G(ctx).Warnf("[Perf] Slow tunInbound send: %s -> %s blocked %v (channel backpressure)", src, dst, elapsed)
 	}
@@ -64,7 +70,7 @@ func (t *serverTransport) routeTun(ctx context.Context) {
 			// ours below.
 			binary.BigEndian.PutUint16(packet.data[:datagramHeaderLen], uint16(packet.length))
 			writeStart := time.Now()
-			conn, err := t.hub.WriteToRoutePacket(dstKey, packet)
+			conn, err := t.hub.WriteToRoutePacket(ctx, dstKey, packet)
 			if elapsed := time.Since(writeStart); elapsed > slowPathWarnThreshold {
 				plog.G(ctx).Warnf("[Perf] Slow WriteToRoute: %s -> %s took %v", packet.src, packet.dst, elapsed)
 			}
@@ -81,16 +87,21 @@ func (t *serverTransport) routeTun(ctx context.Context) {
 }
 
 // routeTCPToTun bridges packets that the gvisor stacks could not route locally (delivered on
-// RouteHub.TCPPacketChan) back to the server's TUN via tunOutbound.
+// RouteHub.tunQueue) back to the server's TUN via tunOutbound.
 func (t *serverTransport) routeTCPToTun(ctx context.Context) {
-	defer drainPacketChan(t.hub.TCPPacketChan)
+	defer t.hub.stopTUNBridge()
 	for {
 		select {
-		case packet := <-t.hub.TCPPacketChan:
+		case packet := <-t.hub.tunQueue:
 			if packet == nil {
 				return
 			}
-			t.dev.tunOutbound <- packet
+			select {
+			case t.dev.tunOutbound <- packet:
+			case <-ctx.Done():
+				packet.release()
+				return
+			}
 		case <-ctx.Done():
 			return
 		}

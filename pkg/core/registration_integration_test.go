@@ -90,12 +90,7 @@ func (s *regServer) dropAllConns() {
 
 // routeConnCount returns how many conns the hub has registered for ip, or 0 when there is no route.
 func (s *regServer) routeConnCount(ip net.IP) int {
-	key := regRouteKey(ip)
-	val, ok := s.hub.RouteMapTCP.Load(key)
-	if !ok {
-		return 0
-	}
-	return val.(*ConnList).Len()
+	return len(routeSnapshot(s.hub)[regRouteKey(ip)])
 }
 
 // routeConns returns a snapshot of the exact conns the hub currently has registered for ip. Unlike
@@ -103,21 +98,12 @@ func (s *regServer) routeConnCount(ip net.IP) int {
 // conns are removed one by one while the client reconnects and registers fresh conns on the same
 // key, so the aggregate count may never read 0, but "these specific conns are gone" always holds.
 func (s *regServer) routeConns(ip net.IP) []net.Conn {
-	val, ok := s.hub.RouteMapTCP.Load(regRouteKey(ip))
-	if !ok {
-		return nil
-	}
-	cl := val.(*ConnList)
-	cl.mu.Lock()
-	defer cl.mu.Unlock()
-	return append([]net.Conn(nil), cl.conns...)
+	return routeSnapshot(s.hub)[regRouteKey(ip)]
 }
 
 // routeKeyCount returns how many distinct addresses the hub currently has a route for.
 func (s *regServer) routeKeyCount() int {
-	n := 0
-	s.hub.RouteMapTCP.Range(func(_, _ any) bool { n++; return true })
-	return n
+	return len(routeSnapshot(s.hub))
 }
 
 // regRouteKey mirrors how the server keys routes: the raw address bytes as ParseIPFast slices them

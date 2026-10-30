@@ -64,6 +64,22 @@ IP packets are encapsulated in a custom datagram framing protocol over TLS/TCP. 
 - **Prefix** (1 byte): routing directive (see below)
 - **IP Packet**: raw IPv4 or IPv6 packet
 
+The framing layer accepts uint16 payload lengths **0..65535**; tunnel payloads include the
+prefix within that length. `readDatagramPacket` reads the two-byte header into independent
+storage, then reads the body into the caller's buffer. An undersized buffer returns
+`io.ErrShortBuffer`; the consumed header makes the stream unusable, so the framing wrapper
+closes it rather than trying to resume. Outbound payloads above 65535 are rejected before
+any write. Specifically, `UDPConnOverTCP.Write` uses standalone storage for its largest
+legal frame (65537 bytes), without returning that storage to `config.LPool`. This is the
+wrapper's allocation contract, not a guarantee for every framed-packet path. The uint16
+wire limit is unchanged; other pooled paths can reject packets when their buffer is too short.
+
+`writeFull` continues positive short writes on the **same connection**, reports actual wire
+progress, and preserves errors (zero progress without an error becomes `io.ErrShortWrite`).
+A partially written frame is never replayed on another connection. Read and Write are
+serialized separately by `UDPConnOverTCP`; context cancellation/Close closes the transport
+without waiting for an I/O mutex. These are safety contracts, not a wire-format change.
+
 ### Prefix Byte Semantics
 
 | Value | Name | Direction | Meaning |
@@ -76,12 +92,16 @@ IP packets are encapsulated in a custom datagram framing protocol over TLS/TCP. 
 
 **Routing decision on server (data conn, per packet; control conns use `handleControlConn`):**
 ```go
-if buf[0] == 1 {
-    // Inject into gvisor stack → TCP/UDP forwarder → dial real service
+// Simplified: registered peer destinations route directly before prefix handling.
+if hub.HasRoute(dstKey) {
+    _, err = hub.WriteToRoutePacket(ctx, dstKey, packet)
+    packet.release() // caller's reference
+} else if prefix == packetTypeToGvisor {
+    // Inject into the per-client stack → TCP/UDP forwarder → real service.
     endpoint.InjectInbound(protocol, pkt)
-} else {
-    // Forward via RouteHub TCPPacketChan → server TUN → other client
-    hub.TCPPacketChan <- packet
+} else if !hub.enqueueTUN(ctx, packet) {
+    // Private TUN bridge did not take ownership (canceled/stopped).
+    packet.release()
 }
 ```
 
@@ -248,7 +268,7 @@ Multiple clients coexist in the same table:
 Client A (198.18.0.2):  1 registered data conn
 Client B (198.18.0.3):  1 registered data conn
 
-RouteHub.routeMapTCP:
+RouteHub.routes (private, guarded by hub.mu):
   198.18.0.2 → ConnList[ conn_A0 ]
   198.18.0.3 → ConnList[ conn_B0 ]
 ```
@@ -256,8 +276,9 @@ RouteHub.routeMapTCP:
 ### Route Registration
 
 Routes are registered when the server receives a packet from a client connection:
-it calls `hub.AddRoute(srcIP, conn)`. Duplicate connections are ignored (dedup by
-pointer equality). Control connections are excluded. Registration comes from:
+it calls `hub.AddRoute(ctx, srcIP, conn)`. Duplicate connections are ignored (dedup by
+pointer equality); a closed `bufferedTCP` is rejected and its reader must exit. Control
+connections are excluded. Registration comes from:
 
 - **Proactive registration** — a freshly dialed slot writes a registration packet
   (an ICMP echo to the gateway, carrying its TUN IP) on the new conn *before* any
@@ -269,19 +290,32 @@ pointer equality). Control connections are excluded. Registration comes from:
 
 ### Write with Fallback
 
-When the server needs to forward a packet to a client (e.g., cross-client
-traffic A→B, or proxy response), it uses `WriteToRoute` or `WriteFuncToRoute`.
+The packet path uses `WriteToRoutePacket(ctx, dstKey, packet)`. It snapshots the current
+`ConnList` and its member identities, then revalidates the list and member before I/O.
+Failed-member removal checks those same identities, so an old write cannot remove a
+re-added connection or a replacement list. Neither `hub.mu` nor `ConnList.mu` is held
+across socket writes, queue admission, or `Close`.
+
 The following illustrates fallback when multiple entries exist (reconnect overlap or a
 multi-slot test override), not the normal single-data-conn topology:
 
 ```
-WriteFuncToRoute("198.18.0.3", dgram.Write):
-  try conn_B0 → write succeeds → return conn_B0, nil
-  
-WriteFuncToRoute("198.18.0.3", dgram.Write):
-  try conn_B0 → write fails (dead conn) → remove conn_B0
-  try conn_B1 → write succeeds → return conn_B1, nil
+WriteToRoutePacket(ctx, dstKey, packet):
+  try conn_B0 → enqueue/write succeeds → return conn_B0, nil
+
+  or: conn_B0 fails before any frame bytes → remove that member
+      try conn_B1 → enqueue/write succeeds → return conn_B1, nil
+
+  or: conn_B0 partially writes then fails → return error, never replay on conn_B1
 ```
+
+Buffered enqueue cancellation returns without evicting a healthy conn or falling back.
+Raw writes use a separate context-aware serialization gate: cancellation before a write
+starts leaves the conn intact; cancellation during active socket I/O closes the selected
+conn, waits for that close callback, and removes only the selected membership. Positive
+short writes continue on the same conn through `writeFull`, not on the next route.
+Legacy `WriteFuncToRoute` callbacks do not report byte progress or promise cancellable I/O;
+they are not the framed-packet routing path.
 
 This is first-writable-conn fallback, not per-flow load balancing or a packet-loss
 guarantee. With the default single data conn there is no spare registered data slot;
@@ -302,27 +336,35 @@ the default steady-state path has only `conn_A0` and `conn_B0`.
 ```
 1. Client A sends packet with dst=198.18.0.3
 2. Server receives on one of A's conns
-3. Server: AddRoute("198.18.0.2", conn_A_slot)         ← register A's route
-4. Server: HasRoute("198.18.0.3")                      ← true, B is connected
-5. Server: WriteFuncToRoute("198.18.0.3", dgram.Write) ← try B's conns in order
-6. If conn_B0 dead → removed, tries conn_B1 → success
-7. Client B receives packet on conn_B1, writes to TUN
+3. Server: AddRoute(ctx, srcIP, conn_A0)                 ← register A's route
+4. Server: HasRoute(dstKey)                              ← B has a data route
+5. Server: WriteToRoutePacket(ctx, dstKey, packet)        ← validated snapshot of B's conns
+6. If conn_B0 fails with zero progress → remove member, try conn_B1
+   Partial frame failure or cancellation → stop; no fallback/resend
+7. Client B receives a successfully routed packet and writes it to TUN
 ```
 
 ### Cleanup
 
-When a connection closes, `RemoveRoutesByConn(conn)` iterates all route entries
-and removes that connection from every `ConnList` it appears in. If a `ConnList`
-becomes empty, the route entry is deleted entirely.
+When a connection closes, `RemoveRoutesByConn(ctx, conn)` removes it from every
+`ConnList` under `hub.mu`. Empty-route deletion and the internal `emptyLocked` callback
+are serialized with registration and `addedLocked`. Callback lock order is `hub.mu` then
+`handler.mu`; callbacks only change metadata/timers, with no I/O, logging, or hub reentry.
 
 This cleanup is driven by the server-side conn deadlines so that even a half-open
 ghost (no FIN/RST) is reclaimed: the read loop (`readFromTCPConnWriteToEndpoint`)
 times out after `KeepAliveTime*3` of silence, and the buffered writer
 (`bufferedTCP.run`) times out a stuck write after `KeepAliveTime`; either closes the
-conn, which exits the reader and triggers `RemoveRoutesByConn`. See
-[08-heartbeat-health.md](08-heartbeat-health.md) §#3.
+conn. The buffered writer's stop callback removes its routes immediately; reader cleanup
+also removes routes idempotently. `AddRoute` refuses that stopped writer, so late reads
+cannot restore it. See [08-heartbeat-health.md](08-heartbeat-health.md) §#3.
 
-Note: there is a benign TOCTOU between `IsEmpty()` and `Delete()` in the write path — another goroutine could add a connection between the two calls. This is harmless because `sync.Map.Delete` is idempotent and the next packet will re-register the route via `AddRoute`.
+There is no separate public-map `IsEmpty`/`Delete` transaction: the private table, validated
+snapshots, and identity-safe removal prevent stale writers from deleting restored routes.
+The private `tunQueue` bridge admits packets through cancellable `enqueueTUN`; shutdown
+signals `tunDone`, joins in-flight admission, then drains without closing the data channel.
+Server device sends are also cancellable. See [12-session-lifecycle.md](12-session-lifecycle.md)
+for server-device failure and joined shutdown.
 
 ## MTU Calculation
 

@@ -54,6 +54,10 @@ still shares an outer TCP transport. The default uses direct slot-0 dispatch wit
 slot-selection parsing/hash; the private data-only `poolSize` override supports nil-stats
 1/2/4/8-slot comparisons, with no new CLI or environment flag. `connSlot` lifecycle, queues,
 deadlines and batching are retained, as is concurrent handling of business flows.
+This stability increment changes neither the wire format nor the one-data/one-control
+default, and adds no CLI or protocol. Framing remains `[uint16 length][payload]` with
+0..65535 payload bytes; oversized writes are rejected before I/O, short receive buffers
+make the stream unusable, and partial frames are not replayed (see [18](18-gvisor-network-stack.md#7-protocol-encapsulation)).
 
 ## 3. Protocol: `packetTypeControl`
 
@@ -97,27 +101,44 @@ case <-ctx.Done():
 ```
 
 Backpressure chain: slot full → runConnPool blocks → tunInbound full → routeOutbound blocks →
-pumpTun stops reading TUN → OS TCP send buffer fills → TCP advertises smaller window → SCP
-application slows down (smooth degradation, no RTO).
-
-Previously `trySendToSlot` silently dropped packets → OS TCP saw loss → RTO exponential backoff
-(1–7 s stalls). The blocking design eliminates this entirely.
+pumpTun stops reading TUN. Queue admission is cancellable so shutdown can release blocked
+producers. This removes the former default `trySendToSlot` full-queue drop path; it does not
+eliminate all packet loss, TCP RTOs, or application timeouts, and makes no throughput claim.
 
 ## 5. Per-Client Stack Lifecycle
 
 | Event | Action |
 |-------|--------|
-| First cluster-bound packet from new client IP | Create stack + reader goroutine |
-| Pool slot reconnects | conn re-registered in RouteHub; stack untouched |
-| All data conns for client removed | Start grace timer (KeepAliveTime×3 = 180 s) |
-| Grace timer fires (no reconnect) | Destroy stack, free memory |
-| Server shutdown | All stacks destroyed |
+| First cluster-bound packet or control probe from new client IP | Create per-client stack + output loop; arm grace if no data route exists |
+| Data route registered/reconnected | Invalidate grace epoch and stop timer; retain current stack |
+| All data conns for client removed | Arm one grace interval (KeepAliveTime×3 = 180 s) |
+| More control probes while no data route exists | Do not refresh an already armed interval |
+| Grace timer fires | Retire only the expected stack with the current armed epoch and no data route; cancel outside locks |
+| Stack context canceled (including shutdown) | Destroy stack, join owned output loop, then close `clientStack.done` |
 
 ### Why 180 s grace period
 
 Port-forward reconnections typically complete in 10–15 s. The grace period (3× `KeepAliveTime`, not the 5 s heartbeat interval)
-covers network glitches and brief laptop sleep. After 180 s without any data conn, the client
-is genuinely gone and its stack memory can be reclaimed.
+covers brief transport gaps. After 180 s without a data route, the server retires that stack;
+this is a resource-retention policy, not proof that the client process is gone.
+
+### Serialized grace transitions
+
+RouteHub owns a private `routes` table under `hub.mu`. Internal `addedLocked` and
+`emptyLocked` callbacks execute inside the route transaction and acquire `handler.mu`
+**after** the hub mutex. They only update state/timers: no socket I/O, logging, or hub
+reentry. Stack construction and destruction occur outside these metadata locks.
+
+`armGraceLocked` captures both the stack pointer and `graceEpoch`. `expireGrace` validates
+that the client map still contains that expected stack, the same epoch is armed, and there
+is no current data route. Data registration invalidates the epoch even if `Timer.Stop`
+loses a race with an already scheduled callback. Late callbacks therefore cannot delete a
+restored stack or its replacement.
+
+A stack created by control traffic before any data registration gets one bounded grace
+interval. Repeated probes do not extend that stack's armed interval; successful data
+registration cancels it. `clientStack.done` tracks completion of its owned output loop and
+`stack.Destroy`, not a join guarantee for all foreign-library goroutines.
 
 ### Data slot timeout and session retention
 
@@ -140,8 +161,23 @@ new conn.
 
 ### 6.2 Client isolation
 
-Each client's `readFromEndpointWriteToRoute` is independent. Blocking `WriteToRoutePacket` on
-one client stalls only that client's gvisor stack. Other clients are unaffected.
+Each client's `readFromEndpointWriteToRoute` is independent and uses
+`WriteToRoutePacket(ctx, dstKey, pkt)`. A blocked client enqueue does not hold the hub or
+membership mutex, so it does not serialize unrelated route operations. This does not
+promise isolation from shared process resources or the outer transport.
+
+Each `ConnList` snapshots member identities and validates them before I/O. Failure removal
+checks both list and member identity, so stale writes cannot remove re-added/replacement
+routes. Socket writes, enqueue, and Close run outside metadata locks. Buffered admission
+cancellation does not evict healthy routes; raw gate cancellation before I/O leaves the
+conn intact, whereas cancellation during active raw I/O closes the selected conn. A partial
+frame error never falls back or resends; positive short writes continue on the same conn.
+
+The `bufferedTCP` stop callback removes routes and registration refuses closed writers.
+Its final drain joins admission, and the private TUN bridge similarly uses `enqueueTUN`
+plus stop/join/drain without closing the data channel. Server-role `TunHandler.FatalOnReturn`
+makes device completion terminal for `handler.Run`, which cancels and joins accepted
+handlers; ordinary TCP EOF is not fatal. Root-client NetworkManager completion is unchanged.
 
 ### 6.3 Heartbeat independence
 
@@ -160,7 +196,10 @@ type clientStack struct {
     endpoint   *channel.Endpoint
     stack      *stack.Stack
     cancel     context.CancelFunc
-    graceTimer *time.Timer
+    done       chan struct{} // owned output loop + stack destruction completed
+    graceTimer graceTimer
+    graceEpoch uint64
+    graceArmed bool
 }
 
 type gvisorTCPHandler struct {
@@ -186,7 +225,7 @@ type connSlot struct {
 | `gvisor_tun_endpoint.go` | First-packet type detection, per-client endpoint injection |
 | `tun_client.go` | controlSlot, blocking runConnPool, heartbeats via controlSlot |
 | `conn_slot.go` | `isControl` field, control declaration on connect |
-| `route.go` | `OnRouteEmpty`/`OnRouteAdded` callbacks |
+| `route.go` | Private routes, validated member snapshots, `emptyLocked`/`addedLocked`, cancellable TUN bridge |
 
 ## 8. Resource Usage
 

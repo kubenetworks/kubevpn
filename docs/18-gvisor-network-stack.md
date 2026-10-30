@@ -63,18 +63,24 @@ Examples:
 
 ## 5. TUN Handler (Server vs Client)
 
-`tunHandler.Handle()` checks if a `Forwarder` is configured:
-- **No forwarder** → `HandleServer()` — this is the traffic manager
-- **Has forwarder** → `HandleClient()` — this is the local machine or sidecar
+`tunHandler.Handle()` creates a `tunDevice` and chooses its transport before `serve`:
+- **No forwarder** → `serverTransport` — this is the traffic manager
+- **Has forwarder** → `clientTransport` — this is the local machine or sidecar
 
-### 5.1 Server Side (`Device`)
+### 5.1 Server Side (`serverTransport`)
 
 ```
-HandleServer:
-  readFromTun ──► tunInbound ──► Peer.routeTun ──► RouteHub.WriteToRoute ──► remote conn
-                                                                                │
-  writeToTun  ◄── tunOutbound ◄── Peer.routeTCPToTun ◄── RouteHub.TCPPacketChan ┘
+TunHandler → tunDevice + serverTransport → serve:
+  pumpTun → routeOutbound → tunInbound → routeTun → WriteToRoutePacket(ctx, ...) → remote conn
+  writeToTun ← tunOutbound ← routeTCPToTun ← RouteHub.tunQueue ← enqueueTUN(ctx, packet)
 ```
+
+Server queue sends and packet routing are context-aware. `stopTUNBridge` signals stop,
+joins in-flight `enqueueTUN` admission, and drains the private queue without closing its
+data channel. Device `serve` joins routines before the final device-queue drain.
+Server-role `FatalOnReturn()` makes a returned TUN handler terminal for `handler.Run`:
+cancel, close listeners/connections, join accept loops and accepted handlers. Ordinary
+TCP EOF is not fatal; root-client NetworkManager completion is unchanged (see [12](12-session-lifecycle.md)).
 
 The server reads IP packets from the TUN device, looks up the destination in `RouteHub`, and writes to the appropriate remote connection. Incoming packets from remote connections are written back to the TUN device.
 
@@ -84,19 +90,19 @@ The server reads IP packets from the TUN device, looks up the destination in `Ro
 `tunDevice.pumpTun(ctx, errLabel, dispatch)` (in `tun_device.go`). It owns the pooled-buffer
 read at `buf[3:]`, `ParseIPFast`, and read/parse error handling (read error → `errChan` + stop;
 parse error → drop + continue), then hands each packet to a per-side `dispatch` callback.
-`Device.readFromTun` is just `pumpTun(ctx, "[TUN]", …)` whose dispatch debug-logs and sends to
-`tunInbound`.
+The server's `routeOutbound` dispatch debug-logs and sends to `tunInbound`, releasing the
+packet if cancellation prevents admission.
 
-### 5.2 Client Side (`ClientDevice`)
+### 5.2 Client Side (`clientTransport`)
 
 ```
-HandleClient:
-  readFromTun ──► tunInbound ──► runConnPool ──► slot[0] (direct)     ──► writeToConn ──► server
+tunDevice + clientTransport:
+  pumpTun     ──► tunInbound ──► runConnPool ──► slot[0] (direct)     ──► writeToConn ──► server
                                                                                         │
   writeToTun  ◄── tunOutbound ◄──────────────── readFromConn ◄──────────────────────────┘
 ```
 
-`ClientDevice.readFromTun` uses the same `pumpTun` loop as the server; its dispatch sets the
+`clientTransport.routeOutbound` is dispatched by the same `pumpTun` loop; it sets the
 type prefix and either forwards locally (when `src == dst`, via the gvisor handler) or pushes
 to `tunInbound` for the pool to distribute.
 
@@ -122,23 +128,50 @@ guarantee.
 |------|----------------|
 | `packet.go` | The `Packet` value type (`NewPacket`/`Data`/`Length`), the gvisor `copyPacketToPool` helper, and `logIPPacket` (the debug packet-log helper — the only `gopacket/layers` user among these files) |
 | `tun_device.go` | Shared `tunDevice` base (`tun`, the inbound/outbound channels, `errChan`), `writeToTun`, `Close`, the generic `pumpTun` read loop, and `drainPacketChan` |
-| `tun_client.go` | `ClientDevice`, the connection pool (`runConnPool`, `flowHash`/`parseFiveTupleInline`/`ipHash`, `trySendToSlot`/`broadcastToSlots`, `periodicDeadline`), and the `connSlot` type |
-| `tun_server.go` | `Device`, `Peer` routing (`routeTun`/`routeTCPToTun`), and `tunHandler` dispatch |
+| `tun_client.go` | `clientTransport`, connection pool dispatch and heartbeats |
+| `conn_slot.go` | `connSlot` queues, dial/reconnect and read/write loops |
+| `tun_server.go` | `serverTransport` routing (`routeTun`/`routeTCPToTun`) |
+| `tun_handler.go` | Role selection, `FatalOnReturn`, and joined device `serve` |
 
 ## 6. RouteHub — Packet Routing
 
 `RouteHub` is the central routing table shared between TUN and gvisor handlers:
 
 ```go
+// Selected fields; private metadata is accessed through RouteHub operations.
 type RouteHub struct {
-    RouteMapTCP   *sync.Map     // map[string]*ConnList — dstIP → connections
-    TCPPacketChan chan *Packet   // gvisor endpoint → TUN bridge
+    mu          sync.Mutex
+    routes      map[string]*ConnList
+    tunQueue    chan *Packet
+    tunDone     chan struct{}
+    emptyLocked func(ipKey string)
+    addedLocked func(ipKey string)
 }
 ```
 
-**ConnList**: Holds registered data connections for the same client IP, ordered newest-first (`Add` prepends). The current default has one registered conn per client address in steady state; control is excluded. `Write()` tries the first writable conn, removing failed ones and falling back when another entry exists (reconnect overlap or multi-slot test override). This is not per-flow load balancing.
+**ConnList**: Holds newest-first data-route member identities; control conns are excluded.
+The default has one data conn per client address. Writes snapshot membership, validate the
+current list/member before I/O, and remove failures only if those identities still match.
+A stale write therefore cannot delete a replacement list or a re-added member. Neither
+`hub.mu` nor `ConnList.mu` spans socket writes, enqueue, or Close. Raw frame serialization
+uses a separate gate; buffered writers own their queue serialization.
 
-**Route registration**: When the server receives a data packet or the data slot's registration echo sent right after dialing, it calls `AddRoute(srcIP, conn)` to register the client's IP. Periodic control-slot heartbeats do not register routes. Stale "ghost" conns are evicted by the server-side read/write deadlines (see [08-heartbeat-health.md](08-heartbeat-health.md) §#3).
+**Cancellation and fallback**: `WriteToRoutePacket(ctx, dstKey, pkt)` cancels buffered queue
+admission without evicting a healthy conn. Cancellation while waiting for the raw gate or
+before I/O leaves the conn intact; cancellation during active raw socket I/O closes the
+selected conn and waits for the close callback. Fallback is only safe after zero wire
+progress, never after a partially transmitted frame or cancellation. `writeFull` continues
+short writes on the same conn. This is first-writable routing, not per-flow balancing.
+Legacy `WriteFuncToRoute` callbacks lack byte-progress/cancellable-I/O guarantees and are
+not used for the framed-packet path.
+
+**Route registration/lifetime**: `AddRoute(ctx, srcIP, conn)` registers data packets and
+proactive registration echoes, but refuses a closed `bufferedTCP`. Its stop callback removes
+routes even before reader cleanup. Route changes and internal `addedLocked`/`emptyLocked`
+callbacks are serialized under `hub.mu`; callback lock order is hub then `handler.mu`,
+with metadata/timer updates only (no I/O, logging, or hub reentry). Periodic control probes
+do not register routes. See [48](48-shared-server-gvisor-stack.md) for grace epochs and
+[08](08-heartbeat-health.md) for read/write deadlines.
 
 ## 7. Protocol Encapsulation
 
@@ -152,11 +185,32 @@ Provides UDP-like datagram semantics over a TCP stream using length-prefix frami
 ...
 ```
 
-Used by the TUN client→server connection to preserve packet boundaries.
+Used by the TUN client→server connection to preserve packet boundaries. The uint16 length
+allows **0..65535 payload bytes**, including any tunnel type prefix. The framing layer can
+represent an empty datagram; higher-level consumers may reject or ignore it.
 
-### 7.2 PacketConnOverTCP (`conn_packet_over_tcp.go`)
+`readDatagramPacket` reads its two-byte header independently of the caller's payload
+storage. Insufficient storage returns `io.ErrShortBuffer`; because the header was consumed,
+the stream is unusable and the wrapper closes it. Oversize outbound payloads are rejected
+before writing. Specifically, `UDPConnOverTCP.Write` uses standalone storage for its
+maximum-size frame (**65537 bytes**), without returning that storage to `config.LPool`.
+This allocation contract belongs to the wrapper, not every framed-packet path. The uint16
+wire limit is unchanged; other pooled paths can reject packets when their buffer is too short.
 
-Same length-prefix framing but implements `net.PacketConn` for compatibility with code expecting `ReadFrom`/`WriteTo`.
+`UDPConnOverTCP` uses separate read/write mutexes to preserve framing while allowing
+full-duplex I/O. Its context cancellation and Close close the transport without taking
+those I/O mutexes. Framing read/write errors terminate the stream, not a resumable frame.
+
+### 7.2 Shared framing and UDP relay
+
+`writeDatagram` stamps reserved headroom and uses the common `writeFull` helper. `writeFull`
+reports actual wire progress and errors, continues positive short writes only on the same
+writer, and converts zero progress without an error to `io.ErrShortWrite`. A partial frame
+failure must never trigger fallback/replay onto another connection.
+
+`relayUDPOverTCP` in `gvisor_udp_handler.go` closes both TCP and UDP endpoints on first copy
+completion or cancellation, then joins both copy workers. This is the UDP-over-TCP relay's
+ownership contract, not a claim about all gvisor forwarder goroutines.
 
 ### 7.3 BufferedTCP (`conn_buffered_tcp.go`)
 
@@ -165,15 +219,20 @@ Wraps a TCP connection with an **async write queue** to coalesce syscalls under 
 (`ch chan *Packet`, capacity `MaxSize`) and writes each framed packet to the socket. Two enqueue
 paths:
 
-- **`writePacket(pkt)`** — the hot path. Enqueues an *already-framed* `Packet` and **transfers one
-  reference**: `run` calls `pkt.release()` after the socket write. Returns `false` if the conn is
-  closed, in which case ownership is **not** taken (caller keeps its ref). This is zero-copy.
-- **`Write(b)`** — the `net.Conn` contract path. Because the caller may reuse `b` after `Write`
-  returns, `b` is **copied** into a pooled buffer. Hot routing paths therefore prefer
-  `writePacket`.
+- **`writePacket(ctx, pkt)`** — the hot path. Enqueues an *already-framed* `Packet` and
+  **transfers one reference on success**; the writer releases it after writing or draining.
+  On cancellation/closed error, ownership is not taken. Admission cancellation alone does
+  not evict a healthy route.
+- **`Write(b)`** — the `net.Conn` contract path copies bytes because the caller may reuse
+  them immediately. Its existing larger-buffer allocation and `Packet.release` pool behavior
+  are unchanged by this increment; the standalone-storage guarantee above applies only to
+  `UDPConnOverTCP.Write`.
 
-A `closed atomic.Bool` plus a `done` channel (closed when `run` exits) ensure `writePacket`/`Write`
-never block on a drainerless channel after shutdown.
+Stop sets `closed`, closes the admission-stop `done` channel, and invokes the installed
+route-removal callback. Close then closes the underlying transport outside route metadata
+locks. `run` also closes on exit, including idle/pre-canceled cases, joins in-flight enqueue
+admission and drains the remaining packets. The data channel is never closed; `done` is
+not a writer-completion join signal. Closed writers cannot be registered again.
 
 ### 7.4 Reference-Counted Packet Pool (`packet.go`)
 
@@ -239,7 +298,19 @@ Two variants:
 
 ### 8.3 TUN Endpoints
 
-**gvisor_tun_endpoint.go**: Server-side, bridges between TCP connections (from VPN clients) and the shared gvisor `channel.Endpoint`. `readFromTCPConnWriteToEndpoint` reads datagram-framed packets from a tunnel conn and injects them into the shared stack. `readFromEndpointWriteToRoute` reads packets from the shared stack's endpoint and routes them via RouteHub to the correct client conn (non-blocking via `TryWriteToRoutePacket` to prevent slow-client stalling). The send path carries a frame-boundary guard: a packet too large to fit the `[2 len][1 type][IP]` frame is dropped rather than truncated (TCP recovers). See [48-shared-server-gvisor-stack.md](48-shared-server-gvisor-stack.md).
+**gvisor_tun_endpoint.go**: Server-side, bridges tunnel conns to a **per-client** gvisor
+`channel.Endpoint`. `readFromTCPConnWriteToEndpoint` routes registered peer traffic directly,
+injects cluster-bound traffic into that client's stack, or hands packets to `enqueueTUN`.
+`readFromEndpointWriteToRoute` uses blocking, context-aware `WriteToRoutePacket`; each client
+has an independent output loop, rather than a single shared loop with non-blocking drops.
+Oversized stack output that cannot fit its pooled framed buffer is dropped, not truncated.
+The wire framing layer's maximum remains 65535 payload bytes.
+
+Stack grace expiry checks the expected `clientStack` identity, armed epoch, and absence of
+a current data route under hub then handler locks. Control-before-data creation gets one
+bounded grace interval, not one refreshed by probes; data registration invalidates it.
+`clientStack.done` covers the owned output loop plus stack destruction only, not every
+foreign-library goroutine. See [48-shared-server-gvisor-stack.md](48-shared-server-gvisor-stack.md).
 
 **gvisor_local_tun_endpoint.go**: Client-side, bridges between the local TUN device and gvisor for local traffic (src==dst).
 
@@ -275,9 +346,9 @@ Forwarder.DialContext()
 | File | Purpose |
 |------|---------|
 | `gvisor_stack.go` | gvisor stack creation (NewStack, NewLocalStack) |
-| `tun_server.go` | Server-side Device, Peer, routing |
-| `tun_client.go` | Client-side ClientDevice, connection pool, heartbeats |
-| `tun_device.go` | Shared tunDevice base, Packet type |
+| `tun_server.go` | Server transport and routing |
+| `tun_client.go` | Client transport, connection pool, heartbeats |
+| `tun_device.go` | Shared tunDevice and device I/O |
 | `route.go` | RouteHub, ConnList, protocol registry, GenerateServers |
 | `node.go` | Node URI parsing |
 | `forwarder.go` | Forwarder, Handler, Connector, Transporter interfaces |
@@ -290,7 +361,7 @@ Forwarder.DialContext()
 | `gvisor_tcp_handler.go` | gvisor TCP listener handler (gtcp) |
 | `gvisor_udp_handler.go` | gvisor UDP listener handler (gudp) |
 | `conn_udp_over_tcp.go` | UDP-over-TCP datagram framing |
-| `conn_packet_over_tcp.go` | PacketConn-over-TCP framing |
+| `gvisor_udp_handler.go` | UDP-over-TCP relay, endpoint close and copy-worker join |
 | `conn_buffered_tcp.go` | Buffered TCP wrapper |
 | `transporter_tcp.go` | TCP Transporter with optional TLS |
 | `ssh.go` | SSH protocol listener/handler |

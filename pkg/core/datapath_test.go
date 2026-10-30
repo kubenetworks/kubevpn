@@ -224,9 +224,9 @@ func TestDataPath_InboundProxy_WithDeadSlots(t *testing.T) {
 	}
 
 	// Dead conns should be auto-removed
-	val, _ := hub.RouteMapTCP.Load(dstKey)
-	if val.(*ConnList).Len() != 2 {
-		t.Fatalf("expected 2 surviving, got %d", val.(*ConnList).Len())
+	val := routeSnapshot(hub)[dstKey]
+	if len(val) != 2 {
+		t.Fatalf("expected 2 surviving, got %d", len(val))
 	}
 }
 
@@ -314,9 +314,9 @@ func TestDataPath_InterClient_WithFailover(t *testing.T) {
 	}
 
 	// Verify dead conns removed, only connB3 remains
-	val, _ := hub.RouteMapTCP.Load(dstKey)
-	if val.(*ConnList).Len() != 1 {
-		t.Fatalf("expected 1 surviving conn, got %d", val.(*ConnList).Len())
+	val := routeSnapshot(hub)[dstKey]
+	if len(val) != 1 {
+		t.Fatalf("expected 1 surviving conn, got %d", len(val))
 	}
 }
 
@@ -572,9 +572,9 @@ func TestDataPath_ProxyResource_MultiUser_SameResource_WithFailover(t *testing.T
 	}
 
 	// B's dead conns should be cleaned up
-	val, _ := hub.RouteMapTCP.Load(string(clientB))
-	if val.(*ConnList).Len() != 1 {
-		t.Fatalf("expected 1 surviving conn for B, got %d", val.(*ConnList).Len())
+	val := routeSnapshot(hub)[string(clientB)]
+	if len(val) != 1 {
+		t.Fatalf("expected 1 surviving conn for B, got %d", len(val))
 	}
 }
 

@@ -7,21 +7,37 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
+
+// routeSnapshot copies membership under the same transaction lock as mutations.
+// Tests never receive a live list or mutable route table.
+func routeSnapshot(hub *RouteHub) map[string][]net.Conn {
+	hub.mu.Lock()
+	defer hub.mu.Unlock()
+	result := make(map[string][]net.Conn, len(hub.routes))
+	for key, list := range hub.routes {
+		for _, m := range list.snapshot() {
+			result[key] = append(result[key], m.conn)
+		}
+	}
+	return result
+}
 
 func TestNewRouteHub(t *testing.T) {
 	hub := NewRouteHub()
 	if hub == nil {
 		t.Fatal("NewRouteHub returned nil")
 	}
-	if hub.RouteMapTCP == nil {
-		t.Fatal("RouteMapTCP is nil")
+	if routes := routeSnapshot(hub); routes == nil || len(routes) != 0 {
+		t.Fatal("expected initialized, empty route table")
 	}
-	if hub.TCPPacketChan == nil {
-		t.Fatal("TCPPacketChan is nil")
+	if hub.tunQueue == nil {
+		t.Fatal("tunQueue is nil")
 	}
-	if cap(hub.TCPPacketChan) != MaxSize {
-		t.Fatalf("TCPPacketChan capacity = %d, want %d", cap(hub.TCPPacketChan), MaxSize)
+	if cap(hub.tunQueue) != MaxSize {
+		t.Fatalf("tunQueue capacity = %d, want %d", cap(hub.tunQueue), MaxSize)
 	}
 }
 
@@ -58,22 +74,18 @@ func TestRouteHub_SharedState(t *testing.T) {
 	}
 }
 
-func TestRouteHub_TCPPacketChan_ProduceConsume(t *testing.T) {
+func TestRouteHub_tunQueue_ProduceConsume(t *testing.T) {
 	hub := NewRouteHub()
 
-	pkt := &Packet{
-		data:   make([]byte, 100),
-		length: 50,
-		src:    net.ParseIP("198.18.0.100"),
-		dst:    net.ParseIP("198.18.0.101"),
-	}
+	pkt := NewPacket(config.LPool.Get().([]byte), 50, net.ParseIP("198.18.0.100"), net.ParseIP("198.18.0.101"))
 
 	go func() {
-		hub.TCPPacketChan <- pkt
+		hub.enqueueTUN(context.Background(), pkt)
 	}()
 
 	select {
-	case received := <-hub.TCPPacketChan:
+	case received := <-hub.tunQueue:
+		defer received.release()
 		if received != pkt {
 			t.Fatal("received packet does not match sent packet")
 		}
@@ -99,11 +111,7 @@ func TestRouteHub_ConcurrentAccess(t *testing.T) {
 
 	wg.Wait()
 
-	count := 0
-	hub.RouteMapTCP.Range(func(_, _ any) bool {
-		count++
-		return true
-	})
+	count := len(routeSnapshot(hub))
 	if count != 100 {
 		t.Fatalf("expected 100 entries, got %d", count)
 	}
@@ -179,6 +187,10 @@ func (m *mockConn) Write(b []byte) (int, error) {
 	}
 	return len(b), nil
 }
+
+// Raw route failures now close their transport; do not delegate to the nil
+// embedded Conn in this metadata-only fixture.
+func (m *mockConn) Close() error { return nil }
 
 func (m *mockConn) RemoteAddr() net.Addr {
 	a, _ := net.ResolveTCPAddr("tcp", m.addr)

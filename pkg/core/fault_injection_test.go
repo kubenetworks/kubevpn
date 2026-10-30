@@ -90,8 +90,8 @@ func TestFault_ClientDisconnect_PoolBuffersNotLeaked(t *testing.T) {
 		t.Fatal("timeout")
 	}
 
-	// Drain TCPPacketChan to free pool buffers
-	drainPacketChan(hub.TCPPacketChan)
+	// Drain tunQueue to free pool buffers
+	drainPacketChan(hub.tunQueue)
 }
 
 // ============================================================================
@@ -149,16 +149,16 @@ func TestFault_SlotDies_OtherSlotsWork(t *testing.T) {
 }
 
 // ============================================================================
-// Backpressure: TCPPacketChan full → producer doesn't hang indefinitely
+// Backpressure: tunQueue full → producer doesn't hang indefinitely
 // ============================================================================
 
-func TestFault_TCPPacketChan_Backpressure(t *testing.T) {
+func TestFault_tunQueue_Backpressure(t *testing.T) {
 	hub := NewRouteHub()
 
-	// Fill TCPPacketChan to capacity
+	// Fill tunQueue to capacity
 	for i := 0; i < MaxSize; i++ {
 		buf := config.LPool.Get().([]byte)
-		hub.TCPPacketChan <- &Packet{data: buf, length: 1}
+		hub.enqueueTUN(context.Background(), NewPacket(buf, 1, nil, nil))
 	}
 
 	// Now sending one more should block (channel full)
@@ -166,7 +166,7 @@ func TestFault_TCPPacketChan_Backpressure(t *testing.T) {
 	blocked := make(chan struct{})
 	go func() {
 		buf := config.LPool.Get().([]byte)
-		hub.TCPPacketChan <- &Packet{data: buf, length: 1}
+		hub.enqueueTUN(context.Background(), NewPacket(buf, 1, nil, nil))
 		close(blocked) // only reached if not blocked
 	}()
 
@@ -178,8 +178,8 @@ func TestFault_TCPPacketChan_Backpressure(t *testing.T) {
 	}
 
 	// Drain one packet to unblock producer
-	pkt := <-hub.TCPPacketChan
-	config.LPool.Put(pkt.data[:])
+	pkt := <-hub.tunQueue
+	pkt.release()
 
 	select {
 	case <-blocked:
@@ -189,7 +189,7 @@ func TestFault_TCPPacketChan_Backpressure(t *testing.T) {
 	}
 
 	// Drain everything
-	drainPacketChan(hub.TCPPacketChan)
+	drainPacketChan(hub.tunQueue)
 }
 
 // ============================================================================

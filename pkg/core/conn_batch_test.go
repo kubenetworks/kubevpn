@@ -334,6 +334,106 @@ func (c *batchBlockingConn) Write(b []byte) (int, error) {
 	c.once.Do(func() { close(c.entered) })
 	return c.Conn.Write(b)
 }
+
+// Hold cancellation callback dispatch until run has returned, deterministically
+// exercising the idle path where stopClose wins before the callback can start.
+type batchDeferredCancel struct {
+	context.Context
+	done       chan struct{}
+	registered chan struct{}
+	mu         sync.Mutex
+	canceled   bool
+	callback   func()
+}
+
+func (c *batchDeferredCancel) Done() <-chan struct{} { return c.done }
+func (c *batchDeferredCancel) Err() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.canceled {
+		return context.Canceled
+	}
+	return nil
+}
+func (c *batchDeferredCancel) AfterFunc(fn func()) func() bool {
+	c.mu.Lock()
+	c.callback = fn
+	c.mu.Unlock()
+	close(c.registered)
+	return func() bool {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		active := c.callback != nil
+		c.callback = nil
+		return active
+	}
+}
+func (c *batchDeferredCancel) cancel() { c.mu.Lock(); c.canceled = true; close(c.done); c.mu.Unlock() }
+func (c *batchDeferredCancel) dispatch() {
+	c.mu.Lock()
+	fn := c.callback
+	c.callback = nil
+	c.mu.Unlock()
+	if fn != nil {
+		fn()
+	}
+}
+
+type batchCloseCountConn struct {
+	net.Conn
+	mu     sync.Mutex
+	closes int
+}
+
+func (c *batchCloseCountConn) Close() error {
+	c.mu.Lock()
+	c.closes++
+	c.mu.Unlock()
+	return c.Conn.Close()
+}
+
+func TestConnBatchBufferedIdleCancelClosesSocket(t *testing.T) {
+	for _, mode := range []string{"precanceled", "idle-deferred-callback"} {
+		t.Run(mode, func(t *testing.T) {
+			raw, peer := net.Pipe()
+			defer raw.Close()
+			defer peer.Close()
+			conn := &batchCloseCountConn{Conn: raw}
+			var ctx context.Context
+			var cancel context.CancelFunc
+			if mode == "precanceled" {
+				ctx, cancel = context.WithCancel(context.Background())
+				cancel()
+			} else {
+				deferred := &batchDeferredCancel{Context: context.Background(), done: make(chan struct{}), registered: make(chan struct{})}
+				ctx = deferred
+				cancel = func() { lifetimeAwait(t, deferred.registered, "cancellation callback registration"); deferred.cancel() }
+				defer deferred.dispatch()
+			}
+			c := &bufferedTCP{Conn: conn, ch: make(chan *Packet, 1), done: make(chan struct{})}
+			done := make(chan struct{})
+			go func() { c.run(ctx); close(done) }()
+			if mode != "precanceled" {
+				cancel()
+			}
+			lifetimeAwait(t, done, "idle buffered writer exit")
+			_ = peer.SetReadDeadline(time.Now().Add(time.Second))
+			var b [1]byte
+			if _, err := peer.Read(b[:]); !errors.Is(err, io.EOF) {
+				t.Fatalf("run returned without closing underlying socket: %v", err)
+			}
+			// Explicit owner cleanup and cancellation must share one socket close.
+			c.Close()
+			conn.mu.Lock()
+			closes := conn.closes
+			conn.mu.Unlock()
+			if closes != 1 {
+				t.Fatalf("underlying socket closed %d times, want 1", closes)
+			}
+		})
+	}
+}
+
 func TestConnBatchBufferedBlockedWrite(t *testing.T) {
 	for _, cancelOnly := range []bool{false, true} {
 		t.Run(fmt.Sprint(cancelOnly), func(t *testing.T) {
@@ -393,6 +493,84 @@ func TestConnBatchBufferedWriteMaximum(t *testing.T) {
 	}
 }
 
+// Exercise the route API over actual TCP, including a short-write wrapper that
+// reports progress and an error together. Neither byte nor packet routing may
+// replay that prefix (or its suffix) on a fallback connection.
+func TestStage3_RawRouteProgress(t *testing.T) {
+	for _, api := range []string{"packet", "bytes", "list-packet", "list-bytes"} {
+		for _, mode := range []string{"partial-error", "short", "zero"} {
+			t.Run(api+"/"+mode, func(t *testing.T) {
+				raw, peer := batchTCPPair(t, false)
+				fallbackRaw, fallbackPeer := batchTCPPair(t, false)
+				first := &batchTestConn{Conn: raw, limit: 3}
+				fallback := &batchTestConn{Conn: fallbackRaw}
+				if mode == "partial-error" {
+					first.failAfter = 1
+				}
+				if mode == "zero" {
+					first.zero = true
+				}
+				hub := NewRouteHub()
+				ip := net.IPv4(198, 18, 0, 75).To4()
+				hub.AddRoute(context.Background(), ip, fallback)
+				hub.AddRoute(context.Background(), ip, first)
+				hub.mu.Lock()
+				cl := hub.routes[string(ip)]
+				hub.mu.Unlock()
+				p := batchPacket(20, 0)
+				ctx, cancel := context.WithCancel(context.Background())
+				var used net.Conn
+				var err error
+				switch api {
+				case "packet":
+					used, err = hub.WriteToRoutePacket(ctx, string(ip), p)
+				case "bytes":
+					used, err = hub.WriteToRoute(string(ip), p.data[:20])
+				case "list-packet":
+					used, err = cl.WritePacket(ctx, p)
+				case "list-bytes":
+					used, err = cl.Write(p.data[:20])
+				}
+				cancel() // successful writes must not leave a late socket-close callback
+				p.release()
+				defer checkBatchRefs(t, []*Packet{p})
+				if mode == "partial-error" {
+					if !errors.Is(err, io.ErrUnexpectedEOF) || used != nil || fallback.calls != 0 || first.calls != 1 {
+						t.Fatalf("partial frame replay/lost error: used=%v err=%v calls=%d/%d", used, err, first.calls, fallback.calls)
+					}
+					if cl.Len() != 1 {
+						t.Fatal("failed member was not retired")
+					}
+					prefix := make([]byte, 3)
+					if _, err := io.ReadFull(peer, prefix); err != nil || !bytes.Equal(prefix, p.data[:3]) {
+						t.Fatalf("wire prefix: %x %v", prefix, err)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				reader := peer
+				if mode == "zero" {
+					reader = fallbackPeer
+					if used != fallback || cl.Len() != 1 {
+						t.Fatal("zero-progress failure did not fall back")
+					}
+				} else if used != first || first.calls != 7 {
+					t.Fatal("short write did not continue on same socket")
+				}
+				got := make([]byte, 20)
+				if _, err := io.ReadFull(reader, got); err != nil || !bytes.Equal(got, p.data[:20]) {
+					t.Fatalf("frame mismatch: %x %v", got, err)
+				}
+				if _, err := used.Write([]byte{9}); err != nil {
+					t.Fatalf("late cancellation closed completed write: %v", err)
+				}
+			})
+		}
+	}
+}
+
 func TestConnBatchBufferedCloseEnqueue(t *testing.T) {
 	for _, cancelOnly := range []bool{false, true} {
 		t.Run(fmt.Sprint(cancelOnly), func(t *testing.T) {
@@ -412,7 +590,7 @@ func TestConnBatchBufferedCloseEnqueue(t *testing.T) {
 				wg.Add(1)
 				go func(p *Packet) {
 					defer wg.Done()
-					if !c.writePacket(p) {
+					if err := c.writePacket(ctx, p); err != nil {
 						p.release()
 					}
 				}(p)

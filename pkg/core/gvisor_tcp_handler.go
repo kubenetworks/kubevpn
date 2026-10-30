@@ -41,19 +41,15 @@ type clientStack struct {
 	stack    *stack.Stack
 	cancel   context.CancelFunc
 
-	mu         sync.Mutex
-	graceTimer *time.Timer
+	done chan struct{} // output loop and stack destruction have both completed
+
+	// All grace state is protected by handler.mu, within a hub transaction.
+	graceTimer graceTimer
+	graceEpoch uint64
+	graceArmed bool
 }
 
-// stopGrace cancels any pending grace-period timer (called when a conn is re-added).
-func (cs *clientStack) stopGrace() {
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
-	if cs.graceTimer != nil {
-		cs.graceTimer.Stop()
-		cs.graceTimer = nil
-	}
-}
+type graceTimer interface{ Stop() bool }
 
 // gvisorTCPHandler accepts TCP tunnel connections and forwards their traffic through
 // per-client gvisor stacks. Each client (unique TUN IP) gets an independent stack that
@@ -64,8 +60,9 @@ type gvisorTCPHandler struct {
 	newStack stackConstructor
 	ctx      context.Context
 
-	mu      sync.Mutex
-	clients map[string]*clientStack
+	mu        sync.Mutex
+	clients   map[string]*clientStack
+	afterFunc func(time.Duration, func()) graceTimer // scheduler must not call inline
 }
 
 // GvisorTCPHandler creates a Handler that accepts TCP connections and maintains per-client
@@ -78,8 +75,10 @@ func GvisorTCPHandler(hub *RouteHub) Handler {
 		clients:  make(map[string]*clientStack),
 	}
 	if hub != nil {
-		hub.OnRouteEmpty = h.onRouteEmpty
-		hub.OnRouteAdded = h.onRouteAdded
+		hub.mu.Lock()
+		hub.emptyLocked = h.onRouteEmptyLocked
+		hub.addedLocked = h.onRouteAddedLocked
+		hub.mu.Unlock()
 	}
 	return h
 }
@@ -92,107 +91,165 @@ func GvisorLocalTCPHandler(hub *RouteHub) Handler {
 		clients:  make(map[string]*clientStack),
 	}
 	if hub != nil {
-		hub.OnRouteEmpty = h.onRouteEmpty
-		hub.OnRouteAdded = h.onRouteAdded
+		hub.mu.Lock()
+		hub.emptyLocked = h.onRouteEmptyLocked
+		hub.addedLocked = h.onRouteAddedLocked
+		hub.mu.Unlock()
 	}
 	return h
 }
 
 func (h *gvisorTCPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 	defer tcpConn.Close()
+	h.mu.Lock()
 	if h.ctx == nil {
 		h.ctx = ctx
 	}
+	h.mu.Unlock()
 	connCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	plog.G(connCtx).Debugf("[Gvisor-TCP] Client connected: %s", tcpConn.RemoteAddr())
-	h.readFromTCPConnWriteToEndpoint(connCtx, NewBufferedTCP(connCtx, tcpConn))
+	h.readFromTCPConnWriteToEndpoint(connCtx, newBufferedTCP(connCtx, tcpConn, func(c *bufferedTCP) {
+		h.hub.RemoveRoutesByConn(connCtx, c)
+	}))
 	plog.G(connCtx).Debugf("[Gvisor-TCP] Client disconnected: %s", tcpConn.RemoteAddr())
 }
 
 // getOrCreateClientStack returns the gvisor stack for the given client IP, creating one
 // if it doesn't exist yet.
 func (h *gvisorTCPHandler) getOrCreateClientStack(srcKey string) *clientStack {
+	h.hub.mu.Lock()
 	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	if cs, ok := h.clients[srcKey]; ok {
+	parent := h.ctx
+	cs := h.clients[srcKey]
+	if parent == nil || parent.Err() != nil {
+		h.mu.Unlock()
+		h.hub.mu.Unlock()
+		return nil
+	}
+	h.mu.Unlock()
+	h.hub.mu.Unlock()
+	if cs != nil {
 		return cs
 	}
 
-	stackCtx, stackCancel := context.WithCancel(h.ctx)
+	// Construction can be expensive and must not stall unrelated route operations.
+	stackCtx, stackCancel := context.WithCancel(parent)
 	endpoint := channel.New(MaxSize, uint32(config.DefaultMTU), tcpip.GetRandMacAddr())
 	endpoint.LinkEPCapabilities = stack.CapabilityRXChecksumOffload
 	endpoint.SupportedGSOKind = stack.GVisorGSOSupported
 
 	s := h.newStack(stackCtx, sniffLink(stackCtx, endpoint, "[gVISOR] "))
 
-	cs := &clientStack{
+	cs = &clientStack{
 		endpoint: endpoint,
 		stack:    s,
 		cancel:   stackCancel,
+		done:     make(chan struct{}),
 	}
-	h.clients[srcKey] = cs
+	h.hub.mu.Lock()
+	h.mu.Lock()
+	existing := h.clients[srcKey]
+	publish := parent.Err() == nil && existing == nil
+	if publish {
+		h.clients[srcKey] = cs
+		if h.hub.routes[srcKey] == nil {
+			h.armGraceLocked(srcKey, cs)
+		}
+	}
+	h.mu.Unlock()
+	h.hub.mu.Unlock()
+	if !publish {
+		stackCancel()
+		s.Destroy()
+		close(cs.done)
+		if parent.Err() != nil {
+			return nil
+		}
+		return existing
+	}
 
+	outputDone := make(chan struct{})
 	go func() {
+		defer close(outputDone)
 		defer netutil.HandleCrash()
 		h.readFromEndpointWriteToRoute(stackCtx, endpoint)
 	}()
 	go func() {
 		<-stackCtx.Done()
+		h.hub.mu.Lock()
+		h.mu.Lock()
+		if h.clients[srcKey] == cs {
+			delete(h.clients, srcKey)
+		}
+		h.invalidateGraceLocked(cs)
+		h.mu.Unlock()
+		h.hub.mu.Unlock()
 		s.Destroy()
+		<-outputDone
+		close(cs.done)
 	}()
 
-	plog.G(h.ctx).Debugf("[Gvisor-TCP] Created per-client stack for %s", net.IP(srcKey))
+	plog.G(parent).Debugf("[Gvisor-TCP] Created per-client stack for %s", net.IP(srcKey))
 	return cs
 }
 
-// destroyClientStack tears down a client's gvisor stack and removes it from the map.
-func (h *gvisorTCPHandler) destroyClientStack(ipKey string) {
+// These callbacks run inside the hub transaction, preserving empty/add order.
+func (h *gvisorTCPHandler) onRouteEmptyLocked(ipKey string) {
 	h.mu.Lock()
-	cs, ok := h.clients[ipKey]
-	if ok {
-		delete(h.clients, ipKey)
-	}
-	h.mu.Unlock()
-
-	if ok {
-		cs.cancel()
-		plog.G(h.ctx).Debugf("[Gvisor-TCP] Destroyed per-client stack for %s (grace expired)", net.IP(ipKey))
+	defer h.mu.Unlock()
+	if cs := h.clients[ipKey]; cs != nil {
+		h.armGraceLocked(ipKey, cs)
 	}
 }
 
-// onRouteEmpty is called by RouteHub when the last conn for a client IP is removed.
-// Starts the grace-period timer.
-func (h *gvisorTCPHandler) onRouteEmpty(ipKey string) {
+func (h *gvisorTCPHandler) onRouteAddedLocked(ipKey string) {
 	h.mu.Lock()
-	cs, ok := h.clients[ipKey]
-	h.mu.Unlock()
-	if !ok {
-		return
+	defer h.mu.Unlock()
+	if cs := h.clients[ipKey]; cs != nil {
+		h.invalidateGraceLocked(cs)
 	}
+}
 
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
+func (h *gvisorTCPHandler) invalidateGraceLocked(cs *clientStack) {
+	cs.graceEpoch++
+	cs.graceArmed = false
 	if cs.graceTimer != nil {
 		cs.graceTimer.Stop()
+		cs.graceTimer = nil
 	}
-	cs.graceTimer = time.AfterFunc(config.KeepAliveTime*3, func() {
-		h.destroyClientStack(ipKey)
-	})
-	plog.G(h.ctx).Debugf("[Gvisor-TCP] All conns gone for %s, grace timer started (%v)", net.IP(ipKey), config.KeepAliveTime*3)
 }
 
-// onRouteAdded is called by RouteHub when a route is first created for a client IP.
-// Cancels any pending grace-period timer.
-func (h *gvisorTCPHandler) onRouteAdded(ipKey string) {
-	h.mu.Lock()
-	cs, ok := h.clients[ipKey]
-	h.mu.Unlock()
-	if !ok {
+func (h *gvisorTCPHandler) armGraceLocked(ipKey string, cs *clientStack) {
+	if cs.graceArmed {
 		return
 	}
-	cs.stopGrace()
+	cs.graceEpoch++
+	cs.graceArmed = true
+	epoch := cs.graceEpoch
+	after := h.afterFunc
+	if after == nil {
+		after = func(d time.Duration, f func()) graceTimer { return time.AfterFunc(d, f) }
+	}
+	cs.graceTimer = after(config.KeepAliveTime*3, func() {
+		h.expireGrace(ipKey, cs, epoch)
+	})
+}
+
+func (h *gvisorTCPHandler) expireGrace(ipKey string, expected *clientStack, epoch uint64) {
+	h.hub.mu.Lock()
+	h.mu.Lock()
+	valid := h.clients[ipKey] == expected && expected.graceArmed &&
+		expected.graceEpoch == epoch && h.hub.routes[ipKey] == nil
+	if valid {
+		delete(h.clients, ipKey)
+		h.invalidateGraceLocked(expected)
+	}
+	h.mu.Unlock()
+	h.hub.mu.Unlock()
+	if valid {
+		expected.cancel()
+	}
 }
 
 // handleControlConn serves a dedicated control-plane connection. It does NOT register the conn
@@ -228,6 +285,10 @@ func (h *gvisorTCPHandler) handleControlConn(ctx context.Context, tcpConn net.Co
 		// The stack's ICMP forwarder generates a reply, which readFromEndpointWriteToRoute
 		// routes back to the client via RouteHub (through data conns, not this control conn).
 		cs := h.getOrCreateClientStack(string(src))
+		if cs == nil {
+			config.LPool.Put(buf[:])
+			return
+		}
 		protocol := header.IPv4ProtocolNumber
 		if netutil.IsIPv6(ip) {
 			protocol = header.IPv6ProtocolNumber

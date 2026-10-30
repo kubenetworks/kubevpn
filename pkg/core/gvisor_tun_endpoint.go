@@ -57,7 +57,7 @@ func (h *gvisorTCPHandler) readFromEndpointWriteToRoute(ctx context.Context, end
 		buf[datagramHeaderLen] = packetTypeToTUN
 
 		p := NewPacket(buf, payloadLen, nil, dstIP)
-		usedConn, err := h.hub.WriteToRoutePacket(string(dstIP), p)
+		usedConn, err := h.hub.WriteToRoutePacket(ctx, string(dstIP), p)
 		p.release()
 		if err != nil {
 			// Throttled Warn, not Debug: this is the server's only account of "I answered the
@@ -137,12 +137,15 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 			continue
 		}
 
-		h.hub.AddRoute(ctx, src, conn)
+		if !h.hub.AddRoute(ctx, src, conn) {
+			config.LPool.Put(buf[:])
+			return
+		}
 		dstKey := string(dst)
 		if h.hub.HasRoute(dstKey) {
 			pkt := NewPacket(buf, read, src, dst)
 			binary.BigEndian.PutUint16(buf[:datagramHeaderLen], uint16(read))
-			usedConn, writeErr := h.hub.WriteToRoutePacket(dstKey, pkt)
+			usedConn, writeErr := h.hub.WriteToRoutePacket(ctx, dstKey, pkt)
 			pkt.release()
 			if writeErr != nil {
 				plog.G(ctx).Warnf("[Gvisor-TCP] All routes dead for %s: %v", dst, writeErr)
@@ -160,6 +163,10 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 			continue
 		} else if buf[datagramHeaderLen] == packetTypeToGvisor {
 			cs := h.getOrCreateClientStack(string(src))
+			if cs == nil {
+				config.LPool.Put(buf[:])
+				return
+			}
 			pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
 				ReserveHeaderBytes: 0,
 				Payload:            buffer.MakeWithData(ip),
@@ -173,9 +180,7 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 			}
 		} else {
 			pkt := NewPacket(buf[:], read, src, dst)
-			select {
-			case h.hub.TCPPacketChan <- pkt:
-			case <-ctx.Done():
+			if !h.hub.enqueueTUN(ctx, pkt) {
 				pkt.release()
 				return
 			}

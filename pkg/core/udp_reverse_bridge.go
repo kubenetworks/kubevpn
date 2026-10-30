@@ -48,6 +48,12 @@ func (h *udpBridgeHandler) Handle(ctx context.Context, conn net.Conn) {
 // reads the 2-byte target port, listens UDP on 127.0.0.1:port, and relays
 // datagrams to/from the developer over conn. Blocks until conn or ctx closes.
 func ServeUDPReverse(ctx context.Context, conn net.Conn) error {
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
+	defer conn.Close()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	var hdr [2]byte
 	if _, err := io.ReadFull(conn, hdr[:]); err != nil {
 		return fmt.Errorf("read udp-bridge port header: %w", err)
@@ -69,9 +75,15 @@ func ServeUDPReverse(ctx context.Context, conn net.Conn) error {
 // control connection: it announces envoyPort, then relays framed datagrams
 // to/from the local UDP service at 127.0.0.1:localPort. Blocks until done.
 func DialUDPReverse(ctx context.Context, conn net.Conn, envoyPort, localPort int) error {
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
+	defer conn.Close()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	var hdr [2]byte
 	binary.BigEndian.PutUint16(hdr[:], uint16(envoyPort))
-	if _, err := conn.Write(hdr[:]); err != nil {
+	if _, err := writeFull(conn, hdr[:]); err != nil {
 		return fmt.Errorf("write udp-bridge port header: %w", err)
 	}
 
@@ -139,8 +151,11 @@ func (u *listenUDP) Close() error { return u.c.Close() }
 // header is stamped in place.
 func relayUDPReverse(ctx context.Context, conn net.Conn, udpEnd udpEndpoint) {
 	errChan := make(chan error, 2)
+	var workers sync.WaitGroup
+	workers.Add(2)
 	// UDP -> conn (to the other side)
 	go func() {
+		defer workers.Done()
 		buf := config.LPool.Get().([]byte)
 		defer config.LPool.Put(buf)
 		for {
@@ -157,6 +172,7 @@ func relayUDPReverse(ctx context.Context, conn net.Conn, udpEnd udpEndpoint) {
 	}()
 	// conn -> UDP (to the local/remote service)
 	go func() {
+		defer workers.Done()
 		buf := config.LPool.Get().([]byte)
 		defer config.LPool.Put(buf)
 		for {
@@ -180,6 +196,7 @@ func relayUDPReverse(ctx context.Context, conn net.Conn, udpEnd udpEndpoint) {
 	}
 	_ = udpEnd.Close()
 	_ = conn.Close()
+	workers.Wait()
 }
 
 func isClosedOrEOF(err error) bool {

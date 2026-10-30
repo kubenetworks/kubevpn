@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"sync"
 
@@ -29,6 +30,7 @@ func Run(ctx context.Context, servers []core.Server) error {
 	var mu sync.Mutex
 	active := map[net.Conn]struct{}{}
 	errors := make(chan error, len(servers))
+	fatal := make(chan error, 1)
 	for _, server := range servers {
 		accepts.Add(1)
 		go func(svr core.Server) {
@@ -52,6 +54,12 @@ func Run(ctx context.Context, servers []core.Server) error {
 					defer handlers.Done()
 					defer func() { c.Close(); mu.Lock(); delete(active, c); mu.Unlock() }()
 					svr.Handler.Handle(ctx, c)
+					if h, ok := svr.Handler.(interface{ FatalOnReturn() bool }); ok && h.FatalOnReturn() && ctx.Err() == nil {
+						select {
+						case fatal <- fmt.Errorf("server device handler exited"):
+						default:
+						}
+					}
 				}()
 			}
 		}(server)
@@ -59,6 +67,7 @@ func Run(ctx context.Context, servers []core.Server) error {
 	var err error
 	select {
 	case err = <-errors:
+	case err = <-fatal:
 	case <-ctx.Done():
 		err = ctx.Err()
 	}

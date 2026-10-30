@@ -227,7 +227,7 @@ func TestReconnect_WriteDeadlineEvictsGhostAndFallsBack(t *testing.T) {
 	// First write enqueues into the ghost's async buffer (writePacket only queues, so it "succeeds"
 	// for now). That packet is doomed: run() will block on the half-open socket and time out.
 	pkt := mk()
-	conn, err := cl.WritePacket(pkt)
+	conn, err := cl.WritePacket(ctx, pkt)
 	pkt.release()
 	if err != nil {
 		t.Fatalf("first write should enqueue on the ghost: %v", err)
@@ -242,7 +242,7 @@ func TestReconnect_WriteDeadlineEvictsGhostAndFallsBack(t *testing.T) {
 	// Now the ghost reports closed (writePacket -> false), so ConnList evicts it and falls back to
 	// the fresh conn, which actually delivers.
 	pkt = mk()
-	conn, err = cl.WritePacket(pkt)
+	conn, err = cl.WritePacket(ctx, pkt)
 	pkt.release()
 	if err != nil {
 		t.Fatalf("fallback write should succeed on the fresh conn: %v", err)
