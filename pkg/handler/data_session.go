@@ -111,6 +111,13 @@ func (ds *DataSession) DoConnect(ctx context.Context) (err error) {
 		return
 	}
 	ds.nm.StartIPWatcher(ds.ctx)
+	// Observe manager termination outside its owned workers: Cleanup calls Stop,
+	// which joins those workers and must never be called by the supervisor itself.
+	go func() {
+		<-ds.nm.ctx.Done()
+		ds.cancel()
+		ds.Cleanup(context.WithoutCancel(ds.ctx))
+	}()
 	return
 }
 
@@ -273,6 +280,7 @@ func (ds *DataSession) setupSignalHandler(ctx context.Context) {
 	stopChan := make(chan os.Signal, 1)
 	// SIGKILL and SIGSTOP cannot be caught by signal.Notify, so they are intentionally omitted.
 	signal.Notify(stopChan, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+	defer signal.Stop(stopChan)
 	select {
 	case <-stopChan:
 		ds.Cleanup(context.Background())

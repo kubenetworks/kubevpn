@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -42,14 +43,28 @@ func (s *connSlot) run(ctx context.Context) {
 			subCtx, cancel := context.WithCancel(ctx)
 			defer cancel()
 
+			// Fence each underlying connection, not this long-lived slot. A
+			// generation change during Dial discards that connection and retries.
+			generation := s.stats.Generation()
 			conn, err := s.forward.DialContext(subCtx)
 			if err != nil {
+				s.stats.slotTransition(s.id, generation, false, "dial: "+err.Error())
 				plog.G(ctx).Errorf("[Client-%d] Failed to dial %s: %v", s.id, s.forward.Addr, err)
-				time.Sleep(config.SlotReconnectBackoff)
+				select {
+				case <-time.After(config.SlotReconnectBackoff):
+				case <-ctx.Done():
+				}
 				return
 			}
 			defer conn.Close()
-			plog.G(ctx).Debugf("[Client-%d] Connected to %s", s.id, conn.RemoteAddr())
+			stopClose := context.AfterFunc(subCtx, func() { _ = conn.Close() })
+			defer stopClose()
+			if generation != s.stats.Generation() {
+				return
+			}
+			s.stats.slotTransition(s.id, generation, true, "")
+			defer s.stats.slotTransition(s.id, generation, false, "")
+			plog.G(ctx).Debugf("[Client-%d] Connected generation=%d to %s", s.id, generation, conn.RemoteAddr())
 
 			udpConn := conn.(*UDPConnOverTCP)
 
@@ -57,31 +72,49 @@ func (s *connSlot) run(ctx context.Context) {
 				// Control conn: send a packetTypeControl declaration so the server enters
 				// the control loop (no AddRoute, no RouteHub registration).
 				controlDecl := []byte{packetTypeControl}
-				if _, err = udpConn.Write(controlDecl); err != nil {
+				if _, err = s.writePayload(udpConn, controlDecl, generation, false); err != nil {
+					s.stats.slotTransition(s.id, generation, false, "control declaration: "+err.Error())
 					plog.G(ctx).Debugf("[Client-%d] Failed to send control declaration: %v", s.id, err)
 					return
 				}
 			} else if s.registrations != nil {
 				// Data conn: announce our TUN IP(s) so the server registers the route immediately.
 				for _, payload := range s.registrations(ctx) {
-					if _, err = udpConn.Write(payload); err != nil {
+					if _, err = s.writePayload(udpConn, payload, generation, true); err != nil {
 						// Not cosmetic: without this announcement the server keeps no route for us
 						// and silently drops everything addressed to us, heartbeat replies included.
 						dataPlaneWarn.Warnf(ctx, "reg-write",
 							"[Client-%d] Failed to announce our route on connect: %v; the server will drop "+
 								"inbound traffic for us until a later attempt succeeds", s.id, err)
-						break
+						s.stats.slotTransition(s.id, generation, false, "registration: "+err.Error())
+						return
 					}
 				}
 			}
 
 			errChan := make(chan error, 2)
-			go s.readFromConn(subCtx, udpConn, errChan)
-			go s.writeToConn(subCtx, udpConn.Conn, errChan)
+			var loops sync.WaitGroup
+			loops.Add(2)
+			go func() {
+				defer loops.Done()
+				s.readGeneration(subCtx, udpConn, errChan, generation)
+			}()
+			go func() {
+				defer loops.Done()
+				s.writeGeneration(subCtx, udpConn.Conn, errChan, generation)
+			}()
+			defer func() {
+				// Unblock socket I/O and join both consumers before another dial
+				// iteration can start a writer on this slot's shared inbound queue.
+				cancel()
+				_ = conn.Close()
+				loops.Wait()
+			}()
 
 			select {
 			case err = <-errChan:
-				plog.G(ctx).Warnf("[Client-%d] Disconnected from %s: %v", s.id, conn.RemoteAddr(), err)
+				s.stats.slotTransition(s.id, generation, false, err.Error())
+				plog.G(ctx).Warnf("[Client-%d] Disconnected generation=%d from %s: %v", s.id, generation, conn.RemoteAddr(), err)
 			case <-ctx.Done():
 				return
 			}
@@ -94,6 +127,10 @@ func (s *connSlot) run(ctx context.Context) {
 // s.interClientInbound. conn is the framed *UDPConnOverTCP in production (typed as net.Conn so
 // tests can drive it with a raw pipe).
 func (s *connSlot) readFromConn(ctx context.Context, conn net.Conn, errChan chan error) {
+	s.readGeneration(ctx, conn, errChan, s.stats.Generation())
+}
+
+func (s *connSlot) readGeneration(ctx context.Context, conn net.Conn, errChan chan error, generation uint64) {
 	defer netutil.HandleCrash()
 	dl := &periodicDeadline{timeout: config.KeepAliveTime * 3, set: conn.SetReadDeadline}
 	for ctx.Err() == nil {
@@ -117,8 +154,11 @@ func (s *connSlot) readFromConn(ctx context.Context, conn net.Conn, errChan chan
 			config.LPool.Put(buf[:])
 			continue
 		}
+		s.stats.slotActivity(s.id, generation, true, n)
 		ip := buf[tunReserve : datagramHeaderLen+n]
-		logIPPacket(ctx, fmt.Sprintf("[Client-%d] INBOUND", s.id), ip)
+		if plog.IsDebugEnabled(ctx) {
+			logIPPacket(ctx, fmt.Sprintf("[Client-%d] INBOUND", s.id), ip)
+		}
 		if buf[datagramHeaderLen] == packetTypeToGvisor {
 			// Inject directly into the shared inter-client stack, mirroring the server's
 			// readFromTCPConnWriteToEndpoint: no intermediate bounded queue, so TCP's receive
@@ -131,14 +171,18 @@ func (s *connSlot) readFromConn(ctx context.Context, conn net.Conn, errChan chan
 			}
 			config.LPool.Put(buf[:])
 		} else {
-			// Heartbeat echo replies from the gateway are the data-plane liveness signal:
-			// record them and drop (the OS would discard them — the echo was crafted by us).
-			if s.stats != nil && isHeartbeatEchoReply(ip) {
-				s.stats.MarkReply()
+			// Only this session's correlated echoes renew health. Protocol-owned
+			// stale echoes are dropped; application gateway pings reach the TUN.
+			if s.stats.observeReply(ip, generation, s.id) {
 				config.LPool.Put(buf[:])
 				continue
 			}
-			s.tunOutbound <- NewPacket(buf[:], n, nil, nil)
+			select {
+			case s.tunOutbound <- NewPacket(buf[:], n, nil, nil):
+			case <-ctx.Done():
+				config.LPool.Put(buf[:])
+				return
+			}
 		}
 	}
 }
@@ -146,6 +190,34 @@ func (s *connSlot) readFromConn(ctx context.Context, conn net.Conn, errChan chan
 // writeToConn writes packets from this slot's inbound channel to the raw TCP conn with
 // datagram framing.
 func (s *connSlot) writeToConn(ctx context.Context, rawConn net.Conn, errChan chan error) {
+	s.writeGeneration(ctx, rawConn, errChan, s.stats.Generation())
+}
+
+// writePayload handles direct registration writes using the same correlation
+// contract as queued control probes. The framed connection owns framing here.
+func (s *connSlot) writePayload(conn net.Conn, payload []byte, generation uint64, probe bool) (int, error) {
+	var id uint64
+	if probe && len(payload) > typePrefixLen {
+		ip, token := s.stats.prepareProbe(payload[typePrefixLen:], generation, s.id)
+		if ip == nil {
+			return 0, fmt.Errorf("retired heartbeat generation")
+		}
+		id = token
+		payload = append([]byte{payload[0]}, ip...)
+	}
+	if err := conn.SetWriteDeadline(time.Now().Add(config.KeepAliveTime)); err != nil {
+		s.stats.finishProbe(id, false)
+		return 0, err
+	}
+	n, err := conn.Write(payload)
+	s.stats.finishProbe(id, err == nil && n == len(payload))
+	if err == nil {
+		s.stats.slotActivity(s.id, generation, false, n)
+	}
+	return n, err
+}
+
+func (s *connSlot) writeGeneration(ctx context.Context, rawConn net.Conn, errChan chan error, generation uint64) {
 	defer netutil.HandleCrash()
 	dl := &periodicDeadline{timeout: config.KeepAliveTime, set: rawConn.SetWriteDeadline}
 	// readDL keeps this slot's read (liveness) deadline alive on write activity. A slot busy
@@ -158,34 +230,48 @@ func (s *connSlot) writeToConn(ctx context.Context, rawConn net.Conn, errChan ch
 	// safe to call concurrently with an in-flight Read). Liveness is thus "active in either
 	// direction"; a slot idle in BOTH directions still times out via readFromConn.
 	readDL := &periodicDeadline{timeout: config.KeepAliveTime * 3, set: rawConn.SetReadDeadline}
-	for {
-		select {
-		case packet := <-s.inbound:
-			if packet == nil {
-				return
-			}
-			if err := dl.refresh(); err != nil {
-				plog.G(ctx).Errorf("[Client-%d] Failed to set write deadline: %v", s.id, err)
-				netutil.SafeWrite(errChan, fmt.Errorf("failed to set write deadline: %w", err))
-				return
-			}
-			// Write datagram frame in-place: [2-byte length header][prefix+IP data]
-			binary.BigEndian.PutUint16(packet.data[:datagramHeaderLen], uint16(packet.length))
-			_, err := rawConn.Write(packet.data[:packet.length+datagramHeaderLen])
-			packet.release()
-			if err != nil {
-				plog.G(ctx).Errorf("[Client-%d] Failed to write to remote: %v", s.id, err)
-				netutil.SafeWrite(errChan, fmt.Errorf("failed to write packet to remote: %w", err))
-				return
-			}
-			// A successful write proves this slot is alive: push the read/liveness deadline forward.
-			// Best-effort — the write already succeeded, so a rare SetReadDeadline hiccup should not
-			// tear down the slot; a genuinely dead conn is caught by the next write or by readFromConn.
-			if err := readDL.refresh(); err != nil {
-				plog.G(ctx).Debugf("[Client-%d] Failed to refresh read deadline after write: %v", s.id, err)
-			}
-		case <-ctx.Done():
+	var batch packetBatch
+	var writer frameBatchWriter
+	defer batch.close()
+	limit := maxBatchFrames
+	if s.isControl {
+		// Stamp correlated probes immediately before their own write, never while
+		// collecting a batch that could delay the probe's actual send time.
+		limit = 1
+	}
+	for batch.next(ctx, s.inbound, limit, nil) {
+		if err := dl.refresh(); err != nil {
+			netutil.SafeWrite(errChan, fmt.Errorf("failed to set write deadline: %w", err))
 			return
+		}
+		var probeID uint64
+		packet := batch.packets[0]
+		if s.isControl && packet.data[datagramHeaderLen] == packetTypeControl {
+			ip, id := s.stats.prepareProbe(packet.data[tunReserve:datagramHeaderLen+packet.length], generation, s.id)
+			if ip == nil {
+				batch.release()
+				continue
+			}
+			probeID = id
+			packet.length = copy(packet.data[tunReserve:], ip) + typePrefixLen
+		}
+		for _, p := range batch.packets[:batch.n] {
+			binary.BigEndian.PutUint16(p.data[:datagramHeaderLen], uint16(p.length))
+		}
+		complete, err := writer.write(rawConn, batch.packets[:batch.n])
+		s.stats.finishProbe(probeID, err == nil && complete == batch.n)
+		for _, p := range batch.packets[:complete] {
+			s.stats.slotActivity(s.id, generation, false, p.length)
+		}
+		batch.release()
+		if err != nil {
+			plog.G(ctx).Errorf("[Client-%d] Failed to write to remote: %v", s.id, err)
+			netutil.SafeWrite(errChan, fmt.Errorf("failed to write packet to remote: %w", err))
+			return
+		}
+		// A completed batch proves this slot is alive. Refresh best-effort.
+		if err := readDL.refresh(); err != nil {
+			plog.G(ctx).Debugf("[Client-%d] Failed to refresh read deadline after write: %v", s.id, err)
 		}
 	}
 }

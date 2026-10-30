@@ -3,59 +3,112 @@ package core
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"io"
 	"net"
+	"sync"
+	"sync/atomic"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
+const maxDatagramPayload = 1<<16 - 1
+
+var errDatagramPayloadSize = errors.New("datagram payload length must be between 0 and 65535")
+
 // NewUDPConnOverTCP wraps a TCP connection with datagram framing for UDP-like semantics.
 func NewUDPConnOverTCP(ctx context.Context, conn net.Conn) (net.Conn, error) {
-	return &UDPConnOverTCP{ctx: ctx, Conn: conn}, nil
+	c := &UDPConnOverTCP{ctx: ctx, Conn: conn}
+	// The callback only touches transport state, never the stop function being
+	// initialized here (an already-canceled context can start it immediately).
+	c.stopCancel = context.AfterFunc(ctx, func() { _ = c.closeTransport() })
+	return c, nil
 }
 
 var _ net.Conn = (*UDPConnOverTCP)(nil)
 
 // UDPConnOverTCP provides UDP-like datagram semantics over a TCP stream using length-prefix framing.
 type UDPConnOverTCP struct {
-	// tcp connection
 	net.Conn
-	ctx context.Context
+	ctx        context.Context
+	readMu     sync.Mutex
+	writeMu    sync.Mutex
+	closed     atomic.Bool
+	closeOnce  sync.Once
+	closeErr   error
+	stopCancel func() bool
+}
+
+func (c *UDPConnOverTCP) operationError() error {
+	if err := c.ctx.Err(); err != nil {
+		return err
+	}
+	if c.closed.Load() {
+		return net.ErrClosed
+	}
+	return nil
 }
 
 func (c *UDPConnOverTCP) Read(b []byte) (int, error) {
-	select {
-	case <-c.ctx.Done():
-		return 0, c.ctx.Err()
-	default:
-		datagram, err := readDatagramPacket(c.Conn, b)
-		if err != nil {
-			return 0, err
-		}
-		return int(datagram.DataLength), nil
+	if err := c.operationError(); err != nil {
+		return 0, err
 	}
+	c.readMu.Lock()
+	defer c.readMu.Unlock()
+	if err := c.operationError(); err != nil {
+		return 0, err
+	}
+	datagram, err := readDatagramPacket(c.Conn, b)
+	if err != nil {
+		// The header may already be consumed. Never reuse a damaged stream.
+		_ = c.Close()
+		return 0, err
+	}
+	return int(datagram.DataLength), nil
 }
 
 func (c *UDPConnOverTCP) Write(b []byte) (int, error) {
-	buf := config.LPool.Get().([]byte)
-	n := copy(buf[2:], b)
-	binary.BigEndian.PutUint16(buf[:2], uint16(n))
-	_, err := c.Conn.Write(buf[:n+2])
-	config.LPool.Put(buf)
-	if err != nil {
+	if len(b) > maxDatagramPayload {
+		return 0, errDatagramPayloadSize
+	}
+	if err := c.operationError(); err != nil {
 		return 0, err
 	}
-	return len(b), nil
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	if err := c.operationError(); err != nil {
+		return 0, err
+	}
+
+	var buf []byte
+	if len(b) == maxDatagramPayload {
+		// The largest legal frame exceeds LPool's 64KiB buffers by one byte.
+		buf = make([]byte, datagramHeaderLen+len(b))
+	} else {
+		buf = config.LPool.Get().([]byte)
+		defer config.LPool.Put(buf)
+	}
+	copy(buf[datagramHeaderLen:], b)
+	binary.BigEndian.PutUint16(buf[:datagramHeaderLen], uint16(len(b)))
+	n, err := writeFull(c.Conn, buf[:datagramHeaderLen+len(b)])
+	if err != nil {
+		_ = c.Close()
+	}
+	return min(max(n-datagramHeaderLen, 0), len(b)), err
+}
+
+// closeTransport never takes an I/O mutex: closing the socket wakes their holders.
+func (c *UDPConnOverTCP) closeTransport() error {
+	c.closeOnce.Do(func() {
+		c.closed.Store(true)
+		c.closeErr = c.Conn.Close()
+	})
+	return c.closeErr
 }
 
 func (c *UDPConnOverTCP) Close() error {
-	if cc, ok := c.Conn.(interface{ CloseRead() error }); ok {
-		_ = cc.CloseRead()
-	}
-	if cc, ok := c.Conn.(interface{ CloseWrite() error }); ok {
-		_ = cc.CloseWrite()
-	}
-	return c.Conn.Close()
+	c.stopCancel()
+	return c.closeTransport()
 }
 
 // DatagramPacket represents a length-prefixed datagram read off a stream connection
@@ -65,27 +118,51 @@ type DatagramPacket struct {
 	Data       []byte // []byte
 }
 
-// this method will return all byte array in the way: b[:], len(DatagramPacket.Data)==64k
+// readDatagramPacket uses caller-owned payload storage. On error the caller must
+// terminate the stream, since a header or partial body may already be consumed.
 func readDatagramPacket(r io.Reader, b []byte) (*DatagramPacket, error) {
-	_, err := io.ReadFull(r, b[:2])
-	if err != nil {
+	var header [datagramHeaderLen]byte
+	if _, err := io.ReadFull(r, header[:]); err != nil {
 		return nil, err
 	}
-	dataLength := binary.BigEndian.Uint16(b[:2])
-	_, err = io.ReadFull(r, b[:dataLength])
-	if err != nil {
+	dataLength := binary.BigEndian.Uint16(header[:])
+	if int(dataLength) > len(b) {
+		return nil, io.ErrShortBuffer
+	}
+	if _, err := io.ReadFull(r, b[:dataLength]); err != nil {
 		return nil, err
 	}
-	return &DatagramPacket{DataLength: dataLength, Data: b[:]}, nil
+	return &DatagramPacket{DataLength: dataLength, Data: b}, nil
 }
 
-// writeDatagram frames buf as [2-byte big-endian length][payload] and writes it in a single
-// Write. buf must carry the payload at buf[datagramHeaderLen:datagramHeaderLen+payloadLen] with
-// datagramHeaderLen bytes of headroom at buf[:datagramHeaderLen]; the length header is written in
-// place. This is idempotent — safe to retry across connections (WriteFunc) without corrupting the
-// frame — and a single contiguous Write, so it composes with bufferedTCP (one Write == one frame).
+// writeDatagram stamps the length in the reserved headroom before the payload.
+// Stamping is idempotent, but a failed write must terminate this stream; a partly
+// transmitted frame must not be replayed on another connection.
 func writeDatagram(w io.Writer, buf []byte, payloadLen int) error {
+	if payloadLen < 0 || payloadLen > maxDatagramPayload {
+		return errDatagramPayloadSize
+	}
+	if len(buf) < datagramHeaderLen || payloadLen > len(buf)-datagramHeaderLen {
+		return io.ErrShortBuffer
+	}
 	binary.BigEndian.PutUint16(buf[:datagramHeaderLen], uint16(payloadLen))
-	_, err := w.Write(buf[:datagramHeaderLen+payloadLen])
+	_, err := writeFull(w, buf[:datagramHeaderLen+payloadLen])
 	return err
+}
+
+// writeFull continues positive short writes only on the same writer. The wire
+// progress count prevents replaying a partly transmitted frame on another socket.
+func writeFull(w io.Writer, data []byte) (int, error) {
+	written := 0
+	for written < len(data) {
+		n, err := w.Write(data[written:])
+		written += n
+		if err != nil {
+			return written, err
+		}
+		if n == 0 {
+			return written, io.ErrShortWrite
+		}
+	}
+	return written, nil
 }

@@ -45,10 +45,13 @@ type Server struct {
 	currentConnectionID string
 	connections         []handler.Connection
 
-	// connectMu serializes the connect (TUN IP allocation) phase so two
-	// concurrent connects to different clusters cannot race and receive the same
-	// local TUN IP. Held in the root daemon around DoConnect.
+	// connectMu serializes connect decisions through publication, including terminal
+	// cleanup and TUN IP allocation. Never hold connMu while waiting for setup/cleanup.
 	connectMu sync.Mutex
+
+	// newDataSession optionally substitutes the data-plane implementation in daemon
+	// integration tests, without invoking privileged TUN/route/DNS operations.
+	newDataSession func(*handler.DataSession) handler.DataPlane
 
 	// sshMu guards sshServerIP and sshCancelFunc — the SSH TUN server state owned by
 	// SshStart/SshStop. Separate from dnsMu so the two concerns stay decoupled.

@@ -102,7 +102,7 @@ func (r *watcherRun) wait(t *testing.T, timeout time.Duration) {
 
 type watcherCase struct {
 	name string
-	once func(*NetworkManager, context.Context, string, *int64) error
+	once func(*NetworkManager, context.Context, *int64) error
 	loop func(*NetworkManager, context.Context)
 }
 
@@ -173,7 +173,7 @@ func TestIntegration_WatcherDialTimeoutAndRecovery(t *testing.T) {
 			ctx, cancel, _ := watcherContext(t, logrus.InfoLevel)
 			target := env.listener.Addr().String()
 			started := time.Now()
-			r := runWatcher(t, cancel, func(version *int64) error { return tc.once(nm, ctx, target, version) })
+			r := runWatcher(t, cancel, func(version *int64) error { return tc.once(nm, ctx, version) })
 			r.wait(t, 40*time.Second)
 			if !errors.Is(r.err, context.DeadlineExceeded) || ctx.Err() != nil {
 				t.Fatalf("dial error = %v, parent error = %v", r.err, ctx.Err())
@@ -251,7 +251,7 @@ func TestIntegration_WatcherStreamOutlivesDialTimeout(t *testing.T) {
 			processed := make(chan struct{}, 16)
 			nm.cfg.ReservedTunIPs = func() []net.IP { processed <- struct{}{}; return nil }
 			ctx, cancel, logs := watcherContext(t, logrus.DebugLevel)
-			r := runWatcher(t, cancel, func(version *int64) error { return tc.once(nm, ctx, env.listener.Addr().String(), version) })
+			r := runWatcher(t, cancel, func(version *int64) error { return tc.once(nm, ctx, version) })
 			waitWatcherReady(t, tc, env, routes)
 			select {
 			case <-r.done:
@@ -335,15 +335,24 @@ func TestIntegration_WatcherCancelAndLogs(t *testing.T) {
 			})
 		}
 	}
-	t.Run("skipped-start", func(t *testing.T) {
-		ctx, _, logs := watcherContext(t, logrus.DebugLevel)
+	t.Run("waiting-for-generation", func(t *testing.T) {
+		ctx, cancel, logs := watcherContext(t, logrus.DebugLevel)
 		nm := newNetworkManager(NetworkConfig{OwnerID: "owner"})
+		t.Cleanup(nm.Stop)
 		nm.StartRouteWatcher(ctx)
 		nm.StartIPWatcher(ctx)
-		awaitWatcher(t, time.Second, "zero-port diagnostics", func() bool {
+		awaitWatcher(t, time.Second, "watcher startup diagnostics", func() bool {
 			return strings.Contains(logs.String(), "[RouteWatcher]") && strings.Contains(logs.String(), "[IPWatcher]")
 		})
-		nm.cfg.OwnerID = ""
+		cancel()
+		nm.Stop()
+		if strings.Contains(logs.String(), "warning:") {
+			t.Errorf("waiting for a generation or cancellation added warnings: %s", logs.String())
+		}
+	})
+	t.Run("missing-owner", func(t *testing.T) {
+		ctx, _, logs := watcherContext(t, logrus.DebugLevel)
+		nm := newNetworkManager(NetworkConfig{})
 		nm.StartIPWatcher(ctx)
 		if !strings.Contains(logs.String(), "OwnerID") {
 			t.Errorf("missing skip reason: %s", logs.String())
@@ -418,7 +427,7 @@ func TestIntegration_IPWatcherSelfHealTimeout(t *testing.T) {
 	go env.grpcServer.Serve(env.listener)
 	ctx, cancel, logs := watcherContext(t, logrus.InfoLevel)
 	started := time.Now()
-	r := runWatcher(t, cancel, func(version *int64) error { return nm.doWatchTunIP(ctx, env.listener.Addr().String(), version) })
+	r := runWatcher(t, cancel, func(version *int64) error { return nm.doWatchTunIP(ctx, version) })
 	select {
 	case deadline := <-callDone:
 		if budget := deadline.Sub(started); budget < 9*time.Second || budget > 12*time.Second {

@@ -1,5 +1,11 @@
 # Cross-Client (A→B) Throughput Diagnosis
 
+> The original path, bottleneck measurements and direct-injection results below are
+> historical evidence. They are not benchmarks of the current batching implementation.
+> All recorded results, including the later batching medians, were measured **before the
+> single-data-slot default**. Their values are unchanged; none establishes throughput for
+> the current one-data-plus-one-control topology.
+
 ## Symptom
 
 Two kubevpn clients; client **A** accessing a service on client **B**'s machine (A → B's TUN IP)
@@ -111,12 +117,12 @@ Change (`pkg/core`):
 - The diagnostic `InterClientDrops` counter (`datapath_stats.go`) is removed — the drop path it
   measured no longer exists; flow control is now TCP's receive window.
 
-Why this is safe for liveness: `InjectInbound` delivers synchronously only up to the transport
-layer and returns promptly (the localhost `io.Copy` runs in the forwarder's own goroutines), so a
-busy stack never blocks a slot's reader. That matters because the periodic heartbeat's echo *reply*
-is routed back over a **data** conn (see `handleControlConn`), so a stalled data-slot reader would
-otherwise starve the liveness watchdog. A blocking send would have had that hazard; direct
-injection does not.
+Why this helps liveness: `InjectInbound` delivers synchronously only up to the transport
+layer (the localhost `io.Copy` runs in the forwarder's own goroutines), removing the intermediate
+blocking-send hazard from the slot's reader. That matters because the periodic heartbeat's echo
+*reply* is routed back over a **data** conn (see `handleControlConn`), so a stalled data-slot reader
+can starve the liveness watchdog. This is not an absolute guarantee against stack, data-conn or
+shared outer-transport stalls.
 
 ### Verified (same in-process benchmark, arm64, clean loopback)
 
@@ -172,6 +178,50 @@ Debug. Per-packet logging then follows naturally, per connection:
 Effect: without `--debug`, per-packet logging is fully off and the hot path pays only the
 `IsDebugEnabled` check. With `connect --debug`, that connection logs packets (file + stream); other
 concurrent non-debug connections stay silent.
+
+## Current implementation — bounded batching
+
+The default now uses **one data `connSlot` plus one independent control slot**. Data dispatch
+goes directly to slot 0 without slot-selection parsing/hashing; `connSlot` lifecycle, queues,
+deadlines and batching remain, and business flows still run concurrently. The private `poolSize`
+is a data-only override for nil-stats 1/2/4/8-slot comparisons, not a CLI or environment flag.
+
+Heartbeat requests bypass the business queue through a separate queue/conn to the **same TCP
+forwarding endpoint 10801**, not xDS 9002. Replies use RouteHub's first-writable registered data
+conn with fallback, not per-flow load balancing. There is one registered data conn per client
+address in steady state; control is excluded. The outer SSH/port-forward TCP transport remains
+shared, so separation is not an absolute liveness guarantee. Shared gvisor session state and
+grace retention do not depend on four slots. No new throughput claim accompanies this default.
+
+TCP writers and the TUN write path now drain only immediately available queued packets,
+without a batching timer: at most **32 frames / 64 KiB** per batch (a single legal maximum
+framed TCP packet may occupy **65,537 bytes**). `conn_batch.go` uses `net.Buffers`/writev for
+raw `*net.TCPConn`; TLS/wrapped connections use a reusable bounded aggregate buffer rather
+than one TLS write per frame. Partial writes continue only on the same connection, never
+replay a partial frame after reconnect. `batchDevice.WritePackets` normalizes the platform
+contract (Linux reports bytes, other platforms packet counts) and handles device batch limits.
+Serving routines join before final queue drain, so pooled packets are not stranded by late
+producers. No wire-format, CLI, protobuf or dependency change is needed.
+
+### Historical local verification after batching (before single-slot default)
+
+Measured on Apple M4, darwin/arm64, Go 1.26.3, CGO disabled, using the same
+`BenchmarkCrossClientThroughput` command (`-benchtime=2s -count=3`) before and after
+implementation, with no concurrent test/build workload. Values below are medians of three
+runs in MB/s, not predictions for SSH, port-forward, or WAN throughput:
+
+| Path | Flows | Baseline | After |
+|---|---:|---:|---:|
+| A→B | 1 | 21.10 | 69.65 |
+| A→B | 8 | 22.74 | 49.94 |
+| A→cluster | 1 | 42.42 | 133.68 |
+| A→cluster | 8 | 36.82 | 95.34 |
+
+Single-flow post-change results varied substantially (A→B: 64.74–127.33 MB/s;
+A→cluster: 131.88–311.72 MB/s). These clean-loopback measurements support reduced
+per-packet I/O overhead, but do not isolate every change or establish a production speedup.
+Mixed interactive/bulk latency has no pre-change baseline; real RTT/loss and native TUN
+performance remain unverified.
 
 ## Remaining work
 

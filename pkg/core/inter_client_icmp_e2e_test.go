@@ -42,12 +42,14 @@ func TestInterClient_ICMP_EndToEnd(t *testing.T) {
 			serverPort := hub.port
 
 			osA, replyA := startPipeClient(ctx, t, serverPort, tc.pinger)
-			osB, _ := startPipeClient(ctx, t, serverPort, tc.pingee)
+			osB, replyB := startPipeClient(ctx, t, serverPort, tc.pingee)
 
 			// Register both routes on the server by having each client emit a packet with its own
 			// src IP (mirrors the production route-registration echo to the gateway).
 			registerRoute(t, osA, tc.pinger)
 			registerRoute(t, osB, tc.pingee)
+			assertRegistrationEcho(t, replyA, tc.pinger)
+			assertRegistrationEcho(t, replyB, tc.pingee)
 			waitForRoutes(t, hub.hub, tc.pinger, tc.pingee)
 
 			// A pings B.
@@ -93,6 +95,7 @@ func TestInterClient_ICMP_ServerAnswersWhenPeerRouteMissing(t *testing.T) {
 
 	// Only A registers; the pingee 198.18.0.3 is never announced, so HasRoute(.3) is false.
 	registerRoute(t, osA, "198.18.0.5")
+	assertRegistrationEcho(t, replyA, "198.18.0.5")
 	waitForRoutes(t, hub.hub, "198.18.0.5")
 
 	if _, err := osA.Write(genEchoRequest(t, "198.18.0.5", "198.18.0.3")); err != nil {
@@ -160,8 +163,8 @@ func startPipeClient(ctx context.Context, t testing.TB, serverPort int, tunIP st
 		tunOutbound: make(chan *Packet, MaxSize),
 		errChan:     make(chan error, 1),
 	}
-	// Non-nil stats so the client drops gateway heartbeat echo replies (matching production),
-	// keeping the route-registration reply from polluting the observed ping replies.
+	// Non-nil stats matches production correlation. Manually emitted registration
+	// pings are application traffic, so their replies must be observed at the TUN.
 	device.transport = newClientTransport(device, forwarder, &HeartbeatStats{})
 	for _, r := range device.routines() {
 		go r.fn(ctx)
@@ -213,6 +216,24 @@ func registerRoute(t testing.TB, os net.Conn, tunIP string) {
 	}
 	if _, err := os.Write(pkt); err != nil {
 		t.Fatalf("write registration packet: %v", err)
+	}
+}
+
+// These registration pings entered through the OS/TUN rather than the heartbeat
+// writer. Verify (do not silently filter) their replies before the peer ping.
+func assertRegistrationEcho(t *testing.T, replies <-chan []byte, tunIP string) {
+	t.Helper()
+	select {
+	case packet := <-replies:
+		_, dst, _, err := netutil.ParseIPFast(packet)
+		if err != nil || !dst.Equal(net.ParseIP(tunIP)) || !isHeartbeatEchoReply(packet) {
+			t.Fatalf("invalid application registration echo for %s", tunIP)
+		}
+		if err := verifyEchoReplyChecksum(packet); err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("application gateway ping was swallowed by heartbeat correlation")
 	}
 }
 

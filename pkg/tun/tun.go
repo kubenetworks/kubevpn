@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/containernetworking/cni/pkg/types"
@@ -23,6 +24,7 @@ type Config struct {
 }
 
 type tunListener struct {
+	mu     sync.Mutex
 	addr   net.Addr
 	conns  chan net.Conn
 	closed chan struct{}
@@ -51,6 +53,14 @@ func Listener(config Config) (net.Listener, error) {
 func (l *tunListener) Accept() (net.Conn, error) {
 	select {
 	case conn := <-l.conns:
+		l.mu.Lock()
+		defer l.mu.Unlock()
+		select {
+		case <-l.closed:
+			conn.Close()
+			return nil, ErrClosed
+		default:
+		}
 		return conn, nil
 	case <-l.closed:
 		return nil, ErrClosed
@@ -62,11 +72,18 @@ func (l *tunListener) Addr() net.Addr {
 }
 
 func (l *tunListener) Close() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	select {
 	case <-l.closed:
 		return errors.New("listener has been closed")
 	default:
 		close(l.closed)
+	}
+	select {
+	case conn := <-l.conns:
+		return conn.Close()
+	default:
 	}
 	return nil
 }

@@ -3,24 +3,25 @@ package core
 // Benchmark comparing tunnel throughput for different connection-pool sizes
 // (ConnPoolSize 1 vs 2/4/8) over a clean and an impaired (added-latency) link.
 //
-// Why this exists: tun_client.go documents ConnPoolSize=4 as "reduce head-of-line
-// blocking and improve throughput", but nothing measured it. This wires the REAL
-// data plane end-to-end WITHOUT a TUN device (no root):
+// Production defaults to one data slot; this data-only, nil-stats harness retains
+// explicit pool-size overrides for comparisons. It wires the real data plane
+// end-to-end WITHOUT a TUN device (no root):
 //
 //	bench app (gonet, many dst IPs) → client gvisor stack
 //	  ⇄ raw-IP packetConn (= tunDevice.tun)
 //	    → real tunDevice + clientTransport connection pool (poolSize=N)
 //	      → loopback TCP (optionally latency-shaped) → server listener
-//	        → GvisorLocalTCPHandler (one gvisor stack per conn) → LocalTCPForwarder
+//	        → GvisorLocalTCPHandler (one gvisor stack per client IP) → LocalTCPForwarder
 //	          → 127.0.0.1:<sink> (drains, counts bytes)
 //
-// The pool partitions flows by ipHash(dst), so a SINGLE flow always uses ONE slot:
-// pool size can only matter with MANY concurrent flows.
+// Multi-slot overrides partition flows by five-tuple hash; the default single slot
+// bypasses hashing. Application flow count and tunnel slot count are distinct axes.
 //
 // Run:
 //	go test ./pkg/core/ -run '^$' -bench BenchmarkConnPool -benchmem -benchtime=2s -count=3
 //
-// Measured (arm64, -benchtime=1s -count=3, MB/s averaged over the 3 runs):
+// Historical measurements, before current batching/single-slot default (arm64,
+// -benchtime=1s -count=3, MB/s averaged over the 3 runs):
 //
 //	                 pool=1  pool=2  pool=4  pool=8
 //	clean/flows=16      338     488     502     525
@@ -29,21 +30,10 @@ package core
 //	lat2ms/flows=16     391     396     380     393   (flat)
 //	lat2ms/flows=64     315     353     363     347
 //
-// Two conclusions, the second of which contradicts what this file used to assume:
-//
-//  1. The pool is worth having: at 16 concurrent flows pool=4 is ~+49% over a single
-//     conn, at 64 flows ~+74%, and the trend is monotonic. ConnPoolSize=4 sits just
-//     past the knee (pool=8 buys little).
-//
-//  2. That gain comes from the CLEAN link, not the latency-shaped one — the opposite
-//     of the original premise that "the pool's value shows on a latency-shaped link
-//     where one conn is round-trip-limited". With a correct propagation-delay model
-//     (see shapedConn) latency is not a bottleneck for bulk transfer at all and the
-//     pool makes almost no difference there. What the pool actually parallelises is
-//     OUR OWN per-conn serialization: datagram framing, the per-slot inbound channel
-//     and the server's per-conn read loop are each a single-threaded pipeline, so N
-//     conns give N pipelines. That is also why the gain does not depend on whether the
-//     conns are multiplexed onto one apiserver SPDY session in production.
+// Those results favored multiple slots on clean loopback, but are not current
+// performance evidence. This harness does not measure TLS/SSH/SPDY contention,
+// outer TCP loss, or production congestion isolation. Its cancellation-only cleanup
+// also needs stronger resource joining before drawing conclusions from repeated runs.
 
 import (
 	"context"

@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"gvisor.dev/gvisor/pkg/buffer"
 	"gvisor.dev/gvisor/pkg/tcpip"
@@ -53,6 +54,7 @@ func handleGvisorPacket(gvisorInbound <-chan *Packet, outbound chan<- *Packet, h
 type interClientStack struct {
 	endpoint *channel.Endpoint
 	stack    *stack.Stack
+	done     chan struct{}
 }
 
 // newInterClientStack builds the shared inter-client stack and starts its output pump, which
@@ -66,16 +68,15 @@ func newInterClientStack(ctx context.Context, out chan<- *Packet, headroom int) 
 	// push super-MTU segments a TUN cannot write). See gvisorLocalHandler.Run.
 	endpoint.SupportedGSOKind = stack.GVisorGSOSupported
 	s := NewLocalStack(ctx, sniffLink(ctx, endpoint, fmt.Sprintf("[gVISOR]%s ", plog.GenStr(plog.GetFields(ctx)))))
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		defer netutil.HandleCrash()
+		defer s.Destroy()
+		defer endpoint.Close()
 		readFromEndpointWriteToTun(ctx, endpoint, out, headroom)
 	}()
-	go func() {
-		<-ctx.Done()
-		endpoint.Close()
-		s.Destroy()
-	}()
-	return &interClientStack{endpoint: endpoint, stack: s}
+	return &interClientStack{endpoint: endpoint, stack: s, done: done}
 }
 
 // InjectIP delivers one raw IP packet (IPv4/IPv6) into the stack. It returns promptly: gvisor
@@ -96,6 +97,8 @@ func (ics *interClientStack) InjectIP(ip []byte) {
 }
 
 func (h *gvisorLocalHandler) Run(ctx context.Context) {
+	ctx, cancel := context.WithCancel(ctx)
+	var workers sync.WaitGroup
 	endpoint := channel.New(MaxSize, uint32(config.DefaultMTU), tcpip.GetRandMacAddr())
 	// for support ipv6 skip checksum
 	// vendor/gvisor.dev/gvisor/pkg/tcpip/stack/nic.go:763
@@ -107,18 +110,22 @@ func (h *gvisorLocalHandler) Run(ctx context.Context) {
 	// super-MTU segments onto the wire that macOS/Windows clients cannot write to their TUN.
 	endpoint.SupportedGSOKind = stack.GVisorGSOSupported
 	defer endpoint.Close()
+	workers.Add(2)
 	go func() {
+		defer workers.Done()
 		defer netutil.HandleCrash()
 		readFromGvisorInboundWriteToEndpoint(ctx, h.gvisorInbound, endpoint)
 		netutil.SafeClose(h.errChan)
 	}()
 	go func() {
+		defer workers.Done()
 		defer netutil.HandleCrash()
 		readFromEndpointWriteToTun(ctx, endpoint, h.outbound, h.headroom)
 		netutil.SafeClose(h.errChan)
 	}()
 	s := NewLocalStack(ctx, sniffLink(ctx, endpoint, fmt.Sprintf("[gVISOR]%s ", plog.GenStr(plog.GetFields(ctx)))))
 	defer s.Destroy()
+	defer func() { cancel(); workers.Wait() }()
 	select {
 	case <-h.errChan:
 		return

@@ -90,8 +90,8 @@ func TestFault_ClientDisconnect_PoolBuffersNotLeaked(t *testing.T) {
 		t.Fatal("timeout")
 	}
 
-	// Drain TCPPacketChan to free pool buffers
-	drainPacketChan(hub.TCPPacketChan)
+	// Drain tunQueue to free pool buffers
+	drainPacketChan(hub.tunQueue)
 }
 
 // ============================================================================
@@ -99,8 +99,8 @@ func TestFault_ClientDisconnect_PoolBuffersNotLeaked(t *testing.T) {
 // ============================================================================
 
 func TestFault_SlotDies_OtherSlotsWork(t *testing.T) {
-	// Simulate ConnPoolSize=4 slots, kill slot 0, verify slot 1-3 still work
-	n := ConnPoolSize
+	// Explicit multi-slot fixture; this tests separate queues, not dispatcher isolation.
+	const n = 4
 	slots := make([]chan *Packet, n)
 	for i := range slots {
 		slots[i] = make(chan *Packet, MaxSize)
@@ -149,16 +149,16 @@ func TestFault_SlotDies_OtherSlotsWork(t *testing.T) {
 }
 
 // ============================================================================
-// Backpressure: TCPPacketChan full → producer doesn't hang indefinitely
+// Backpressure: tunQueue full → producer doesn't hang indefinitely
 // ============================================================================
 
-func TestFault_TCPPacketChan_Backpressure(t *testing.T) {
+func TestFault_tunQueue_Backpressure(t *testing.T) {
 	hub := NewRouteHub()
 
-	// Fill TCPPacketChan to capacity
+	// Fill tunQueue to capacity
 	for i := 0; i < MaxSize; i++ {
 		buf := config.LPool.Get().([]byte)
-		hub.TCPPacketChan <- &Packet{data: buf, length: 1}
+		hub.enqueueTUN(context.Background(), NewPacket(buf, 1, nil, nil))
 	}
 
 	// Now sending one more should block (channel full)
@@ -166,7 +166,7 @@ func TestFault_TCPPacketChan_Backpressure(t *testing.T) {
 	blocked := make(chan struct{})
 	go func() {
 		buf := config.LPool.Get().([]byte)
-		hub.TCPPacketChan <- &Packet{data: buf, length: 1}
+		hub.enqueueTUN(context.Background(), NewPacket(buf, 1, nil, nil))
 		close(blocked) // only reached if not blocked
 	}()
 
@@ -178,8 +178,8 @@ func TestFault_TCPPacketChan_Backpressure(t *testing.T) {
 	}
 
 	// Drain one packet to unblock producer
-	pkt := <-hub.TCPPacketChan
-	config.LPool.Put(pkt.data[:])
+	pkt := <-hub.tunQueue
+	pkt.release()
 
 	select {
 	case <-blocked:
@@ -189,7 +189,7 @@ func TestFault_TCPPacketChan_Backpressure(t *testing.T) {
 	}
 
 	// Drain everything
-	drainPacketChan(hub.TCPPacketChan)
+	drainPacketChan(hub.tunQueue)
 }
 
 // ============================================================================
@@ -289,8 +289,9 @@ func TestFault_WriteFailsMidStream_CleanExit(t *testing.T) {
 		}
 	}()
 
-	// Send 10 packets — should fail after 3
-	for i := 0; i < 10; i++ {
+	// Queue enough frames to require at least four bounded writes, even when
+	// the writer drains a full batch on every iteration.
+	for i := 0; i < 4*maxBatchFrames; i++ {
 		buf := config.LPool.Get().([]byte)
 		buf[2] = 1
 		n := copy(buf[3:], buildIPv4Packet(net.IPv4(10, 0, 0, 1), net.IPv4(10, 0, 0, 2), []byte("x")))

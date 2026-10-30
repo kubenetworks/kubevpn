@@ -74,7 +74,7 @@ func newTestNetworkManager(t *testing.T, env *networkTestEnv, ownerID string) *N
 		ManagerNamespace: "test-ns",
 		OwnerID:          ownerID,
 	})
-	nm.controlPlaneLocalPort = env.port
+	seedTransportEndpoint(t, nm, fmt.Sprintf("127.0.0.1:%d", env.port))
 	return nm
 }
 
@@ -199,7 +199,7 @@ func TestNetworkManager_RentIP_ServerDown(t *testing.T) {
 		ManagerNamespace: "test-ns",
 		OwnerID:          "no-server",
 	})
-	nm.controlPlaneLocalPort = 19999 // 没有 server 监听的端口
+	seedTransportEndpoint(t, nm, "127.0.0.1:19999") // 没有 server 监听的端口
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -286,11 +286,10 @@ func TestNetworkManager_WatchTunIP_ReceivesPush(t *testing.T) {
 	defer cancel()
 
 	var currentVersion int64
-	target := fmt.Sprintf("127.0.0.1:%d", env.port)
 
 	watchDone := make(chan error, 1)
 	go func() {
-		watchDone <- nm.doWatchTunIP(ctx, target, &currentVersion)
+		watchDone <- nm.doWatchTunIP(ctx, &currentVersion)
 	}()
 
 	// 等待 watcher 注册（轮询 gRPC — 不访问 server 内部）

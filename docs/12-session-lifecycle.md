@@ -2,7 +2,7 @@
 
 ## Overview
 
-KubeVPN daemon actions (Connect, Sync) use `context.Context` to manage the lifecycle of SSH tunnels and VPN connections. The `SessionLifecycle` struct centralizes the session context + teardown, replacing the previous ad-hoc pattern of scattered `ctx/cancel` calls. Teardown is entirely context-cancellation driven — daemon actions no longer materialize temp kubeconfig files (see [15-ssh-architecture.md](15-ssh-architecture.md); kubeconfig stays in memory as bytes), so there is no cleanup registry.
+KubeVPN daemon actions (Connect, Sync) use `context.Context` to manage the lifecycle of SSH tunnels and VPN connections. The `SessionLifecycle` struct centralizes the session context + teardown, replacing the previous ad-hoc pattern of scattered `ctx/cancel` calls. `SessionLifecycle.Teardown` cancels context and detaches the logger; it is not a join barrier. The separate `SessionBase`/`SyncOptions` rollback registry and `NetworkManager.Stop` own resource cleanup and joined shutdown. Daemon actions keep kubeconfig in memory, with no temp kubeconfig file to remove (see [15-ssh-architecture.md](15-ssh-architecture.md)).
 
 ## Why Not `resp.Context()`?
 
@@ -48,8 +48,9 @@ type SessionLifecycle struct {
 
 ### 1. Connect — Sudo Daemon (Data Plane)
 
-No SSH tunnel. Kubeconfig is built in-process from bytes (`util.InitFactoryByBytes`) —
-no temp kubeconfig file is written.
+Kubeconfig is built in-process from bytes (`util.InitFactoryByBytes`), without a temp file.
+The root daemon can also own SSH **data-plane** forwarding to the manager ClusterIP;
+this is separate from the user daemon's SSH API-server tunnel.
 
 ```
 session := NewSessionLifecycle(logger)
@@ -60,12 +61,12 @@ go grpcutil.ListenCancel(resp, session.Cancel)    ← client cancel → session 
 ds.InitClient(InitFactoryByBytes(req.KubeconfigBytes, ns))  ← Factory from bytes, no file
 ds.DoConnect(session.Ctx)                     ← DataSession, root daemon
     └── ds.ctx = WithCancel(session.Ctx)      ← internal lifecycle
-           ├── portForward(ds.ctx)
-           ├── startLocalTunServer(ds.ctx)
-           ├── addRouteDynamic(ds.ctx)
-           └── setupDNS(ds.ctx)
+           └── NetworkManager.Start(ds.ctx)
+                  ├── transport supervisor (SSH or port-forward generation)
+                  ├── TUN + current-generation heartbeat readiness (60s startup budget)
+                  └── network monitor, routes and DNS
 
-Teardown: session.Cancel() → ds.ctx cancelled → TUN/DNS/routes stop
+Teardown: cancellation requests shutdown; NetworkManager.Stop joins owned workers/resources
 ```
 
 ### 2. Connect — User Daemon (Control Plane + SSH)
@@ -141,9 +142,52 @@ ConnectOptions.Cleanup() — user daemon (ControlSession), ALWAYS control-plane:
 
 DataSession.Cleanup() — root daemon, ALWAYS data-plane:
     1. Execute rollback funcs
-    2. nm.Stop() → cancel DNS, cancel context
-    3. Context cancellation → stops TUN, port-forward, routes
+    2. nm.Stop() → reject new workers/events, cancel parent context
+    3. Retire/join active transport; wait startupDone, then join TUN handlers/workers
+    4. Clear DNS/state after joins
 ```
+
+`Stop` is idempotent and serializes worker admission with shutdown. Each generation owns
+joinable SSH/port-forward handles plus pending and returned data/xDS connections; late dials
+cannot publish after retirement. TUN serving routines join before their final queue drain.
+Terminal transport errors cancel the manager; `DataSession` observes cancellation outside
+the supervisor and runs cleanup, avoiding a supervisor self-join.
+
+## Core Server Shutdown and Stack Ownership
+
+This increment leaves the root-client `NetworkManager` completion path unchanged:
+`tunCompletionHandler` cancels the manager when its TUN handler returns, and the external
+owner performs joined cleanup. `SessionLifecycle.Teardown` remains cancellation plus
+logger detach, not a join barrier.
+
+For the traffic-manager **server role**, `TunHandler` implements `FatalOnReturn() == true`
+(no forwarder). Its return is terminal for `handler.Run`, even if the TUN listener remains
+blocked in `Accept`. `Run` cancels its context, closes listeners, joins accept loops, closes
+accepted connections outside its bookkeeping mutex, and joins their handlers before
+returning. An ordinary accepted TCP handler returning on EOF is **not** server-fatal.
+
+Core shutdown has explicit ownership boundaries:
+
+- Server device sends to `tunInbound`/`tunOutbound` select on cancellation. The private
+  RouteHub TUN bridge uses `enqueueTUN(ctx, pkt)`; success transfers a packet reference,
+  failure leaves it with the caller. `stopTUNBridge` signals `tunDone`, joins in-flight
+  admissions, then drains `tunQueue`. It never closes the data channel. Device `serve`
+  joins its routines before its final queue drains.
+- `bufferedTCP` closes its transport on stop, including an idle or pre-canceled writer.
+  Its stop callback removes routes, and registration rejects closed writers. Admission
+  is joined before the writer's final drain; its `done` signals admission stop, not a
+  general goroutine join. Route metadata locks are not held during socket Close or I/O.
+- Per-client gvisor `clientStack.done` closes after **both** the owned output loop and
+  stack destruction finish. Grace expiry validates stack identity, epoch, and absence of
+  a current data route under `hub.mu` then `handler.mu`; late callbacks cannot delete a
+  restored/replacement stack. A control-before-data stack gets one bounded grace interval,
+  not an interval refreshed by probes; data registration cancels it. This is not a claim
+  that all foreign-library goroutines are joined (see [48](48-shared-server-gvisor-stack.md)).
+- `UDPConnOverTCP` serializes reads and writes separately; cancellation/Close unblocks
+  active I/O by closing the transport without acquiring those I/O mutexes.
+  `relayUDPOverTCP` cancels and closes both TCP and UDP endpoints on cancellation or first
+  copy completion, then joins both copy workers before returning. This contract is for
+  that owned relay, not every gvisor forwarder or library goroutine.
 
 ## Before & After
 

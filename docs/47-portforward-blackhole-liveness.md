@@ -1,5 +1,50 @@
 # Port-forward Black-hole & Data-plane Liveness Watchdog
 
+## Current recovery ownership
+
+The client defaults to **one data `connSlot` plus one independent control slot**. Default
+business dispatch goes directly to slot 0 without slot-selection parsing/hashing; lifecycle,
+batching and business concurrency are preserved. Heartbeat requests bypass the business queue
+via a separate control queue/conn to the **same TCP forwarding endpoint 10801**, not xDS 9002.
+The control conn is excluded from RouteHub; replies use the registered data conn (first writable
+with fallback, not per-flow balancing). There is one registered conn per current client address
+in steady state. The outer SSH/port-forward TCP transport remains shared, and data-path stalls
+can delay replies: separation is not an absolute liveness guarantee.
+
+The historical watchdog/port-forward loops described below have been replaced by
+one transport supervisor in `pkg/handler/network_transport.go`, shared by SSH and
+Kubernetes port-forward. The 30-second unprimed and `3 * HeartbeatInterval` steady
+thresholds remain (sampled every 5 s). Health is armed after TUN startup; bootstrap uses
+10-second GetTunIP calls and waits for a **current-generation data heartbeat** within the
+60-second total startup budget. The budget cancels failed startup, not an established session.
+
+RentIP, IPWatcher and RouteWatcher all use a common context dialer with
+`passthrough:///kubevpn-manager`; each dial resolves the active generation's xDS
+endpoint. Bootstrap timeout/unavailable errors are generation-tagged recovery
+signals. Runtime watcher failures do not override healthy data-plane heartbeats.
+Generation-aware data and gRPC dials resolve ephemeral loopback endpoints, never a stale
+fixed port. Healthy current SSH/port-forward is sticky; only failure switches paths, with
+bounded backoff. Authentication/trust/configuration failures are terminal. Heartbeats carry
+nonce/generation/counter with bounded outstanding state (128 / 30 s); see docs/08.
+
+`network_monitor.go` integrates the existing vendored **netmon 1.74.1** API. Callbacks only
+coalesce wakeups; the supervisor compares current interface/route state, not callback Old/New.
+`TimeJumped` remains sticky until consumed. Sampling follows actual API/SSH/proxy egress and
+IPv4/IPv6 default-route fallbacks, excluding this connection's TUN identity. Route lookups send
+no packets to external probe targets (endpoint hostname resolution may use DNS). Relevant changes
+use `ClearPending`, not `BeginGeneration`, and request fresh evidence on the current path.
+Debouncing/offline backoff never extends the recovery budget indefinitely; monitor failure leaves
+the heartbeat watchdog active. No CLI, protobuf or dependency change is required.
+
+`Stop` rejects new workers/events, cancels the parent, retires/joins the active generation,
+waits for `startupDone` and all workers (including monitor/TUN handlers), then clears DNS/state. Terminal runtime transport
+errors cancel the manager; DataSession observes that cancellation outside the
+supervisor and performs cleanup without self-joining.
+
+> **Historical incident and original fix:** Sections 1–5 below preserve the original
+> observations, timings and port-forward-only design. Removed helpers and timestamp-only
+> priming describe that implementation, not the current supervisor summarized above.
+
 ## 1. Symptom
 
 An idle long-lived connection tunnelled through the VPN — e.g. an SSH session to another
@@ -14,7 +59,9 @@ The entire client data plane rides on a **single** Kubernetes port-forward:
 TUN device → 127.0.0.1:<local port> → (k8s port-forward, SPDY) → traffic-manager pod
 ```
 
-All four conn-pool slots dial `127.0.0.1:<local port>`. If that one port-forward session
+In the historical topology, all four data conn-pool slots dialed `127.0.0.1:<local port>`.
+The current one-data-plus-one-control topology still shares the forwarding endpoint and outer
+transport. If that one port-forward session
 drops, the **whole tunnel** is down until it reconnects. See
 [01-network-architecture.md](01-network-architecture.md) and
 [24-traffic-manager-deployment.md](24-traffic-manager-deployment.md).
@@ -140,9 +187,14 @@ now without a producer.
 `--debug`; repeated warnings are limited to once per minute per watcher, with intervening attempts
 at Debug. Debug also includes dial readiness and elapsed time. Cancellation is a normal exit.
 
+Each watch attempt resolves the current transport generation and logs its actual xDS endpoint.
+The 30-second readiness deadline applies only to the blocking gRPC dial, not to the generation-bound
+watch stream. Retirement cancels the old stream and fences its route/IP updates. A watcher started
+between generations waits for the next endpoint rather than permanently skipping a zero local port.
+
 IPWatcher's reconnect reassertion (`GetTunIP`) has its own **10-second** call deadline. Failure is
-logged and retains the existing fallback to `WatchTunIP`. Proposal confirmation/decline/rejection
-RPCs are separate operations and are not bounded by this initial reassertion deadline.
+logged and retains the existing fallback to `WatchTunIP` unless the generation/session was canceled.
+Proposal confirmation/decline/rejection RPCs each have a separate **10-second** deadline.
 
 These deadlines do not expire the watch streams themselves or detect a black-hole that develops
 after a stream has connected. They restore control to the watcher retry loop during connection

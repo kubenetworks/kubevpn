@@ -188,8 +188,8 @@ func TestRouteHub_AddRoute_MultiConn(t *testing.T) {
 	ip := net.ParseIP("198.18.0.5")
 	hub.AddRoute(ctx, ip, newMockConn("c1", false))
 	hub.AddRoute(ctx, ip, newMockConn("c2", false))
-	val, _ := hub.RouteMapTCP.Load(string(ip))
-	if val.(*ConnList).Len() != 2 {
+	val := routeSnapshot(hub)[string(ip)]
+	if len(val) != 2 {
 		t.Fatalf("expected 2 conns")
 	}
 }
@@ -277,15 +277,16 @@ func TestScenario_SlotReconnect_NoPacketLoss(t *testing.T) {
 	}
 
 	// Dead slots auto-removed
-	val, _ := hub.RouteMapTCP.Load(key)
-	if val.(*ConnList).Len() != 2 {
+	val := routeSnapshot(hub)[key]
+	if len(val) != 2 {
 		t.Fatal("expected 2 surviving")
 	}
 
 	// A slot reconnects (new conn)
 	newSlot := newMockConn("new0", false)
 	hub.AddRoute(ctx, clientIP, newSlot)
-	if val.(*ConnList).Len() != 3 {
+	val = routeSnapshot(hub)[key]
+	if len(val) != 3 {
 		t.Fatal("expected 3 after reconnect")
 	}
 }
@@ -345,9 +346,9 @@ func TestScenario_ConcurrentPoolRegistration(t *testing.T) {
 	}
 	wg.Wait()
 
-	val, _ := hub.RouteMapTCP.Load(string(ip))
-	if val.(*ConnList).Len() != 4 {
-		t.Fatalf("expected 4, got %d", val.(*ConnList).Len())
+	val := routeSnapshot(hub)[string(ip)]
+	if len(val) != 4 {
+		t.Fatalf("expected 4, got %d", len(val))
 	}
 
 	// Concurrent writes

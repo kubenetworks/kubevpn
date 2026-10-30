@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"io"
 	"net"
 	"time"
 
@@ -38,6 +39,13 @@ type batchTUN interface {
 	// ReadPackets reads up to len(bufs) IP packets, writing packet i into bufs[i][off:] and
 	// its length into sizes[i]; it returns the number of packets placed into bufs.
 	ReadPackets(bufs [][]byte, sizes []int, off int) (int, error)
+}
+
+// batchTUNWriter is optional and independent of batchTUN's read support.
+// WritePackets returns a packet count, never a byte count, and must not mutate inputs.
+type batchTUNWriter interface {
+	BatchSize() int
+	WritePackets(packets [][]byte) (int, error)
 }
 
 // tunDevice is the single, symmetric TUN engine for both the client and server roles. It runs
@@ -224,20 +232,38 @@ func (d *tunDevice) pumpTunBatch(ctx context.Context, errLabel string, bt batchT
 func (d *tunDevice) writeToTun(ctx context.Context) {
 	defer netutil.HandleCrash()
 	defer drainPacketChan(d.tunOutbound)
-	for {
-		select {
-		case packet := <-d.tunOutbound:
-			if packet == nil {
-				return
+	var batch packetBatch
+	defer batch.close()
+	var bufs [maxBatchFrames][]byte
+	writer, batched := d.tun.(batchTUNWriter)
+	limit := 1
+	if batched {
+		limit = min(maxBatchFrames, max(1, writer.BatchSize()))
+	}
+	for batch.next(ctx, d.tunOutbound, limit, nil) {
+		for i, p := range batch.packets[:batch.n] {
+			bufs[i] = p.data[tunReserve : datagramHeaderLen+p.length]
+		}
+		var err error
+		if batched {
+			var n int
+			n, err = writer.WritePackets(bufs[:batch.n])
+			if err == nil && n != batch.n {
+				err = io.ErrShortWrite
 			}
-			_, err := d.tun.Write(packet.data[tunReserve : datagramHeaderLen+packet.length])
-			packet.release()
-			if err != nil {
-				plog.G(ctx).Errorf("[TUN] Failed to write to tun device: %v", err)
-				netutil.SafeWrite(d.errChan, err)
-				return
+		} else {
+			var n int
+			n, err = d.tun.Write(bufs[0])
+			if err == nil && n != len(bufs[0]) {
+				err = io.ErrShortWrite
 			}
-		case <-ctx.Done():
+		}
+		clear(bufs[:batch.n])
+		batch.release()
+		if err != nil {
+			// Packet devices cannot resume a partial byte write like a TCP stream.
+			plog.G(ctx).Errorf("[TUN] Failed to write to tun device: %v", err)
+			netutil.SafeWrite(d.errChan, err)
 			return
 		}
 	}

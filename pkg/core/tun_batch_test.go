@@ -3,6 +3,9 @@ package core
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
+	"io"
 	"net"
 	"sync"
 	"testing"
@@ -43,6 +46,89 @@ func (f *fakeBatchTUN) ReadPackets(bufs [][]byte, sizes []int, off int) (int, er
 	}
 	<-f.gate
 	return 0, context.Canceled
+}
+
+type writeBatchTUN struct {
+	net.Conn
+	batch   int
+	calls   int
+	written [][]byte
+	short   bool
+}
+
+func (f *writeBatchTUN) BatchSize() int { return f.batch }
+func (f *writeBatchTUN) WritePackets(packets [][]byte) (int, error) {
+	f.calls++
+	if len(packets) > f.batch {
+		return 0, fmt.Errorf("batch exceeds device limit")
+	}
+	for _, p := range packets {
+		f.written = append(f.written, append([]byte(nil), p...))
+	}
+	if f.short {
+		return 0, nil
+	}
+	return len(packets), nil
+}
+func (f *writeBatchTUN) Write(p []byte) (int, error) {
+	f.calls++
+	f.written = append(f.written, append([]byte(nil), p...))
+	return len(p), nil
+}
+func TestWriteTunBatch(t *testing.T) {
+	for _, bs := range []int{1, 8, 64} {
+		t.Run(fmt.Sprint(bs), func(t *testing.T) {
+			f := &writeBatchTUN{batch: bs}
+			q := make(chan *Packet, 70)
+			var packets []*Packet
+			for i := 0; i < 70; i++ {
+				p := batchPacket(60, i)
+				packets = append(packets, p)
+				q <- p
+			}
+			close(q)
+			d := &tunDevice{tun: f, tunOutbound: q, errChan: make(chan error, 1)}
+			d.writeToTun(context.Background())
+			limit := min(bs, 32)
+			if f.calls != (70+limit-1)/limit {
+				t.Fatalf("calls=%d", f.calls)
+			}
+			if len(f.written) != 70 {
+				t.Fatalf("written=%d", len(f.written))
+			}
+			for i, p := range packets {
+				if !bytes.Equal(f.written[i], p.data[3:60]) {
+					t.Fatalf("packet %d corrupt", i)
+				}
+			}
+			checkBatchRefs(t, packets)
+		})
+	}
+}
+func TestWriteTunBatchShortCount(t *testing.T) {
+	f := &writeBatchTUN{batch: 8, short: true}
+	q := make(chan *Packet, 3)
+	var packets []*Packet
+	for i := 0; i < 3; i++ {
+		p := batchPacket(60, i)
+		packets = append(packets, p)
+		q <- p
+	}
+	close(q)
+	d := &tunDevice{tun: f, tunOutbound: q, errChan: make(chan error, 1)}
+	d.writeToTun(context.Background())
+	select {
+	case err := <-d.errChan:
+		if !errors.Is(err, io.ErrShortWrite) {
+			t.Fatal(err)
+		}
+	default:
+		t.Fatal("short batch not reported")
+	}
+	if f.calls != 1 {
+		t.Fatal("short packet write retried")
+	}
+	checkBatchRefs(t, packets)
 }
 
 // TestPumpTunBatchDispatchesEachSegment verifies that a single batched read yielding multiple

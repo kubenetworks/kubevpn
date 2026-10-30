@@ -12,7 +12,7 @@ import (
 // transport is the role-specific half of the symmetric tunDevice: how outbound packets (read
 // from the TUN) are routed toward the wire, and the goroutines that feed inbound packets back
 // into the device's tunOutbound. clientTransport dials a connection pool to the server;
-// serverTransport routes via RouteHub and bridges the gvisor TCPPacketChan.
+// serverTransport routes via RouteHub and bridges the gvisor TUN queue.
 type transport interface {
 	// label prefixes the device's read-tun logs, e.g. "[Client]" or "[TUN]".
 	label() string
@@ -50,6 +50,10 @@ func TunHandler(forward *Forwarder, hub *RouteHub, stats *HeartbeatStats) Handle
 		stats:   stats,
 	}
 }
+
+// FatalOnReturn marks only the shared server device; client completion belongs
+// to NetworkManager through its existing completion handler.
+func (h *tunHandler) FatalOnReturn() bool { return h.forward.IsEmpty() }
 
 func (h *tunHandler) Handle(ctx context.Context, tun net.Conn) {
 	dev, err := newTunDevice(tun, h.errChan)
@@ -97,4 +101,11 @@ func serve(ctx context.Context, dev *tunDevice) {
 	cancel()
 	dev.Close()
 	wg.Wait()
+	// A canceled select can still enqueue into a ready channel after its
+	// consumer's deferred drain. Only now have all device producers joined.
+	if closer, ok := dev.transport.(interface{ close() }); ok {
+		closer.close()
+	}
+	drainPacketChan(dev.tunInbound)
+	drainPacketChan(dev.tunOutbound)
 }

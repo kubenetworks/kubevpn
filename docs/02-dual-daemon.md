@@ -226,6 +226,15 @@ User Daemon: Return success to CLI
 > daemon is still running, the root side must also short-circuit on a known `ConnectionID` — else
 > it would build a second DataSession (a duplicate TUN / port-forward / route / DNS setup) and
 > leak. Guard: `Connect` (IsSudo) → `svr.findConnection(req.ConnectionID)` before creating `ds`.
+>
+> This guard retains only live sessions (including unhealthy sessions still recovering).
+> A canceled session context is terminal: under `connectMu`, remove that exact instance
+> under `connMu`, release `connMu`, join its cleanup, then allocate and publish the replacement.
+> The user-side guard queries fresh, bounded root `Status`; missing/disconnected sessions
+> replay the original request with the retained control factory's kubeconfig and OwnerID.
+> The existing control session, proxy/sync metadata, and SSH API tunnel are retained;
+> only the new temporary user lifecycle is retired. Probe failures return an error without
+> destructive cleanup. Cached health is not used to decide whether explicit connect is a no-op.
 
 ### 3.1a Peer Liveness (user ↔ root) and crash recovery
 

@@ -150,7 +150,6 @@ func TestWriteToTun_DrainsOnCancel(t *testing.T) {
 
 // --- readFromEndpointWriteToTCPConn: verify return on write error ---
 
-
 func TestReadFromEndpointWriteToRoute_DropsNoRoute(t *testing.T) {
 	hub := NewRouteHub()
 
@@ -199,19 +198,20 @@ func TestMaxSizeConstant(t *testing.T) {
 	}
 }
 
-// --- RouteHub.TCPPacketChan drain in routeTCPToTun ---
+// --- RouteHub.tunQueue drain in routeTCPToTun ---
 
 func TestRouteTCPToTun_DrainsOnCancel(t *testing.T) {
 	hub := NewRouteHub()
 	outbound := make(chan *Packet, MaxSize)
+	defer drainPacketChan(outbound)
 
 	dev := &tunDevice{tunOutbound: outbound, errChan: make(chan error, 1)}
 	st := newServerTransport(dev, hub)
 
-	// Put packets in TCPPacketChan
+	// Put packets in tunQueue
 	for i := 0; i < 3; i++ {
 		buf := config.LPool.Get().([]byte)
-		hub.TCPPacketChan <- &Packet{data: buf, length: 1}
+		hub.enqueueTUN(context.Background(), NewPacket(buf, 1, nil, nil))
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -226,8 +226,8 @@ func TestRouteTCPToTun_DrainsOnCancel(t *testing.T) {
 	cancel()
 	<-done
 
-	if len(hub.TCPPacketChan) != 0 {
-		t.Errorf("TCPPacketChan should be drained, but %d packets remain", len(hub.TCPPacketChan))
+	if len(hub.tunQueue) != 0 {
+		t.Errorf("tunQueue should be drained, but %d packets remain", len(hub.tunQueue))
 	}
 }
 

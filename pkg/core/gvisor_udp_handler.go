@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -68,15 +69,17 @@ func GvisorUDPListener(addr string) (net.Listener, error) {
 }
 
 func relayUDPOverTCP(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn) {
-	defer udpConn.Close()
 	plog.G(ctx).Debugf("[UDP] Relaying: %s <-> %s", tcpConn.RemoteAddr(), udpConn.LocalAddr())
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	errChan := make(chan error, 2)
+	var workers sync.WaitGroup
+	workers.Add(2)
 
 	go func() {
+		defer workers.Done()
 		defer netutil.HandleCrash()
 		buf := config.LPool.Get().([]byte)
 		defer config.LPool.Put(buf)
@@ -84,6 +87,7 @@ func relayUDPOverTCP(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn
 	}()
 
 	go func() {
+		defer workers.Done()
 		defer netutil.HandleCrash()
 		buf := config.LPool.Get().([]byte)
 		defer config.LPool.Put(buf)
@@ -98,6 +102,9 @@ func relayUDPOverTCP(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn
 	case <-ctx.Done():
 	}
 	cancel()
+	_ = tcpConn.Close()
+	_ = udpConn.Close()
+	workers.Wait()
 	plog.G(ctx).Debugf("[UDP] Relay closed: %s <-> %s", tcpConn.RemoteAddr(), udpConn.LocalAddr())
 }
 

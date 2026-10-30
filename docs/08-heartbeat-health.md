@@ -4,7 +4,7 @@
 
 KubeVPN uses several heartbeat/health-check mechanisms across 4 layers to maintain connection liveness, detect failures, and trigger recovery. Each serves a distinct purpose — removing any one would leave a gap.
 
-The **#1 TUN heartbeat and its watchdog are the primary tunnel-liveness signal.** The client observes the ICMP echo replies and (a) exposes the last-reply time as the data-plane liveness signal driving `kubevpn status`, and (b) runs a black-hole watchdog that force-reconnects the port-forward when the replies go stale — the sole liveness-based reconnect trigger. See [Data-Plane Liveness for `kubevpn status`](#data-plane-liveness-for-kubevpn-status) and [47-portforward-blackhole-liveness.md](47-portforward-blackhole-liveness.md). This reuses an already-flowing heartbeat — it adds no extra traffic.
+The **#1 correlated TUN heartbeat and the transport supervisor are the primary tunnel-liveness signal.** The client exposes the last validated reply time to `kubevpn status`; the supervisor replaces a stale SSH or Kubernetes port-forward generation. Runtime xDS watcher errors alone do not retire a healthy data path. See [Data-Plane Liveness for `kubevpn status`](#data-plane-liveness-for-kubevpn-status) and [47-portforward-blackhole-liveness.md](47-portforward-blackhole-liveness.md). This reuses an already-flowing heartbeat — it adds no extra traffic.
 
 > The former **#4 xDS gRPC health check** (a 30 s `Check` over the port-forward that tore the tunnel down on failure) has been **removed**: the data-plane heartbeat watchdog is a more accurate, faster liveness signal (it tests the actual data path, not the control-plane port), and a control-plane hiccup no longer drops a healthy data tunnel. See §"#4 (removed)" below.
 
@@ -20,8 +20,8 @@ The **#1 TUN heartbeat and its watchdog are the primary tunnel-liveness signal.*
 ├─────────────────────────────────────────────────────────────────────┤
 │ Layer 3: TUN tunnel (application-layer keepalive)                   │
 │                                                                     │
-│  #1 TUN heartbeat             5s   ICMP to RouterIP, all slots     │
-│     + black-hole watchdog → port-forward reconnect                 │
+│  #1 TUN heartbeat             5s   ICMP via control slot           │
+│     + supervisor → SSH / port-forward generation recovery          │
 │  #3 TCP read/write deadline  180s/60s  Detect unresponsive conn    │
 │                                                                     │
 ├─────────────────────────────────────────────────────────────────────┤
@@ -41,17 +41,19 @@ The **#1 TUN heartbeat and its watchdog are the primary tunnel-liveness signal.*
 **What:** Sends ICMP Echo packets from the client's TUN IP to the router IP (`198.18.0.0`) every `config.HeartbeatInterval` (5 s). This is deliberately shorter than `config.KeepAliveTime` (60 s, which drives the deadlines and TCP keepalive) so the black-hole watchdog can detect a silent tunnel in seconds; sending more often only helps the server read deadline (`KeepAliveTime*3`).
 
 **Why necessary:**
-- Registers the client's TUN IP in the server's RouteHub (via `hub.AddRoute(src, conn)`)
-- Without this, the server doesn't know which connection belongs to which TUN IP — cross-client routing breaks
-- Keeps all connection pool slots alive (heartbeats are broadcast to all slots)
+- Tests the round trip through the forwarding endpoint and a registered data conn
+- Keeps the dedicated control connection active; the control conn never registers in RouteHub
+- Data-slot registration echoes separately register the TUN IP via `hub.AddRoute(src, conn)` on connect; without registration or business traffic, cross-client routing and heartbeat replies have no return route
 
-**Broadcast to all slots:** Heartbeat packets have `dst == nil` and are cloned to all N connection pool slots. This was a bug fix — previously only slot 0 received heartbeats, causing slots 1-3 to timeout every 180s.
+**Control slot, not broadcast:** The default is one data `connSlot` plus one independent control slot. Periodic heartbeats use a separate control queue/conn through the **same TCP forwarding endpoint 10801**, not xDS 9002, so requests bypass the business queue. The server excludes the control conn from `RouteHub`; replies return through the registered data conn (first writable with fallback, not per-flow balancing). The outer SSH/port-forward TCP transport remains shared, and replies still depend on data-path progress: this is not an absolute liveness guarantee. Data-slot read/write activity refreshes deadlines; idle data slots may reconnect. The earlier all-slot broadcast design is historical.
 
-**Proactive registration on (re)connect:** Waiting up to a full heartbeat period for the next heartbeat to register a freshly reconnected conn would leave reverse traffic un-routable in the meantime. So each slot, immediately after dialing, writes a registration packet (an ICMP echo to the gateway carrying its TUN IP) **directly on the new conn** — `connSlot.run` via `clientTransport.registrationPayloads()`. The server registers the route from it at once, before any data. Being a direct write (not the `dst == nil` broadcast, which `trySendToSlot` may drop when a slot's channel is full), it is drop-immune. The echo reply also doubles as a liveness ping, so it refreshes the data-plane liveness signal **within ~RTT of reconnect** — this is what lets the black-hole watchdog use a short reconnect deadline without falsely tearing down a healthy freshly-reconnected session (see [47-portforward-blackhole-liveness.md](47-portforward-blackhole-liveness.md)).
+**Proactive registration on (re)connect:** Each data slot writes a registration echo **directly on the new connection**, before queued traffic (`connSlot.run` / `clientTransport.registrationPayloads()`). This avoids queue drops and registers its TUN IP immediately. A successfully written, correlated announcement reply can prime liveness within ~RTT; it need not wait for the periodic control heartbeat.
 
 **The announcement is load-bearing, and failing to send it is fatal for an idle client.** The heartbeat leaves on the control conn, which the server deliberately keeps out of `RouteHub`, so the echo reply must return over a *data* conn — that is what proves the data path works. Therefore the only things that can create a route are a data slot's announcement or real outbound user traffic. If the announcement produces nothing, an idle client is invisible: the server generates every echo reply and drops it (`No route for stack output -> x, dropping`), the watchdog never primes, and the port-forward is torn down every 30 s indefinitely. This happened for 20 hours in the field because `registrationPayloads()` re-derived the client's own address by scanning the OS interface table on every reconnect and silently returned nil when that scan failed. The address now comes from `tunDevice.addrs()`, a name-based lookup that an unrelated NIC cannot break, and producing no payload warns instead of returning quietly. See [51-idle-client-route-registration.md](51-idle-client-route-registration.md).
 
-**Reply observation (data-plane liveness):** The server's gvisor stack replies to these echoes (`pkg/core/gvisor_icmp_forwarder.go`, preserving Ident/Sequence). The client's `readFromConn` recognizes echo replies from `RouterIP`/`RouterIP6` (`util.IsICMPEchoReplyFrom`), records the timestamp in `core.HeartbeatStats.MarkReply()`, and drops the packet (the OS would discard it anyway — the echo was crafted by us). A recent reply proves the tunnel carries traffic end-to-end to the server and back. It feeds both `kubevpn status` and the port-forward black-hole watchdog (`NetworkManager.watchDataPlaneLiveness`). See [Data-Plane Liveness for `kubevpn status`](#data-plane-liveness-for-kubevpn-status) and [47-portforward-blackhole-liveness.md](47-portforward-blackhole-liveness.md).
+**Correlated reply observation:** `HeartbeatStats.observeReply` validates gateway source, session nonce, transport generation, monotonic probe counter, ICMP identity and destination against an actually written probe. Outstanding probes are bounded to **128 entries / 30 s**; duplicates, expired probes and retired-generation replies cannot renew health. Protocol-owned replies are consumed; unrelated application gateway pings remain TUN traffic. Production does not use the legacy test helper `MarkReply()`.
+
+**Diagnostics:** One data slot and one control slot have independently locked activity counters (bytes, packets, reconnects, timestamps, bounded reasons). Probe send/reply attribution and arrival slot are recorded separately: a reply need not return on its sending slot, so these counters are not per-slot health verdicts. Generation retirement fences old evidence; network-change checks use `ClearPending()` without changing generation. See [47-portforward-blackhole-liveness.md](47-portforward-blackhole-liveness.md).
 
 **Period:** 5s (`config.HeartbeatInterval`)
 
@@ -77,7 +79,7 @@ The **#1 TUN heartbeat and its watchdog are the primary tunnel-liveness signal.*
 - **Client side:** a stall triggers slot reconnection.
 - **Server side:** a stall (e.g. a client that slept or had its NAT rebound, so no FIN/RST ever arrives) evicts the now-stale "ghost" conn from `RouteHub`. The read timeout exits `readFromTCPConnWriteToEndpoint`, whose deferred `RemoveRoutesByConn` deletes the route; the write timeout closes a conn whose half-open socket would otherwise buffer (and black-hole) reverse traffic until the kernel send buffer fills. Without these, a ghost conn lingered until OS keepalive (#2) eventually noticed — minutes of silently dropped reverse traffic. The two server writers (`bufferedTCP.run` and `readFromEndpointWriteToTCPConn`) share the same socket; both use the 60s timeout and refresh before each write, so neither observes the other's deadline as prematurely expired.
 
-**Client-side liveness is active-in-either-direction (important).** The read (180s) deadline is the slot's idle/liveness detector, but a slot can be busy **sending** while receiving nothing: it carries bulk data whose reverse traffic (that flow's ACKs) is routed to a *different* pool slot — the server's `RouteMapTCP` is last-writer-wins and the #1 heartbeat, broadcast on every slot, makes the winning slot flap. So `writeToConn` also pushes the **read** deadline forward on each successful write (`UDPConnOverTCP` embeds the same conn, so both goroutines drive the one underlying read deadline; `SetReadDeadline` is safe with an in-flight `Read`). Without this, an actively-sending slot would hit the 180s read-idle timeout mid-transfer and be torn down. A slot idle in **both** directions still times out. This originally manifested as a mid-SCP disconnect (`read i/o timeout` → `operation aborted` → RST → RTO retransmit storm), because the aborted slot also hosted the *per-slot* inter-client gvisor stack; that stack has since been made transport-level (decoupled from any slot — see `pkg/core/DATA_FLOW.md`), so the two fixes are independent and complementary.
+**Client-side liveness is active-in-either-direction (important).** The read (180s) deadline is the slot's idle/liveness detector, but a slot can be busy **sending** while receiving nothing. In the historical multi-slot topology (still available as a private nil-stats test override), bulk data's reverse traffic could use a *different* pool slot because server route selection is first-writable fallback, not flow-affine. The default now has one data slot; periodic control heartbeats do not broadcast across data slots. So `writeToConn` also pushes the **read** deadline forward on each successful write (`UDPConnOverTCP` embeds the same conn, so both goroutines drive the one underlying read deadline; `SetReadDeadline` is safe with an in-flight `Read`). Without this, an actively-sending slot would hit the 180s read-idle timeout mid-transfer and be torn down. A slot idle in **both** directions still times out. This originally manifested as a mid-SCP disconnect (`read i/o timeout` → `operation aborted` → RST → RTO retransmit storm), because the aborted slot also hosted the *per-slot* inter-client gvisor stack; that stack has since been made transport-level (decoupled from any slot — see `pkg/core/DATA_FLOW.md`), so the two fixes are independent and complementary.
 
 **Optimization:** Deadlines are not reset on every packet. They are only refreshed when >50% of the timeout has elapsed, reducing syscalls from 1/packet to ~1/90s.
 
@@ -147,10 +149,10 @@ watchdog: reconnect if no fresh reply within 15s (primed) / 30s (startup)
 | Failure | Detected by | Detection time |
 |---------|-------------|----------------|
 | Pod crash/restart | `CheckPodStatus` watch, #5 (watch event) | <1s (informer) or 30s (ticker) |
-| Port-forward black-holed / broken | #1 heartbeat watchdog (reply staleness) | ~15s primed / ~30s startup → reconnect |
+| SSH / port-forward black-holed | #1 correlated heartbeat + supervisor | ~15s primed / ~30s unprimed, sampled every 5s → recovery |
 | TUN tunnel stall | #3 (read deadline) | 180s |
 | TCP connection half-open | #2 (OS keepalive) | ~60s |
-| Slot idle (no traffic) | #1 (heartbeat broadcast) | 5s |
+| Data slot idle in both directions | #3 (read deadline; registration on reconnect) | 180s |
 | Data plane not carrying traffic | heartbeat-reply staleness (`status`) | ~90s |
 | Root (sudo) daemon crash | #6 (liveness monitor: PID + gRPC probe) | ~2s → `status` `disconnected` |
 
@@ -194,12 +196,12 @@ func deriveConnectionStatus(tunUp bool, lastHeartbeat time.Time) string {
 ```
 root daemon (data plane)                       user daemon (control plane)
 ─────────────────────────                      ───────────────────────────
-clientTransport.readFromConn
-  └─ HeartbeatStats.MarkReply()                Status RPC
+connSlot.readFromConn
+  └─ HeartbeatStats.observeReply()                Status RPC
        ▲                                          └─ sudoHealthSnapshot() ── #6 monitor cache
 NetworkManager.LastHeartbeat()                        │  (probeSudo → sudo Status string)
        ▲                                              ▼
-ConnectOptions.GetLastHeartbeat()              resolveStatus(connect, ips, tunUp)
+DataSession.GetLastHeartbeat()              resolveStatus(connect, ips, tunUp)
        ▲                                          └─ user: ip.status from sudo
 deriveConnectionStatus(tunUp, lastHeartbeat)      └─ sudo: deriveConnectionStatus(...)
   → sets Status string (sudo daemon)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"sync"
 	"sync/atomic"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -12,110 +13,120 @@ import (
 
 type bufferedTCP struct {
 	net.Conn
-	ch     chan *Packet
-	closed atomic.Bool
-	done   chan struct{} // closed when run() exits, so Write never blocks on a drainerless channel
+	ch        chan *Packet
+	closed    atomic.Bool
+	done      chan struct{} // stops enqueues; run joins producers before its final drain
+	enqueue   sync.RWMutex
+	stopOnce  sync.Once
+	closeOnce sync.Once // separate from route stop callbacks; never closes under their locks
+	closeErr  error
+	onStop    func(*bufferedTCP) // immutable, installed before run starts
 }
 
 // NewBufferedTCP wraps a TCP connection with an async write buffer to reduce syscalls.
 func NewBufferedTCP(ctx context.Context, conn net.Conn) net.Conn {
-	c := &bufferedTCP{
-		Conn: conn,
-		ch:   make(chan *Packet, MaxSize),
-		done: make(chan struct{}),
-	}
+	return newBufferedTCP(ctx, conn, nil)
+}
+
+func newBufferedTCP(ctx context.Context, conn net.Conn, onStop func(*bufferedTCP)) *bufferedTCP {
+	c := &bufferedTCP{Conn: conn, ch: make(chan *Packet, MaxSize), done: make(chan struct{}), onStop: onStop}
 	go c.run(ctx)
 	return c
 }
 
-// writePacket enqueues an already-framed packet (length header stamped in pkt.data[:2]),
-// taking ownership of one reference: run() releases it after the socket write. Returns
-// false if the conn is closed, in which case ownership is NOT taken (caller keeps its ref).
-func (c *bufferedTCP) writePacket(pkt *Packet) bool {
+// writePacket transfers one reference only on success. The read lock joins an
+// enqueue already in flight with run's final drain, including a select choosing
+// the queue just as done closes. The channel itself is never closed.
+func (c *bufferedTCP) writePacket(ctx context.Context, pkt *Packet) error {
+	c.enqueue.RLock()
+	defer c.enqueue.RUnlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if c.closed.Load() {
-		return false
+		return net.ErrClosed
 	}
 	select {
 	case c.ch <- pkt:
-		return true
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	case <-c.done:
-		return false
+		return net.ErrClosed
 	}
 }
 
-
-// Write satisfies net.Conn. b must be a fully framed datagram ([2-byte length][payload]).
-// Because the net.Conn contract lets the caller reuse b after Write returns, b is copied
-// into a pooled buffer. Hot routing paths use writePacket instead to avoid this copy.
-func (c *bufferedTCP) Write(b []byte) (n int, err error) {
+// Write satisfies net.Conn. b is one fully framed datagram and may be reused
+// by the caller immediately; routing paths use writePacket to avoid this copy.
+func (c *bufferedTCP) Write(b []byte) (int, error) {
 	if c.closed.Load() {
 		return 0, errors.New("tcp channel is closed")
 	}
 	if len(b) < datagramHeaderLen {
 		return 0, nil
 	}
-	buf := config.LPool.Get().([]byte)
-	n = copy(buf, b)
-	pkt := NewPacket(buf, n-datagramHeaderLen, nil, nil)
-	// Select on done so that if run() has exited (ctx cancelled or write error)
-	// we fail fast instead of blocking forever on a channel no one drains.
-	select {
-	case c.ch <- pkt:
-		return n, nil
-	case <-c.done:
-		pkt.release()
-		return 0, errors.New("tcp channel is closed")
+	if len(b) > 65535+datagramHeaderLen {
+		return 0, errors.New("tcp frame too large")
 	}
+	buf := config.LPool.Get().([]byte)
+	if len(b) > len(buf) {
+		config.LPool.Put(buf)
+		buf = make([]byte, len(b))
+	}
+	n := copy(buf, b)
+	pkt := NewPacket(buf, n-datagramHeaderLen, nil, nil)
+	if err := c.writePacket(context.Background(), pkt); err != nil {
+		pkt.release()
+		return 0, err
+	}
+	return n, nil
+}
+
+func (c *bufferedTCP) stop() {
+	c.stopOnce.Do(func() {
+		c.closed.Store(true)
+		close(c.done)
+		if c.onStop != nil {
+			c.onStop(c)
+		}
+	})
 }
 
 func (c *bufferedTCP) run(ctx context.Context) {
-	// Mark closed and signal Write before returning, regardless of exit path,
-	// so a concurrent Write cannot enqueue into a channel that will never drain.
+	stopClose := context.AfterFunc(ctx, func() { _ = c.Close() })
+	defer stopClose()
+	var batch packetBatch
 	defer func() {
-		c.closed.Store(true)
-		close(c.done)
+		// An idle/pre-canceled run can finish before AfterFunc starts. Closing
+		// here is mandatory even if stopClose cancels that pending callback.
+		_ = c.Close()
+		batch.close()
+		// done unblocks even a producer holding RLock on a full queue. Once
+		// joined, no successful enqueue can escape this final drain.
+		c.enqueue.Lock()
+		drainPacketChan(c.ch)
+		c.enqueue.Unlock()
 	}()
-	// Write deadline: a Write to a half-open TCP succeeds (the bytes sit in the kernel send buffer)
-	// until that buffer fills, so without a deadline a dead peer stays invisible for minutes. Bound
-	// it to KeepAliveTime: a stuck write then errors, run() closes the conn — which unblocks the
-	// paired reader and triggers RemoveRoutesByConn — and writePacket starts returning false so
-	// ConnList falls back to a healthy conn. The underlying socket is shared with
-	// readFromEndpointWriteToTCPConn; both writers use the same timeout and refresh before each
-	// write, so neither ever observes the other's deadline as prematurely expired.
+	var writer frameBatchWriter
 	dl := &periodicDeadline{timeout: config.KeepAliveTime, set: c.Conn.SetWriteDeadline}
-	for {
-		select {
-		case pkt := <-c.ch:
-			if pkt == nil {
-				return
-			}
-			if err := dl.refresh(); err != nil {
-				pkt.release()
-				plog.G(ctx).Errorf("[TCP] Failed to set write deadline: %v", err)
-				_ = c.Conn.Close()
-				return
-			}
-			_, err := c.Conn.Write(pkt.data[:datagramHeaderLen+pkt.length])
-			pkt.release()
-			if err != nil {
-				plog.G(ctx).Errorf("[TCP] Failed to write packet: %v", err)
-				_ = c.Conn.Close()
-				return
-			}
-		case <-ctx.Done():
+	for !c.closed.Load() && batch.next(ctx, c.ch, maxBatchFrames, c.done) {
+		if err := dl.refresh(); err != nil {
+			plog.G(ctx).Errorf("[TCP] Failed to set write deadline: %v", err)
+			_ = c.Close()
+			return
+		}
+		_, err := writer.write(c.Conn, batch.packets[:batch.n])
+		batch.release()
+		if err != nil {
+			plog.G(ctx).Errorf("[TCP] Failed to write packet: %v", err)
+			_ = c.Close()
 			return
 		}
 	}
 }
 
 func (c *bufferedTCP) Close() error {
-	c.closed.Store(true)
-	for {
-		select {
-		case pkt := <-c.ch:
-			pkt.release()
-		default:
-			return c.Conn.Close()
-		}
-	}
+	c.stop()
+	c.closeOnce.Do(func() { c.closeErr = c.Conn.Close() })
+	return c.closeErr
 }

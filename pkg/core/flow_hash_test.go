@@ -207,7 +207,7 @@ func TestFlowHash_RealPool_Spreads(t *testing.T) {
 		Addr:       "mock",
 		MaxRetries: 1,
 		Transporter: &mockTransporter{dialFn: func(_ context.Context, _ string) (net.Conn, error) {
-			cliEnd, srvEnd := newPacketConnPair()
+			cliEnd, srvEnd := net.Pipe()
 			mu.Lock()
 			serverConns = append(serverConns, srvEnd)
 			mu.Unlock()
@@ -249,16 +249,21 @@ func TestFlowHash_RealPool_Spreads(t *testing.T) {
 		rwg.Add(1)
 		go func(idx int, c net.Conn) {
 			defer rwg.Done()
+			defer c.Close()
+			framed, err := NewUDPConnOverTCP(ctx, c)
+			if err != nil {
+				return
+			}
 			buf := make([]byte, config.LargeBufferSize)
 			for {
-				n, err := c.Read(buf)
+				n, err := framed.Read(buf)
 				if err != nil {
 					return
 				}
-				if n < datagramHeaderLen+typePrefixLen {
+				if n < typePrefixLen {
 					continue
 				}
-				ip := buf[tunReserve:n] // [len][type][IP]
+				ip := buf[typePrefixLen:n] // framed reader strips the datagram length
 				key := parseFiveTupleInline(ip)
 				if key.hasPorts {
 					rmu.Lock()
