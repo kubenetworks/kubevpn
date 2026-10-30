@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -45,6 +46,19 @@ func (c *batchTestConn) Write(b []byte) (int, error) {
 	}
 	return n, err
 }
+func batchTLSConfig(t testing.TB) *tls.Config {
+	t.Helper()
+	cp, kp, err := cert.GenerateSelfSignedCertKeyWithFixtures("localhost", []net.IP{net.IPv4(127, 0, 0, 1)}, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := tls.X509KeyPair(cp, kp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &tls.Config{Certificates: []tls.Certificate{key}, MinVersion: tls.VersionTLS13}
+}
+
 func batchTCPPair(t testing.TB, encrypted bool) (net.Conn, net.Conn) {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -65,25 +79,190 @@ func batchTCPPair(t testing.TB, encrypted bool) (net.Conn, net.Conn) {
 	if !encrypted {
 		return c, s
 	}
-	cp, kp, err := cert.GenerateSelfSignedCertKeyWithFixtures("localhost", []net.IP{net.IPv4(127, 0, 0, 1)}, nil, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	key, err := tls.X509KeyPair(cp, kp)
-	if err != nil {
-		t.Fatal(err)
-	}
-	server := tls.Server(s, &tls.Config{Certificates: []tls.Certificate{key}, MinVersion: tls.VersionTLS13})
+	server := tls.Server(s, batchTLSConfig(t))
 	client := tls.Client(c, &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS13}) // test-only loopback certificate
 	done := make(chan error, 1)
-	go func() { done <- server.Handshake() }()
-	if err := client.Handshake(); err != nil {
-		t.Fatal(err)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	go func() { done <- server.HandshakeContext(ctx) }()
+	clientErr := client.HandshakeContext(ctx)
+	if clientErr != nil {
+		c.Close()
+		s.Close()
 	}
-	if err := <-done; err != nil {
-		t.Fatal(err)
+	serverErr := <-done // join even when the client handshake failed
+	if clientErr != nil || serverErr != nil {
+		t.Fatalf("TLS handshake: client=%v server=%v", clientErr, serverErr)
 	}
 	return client, server
+}
+
+// benchmarkFrameSink validates every frame with one reusable read buffer. Counts
+// are local to this worker and inspected only after joining; no write wrappers.
+func benchmarkFrameSink(peer net.Conn, frames [][]byte, group int, ack chan<- error) (int, error) {
+	buf := make([]byte, len(frames[0]))
+	count := 0
+	for {
+		_, err := io.ReadFull(peer, buf[:2])
+		if err == io.EOF {
+			return count, nil
+		}
+		if err != nil {
+			return count, err
+		}
+		want := frames[count%len(frames)]
+		if int(binary.BigEndian.Uint16(buf[:2])) != len(want)-2 {
+			return count, fmt.Errorf("frame %d length mismatch", count)
+		}
+		if _, err := io.ReadFull(peer, buf[2:]); err != nil {
+			return count, err
+		}
+		if !bytes.Equal(buf, want) {
+			return count, fmt.Errorf("frame %d corrupt or reordered", count)
+		}
+		count++
+		if ack != nil && count%group == 0 {
+			ack <- nil
+		}
+	}
+}
+
+func BenchmarkSlotBatchActivity(b *testing.B) {
+	for _, encrypted := range []bool{false, true} {
+		transport := "concreteTCP"
+		if encrypted {
+			transport = "realTLS"
+		}
+		for _, enabled := range []bool{false, true} {
+			statsMode := "off"
+			if enabled {
+				statsMode = "on"
+			}
+			for _, burst := range []int{1, 32} {
+				mode := "sparse"
+				if burst == 32 {
+					mode = "32burst"
+				}
+				b.Run(transport+"/stats="+statsMode+"/"+mode, func(b *testing.B) {
+					raw, peer := batchTCPPair(b, encrypted)
+					ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+					q := make(chan *Packet, 32)
+					var stats *HeartbeatStats
+					if enabled {
+						stats = &HeartbeatStats{}
+					}
+					s := &connSlot{inbound: q, stats: stats}
+					packets := make([]*Packet, burst)
+					frames := make([][]byte, burst)
+					for i := range packets {
+						p := batchPacket(1500, i)
+						p.release() // keep one fixture reference
+						packets[i] = p
+						frames[i] = append([]byte(nil), p.data[:1500]...)
+					}
+					ack := make(chan error, 1)
+					recvDone, writeDone := make(chan struct{}), make(chan struct{})
+					var received int
+					var recvErr error
+					// One bounded group buffer; timed groups only drain bytes. Validate
+					// complete framing/payload before and after the measured workload.
+					groupBuf := make([]byte, burst*1500)
+					go func() {
+						defer close(recvDone)
+						for group := 0; group < b.N+2; group++ {
+							if _, recvErr = io.ReadFull(peer, groupBuf); recvErr != nil {
+								return
+							}
+							if group == 0 || group == b.N+1 {
+								for i, want := range frames {
+									if !bytes.Equal(groupBuf[i*1500:(i+1)*1500], want) {
+										recvErr = fmt.Errorf("validation group %d frame %d corrupt", group, i)
+										return
+									}
+								}
+							} else {
+								received += burst
+							}
+							select {
+							case ack <- nil:
+							case <-ctx.Done():
+								return
+							}
+						}
+						var extra [1]byte
+						n, err := peer.Read(extra[:])
+						if n != 0 || err != io.EOF {
+							recvErr = fmt.Errorf("unexpected trailing data: n=%d err=%v", n, err)
+						}
+					}()
+					errs := make(chan error, 1)
+					go func() { defer close(writeDone); s.writeGeneration(ctx, raw, errs, 0) }()
+					defer func() {
+						cancel()
+						raw.Close()
+						peer.Close()
+						<-writeDone
+						<-recvDone
+						drainPacketChan(q)
+						for _, p := range packets {
+							p.release()
+						}
+					}()
+					sendGroup := func() {
+						for _, p := range packets {
+							p.acquire()
+							select {
+							case q <- p:
+							case <-ctx.Done():
+								p.release()
+								b.Fatal(ctx.Err())
+							}
+						}
+						select {
+						case <-ack:
+						case <-recvDone:
+							b.Fatalf("receiver stopped: %v", recvErr)
+						case err := <-errs:
+							b.Fatal(err)
+						case <-ctx.Done():
+							b.Fatal(ctx.Err())
+						}
+					}
+					sendGroup() // untimed full-payload warmup, not in received
+					b.ReportAllocs()
+					b.SetBytes(int64(burst * 1500))
+					b.ResetTimer()
+					for i := 0; i < b.N; i++ {
+						sendGroup()
+					}
+					b.StopTimer()
+					sendGroup() // untimed full-payload postrun validation
+					close(q)
+					<-writeDone
+					// Writer is joined before EOF, so the sink also rejects extra frames.
+					raw.Close()
+					<-recvDone
+					if recvErr != nil || received != b.N*burst {
+						b.Fatalf("frames=%d want=%d: %v", received, b.N*burst, recvErr)
+					}
+					if enabled {
+						got := stats.Snapshot().Slots[0]
+						// Account separately for the two untimed validation bursts.
+						total := received + 2*burst
+						if got.WritePackets != uint64(total) || got.WriteBytes != uint64(total*1498) {
+							b.Fatalf("stats mismatch: %+v", got)
+						}
+					}
+					for _, p := range packets {
+						if p.refs.Load() != 0 {
+							b.Fatal("writer retained packet")
+						}
+					}
+					b.ReportMetric(float64(burst), "frames/op")
+				})
+			}
+		}
+	}
 }
 func batchPacket(size, seq int) *Packet {
 	buf := config.LPool.Get().([]byte)
@@ -198,6 +377,101 @@ func TestConnBatchTCPWritev(t *testing.T) {
 		t.Fatalf("per-frame stats %d", got)
 	}
 	checkBatchRefs(t, packets)
+}
+
+// Prefill and close the queue before starting the real slot writer so scheduler
+// timing cannot split the known batch. Faults still write their prefix to TCP/TLS.
+func TestConnBatchSlotActivity(t *testing.T) {
+	for _, encrypted := range []bool{false, true} {
+		for _, mode := range []string{"full", "empty", "zero", "partial-first", "prefix-error", "partial-next", "all-error", "nil-stats", "old-generation", "invalid-slot"} {
+			t.Run(fmt.Sprintf("tls=%v/%s", encrypted, mode), func(t *testing.T) {
+				raw, peer := batchTCPPair(t, encrypted)
+				var calls atomic.Int64
+				now := time.Unix(1700000000, 0)
+				stats := &HeartbeatStats{now: func() time.Time { calls.Add(1); return now }}
+				stats.BeginGeneration()
+				stats.MarkReply()
+				before := stats.Snapshot()
+				calls.Store(0)
+				var conn net.Conn = raw // exercise concrete TCP writev and real TLS
+				complete, wireBytes := 3, 78
+				var wantErr error
+				switch mode {
+				case "empty":
+					complete, wireBytes = 0, 0
+				case "zero":
+					conn = &batchTestConn{Conn: raw, zero: true}
+					complete, wireBytes, wantErr = 0, 0, io.ErrShortWrite
+				case "partial-first", "prefix-error", "partial-next", "all-error":
+					wireBytes = map[string]int{"partial-first": 5, "prefix-error": 51, "partial-next": 56, "all-error": 78}[mode]
+					complete = map[string]int{"partial-first": 0, "prefix-error": 2, "partial-next": 2, "all-error": 3}[mode]
+					conn = &batchTestConn{Conn: raw, limit: wireBytes, failAfter: 1}
+					wantErr = io.ErrUnexpectedEOF
+				}
+				q := make(chan *Packet, 3)
+				var packets []*Packet
+				var wire []byte
+				if mode != "empty" {
+					for i, size := range []int{20, 31, 27} {
+						p := batchPacket(size, i)
+						packets = append(packets, p)
+						wire = append(wire, p.data[:size]...)
+						q <- p
+					}
+				}
+				close(q)
+				defer checkBatchRefs(t, packets)
+				slot := &connSlot{inbound: q, stats: stats}
+				generation := uint64(1)
+				if mode == "nil-stats" {
+					slot.stats = nil
+				} else if mode == "old-generation" {
+					generation = 0
+				} else if mode == "invalid-slot" {
+					slot.id = ConnPoolSize + 1
+				}
+				errs := make(chan error, 1)
+				slot.writeGeneration(context.Background(), conn, errs, generation)
+				clockCalls := calls.Load() // Snapshot itself uses the clock; exclude it.
+				select {
+				case err := <-errs:
+					if wantErr == nil || !errors.Is(err, wantErr) {
+						t.Errorf("write error=%v, want %v", err, wantErr)
+					}
+				default:
+					if wantErr != nil {
+						t.Errorf("missing write error %v", wantErr)
+					}
+				}
+				_ = raw.Close()
+				_ = peer.SetReadDeadline(time.Now().Add(3 * time.Second))
+				gotWire, err := io.ReadAll(peer)
+				if err != nil || !bytes.Equal(gotWire, wire[:wireBytes]) {
+					t.Fatalf("framed prefix=%x, want %x: %v", gotWire, wire[:wireBytes], err)
+				}
+				if mode == "nil-stats" || mode == "old-generation" || mode == "invalid-slot" {
+					complete = 0
+				}
+				wantBytes := 0
+				for _, p := range packets[:complete] {
+					wantBytes += p.length // type prefix included; framing excluded
+				}
+				wantCalls := int64(0)
+				if complete > 0 {
+					wantCalls = 1
+					before.Slots[0].LastWrite = now
+				}
+				before.Slots[0].WritePackets += uint64(complete)
+				before.Slots[0].WriteBytes += uint64(wantBytes)
+				if got := stats.Snapshot(); got != before {
+					t.Errorf("activity/health snapshot=%+v, want %+v", got, before)
+				}
+				if clockCalls != wantCalls {
+					t.Errorf("activity clock calls=%d, want %d for completed batch", clockCalls, wantCalls)
+				}
+			})
+		}
+	}
 }
 
 func TestConnBatchPartialFrameStats(t *testing.T) {

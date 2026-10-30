@@ -21,7 +21,7 @@ raw IP        = data[tunReserve : datagramHeaderLen+length]
 `pumpTun` reads the TUN into `data[3:]`, reserving the 3-byte head so the datagram
 length and type prefix can be written in place — no shifting on the way out. See
 [Batched / segment-aware TUN reads](#batched--segment-aware-tun-reads) for how one syscall
-may deliver several packets (wireguard-go GRO offload) into a batch of these buffers.
+may deliver several packets (wireguard-go Linux GSO splitting) into a batch of these buffers.
 
 ### Type prefix
 
@@ -39,23 +39,34 @@ The TUN device is a wireguard-go `tun.Device`, whose API reads/writes **multiple
 syscall**: `Read(bufs [][]byte, sizes []int, offset int)`. `tunDevice.pumpTun` picks the loop
 based on the device:
 
-- **`pumpTunBatch`** (real TUN devices) — grabs `BatchSize()` pooled buffers, issues one
-  batched `ReadPackets`, then parses and dispatches **each** returned packet individually into
-  the canonical `[2 len][1 type][IP]` layout. Unused buffers from a short batch go back to the
-  pool. This is the segment-aware path.
+- **`pumpTunBatch`** (real TUN devices) — retains `BatchSize()` buffer slots across reads,
+  refilling only those transferred to dispatch. Unused, invalid and malformed slots stay
+  pump-owned. It parses and dispatches the valid reported prefix even when Read also returns
+  an error; cancellation instead stops further dispatch and returns all still-owned buffers.
+  Ownership transfers before calling dispatch, so retained consumer buffers cannot be reused.
 - **`pumpTunSingle`** (plain `net.Conn`, e.g. `net.Pipe` in tests) — the original one-packet
-  loop.
+  loop, not the retained-batch optimization.
 
-**Why "segment-aware" matters:** on Linux, wireguard-go negotiates GRO/GSO offload, so a
-single read can return **GRO-coalesced** packets (up to ~64 KB) and up to 128 of them per
-call. `pumpTunBatch` treats each as its own IP packet. The offset bridge, the Linux-only
-nature of offload (macOS/Windows have `BatchSize()==1`, so this path degrades to one packet
-per read), and the 64 KB frame-boundary guard (oversized coalesced packets are dropped; TCP
-recovers) all live in the `pkg/tun` adapter — see `docs/22-tun-device.md` §4.
+On Linux, native Read splits kernel **GSO** input into caller-provided buffers (up to 128
+packets); it does not GRO-append/reallocate their bases. The adapter removes its extra read
+copy only for Linux `*tun.NativeTun` and sufficiently capacious destinations. Linux `LPool`
+returns length **65536**, capacity **65538**; temporary aliases of length 65538 permit native
+Read at offset 3 to receive a **65535-byte** segment. The adapter then filters against the
+unchanged logical IP limit **65533**, compacts valid packets by swapping whole buffers, and
+clears the aliases. Oversized packets are dropped, not truncated or put on the wire.
 
-The per-packet copy out of wireguard's scratch into the pooled buffer is the **same single
-copy** the pre-batch code already performed (offsets differ and GRO may reallocate wireguard's
-buffers, so the buffer cannot be shared) — batching does not add copies, it amortizes syscalls.
+Non-Linux, non-native and insufficient-capacity reads keep full-size scratch and copying.
+macOS/Windows have `BatchSize()==1`. Linux write-side **GRO** mutation/coalescing still needs
+private scratch, 16-byte headroom and header clearing; this optimization does not change it.
+Offload retains wireguard-go's internal read/split work: removing the adapter copy is not
+end-to-end zero-copy. See [TUN device design](../../docs/22-tun-device.md) §4.
+
+**Memory is a trade-off:** Darwin-host allocation modeling of the Linux capacities rounds
+65538 to 73728 bytes, adding 8192 bytes per distinct Linux pooled buffer, while removing
+128 adapter read-scratch allocations saves 9 MiB. With 128 pump buffers plus 256 distinct
+queued buffers the model nets -6 MiB; with 2048 queued it nets +8 MiB. Shared references
+count once. Darwin's actual pool remains 65536 bytes; this is neither a global memory
+reduction claim nor a real Linux-kernel benchmark.
 
 ## Datagram Protocol (UDP-over-TCP)
 
@@ -67,9 +78,12 @@ TCP is a stream protocol, so packets are framed with a 2-byte big-endian length 
 
 Read: `readDatagramPacket` reads the 2-byte length, then reads exactly N bytes.
 Write: `writeDatagram(w, buf, payloadLen)` stamps the length header in place in the
-buffer's reserved head and writes the frame `buf[:2+payloadLen]` in a single Write. It
-is idempotent (safe to retry across connections) and emits one contiguous Write, so it
-composes with `bufferedTCP` (one Write == one frame).
+buffer's reserved head and passes the contiguous frame `buf[:2+payloadLen]` to `writeFull`.
+Header stamping is idempotent; **transmission is not safe to retry across connections**.
+Positive short writes continue only on the same writer; zero progress or an error terminates
+the write, and a partly transmitted frame must not be replayed on another socket. Route
+fallback stops once any bytes were written. `frameBatchWriter` preserves each frame's
+header while batching and reports the complete-frame prefix, including before an error.
 
 ### Reference-counted packet buffers
 
@@ -356,8 +370,8 @@ loopback path no longer shifts `[type][IP]` between offsets, and `writeToTun` /
 copies are gone.
 
 **2. In-place datagram framing (`writeDatagram`):** the length header is stamped into the
-reserved 2-byte head and the frame written in one contiguous Write — no scratch buffer.
-Idempotent, so it stays correct across `WriteFunc` retries.
+reserved 2-byte head — no framing scratch buffer. Short writes continue on the same stream;
+idempotent header stamping does not authorize replay after partial transmission.
 
 **3. Zero-copy routing into BufferedTCP:** `routeTun` and inter-client routing hand the
 `*Packet` to `bufferedTCP.writePacket` by reference (one reference transferred, released
@@ -371,6 +385,24 @@ shared buffer would be a data race). Heartbeats are infrequent, so the clone is 
 copy gvisor's section views (`pkt.AsSlices()`, aliased — no copy) straight into the pooled
 buffer in one pass, instead of `pkt.ToView()` (which flattens into a throwaway buffer first)
 followed by a second copy.
+
+**6. Batch activity accounting:** the slot writer sums packet counts and payload bytes for
+`frameBatchWriter`'s complete prefix, then commits one `slotActivity` update (one clock read
+and one slot lock), even when that prefix accompanies an error or the full batch completed
+with an error. A partial frame and the unwritten suffix do not count. Bytes include the
+one-byte type and exclude the two-byte length header. This reduces accounting overhead,
+not health checks: successful writes do not establish heartbeat health.
+
+**7. Single-member route snapshots:** `routeMembersSnapshot` is a value holding one
+`*routeMember` directly in the common one-member case, avoiding the copied slice allocation.
+Multiple members still use a copied slice. This changes allocation only: member identity,
+stale-snapshot validation, newest-first fallback, write serialization and identity-checked
+removal remain unchanged. Removing/re-adding the same conn creates a fresh membership that
+an old write cannot evict.
+
+**8. Retained TUN buffers and qualified direct reads:** unused pump buffers stay owned across
+short batches; Linux native reads can fill pooled buffers without the adapter copy. See the
+read section above for error/cancellation ownership and the capacity/memory trade-off.
 
 ### Remaining copies (unavoidable)
 

@@ -600,8 +600,8 @@ func TestHeartbeatIntegration_GenerationResetsSlotDiagnostics(t *testing.T) {
 	for i := 0; i <= ConnPoolSize; i++ {
 		stats.slotTransition(i, 0, false, "previous failure")
 		stats.slotTransition(i, 0, true, "")
-		stats.slotActivity(i, 0, true, 20)
-		stats.slotActivity(i, 0, false, 30)
+		stats.slotActivity(i, 0, true, 1, 20)
+		stats.slotActivity(i, 0, false, 1, 30)
 	}
 	before := stats.Snapshot()
 	generation := stats.BeginGeneration()
@@ -618,9 +618,49 @@ func TestHeartbeatIntegration_GenerationResetsSlotDiagnostics(t *testing.T) {
 	stats.slotTransition(0, generation, true, "")
 	current := stats.Snapshot()
 	stats.slotTransition(0, generation-1, false, "late old disconnect")
-	stats.slotActivity(0, generation-1, true, 999)
+	stats.slotActivity(0, generation-1, true, 1, 999)
 	if got := stats.Snapshot(); got != current {
 		t.Fatal("late old connection changed current diagnostics")
+	}
+}
+
+func TestHeartbeatIntegration_BatchActivity(t *testing.T) {
+	var calls atomic.Int64
+	now := time.Unix(1700000000, 0)
+	stats := &HeartbeatStats{now: func() time.Time { calls.Add(1); return now }}
+	wire := newProbeWire(t, stats)
+	wire.deliver(wire.echo(wire.send(false)))
+	before := stats.Snapshot()
+	calls.Store(0)
+	// Aggregated activity must not change the correlated health evidence.
+	stats.slotActivity(0, 0, true, 3, 75)
+	stats.slotActivity(0, 0, false, 2, 51)
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("activity clock calls=%d, want 2", got)
+	}
+	before.Slots[0].ReadPackets += 3
+	before.Slots[0].ReadBytes += 75
+	before.Slots[0].WritePackets += 2
+	before.Slots[0].WriteBytes += 51
+	before.Slots[0].LastRead, before.Slots[0].LastWrite = now, now
+	if got := stats.Snapshot(); got != before {
+		t.Fatalf("batch totals changed unrelated diagnostics: got %+v want %+v", got, before)
+	}
+	stats.BeginGeneration()
+	before = stats.Snapshot()
+	calls.Store(0)
+	for _, read := range []bool{false, true} {
+		stats.slotActivity(0, 1, read, 0, 999)
+		stats.slotActivity(-1, 1, read, 2, 999)
+		stats.slotActivity(ConnPoolSize+1, 1, read, 2, 999)
+		stats.slotActivity(0, 0, read, 2, 999)
+		(*HeartbeatStats)(nil).slotActivity(0, 1, read, 2, 999)
+	}
+	if got := calls.Load(); got != 0 {
+		t.Fatalf("rejected activity read clock %d times", got)
+	}
+	if got := stats.Snapshot(); got != before {
+		t.Fatalf("rejected activity changed diagnostics: got %+v want %+v", got, before)
 	}
 }
 

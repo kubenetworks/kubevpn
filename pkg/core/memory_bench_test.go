@@ -1,6 +1,7 @@
 package core
 
 import (
+	"fmt"
 	"runtime"
 	"testing"
 
@@ -19,18 +20,20 @@ func BenchmarkLPoolGetPut(b *testing.B) {
 	}
 }
 
-// TestPacketChannelWorstCaseMemory pins the memory cost of a saturated packet channel:
-// a full channel holds MaxSize *Packet, each owning a LargeBufferSize (64 KiB) pooled
-// buffer, so one channel's worst case is MaxSize * 64 KiB. The data plane has 7+ such
-// channels (tun in/out, gvisor inbound, inter-client, per-slot × ConnPoolSize, route,
-// buffered-tcp), so an oversized MaxSize multiplies straight into client RSS.
+// TestPacketChannelWorstCaseMemory bounds distinct backing allocations in a
+// saturated channel using the actual factory capacity and large-object rounding.
+// Linux capacity 65538 rounds to 72 KiB, not 64 KiB. Multiple queues can pin many
+// distinct buffers, but shared Packet references must not be counted twice.
 //
 // This is a guardrail (not a micro-benchmark): keep a single channel's worst case
 // bounded so a future MaxSize bump cannot silently blow up client memory.
 func TestPacketChannelWorstCaseMemory(t *testing.T) {
-	worst := MaxSize * config.LargeBufferSize
-	t.Logf("worst-case memory per saturated packet channel: MaxSize=%d × %d B = %d MiB",
-		MaxSize, config.LargeBufferSize, worst/1024/1024)
+	buf := config.LPool.New().([]byte)
+	// Large objects round to runtime heap pages (8 KiB), not slice capacity.
+	allocation := (cap(buf) + 8191) / 8192 * 8192
+	worst := MaxSize * allocation
+	t.Logf("channel backing model: logical=%d capacity=%d rounded=%d × depth=%d = %d bytes",
+		len(buf), cap(buf), allocation, MaxSize, worst)
 
 	const perChannelCeiling = 32 * 1024 * 1024 // 32 MiB
 	if worst > perChannelCeiling {
@@ -40,10 +43,9 @@ func TestPacketChannelWorstCaseMemory(t *testing.T) {
 	}
 }
 
-// TestPacketChannelMemory_Measured reports the actual heap held by a saturated packet
-// channel and compares it to the theoretical MaxSize × 64 KiB. Informational (no hard
-// assertion — HeapInuse deltas are noisy), it confirms the guardrail's arithmetic
-// reflects real resident memory.
+// TestPacketChannelMemory_Measured reports heap held by distinct actual-factory
+// buffers in a saturated channel. Informational: HeapInuse deltas are noisy and
+// are not process RSS.
 func TestPacketChannelMemory_Measured(t *testing.T) {
 	ch := make(chan *Packet, MaxSize)
 	runtime.GC()
@@ -51,7 +53,7 @@ func TestPacketChannelMemory_Measured(t *testing.T) {
 	runtime.ReadMemStats(&m0)
 
 	for i := 0; i < MaxSize; i++ {
-		ch <- &Packet{data: make([]byte, config.LargeBufferSize)}
+		ch <- &Packet{data: config.LPool.New().([]byte)}
 	}
 
 	runtime.GC()
@@ -60,6 +62,35 @@ func TestPacketChannelMemory_Measured(t *testing.T) {
 	runtime.KeepAlive(ch)
 
 	delta := int64(m1.HeapInuse) - int64(m0.HeapInuse)
-	t.Logf("measured HeapInuse for a saturated channel (depth=%d): ~%d MiB (theoretical %d MiB)",
-		MaxSize, delta/1024/1024, (MaxSize*config.LargeBufferSize)/1024/1024)
+	t.Logf("actual LPool factory saturated channel depth=%d: HeapInuse delta=%d bytes (includes allocator rounding)", MaxSize, delta)
+}
+
+// Host allocation model only; neither RSS nor a kernel TUN benchmark. Every
+// counted queued buffer is distinct: multiple Packet references do not multiply
+// its backing allocation. Linux's two extra capacity bytes cross a heap page.
+func TestStage4HeapAllocationModel(t *testing.T) {
+	cost := make(map[int]uint64)
+	for _, capacity := range []int{65536, 65538, 65551} {
+		t.Run(fmt.Sprint(capacity), func(t *testing.T) {
+			buffers := make([][]byte, 128)
+			runtime.GC()
+			var before, after runtime.MemStats
+			runtime.ReadMemStats(&before)
+			for i := range buffers {
+				buffers[i] = make([]byte, capacity)
+			}
+			runtime.ReadMemStats(&after)
+			runtime.KeepAlive(buffers)
+			cost[capacity] = (after.TotalAlloc - before.TotalAlloc) / 128
+			t.Logf("distinct backing requested=%d measured allocation=%d bytes/buffer", capacity, cost[capacity])
+		})
+	}
+	removed := 128 * cost[65551]
+	t.Logf("removed adapter scratch: 128*65551=%d logical bytes; measured backing=%d bytes", 128*65551, removed)
+	for _, queued := range []int{0, 256, 2048} {
+		// Pump-owned + queued distinct buffers; scratch exists only in old model.
+		old := uint64(128+queued)*cost[65536] + removed
+		fresh := uint64(128+queued) * cost[65538]
+		t.Logf("distinct queued=%d old=%d direct=%d delta=%d bytes (shared refs counted once)", queued, old, fresh, int64(fresh)-int64(old))
+	}
 }

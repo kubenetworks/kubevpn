@@ -379,8 +379,8 @@ func (h *HeartbeatStats) observeReply(ip []byte, generation uint64, arrival int)
 	return true
 }
 
-func (h *HeartbeatStats) slotActivity(slot int, generation uint64, read bool, n int) {
-	if h == nil || slot < 0 || slot > ConnPoolSize {
+func (h *HeartbeatStats) slotActivity(slot int, generation uint64, read bool, packets, bytes int) {
+	if h == nil || slot < 0 || slot > ConnPoolSize || packets == 0 {
 		return
 	}
 	h.slotMu[slot].Lock()
@@ -392,12 +392,12 @@ func (h *HeartbeatStats) slotActivity(slot int, generation uint64, read bool, n 
 	s.Generation = generation
 	if read {
 		s.LastRead = h.clock()
-		s.ReadPackets++
-		s.ReadBytes += uint64(n)
+		s.ReadPackets += uint64(packets)
+		s.ReadBytes += uint64(bytes)
 	} else {
 		s.LastWrite = h.clock()
-		s.WritePackets++
-		s.WriteBytes += uint64(n)
+		s.WritePackets += uint64(packets)
+		s.WriteBytes += uint64(bytes)
 	}
 }
 

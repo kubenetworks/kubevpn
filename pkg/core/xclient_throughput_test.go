@@ -28,10 +28,12 @@ package core
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"net"
 	"slices"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -64,140 +66,218 @@ func silenceDataPlaneLogs() {
 }
 
 type xclientHarness struct {
-	clientA   *stack.Stack
-	sinkPort  uint16
-	sinkBytes *atomic.Int64
-	server    interClientServer
-	cancel    context.CancelFunc
+	clientA    *stack.Stack
+	appEp      *channel.Endpoint
+	sinkPort   uint16
+	sinkBytes  *atomic.Int64
+	server     interClientServer
+	ctx        context.Context
+	cancel     context.CancelFunc
+	once       sync.Once
+	workers    sync.WaitGroup
+	mu         sync.Mutex
+	closing    bool
+	resources  []io.Closer
+	transports []*clientTransport
+	handler    *gvisorTCPHandler
+	stats      [2]*HeartbeatStats
 }
 
-// newShapedInterClientServer is newInterClientServer with an optional per-conn read latency on
-// every accepted tunnel connection, modelling the client<->traffic-manager RTT. Both A's and B's
-// pool connections are accepted here, so the shaping applies symmetrically to both client hops
-// (matching how connpool_bench_test.go models a latency link).
-func newShapedInterClientServer(ctx context.Context, b *testing.B, latency time.Duration) interClientServer {
+// own/goRun cover only fixture-owned resources/tasks, not unexposed library
+// workers. Admission is fenced before Wait, including accepts and dials racing stop.
+func (h *xclientHarness) own(c io.Closer) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.closing {
+		c.Close()
+		return false
+	}
+	h.resources = append(h.resources, c)
+	return true
+}
+func (h *xclientHarness) goRun(fn func()) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.closing {
+		return
+	}
+	h.workers.Add(1)
+	go func() { defer h.workers.Done(); fn() }()
+}
+func (h *xclientHarness) close() {
+	h.once.Do(func() {
+		h.mu.Lock()
+		h.closing = true
+		resources := append([]io.Closer(nil), h.resources...)
+		h.mu.Unlock()
+		var stacks []*clientStack
+		if h.handler != nil {
+			h.handler.mu.Lock()
+			h.cancel() // fence publication before capturing owned server stacks
+			for _, cs := range h.handler.clients {
+				stacks = append(stacks, cs)
+			}
+			h.handler.mu.Unlock()
+		} else {
+			h.cancel()
+		}
+		for _, c := range resources {
+			c.Close()
+		}
+		h.workers.Wait()
+		for _, cs := range stacks {
+			<-cs.done
+		}
+		if h.clientA != nil {
+			h.clientA.Destroy()
+			h.appEp.Close()
+		}
+		for _, ct := range h.transports {
+			ct.close()
+			drainPacketChan(ct.dev.tunInbound)
+			drainPacketChan(ct.dev.tunOutbound)
+		}
+		h.server.hub.stopTUNBridge()
+	})
+}
+
+// xclientBenchmarkTransport returns an unwrapped concrete TCP or real TLS conn,
+// preserving writev versus aggregate-buffer selection in the real slot writer.
+type xclientBenchmarkTransport struct {
+	h         *xclientHarness
+	encrypted bool
+}
+
+func (t xclientBenchmarkTransport) Dial(ctx context.Context, addr string) (net.Conn, error) {
+	c, err := (&net.Dialer{}).DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+	if !t.h.own(c) {
+		return nil, net.ErrClosed
+	}
+	if !t.encrypted {
+		return c, nil
+	}
+	tc := tls.Client(c, &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS13}) // loopback fixture only
+	if err := tc.HandshakeContext(ctx); err != nil {
+		c.Close()
+		return nil, err
+	}
+	return tc, nil
+}
+
+func (h *xclientHarness) listen(b *testing.B, handle func(net.Conn)) net.Listener {
 	b.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		b.Fatalf("server listener: %v", err)
+		b.Fatal(err)
 	}
-	b.Cleanup(func() { ln.Close() })
-	hub := NewRouteHub()
-	handler := GvisorLocalTCPHandler(hub)
-	go func() {
+	h.own(ln)
+	h.goRun(func() {
 		for {
-			conn, err := ln.Accept()
+			c, err := ln.Accept()
 			if err != nil {
 				return
 			}
-			if latency > 0 {
-				conn = &shapedConn{Conn: conn, latency: latency}
+			if !h.own(c) {
+				return
 			}
-			go handler.Handle(ctx, conn)
+			h.goRun(func() { defer c.Close(); handle(c) })
 		}
-	}()
-	return interClientServer{hub: hub, port: ln.Addr().(*net.TCPAddr).Port}
+	})
+	return ln
 }
 
-// newXClientHarness wires server + a registered client B + originator client A + a shared loopback
-// sink. latency shapes each client<->server hop (0 = clean loopback). Returns once B's route is
-// registered and A's connection pool has had time to connect.
+// The legacy entrypoint retains its topology: B runs full routines; A runs the
+// data pool plus its originator bridge. New modes vary only stats and transport.
+// latency is a per-read shaping artifact, NOT WAN RTT; new modes always use zero.
 func newXClientHarness(b *testing.B, latency time.Duration) *xclientHarness {
+	return newXClientHarnessMode(b, latency, false, false, true)
+}
+func newXClientHarnessMode(b *testing.B, latency time.Duration, encrypted, statsOn, legacy bool) *xclientHarness {
 	b.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-
-	// Shared sink: both B's inter-client forwarder and the server's cluster forwarder dial
-	// 127.0.0.1:<sinkPort>. The two sub-benchmarks never run concurrently, so one sink suffices.
-	sinkLn, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		cancel()
-		b.Fatalf("sink listen: %v", err)
+	h := &xclientHarness{ctx: ctx, cancel: cancel, sinkBytes: &atomic.Int64{}, server: interClientServer{hub: NewRouteHub()}}
+	b.Cleanup(h.close) // also covers setup failures
+	if statsOn {
+		h.stats = [2]*HeartbeatStats{{}, {}}
+	} else if legacy {
+		h.stats[1] = &HeartbeatStats{} // preserve the existing B fixture
 	}
-	go func() { <-ctx.Done(); sinkLn.Close() }()
-	sinkBytes := &atomic.Int64{}
-	go func() {
+	sinkLn := h.listen(b, func(c net.Conn) {
+		buf := make([]byte, 64*1024)
 		for {
-			c, err := sinkLn.Accept()
+			n, err := c.Read(buf)
+			if n > 0 {
+				h.sinkBytes.Add(int64(n))
+			}
 			if err != nil {
 				return
 			}
-			go func(c net.Conn) {
-				defer c.Close()
-				buf := make([]byte, 64*1024)
-				for {
-					n, err := c.Read(buf)
-					if n > 0 {
-						sinkBytes.Add(int64(n))
-					}
-					if err != nil {
-						return
-					}
-				}
-			}(c)
 		}
-	}()
-	sinkPort := uint16(sinkLn.Addr().(*net.TCPAddr).Port)
+	})
+	h.sinkPort = uint16(sinkLn.Addr().(*net.TCPAddr).Port)
+	h.handler = GvisorLocalTCPHandler(h.server.hub).(*gvisorTCPHandler)
+	var tlsConfig *tls.Config
+	if encrypted {
+		tlsConfig = batchTLSConfig(b)
+	}
+	ln := h.listen(b, func(c net.Conn) {
+		if encrypted {
+			tc := tls.Server(c, tlsConfig)
+			if tc.HandshakeContext(ctx) != nil {
+				return
+			}
+			c = tc
+		}
+		if latency > 0 {
+			c = &shapedConn{Conn: c, latency: latency, done: make(chan struct{})}
+		}
+		h.handler.Handle(ctx, c)
+	})
+	h.server.port = ln.Addr().(*net.TCPAddr).Port
+	forward := &Forwarder{Addr: ln.Addr().String(), Connector: NewUDPOverTCPConnector(), Transporter: xclientBenchmarkTransport{h, encrypted}, MaxRetries: 3}
 
-	// Tunnel server: RouteHub + GvisorLocalTCPHandler (forwards injected traffic to 127.0.0.1),
-	// with an optional per-hop RTT shaping the accepted client connections.
-	server := newShapedInterClientServer(ctx, b, latency)
-
-	// Client B: full clientTransport. Its inter-client stack routine forwards A->B traffic to
-	// 127.0.0.1:<port A dialed> = the sink. Register B's route so the server hairpins to it
-	// (an unregistered TUN-pool dst would be dropped, see readFromTCPConnWriteToEndpoint).
-	osB, _ := startPipeClient(ctx, b, server.port, xclientBIP)
+	osB, tunB := net.Pipe()
+	h.own(osB)
+	h.own(tunB)
+	deviceB := h.newDevice(tunB, forward, h.stats[1])
+	for _, r := range deviceB.routines() {
+		h.goRun(func() { r.fn(ctx) })
+	}
+	h.goRun(func() { _, _ = io.Copy(io.Discard, osB) })
 	registerRoute(b, osB, xclientBIP)
-	waitForRoutes(b, server.hub, xclientBIP)
+	waitForRoutes(b, h.server.hub, xclientBIP)
 
-	// Client A: a gvisor stack that originates flows, bridged through a real tunDevice + pool.
-	clientA := buildOriginatorStack(ctx, b, server.port, xclientAIP)
-	// Let A's connection pool establish before flows are dialed (A registers its own route
-	// lazily on the first data packet; the gonet handshake tolerates the brief warm-up).
-	time.Sleep(500 * time.Millisecond)
-
-	return &xclientHarness{clientA: clientA, sinkPort: sinkPort, sinkBytes: sinkBytes, server: server, cancel: cancel}
-}
-
-func (h *xclientHarness) close() { h.cancel() }
-
-// buildOriginatorStack mirrors production client A: gonet/kernel TCP -> gvisor stack -> TUN ->
-// connection pool -> tunnel server. Flows are dialed from the returned stack with gonet.
-func buildOriginatorStack(ctx context.Context, b *testing.B, serverPort int, tunIP string) *stack.Stack {
-	b.Helper()
 	tunEnd, appEnd := newPacketConnPair()
-	device := &tunDevice{
-		tun:         tunEnd,
-		tunInbound:  make(chan *Packet, MaxSize),
-		tunOutbound: make(chan *Packet, MaxSize),
-		errChan:     make(chan error, 1),
-	}
-	ct := newClientTransport(device, &Forwarder{
-		Addr:        fmt.Sprintf("127.0.0.1:%d", serverPort),
-		Connector:   NewUDPOverTCPConnector(),
-		Transporter: TCPTransporter(nil),
-		MaxRetries:  3,
-	}, nil)
-	device.transport = ct
-	// Only the data-plane routines are needed on A (no inter-client stack, no heartbeat: the
-	// route is registered by the first data packet's AddRoute on the server).
-	go device.readFromTun(ctx)
-	go device.writeToTun(ctx)
-	go ct.runConnPool(ctx)
-
-	appEp := channel.New(8192, uint32(config.DefaultMTU), tcpip.GetRandMacAddr())
-	appEp.LinkEPCapabilities = stack.CapabilityRXChecksumOffload
-	s := newGvisorStack(ctx, appEp, LocalTCPForwarder, LocalUDPForwarder)
-	ip := net.ParseIP(tunIP).To4()
-	addr := tcpip.ProtocolAddress{
-		Protocol:          ipv4.ProtocolNumber,
-		AddressWithPrefix: tcpip.AddrFrom4([4]byte(ip)).WithPrefix(),
-	}
-	if err := s.AddProtocolAddress(1, addr, stack.AddressProperties{}); err != nil {
+	// packetConn endpoints share done but not sync.Once; closing this endpoint
+	// shuts down both sides. Do not close its peer a second time.
+	h.own(tunEnd)
+	deviceA := h.newDevice(tunEnd, forward, h.stats[0])
+	ct := deviceA.transport.(*clientTransport)
+	h.goRun(func() { deviceA.readFromTun(ctx) })
+	h.goRun(func() { deviceA.writeToTun(ctx) })
+	h.goRun(func() { ct.runConnPool(ctx) })
+	h.appEp = channel.New(8192, uint32(config.DefaultMTU), tcpip.GetRandMacAddr())
+	h.appEp.LinkEPCapabilities = stack.CapabilityRXChecksumOffload
+	h.clientA = newGvisorStack(ctx, h.appEp, LocalTCPForwarder, LocalUDPForwarder)
+	ip := net.ParseIP(xclientAIP).To4()
+	addr := tcpip.ProtocolAddress{Protocol: ipv4.ProtocolNumber, AddressWithPrefix: tcpip.AddrFrom4([4]byte(ip)).WithPrefix()}
+	if err := h.clientA.AddProtocolAddress(1, addr, stack.AddressProperties{}); err != nil {
 		b.Fatalf("add client A addr: %v", err)
 	}
-	go bridgeEndpointToConn(ctx, appEp, appEnd)
-	go bridgeConnToEndpoint(ctx, appEnd, appEp)
-	return s
+	h.goRun(func() { bridgeEndpointToConn(ctx, h.appEp, appEnd) })
+	h.goRun(func() { bridgeConnToEndpoint(ctx, appEnd, h.appEp) })
+	time.Sleep(500 * time.Millisecond) // unchanged legacy warmup, outside measurement
+	return h
+}
+func (h *xclientHarness) newDevice(tun net.Conn, forward *Forwarder, stats *HeartbeatStats) *tunDevice {
+	d := &tunDevice{tun: tun, tunInbound: make(chan *Packet, MaxSize), tunOutbound: make(chan *Packet, MaxSize), errChan: make(chan error, 1)}
+	ct := newClientTransport(d, forward, stats)
+	d.transport = ct
+	h.transports = append(h.transports, ct)
+	return d
 }
 
 // runFlows dials `flows` concurrent TCP flows from A to dstIP:sinkPort, pumps a total of b.N
@@ -206,7 +286,8 @@ func buildOriginatorStack(ctx context.Context, b *testing.B, serverPort int, tun
 // of one data slot. Varying business flows does not vary the tunnel connection count;
 // docs/50's earlier batching results used the previous four-data-slot default.
 func (h *xclientHarness) runFlows(b *testing.B, dstIP string, chunkSize, flows int) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(h.ctx, 60*time.Second)
+	defer cancel()
 	ip := net.ParseIP(dstIP).To4()
 	remote := tcpip.FullAddress{NIC: 1, Addr: tcpip.AddrFrom4([4]byte(ip)), Port: h.sinkPort}
 	conns := make([]*gonet.TCPConn, flows)
@@ -216,6 +297,8 @@ func (h *xclientHarness) runFlows(b *testing.B, dstIP string, chunkSize, flows i
 			b.Fatalf("dial %d A->%s: %v", i, dstIP, err)
 		}
 		conns[i] = conn
+		h.own(conn)
+		_ = conn.SetWriteDeadline(time.Now().Add(60 * time.Second))
 		defer conn.Close()
 	}
 
@@ -246,12 +329,21 @@ func (h *xclientHarness) runFlows(b *testing.B, dstIP string, chunkSize, flows i
 	}
 	b.StopTimer()
 
-	for range conns {
-		if err := <-writeErr; err != nil {
-			b.Fatalf("write flow A->%s: %v", dstIP, err)
+	if h.sinkBytes.Load()-startSink < total {
+		for _, c := range conns {
+			c.Close()
 		}
 	}
-	if got := h.sinkBytes.Load() - startSink; got < total {
+	var firstErr error
+	for range conns {
+		if err := <-writeErr; err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	if firstErr != nil {
+		b.Fatalf("write flow A->%s: %v", dstIP, firstErr)
+	}
+	if got := h.sinkBytes.Load() - startSink; got != total {
 		b.Fatalf("A->%s (%d flows): sink received %d of %d bytes (stalled / lost)", dstIP, flows, got, total)
 	}
 }
@@ -263,20 +355,33 @@ func BenchmarkCrossClientMixed(b *testing.B) {
 	silenceDataPlaneLogs()
 	h := newXClientHarness(b, 0)
 	defer h.close()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer ln.Close()
-	go func() {
-		for {
-			c, e := ln.Accept()
-			if e != nil {
-				return
-			}
-			go func() { defer c.Close(); _, _ = io.Copy(c, c) }()
+	h.runMixed(b)
+}
+
+func BenchmarkCrossClientMixedModes(b *testing.B) {
+	silenceDataPlaneLogs()
+	for _, encrypted := range []bool{false, true} {
+		transport := "rawTCP"
+		if encrypted {
+			transport = "TLS"
 		}
-	}()
+		for _, enabled := range []bool{false, true} {
+			statsMode := "off"
+			if enabled {
+				statsMode = "on"
+			}
+			b.Run(transport+"/stats="+statsMode, func(b *testing.B) {
+				h := newXClientHarnessMode(b, 0, encrypted, enabled, false)
+				defer h.close()
+				b.ReportAllocs()
+				h.runMixed(b)
+			})
+		}
+	}
+}
+
+func (h *xclientHarness) runMixed(b *testing.B) {
+	ln := h.listen(b, func(c net.Conn) { _, _ = io.Copy(c, c) })
 	addr := tcpip.FullAddress{NIC: 1, Addr: tcpip.AddrFromSlice(net.ParseIP(xclientBIP).To4()), Port: uint16(ln.Addr().(*net.TCPAddr).Port)}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -284,6 +389,7 @@ func BenchmarkCrossClientMixed(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
+	h.own(request)
 	defer request.Close()
 	bulkAddr := addr
 	bulkAddr.Port = h.sinkPort
@@ -294,8 +400,10 @@ func BenchmarkCrossClientMixed(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
+		h.own(bulk[i])
 	}
 	defer func() {
+		cancel() // also releases workers still waiting at the start gate
 		for _, c := range bulk {
 			c.Close()
 		}
@@ -303,10 +411,19 @@ func BenchmarkCrossClientMixed(b *testing.B) {
 			<-done
 		}
 	}()
+	startBulk := make(chan struct{})
+	var ready sync.WaitGroup
+	ready.Add(len(bulk))
 	for _, c := range bulk {
 		go func(c *gonet.TCPConn) {
 			defer func() { done <- struct{}{} }()
 			data := make([]byte, 32*1024)
+			ready.Done()
+			select {
+			case <-startBulk:
+			case <-ctx.Done():
+				return
+			}
 			for {
 				if _, e := c.Write(data); e != nil {
 					return
@@ -317,9 +434,11 @@ func BenchmarkCrossClientMixed(b *testing.B) {
 	samples := make([]time.Duration, b.N)
 	payload := make([]byte, 64)
 	reply := make([]byte, 64)
+	ready.Wait()
 	startBytes := h.sinkBytes.Load()
 	b.ResetTimer()
 	start := time.Now()
+	close(startBulk) // no bulk payload was submitted before this window
 	for i := range samples {
 		_ = request.SetDeadline(time.Now().Add(5 * time.Second))
 		sent := time.Now()
@@ -332,13 +451,14 @@ func BenchmarkCrossClientMixed(b *testing.B) {
 		samples[i] = time.Since(sent)
 	}
 	elapsed := time.Since(start)
+	endBytes := h.sinkBytes.Load()
 	b.StopTimer()
 	slices.Sort(samples)
 	if len(samples) > 0 {
 		b.ReportMetric(float64(samples[(len(samples)-1)*95/100].Nanoseconds())/1000, "request-p95-us")
 		b.ReportMetric(float64(samples[(len(samples)-1)*99/100].Nanoseconds())/1000, "request-p99-us")
 	}
-	b.ReportMetric(float64(h.sinkBytes.Load()-startBytes)/elapsed.Seconds()/1e6, "bulk-MB/s")
+	b.ReportMetric(float64(endBytes-startBytes)/elapsed.Seconds()/1e6, "bulk-MB/s")
 }
 
 // BenchmarkFramedBatchWrites measures deterministic writes per frame over a real
@@ -381,6 +501,41 @@ func BenchmarkFramedBatchWrites(b *testing.B) {
 	}
 	b.StopTimer()
 	b.ReportMetric(float64(conn.calls)/float64(b.N*32), "writes/frame")
+}
+
+// BenchmarkCrossClientModes is the step-0 stats/transport comparison, restricted
+// to latency=0 and the current one-data-slot topology. Legacy names remain below.
+func BenchmarkCrossClientModes(b *testing.B) {
+	silenceDataPlaneLogs()
+	for _, encrypted := range []bool{false, true} {
+		transport := "rawTCP"
+		if encrypted {
+			transport = "TLS"
+		}
+		for _, enabled := range []bool{false, true} {
+			statsMode := "off"
+			if enabled {
+				statsMode = "on"
+			}
+			for _, path := range []string{"crossclient", "cluster"} {
+				for _, flows := range []int{1, 8} {
+					b.Run(fmt.Sprintf("%s/stats=%s/%s/flows=%d", transport, statsMode, path, flows), func(b *testing.B) {
+						h := newXClientHarnessMode(b, 0, encrypted, enabled, false)
+						defer h.close()
+						dst := xclientBIP
+						if path == "cluster" {
+							dst = xclientCIP
+						}
+						b.ReportAllocs()
+						h.runFlows(b, dst, 32*1024, flows)
+						if enabled && h.stats[0].Snapshot().Slots[0].WritePackets == 0 {
+							b.Fatal("stats mode recorded no data")
+						}
+					})
+				}
+			}
+		}
+	}
 }
 
 // BenchmarkCrossClientThroughput compares throughput of A->B (cross-client: exercises B's single

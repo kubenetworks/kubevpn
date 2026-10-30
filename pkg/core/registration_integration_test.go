@@ -223,8 +223,8 @@ func TestIntegration_DataSlotsAutoRegisterRouteAndPrimeLiveness(t *testing.T) {
 	before := stats.LastReply()
 	preTeardown := srv.routeConns(v4) // the ConnPoolSize conns registered before teardown
 	srv.dropAllConns()
-	// The client reconnects immediately on a clean disconnect (no backoff — SlotReconnectBackoff
-	// only applies on a dial failure), so a fresh conn can register on this route key before the
+	// The first rapid disconnect (or one after a stable interval) reconnects immediately;
+	// repeated rapid post-dial failures are paced. A fresh conn can still register before the
 	// last torn-down conn is evicted, and the aggregate count may never read 0. Assert instead
 	// that every pre-teardown conn is gone, which is stable regardless of reconnect timing.
 	waitFor(t, 20*time.Second, func() bool {

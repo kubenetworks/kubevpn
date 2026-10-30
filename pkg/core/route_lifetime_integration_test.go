@@ -2,6 +2,8 @@ package core
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"net"
 	"sync"
@@ -18,6 +20,113 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
+
+func TestStage3_SnapshotWriteCancelReregister(t *testing.T) {
+	for _, count := range []int{0, 1, 2} {
+		t.Run(fmt.Sprintf("members=%d", count), func(t *testing.T) {
+			ctx := context.Background()
+			hub := NewRouteHub()
+			ip := net.IPv4(198, 18, 0, 78).To4()
+			key := string(ip)
+			var peers, conns []net.Conn
+			for i := 0; i < count; i++ {
+				peer, conn := batchTCPPair(t, false)
+				peers = append(peers, peer)
+				conns = append(conns, conn)
+				hub.AddRoute(ctx, ip, conn)
+			}
+			pkt := NewPacket(config.LPool.Get().([]byte), 1, nil, nil)
+			copy(pkt.data, []byte{0, 1, 7})
+			defer pkt.release()
+			write := func() {
+				t.Helper()
+				used, err := hub.WriteToRoutePacket(ctx, key, pkt)
+				if count == 0 {
+					if !errors.Is(err, errNoRoute) || used != nil {
+						t.Fatalf("empty route: conn=%v err=%v", used, err)
+					}
+					return
+				}
+				if err != nil || used != conns[count-1] {
+					t.Fatalf("newest member: conn=%v err=%v", used, err)
+				}
+				peer := peers[count-1]
+				_ = peer.SetReadDeadline(time.Now().Add(3 * time.Second))
+				var frame [3]byte
+				if _, err := io.ReadFull(peer, frame[:]); err != nil || frame != [3]byte{0, 1, 7} {
+					t.Fatalf("frame=%v err=%v", frame, err)
+				}
+			}
+			write()
+			canceled, cancel := context.WithCancel(ctx)
+			cancel()
+			_, err := hub.WriteToRoutePacket(canceled, key, pkt)
+			wantErr := context.Canceled
+			if count == 0 {
+				wantErr = errNoRoute
+			}
+			if !errors.Is(err, wantErr) || len(routeSnapshot(hub)[key]) != count || pkt.refs.Load() != 0 {
+				t.Fatalf("cancellation changed membership/ownership: %v", err)
+			}
+
+			// Keep the old list and exact identities across removal and reuse of
+			// the same net.Conn values. A stale snapshot must never write them.
+			list := &ConnList{}
+			if count != 0 {
+				list = hub.routes[key]
+			}
+			members := list.snapshot()
+			for _, conn := range conns {
+				hub.RemoveRoutesByConn(ctx, conn)
+				hub.AddRoute(ctx, ip, conn)
+			}
+			attempted := false
+			_, err = list.writeMembers(ctx, members, func(net.Conn) (int, error) {
+				attempted = true
+				return 0, nil
+			}, routeWriteCallback, func(m *routeMember) bool {
+				hub.mu.Lock()
+				defer hub.mu.Unlock()
+				return hub.routes[key] == list && list.containsMember(m)
+			}, list.prepareWriteFailure)
+			if attempted || err == nil || len(routeSnapshot(hub)[key]) != count {
+				t.Fatal("stale snapshot attempted or pruned re-registration")
+			}
+			write()
+			for _, conn := range conns {
+				hub.RemoveRoutesByConn(ctx, conn)
+			}
+			if hub.HasRoute(key) || pkt.refs.Load() != 0 {
+				t.Fatal("cleanup retained route or packet reference")
+			}
+		})
+	}
+}
+
+func TestStage3_SingleMemberSnapshotAllocation(t *testing.T) {
+	ctx := context.Background()
+	hub := NewRouteHub()
+	ip := net.IPv4(198, 18, 0, 79).To4()
+	key := string(ip)
+	writer := &routeBenchmarkWriter{mockConn: newMockConn("127.0.0.1:79", false)}
+	hub.AddRoute(ctx, ip, writer)
+	pkt := NewPacket(config.LPool.Get().([]byte), 1, nil, nil)
+	defer pkt.release()
+	allocs := testing.AllocsPerRun(1000, func() {
+		used, err := hub.WriteToRoutePacket(ctx, key, pkt)
+		if err != nil || used != writer {
+			t.Fatalf("packet write: conn=%v err=%v", used, err)
+		}
+	})
+	if pkt.refs.Load() != 0 || writer.count != 1001 {
+		t.Fatal("packet ownership or delivery count changed")
+	}
+	// The failure finalizer still allocates; the single-member slice must not.
+	// This isolated packetWriter bound does not apply to raw cancellation I/O.
+	if allocs > 1 {
+		t.Fatalf("single-member hub write allocated %.0f times, want <=1", allocs)
+	}
+}
 
 func lifetimeAwait(t *testing.T, ch <-chan struct{}, what string) {
 	t.Helper()
@@ -133,8 +242,13 @@ func TestRouteLifetime_RawGateRevalidatesSnapshot(t *testing.T) {
 	// Re-add the identical conn under a new membership while the raw gate is held.
 	cl.Remove(raw)
 	cl.Add(raw)
+	current := cl.snapshot()
+	sameIdentity := members.len() != 1 || current.len() != 1 || members.at(0) == current.at(0)
 	cl.unlockWrite()
 	lifetimeAwait(t, done, "raw gate waiter")
+	if sameIdentity {
+		t.Fatal("re-registration reused the old membership identity")
+	}
 	if attempted.Load() {
 		t.Fatal("raw gate waiter attempted a removed snapshot member")
 	}

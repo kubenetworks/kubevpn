@@ -41,6 +41,39 @@ waits for `startupDone` and all workers (including monitor/TUN handlers), then c
 errors cancel the manager; DataSession observes that cancellation outside the
 supervisor and performs cleanup without self-joining.
 
+### Slot-local rapid-failure pacing
+
+`pkg/core/conn_slot.go` independently paces each data/control slot when dialing succeeds
+but declaration, registration, reading or writing repeatedly fails rapidly. This prevents
+a hot reconnect loop without adding another transport supervisor. Default delays are:
+
+| Consecutive rapid post-dial failure | Wait before the next dial |
+|---|---|
+| First | Immediate |
+| Second | 62.5–125 ms |
+| Third | 125–250 ms |
+| Fourth and later | 250–500 ms |
+
+The intervals use jitter with a capped exponential ceiling. **Rapid age is successful
+Dial return → first terminal failure of that connection attempt**, not dial-start →
+cleanup-complete: dial latency, logging, cancellation, native Close and consumer joins must
+not turn an immediate failure into a stable connection. A best-effort `readDL.refresh`
+error after a successful write is only logged; it does not terminate the attempt or count
+toward this timing. Reaching **2 s** before the first terminal failure resets the streak;
+a successful registration, write or probe alone does not. This is a churn metric, not a
+health verdict.
+
+A new generation resets the streak. It does not require consuming the shared heartbeat
+probe-request channel to interrupt a wait: an already-running pacing wait may add at most
+**500 ms** before the new generation's dial. Context cancellation interrupts waits promptly.
+A dial failure clears the post-dial streak and uses only the existing **2 s** dial-failure
+backoff; the two delays are never stacked.
+
+The existing supervisor still owns SSH/port-forward recovery, heartbeat health and terminal
+authentication/trust/configuration failures. Slot pacing changes none of that ownership or
+terminal-failure behavior. It bounds retry churn; it is not an end-to-end recovery-speed
+measurement.
+
 > **Historical incident and original fix:** Sections 1–5 below preserve the original
 > observations, timings and port-forward-only design. Removed helpers and timestamp-only
 > priming describe that implementation, not the current supervisor summarized above.

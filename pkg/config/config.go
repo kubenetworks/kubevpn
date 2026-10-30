@@ -2,6 +2,7 @@ package config
 
 import (
 	"net"
+	"runtime"
 	"sync"
 	"time"
 
@@ -312,6 +313,12 @@ var (
 	// LPool is a sync.Pool of LargeBufferSize byte slices for reuse in I/O paths.
 	LPool = sync.Pool{
 		New: func() any {
+			if runtime.GOOS == "linux" {
+				// Keep the logical frame limit, with capacity for a full native
+				// read segment at offset 3 (65535+3). Heap rounding costs more
+				// than these two capacity bytes.
+				return make([]byte, LargeBufferSize, LargeBufferSize+2)
+			}
 			return make([]byte, LargeBufferSize)
 		},
 	}

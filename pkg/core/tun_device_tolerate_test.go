@@ -82,6 +82,56 @@ func TestPumpTun_ToleratesTransientReadError(t *testing.T) {
 	close(tun.park)
 }
 
+func TestStage4PumpErrorThresholdAndReset(t *testing.T) {
+	for _, cancelOnRead := range []bool{false, true} {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		pool := &stage4PumpPool{live: make(map[*byte]bool)}
+		d := &tunDevice{errChan: make(chan error, 1)}
+		reads, delivered := 0, 0
+		ip := buildIPv4Packet(net.IPv4(198, 18, 0, 2), net.IPv4(10, 0, 0, 1), nil)
+		f := &stage4PumpSource{batch: 128}
+		f.read = func(b [][]byte, s []int, off int) (int, error) {
+			reads++
+			copy(b[0][off:], ip)
+			s[0] = len(ip)
+			if cancelOnRead {
+				cancel()
+			}
+			if reads == 3 {
+				return 1, nil
+			} // resets the preceding two errors
+			return 1, net.ErrClosed
+		}
+		d.pumpTunBatchWithPool(ctx, "stage4", f, func(b []byte, _ int, _, _ net.IP) { delivered++; pool.Put(b) }, pool)
+		if cancelOnRead {
+			if reads != 1 || delivered != 0 {
+				t.Fatal("canceled read dispatched prefix")
+			}
+			select {
+			case e := <-d.errChan:
+				t.Fatalf("cancel fatal: %v", e)
+			default:
+			}
+		} else {
+			if reads != 13 || delivered != 13 {
+				t.Fatalf("read/error reset counts=%d/%d", reads, delivered)
+			}
+			select {
+			case e := <-d.errChan:
+				if e != net.ErrClosed {
+					t.Fatal(e)
+				}
+			default:
+				t.Fatal("missing fatal tenth error")
+			}
+		}
+		if pool.gets != pool.puts || len(pool.live) != 0 {
+			t.Fatalf("cleanup get/put %d/%d", pool.gets, pool.puts)
+		}
+	}
+}
+
 // TestPumpTun_CtxCancelQuietExit verifies that when the context is cancelled, a resulting read
 // error is treated as a clean shutdown — the loop returns without reporting an error.
 func TestPumpTun_CtxCancelQuietExit(t *testing.T) {

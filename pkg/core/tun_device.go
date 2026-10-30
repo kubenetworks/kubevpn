@@ -176,55 +176,77 @@ func (d *tunDevice) pumpTunSingle(ctx context.Context, errLabel string, dispatch
 }
 
 // pumpTunBatch is the segment-aware read loop for TUN devices that support batched IO
-// (wireguard-go offload/GRO). A single syscall yields up to BatchSize() IP packets —
-// including GRO-coalesced ones — and each is parsed and dispatched individually into the
+// (wireguard-go GSO splitting on Linux). A single syscall yields up to BatchSize()
+// IP packets, each parsed and dispatched individually into the
 // canonical [2 len][1 type][IP] layout (IP at buf[tunReserve:]). Buffers handed to dispatch
-// are owned by the consumer; unused ones from a short batch are returned to the pool here.
+// are owned by the consumer; unused and malformed slots stay with the pump until exit.
 func (d *tunDevice) pumpTunBatch(ctx context.Context, errLabel string, bt batchTUN, dispatch func(buf []byte, n int, src, dst net.IP)) {
+	d.pumpTunBatchWithPool(ctx, errLabel, bt, dispatch, &config.LPool)
+}
+
+func (d *tunDevice) pumpTunBatchWithPool(ctx context.Context, errLabel string, bt batchTUN, dispatch func([]byte, int, net.IP, net.IP), pool interface {
+	Get() any
+	Put(any)
+}) {
 	defer netutil.HandleCrash()
-	bs := bt.BatchSize()
-	if bs < 1 {
-		bs = 1
-	}
-	bufs := make([][]byte, bs)
-	sizes := make([]int, bs)
+	bufs := make([][]byte, max(1, bt.BatchSize()))
+	sizes := make([]int, len(bufs))
+	defer func() {
+		for _, buf := range bufs {
+			if buf != nil {
+				pool.Put(buf)
+			}
+		}
+	}()
 	consecutiveErrors := 0
 	for ctx.Err() == nil {
 		for i := range bufs {
-			bufs[i] = config.LPool.Get().([]byte)[:]
+			if bufs[i] == nil {
+				bufs[i] = pool.Get().([]byte)[:config.LargeBufferSize]
+			}
 		}
+		clear(sizes)
 		m, err := bt.ReadPackets(bufs, sizes, tunReserve)
-		if err != nil {
-			for i := range bufs {
-				config.LPool.Put(bufs[i][:])
-			}
+		if ctx.Err() != nil {
+			return // prefer cleanup to dispatch during shutdown
+		}
+		// Only the reported prefix is ours to dispatch, including on a read error.
+		for i := 0; i < min(m, len(bufs)); i++ {
 			if ctx.Err() != nil {
-				return // shutting down: the read error is expected, stay quiet
-			}
-			consecutiveErrors++
-			if consecutiveErrors >= maxConsecutiveTunReadErrors {
-				plog.G(ctx).Errorf("%s TUN read failed %d times in a row, giving up: %v", errLabel, consecutiveErrors, err)
-				netutil.SafeWrite(d.errChan, err)
 				return
 			}
-			plog.G(ctx).Warnf("%s TUN read error (%d/%d), retrying: %v", errLabel, consecutiveErrors, maxConsecutiveTunReadErrors, err)
-			time.Sleep(tunReadErrorBackoff)
-			continue
-		}
-		consecutiveErrors = 0
-		for i := 0; i < m; i++ {
-			buf := bufs[i]
-			size := sizes[i]
+			buf, size := bufs[i], sizes[i]
+			if size <= 0 || size > len(buf)-tunReserve {
+				continue
+			}
 			src, dst, _, parseErr := netutil.ParseIPFast(buf[tunReserve : tunReserve+size])
 			if parseErr != nil {
 				plog.G(ctx).Errorf("%s Unknown packet, dropping: %v", errLabel, parseErr)
-				config.LPool.Put(buf[:])
 				continue
 			}
+			bufs[i] = nil // transfer ownership before a consumer can retain or release it
 			dispatch(buf, size, src, dst)
 		}
-		for i := m; i < bs; i++ {
-			config.LPool.Put(bufs[i][:])
+		if ctx.Err() != nil {
+			return
+		}
+		if err == nil {
+			consecutiveErrors = 0
+			continue
+		}
+		consecutiveErrors++
+		if consecutiveErrors >= maxConsecutiveTunReadErrors {
+			plog.G(ctx).Errorf("%s TUN read failed %d times in a row, giving up: %v", errLabel, consecutiveErrors, err)
+			netutil.SafeWrite(d.errChan, err)
+			return
+		}
+		plog.G(ctx).Warnf("%s TUN read error (%d/%d), retrying: %v", errLabel, consecutiveErrors, maxConsecutiveTunReadErrors, err)
+		timer := time.NewTimer(tunReadErrorBackoff)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
 		}
 	}
 }

@@ -629,6 +629,37 @@ func TestTransportShutdown_PoolJoinsSharedStack(t *testing.T) {
 	}
 }
 
+func TestStage4PumpBackoffCancel(t *testing.T) {
+	parent, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ctx := &stage3SelectContext{Context: parent, entered: make(chan struct{})}
+	f := &stage4PumpSource{batch: 128, read: func([][]byte, []int, int) (int, error) { return 0, io.ErrUnexpectedEOF }}
+	d := &tunDevice{errChan: make(chan error, 1)}
+	done := make(chan struct{})
+	go func() {
+		d.pumpTunBatch(ctx, "stage4", f, func(b []byte, _ int, _, _ net.IP) { config.LPool.Put(b) })
+		close(done)
+	}()
+	select {
+	case <-ctx.entered:
+	case <-done:
+		t.Fatal("pump never entered cancel-selectable backoff")
+	case <-time.After(2 * time.Second):
+		t.Fatal("no backoff barrier")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("backoff ignored cancellation")
+	}
+	select {
+	case e := <-d.errChan:
+		t.Fatalf("cancel reported fatal: %v", e)
+	default:
+	}
+}
+
 func TestTransportShutdown_FullOutboundQueue(t *testing.T) {
 	for _, self := range []bool{false, true} {
 		ctx, cancel := context.WithCancel(context.Background())

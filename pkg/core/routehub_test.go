@@ -18,8 +18,9 @@ func routeSnapshot(hub *RouteHub) map[string][]net.Conn {
 	defer hub.mu.Unlock()
 	result := make(map[string][]net.Conn, len(hub.routes))
 	for key, list := range hub.routes {
-		for _, m := range list.snapshot() {
-			result[key] = append(result[key], m.conn)
+		members := list.snapshot()
+		for i := 0; i < members.len(); i++ {
+			result[key] = append(result[key], members.at(i).conn)
 		}
 	}
 	return result
@@ -168,6 +169,98 @@ func TestGvisorTCPHandler_CustomHub(t *testing.T) {
 func TestGenerateServers_NilHub_PassedThrough(t *testing.T) {
 	// nil hub is passed through to protocol factories; callers must provide explicit hub
 	_, _ = GenerateServers([]string{"unknown://:0"}, nil)
+}
+
+// routeBenchmarkWriter transfers and releases the route-acquired reference
+// synchronously, isolating membership/ownership cost from socket scheduling.
+type routeBenchmarkWriter struct {
+	*mockConn
+	count int
+}
+
+func (w *routeBenchmarkWriter) writePacket(_ context.Context, p *Packet) error {
+	w.count++
+	p.release()
+	return nil
+}
+
+func BenchmarkRoutePacketSingleMember(b *testing.B) {
+	for _, mode := range []string{"synchronous", "concreteTCP", "realTLS"} {
+		for _, members := range []int{1, 2} {
+			b.Run(fmt.Sprintf("%s/members=%d", mode, members), func(b *testing.B) {
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				hub := NewRouteHub()
+				ip := net.IPv4(198, 18, 0, 3).To4()
+				key := string(ip)
+				p := batchPacket(1500, 7)
+				p.release() // immutable fixture reference; route acquires on each write
+				var writers []*routeBenchmarkWriter
+				var sockets []net.Conn
+				var workers sync.WaitGroup
+				counts := make([]int, members)
+				errs := make([]error, members)
+				var buffered []*bufferedTCP
+				defer func() {
+					cancel()
+					for _, c := range sockets {
+						c.Close()
+					}
+					workers.Wait()
+					if p.refs.Load() != 0 {
+						b.Error("route retained packet")
+					}
+					p.release()
+				}()
+				for i := 0; i < members; i++ {
+					if mode == "synchronous" {
+						w := &routeBenchmarkWriter{mockConn: newMockConn(fmt.Sprintf("127.0.0.1:%d", i+1), false)}
+						writers = append(writers, w)
+						hub.AddRoute(ctx, ip, w)
+						continue
+					}
+					raw, peer := batchTCPPair(b, mode == "realTLS")
+					sockets = append(sockets, raw, peer)
+					c := &bufferedTCP{Conn: raw, ch: make(chan *Packet, MaxSize), done: make(chan struct{})}
+					buffered = append(buffered, c)
+					hub.AddRoute(ctx, ip, c)
+					workers.Add(2)
+					go func() { defer workers.Done(); c.run(ctx) }()
+					go func(i int) {
+						defer workers.Done()
+						counts[i], errs[i] = benchmarkFrameSink(peer, [][]byte{p.data[:1500]}, 0, nil)
+					}(i)
+				}
+				b.ReportAllocs()
+				b.SetBytes(1500)
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					if _, err := hub.WriteToRoutePacket(ctx, key, p); err != nil {
+						b.Fatal(err)
+					}
+				}
+				// End-to-end includes draining writers and validating the exact sink count.
+				// No producer remains, so closing these test-owned queues is safe.
+				for _, c := range buffered {
+					close(c.ch)
+				}
+				workers.Wait()
+				b.StopTimer()
+				total := 0
+				for _, w := range writers {
+					total += w.count
+				}
+				for i, n := range counts {
+					total += n
+					if errs[i] != nil {
+						b.Fatal(errs[i])
+					}
+				}
+				if total != b.N {
+					b.Fatalf("delivered %d frames want %d", total, b.N)
+				}
+			})
+		}
+	}
 }
 
 // mockConn implements net.Conn for testing

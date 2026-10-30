@@ -15,6 +15,8 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
+var createNativeTUN = tun.CreateTUN
+
 func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	if cfg.Addr == "" && cfg.Addr6 == "" {
 		err = fmt.Errorf("ipv4 address and ipv6 address cannot both be empty")
@@ -29,14 +31,15 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	}
 
 	var ifce tun.Device
-	ifce, err = tun.CreateTUN("utun", mtu)
+	ifce, err = createNativeTUN("utun", mtu)
 	if err != nil {
 		return
 	}
-	// Close the device on any error after creation; on success conn owns it.
+	adapter := newBatchDevice(ifce)
+	// Close the adapter on any error after creation; on success conn owns it.
 	defer func() {
 		if err != nil {
-			_ = ifce.Close()
+			_ = adapter.Close()
 		}
 	}()
 
@@ -88,7 +91,7 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	}
 
 	conn = &tunConn{
-		batchDevice: newBatchDevice(ifce),
+		batchDevice: adapter,
 		addr:        &net.IPAddr{IP: ipv4},
 		addr6:       &net.IPAddr{IP: ipv6},
 	}

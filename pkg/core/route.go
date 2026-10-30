@@ -112,10 +112,36 @@ func (cl *ConnList) WriteFunc(fn func(conn net.Conn) error) (net.Conn, error) {
 	}, routeWriteCallback, cl.containsMember, cl.prepareWriteFailure)
 }
 
-func (cl *ConnList) snapshot() []*routeMember {
+type routeMembersSnapshot struct {
+	single *routeMember
+	many   []*routeMember
+}
+
+func (s routeMembersSnapshot) len() int {
+	if s.single != nil {
+		return 1
+	}
+	return len(s.many)
+}
+
+func (s routeMembersSnapshot) at(i int) *routeMember {
+	if s.single != nil {
+		return s.single
+	}
+	return s.many[i]
+}
+
+func (cl *ConnList) snapshot() routeMembersSnapshot {
 	cl.mu.Lock()
 	defer cl.mu.Unlock()
-	return append([]*routeMember(nil), cl.members...)
+	switch len(cl.members) {
+	case 0:
+		return routeMembersSnapshot{}
+	case 1:
+		return routeMembersSnapshot{single: cl.members[0]}
+	default:
+		return routeMembersSnapshot{many: append([]*routeMember(nil), cl.members...)}
+	}
 }
 
 func (cl *ConnList) removeMember(member *routeMember) bool {
@@ -169,9 +195,10 @@ func (cl *ConnList) prepareWriteFailure(m *routeMember) func() {
 	return func() { cl.removeMember(m) }
 }
 
-func (cl *ConnList) writeMembers(ctx context.Context, members []*routeMember, fn func(net.Conn) (int, error), mode routeWriteMode, valid func(*routeMember) bool, prepareFailure func(*routeMember) func()) (net.Conn, error) {
+func (cl *ConnList) writeMembers(ctx context.Context, members routeMembersSnapshot, fn func(net.Conn) (int, error), mode routeWriteMode, valid func(*routeMember) bool, prepareFailure func(*routeMember) func()) (net.Conn, error) {
 	var lastErr error
-	for _, m := range members {
+	for i := 0; i < members.len(); i++ {
+		m := members.at(i)
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -363,7 +390,9 @@ func (hub *RouteHub) prepareRawWriteFailure(conn net.Conn) func() {
 	var memberships []membership
 	hub.mu.Lock()
 	for key, list := range hub.routes {
-		for _, m := range list.snapshot() {
+		members := list.snapshot()
+		for i := 0; i < members.len(); i++ {
+			m := members.at(i)
 			if m.conn == conn {
 				memberships = append(memberships, membership{key, list, m})
 			}

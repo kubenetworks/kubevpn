@@ -55,6 +55,19 @@ The **#1 correlated TUN heartbeat and the transport supervisor are the primary t
 
 **Diagnostics:** One data slot and one control slot have independently locked activity counters (bytes, packets, reconnects, timestamps, bounded reasons). Probe send/reply attribution and arrival slot are recorded separately: a reply need not return on its sending slot, so these counters are not per-slot health verdicts. Generation retirement fences old evidence; network-change checks use `ClearPending()` without changing generation. See [47-portforward-blackhole-liveness.md](47-portforward-blackhole-liveness.md).
 
+**Batched activity accounting:** `slotActivity(slot, generation, read, packets, bytes)`
+commits counts and timestamps with one slot lock and one clock read per accepted update.
+The writer sums only the complete-frame prefix reported by `frameBatchWriter`, including
+when the call returns an error after a prefix or even after the full batch. Partial frames
+and the unwritten suffix do not count. Reads and direct declaration/registration writes
+retain single-packet accounting. Bytes include the type prefix, excluding the two-byte
+length header; nil stats and stale-generation activity remain no-ops.
+
+These counters and write-driven idle-deadline refreshes are **not heartbeat health**.
+Successful writes alone never advance `LastReply`, reset rapid-failure pacing, or prove a
+healthy generation. Only validated correlated replies supply health evidence; batch
+accounting does not consume shared probe state or change reply attribution.
+
 **Period:** 5s (`config.HeartbeatInterval`)
 
 ### #2 TCP KeepAlive
@@ -86,6 +99,25 @@ The **#1 correlated TUN heartbeat and the transport supervisor are the primary t
 **Timeout values:**
 - Read: `KeepAliveTime * 3 = 180s` — a conn silent this long is dead (the 5 s heartbeat means many beats missed)
 - Write: `KeepAliveTime = 60s` — writes should complete quickly
+
+#### Slot-local post-dial retry pacing
+
+The data and control slots each pace repeated rapid failures after a successful dial
+(declaration, registration, read or write failure). With default settings, the first rapid
+failure retries immediately; the second waits **62.5–125 ms**, the third **125–250 ms**,
+and later consecutive rapid failures **250–500 ms** (jittered). The rapid age runs from
+successful Dial return to the **first terminal failure of that connection attempt**,
+excluding dial, logging, cancellation, Close and consumer-join time. A best-effort
+`readDL.refresh` error after a successful write is logged but does not terminate the attempt
+or count toward this timing. An age of **at least 2 s** resets the streak; successful
+registration, writes or probes alone do not.
+
+A new transport generation resets the streak; an already-running pacing wait can delay
+that generation by at most **500 ms**. Context cancellation interrupts the wait promptly.
+Dial failures clear the post-dial streak and retain only the existing **2 s** dial-failure
+backoff, never both waits. This is local churn control, not a new supervisor or health
+signal; it does not consume shared probe requests or change terminal-failure handling.
+See [47-portforward-blackhole-liveness.md](47-portforward-blackhole-liveness.md).
 
 ### #4 Control-Plane Health Check (gRPC over port-forward) — **removed**
 

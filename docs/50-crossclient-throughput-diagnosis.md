@@ -2,9 +2,9 @@
 
 > The original path, bottleneck measurements and direct-injection results below are
 > historical evidence. They are not benchmarks of the current batching implementation.
-> All recorded results, including the later batching medians, were measured **before the
-> single-data-slot default**. Their values are unchanged; none establishes throughput for
-> the current one-data-plus-one-control topology.
+> Results in the historical sections, including the batching medians, were measured
+> **before the single-data-slot default**. Their values are unchanged. The separate
+> 2026-10-30 section below records a new matched comparison on the single-slot topology.
 
 ## Symptom
 
@@ -222,6 +222,98 @@ A→cluster: 131.88–311.72 MB/s). These clean-loopback measurements support re
 per-packet I/O overhead, but do not isolate every change or establish a production speedup.
 Mixed interactive/bulk latency has no pre-change baseline; real RTT/loss and native TUN
 performance remain unverified.
+
+## 2026-10-30: WireGuard-inspired changes on the single-slot topology
+
+This is a new comparison, not an extension of the old four-slot numbers above. Baseline
+production tree: `801ef8f1b1c4606f069d78b428485b35b9e68cb0` (the disconnection-stability
+increment). Identical benchmark fixtures were added before implementation and frozen as
+`599b494cc3db1b809d24e42c7af748dd5543d763`. The measured final implementation is
+`f74aa892e1e5353814de21ec855ac978624b7592`; subsequent changes only finalize documentation.
+
+Environment: Apple M4, darwin/arm64, Go 1.26.3, CGO disabled. Before and after each use
+five sequential 2-second samples, without competing test/build workloads. New
+`BenchmarkCrossClientModes` / `BenchmarkCrossClientMixedModes` vary actual loopback TCP
+versus real TLS and stats off/on. They use one data slot plus the control connection;
+application flow count is separate. Fixture-owned workers and sockets are joined before
+subsequent runs. No per-read delay is interpreted as WAN RTT.
+
+Commands for the matched matrices:
+
+```sh
+go test ./pkg/core -run '^$' -bench 'Benchmark(SlotBatchActivity|RoutePacketSingleMember|PumpTunBatchReuse)$' -benchmem -benchtime=2s -count=5
+go test ./pkg/tun -run '^$' -bench '^BenchmarkBatchDeviceReadPackets$' -benchmem -benchtime=2s -count=5
+go test ./pkg/core -run '^$' -bench 'BenchmarkCrossClient(Modes|MixedModes)$' -benchmem -benchtime=2s -count=5
+```
+
+### End-to-end loopback results with stats enabled
+
+Throughput is measured until the sink receives the submitted bytes. MB/s below are
+medians; brackets show the minimum and maximum of the five samples.
+
+| Transport | Path | Flows | Before MB/s [range] | After MB/s [range] |
+|---|---|---:|---:|---:|
+| TCP | A→B | 1 | 115.35 [108.71–125.87] | 122.63 [118.53–127.54] |
+| TCP | A→B | 8 | 101.86 [97.36–105.31] | 106.12 [101.59–117.96] |
+| TCP | A→cluster | 1 | 137.23 [127.28–140.84] | 137.24 [135.57–139.42] |
+| TCP | A→cluster | 8 | 121.75 [112.59–128.62] | 126.72 [119.75–140.24] |
+| TLS | A→B | 1 | 172.45 [168.92–180.47] | 179.24 [178.06–189.02] |
+| TLS | A→B | 8 | 175.01 [170.12–184.87] | 176.86 [171.39–183.92] |
+| TLS | A→cluster | 1 | 231.94 [227.77–237.36] | 236.80 [228.86–249.13] |
+| TLS | A→cluster | 8 | 218.71 [217.83–221.80] | 225.48 [218.38–230.26] |
+
+Most ranges overlap. These samples show modest median changes, not a statistically
+established or universal throughput improvement. TCP/TLS differences include batching
+and scheduler interactions; they do not establish that encryption makes production faster.
+The harness does not use a real TUN, SSH, Kubernetes port-forward, or WAN connection.
+In particular, these results cannot measure the Linux native-read copy removal.
+
+### Mixed interactive/bulk latency
+
+Seven bulk flows compete with a serialized 64-byte request/echo flow. Bulk workers start
+at the measurement boundary; the ending receive count is captured before sample sorting.
+Values are medians of each run's measured percentile or bulk rate, not percentiles pooled
+across all runs.
+
+| Transport, stats on | Bulk MB/s before → after | Request p99 ms before → after |
+|---|---:|---:|
+| TCP | 99.35 → 106.50 | 60.544 → 53.939 |
+| TLS | 180.60 → 188.20 | 44.636 → 47.705 |
+
+TLS p99 increased in this sample; do not claim latency improved across all modes. Request
+counts and background bulk work vary with throughput, so mixed-workload allocs/op are not
+a fixed-data-volume comparison.
+
+### Mechanisms isolated from end-to-end throughput
+
+- **Single-member route:** synchronous ownership-transfer fixture median 71.24→61.64 ns/op,
+  56→48 B/op and 2→1 allocations. TCP/TLS route delivery also removes one allocation,
+  but transport overhead dominates. This is not allocation-free routing.
+- **Retained pump buffers:** fake batch-size-128 TUN producing one 64-byte packet per read
+  improves 3363→190.2 ns/op and 129→2 allocations/read. It avoids recycling 127 unused
+  buffers each iteration. Full batches and batch-size-1 do not have that benefit; this is
+  a pump model, not a 17-fold real-network throughput claim.
+- **Batch statistics:** deterministic TCP/TLS tests prove one activity clock/lock update
+  per completed batch, with unchanged complete-prefix accounting and heartbeat health.
+  The final slot microbenchmark did **not** demonstrate a speedup: stats-on modes had
+  median ns/op increases of approximately 2–9% versus the earlier baseline. Short paired
+  before/after overlay reruns did not consistently reproduce the TCP differences, while
+  TLS burst results remained variable, including one slower after sample. These checks
+  neither establish a causal regression nor justify a performance-improvement claim.
+- **Linux direct-read algorithm:** a separate fake-device scratch/direct comparison
+  (2 seconds × 5) at 128 packets × 1500 bytes measured 11981→5168 ns/op, both with zero
+  steady-state allocations. It bypasses native qualification and excludes kernel I/O;
+  removing 192000 adapter-copy bytes per operation is algorithm accounting, not an
+  instrumented copy counter. The frozen ordinary adapter benchmark remains scratch-only
+  for its nonnative fake device.
+
+Linux's extra backing capacity has a real memory cost: the host allocation model rounds
+65538 bytes to 73728, adding 8 KiB per distinct pooled allocation, while a qualified
+128-slot direct reader avoids 9 MiB of adapter scratch. Net memory can increase with many
+queued buffers; see [22-tun-device.md](22-tun-device.md#45-memory-trade-off-host-allocation-model).
+No native Linux/Windows runtime, privileged TUN, race-detector, or WAN performance result
+is claimed. Event shutdown and retry pacing are validated by deterministic lifecycle
+regressions, not by throughput numbers.
 
 ## Remaining work
 
