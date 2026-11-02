@@ -45,6 +45,13 @@ func TestIntegration_LeaseAdapterProposalAndRestart(t *testing.T) {
 		t.Fatal("hostname did not reach the store")
 	}
 	allocs["alice"]["ipv4"] = "198.18.200.200/16"
+	// Round-tripping through map[string]any turns versions into float64 (53-bit
+	// mantissa), corrupting UnixNano values; a real kubectl edit preserves the
+	// int64 field. Restore the exact versions so the stale-echo guard in
+	// proposeManualChange (want.Version < liveVersion) does not silently reject
+	// the edit as stale.
+	allocs["alice"]["version"] = alice.Version
+	allocs["bob"]["version"] = bob.Version
 	raw, err := yaml.Marshal(allocs)
 	if err != nil {
 		t.Fatal(err)

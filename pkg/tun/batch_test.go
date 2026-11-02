@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"golang.zx2c4.com/wireguard/device"
 	"golang.zx2c4.com/wireguard/tun"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -498,7 +499,7 @@ func (f *mutatingWriteDevice) Write(bufs [][]byte, offset int) (int, error) {
 		return 0, fmt.Errorf("invalid batch/headroom: %d/%d", len(bufs), offset)
 	}
 	for _, b := range bufs {
-		if cap(b) < offset+65535 {
+		if cap(b) < offset+device.MaxSegmentSize {
 			return 0, errors.New("insufficient GRO scratch")
 		}
 		if !bytes.Equal(b[:offset], make([]byte, offset)) {
@@ -655,7 +656,7 @@ func (f *stage4ReadDevice) Read(b [][]byte, s []int, off int) (int, error) {
 
 func TestStage4DirectReadOwnership(t *testing.T) {
 	for _, off := range []int{0, 3} {
-		for _, size := range []int{0, 1, 20, 40, 65533, 65534, 65535} {
+		for _, size := range []int{0, 1, 20, 40, device.MaxSegmentSize - 2, device.MaxSegmentSize - 1, device.MaxSegmentSize} {
 			t.Run(fmt.Sprintf("off=%d/size=%d", off, size), func(t *testing.T) {
 				packets := [][]byte{bytes.Repeat([]byte{0x45}, size), bytes.Repeat([]byte{0x60}, 40)}
 				f := &stage4ReadDevice{fakeDevice: fakeDevice{batch: 4, reads: [][][]byte{packets, {{0x45, 1, 2}}}}, err: io.ErrUnexpectedEOF, reported: -1}
@@ -668,7 +669,7 @@ func TestStage4DirectReadOwnership(t *testing.T) {
 				sizes := make([]int, 4)
 				original := map[*byte]int{}
 				for i := range dst {
-					dst[i] = make([]byte, 65536, off+65535+16)
+					dst[i] = make([]byte, device.MaxSegmentSize+1, off+device.MaxSegmentSize+16)
 					original[&dst[i][0]] = len(dst[i])
 				}
 				f.before = func(b [][]byte, s []int, o int) {
@@ -676,14 +677,14 @@ func TestStage4DirectReadOwnership(t *testing.T) {
 						t.Fatal("wrong native arguments")
 					}
 					for i := range b {
-						if len(b[i]) != off+65535 || &b[i][0] != &dst[i][0] {
+						if len(b[i]) != off+device.MaxSegmentSize || &b[i][0] != &dst[i][0] {
 							t.Fatal("not expanded same-base alias")
 						}
 					}
 				}
 				n, e := direct.readPacketsDirect(dst, sizes, off)
 				want := 1
-				if size > 0 && size <= 65536-off {
+				if size > 0 && size <= device.MaxSegmentSize+1-off {
 					want++
 				}
 				if n != want || !errors.Is(e, io.ErrUnexpectedEOF) {
@@ -713,7 +714,7 @@ func TestStage4DirectReadOwnership(t *testing.T) {
 				// Hold the first frame while replacing its slot for the next read.
 				held := dst[0]
 				snapshot := append([]byte(nil), held...)
-				dst[0] = make([]byte, 65536, off+65535+16)
+				dst[0] = make([]byte, device.MaxSegmentSize+1, off+device.MaxSegmentSize+16)
 				f.err = nil
 				if n, e = direct.readPacketsDirect(dst, sizes, off); n != 1 || e != nil {
 					t.Fatalf("next read %d %v", n, e)
@@ -850,7 +851,7 @@ func TestStage4ReadQualification(t *testing.T) {
 	f := &fakeDevice{batch: 128, reads: [][][]byte{{{0x45}}}}
 	d = newBatchDevice(f)
 	buf := config.LPool.New().([]byte)
-	if n, e := d.ReadPackets([][]byte{buf}, make([]int, 1), 3); n != 1 || e != nil || len(d.rbufs) != 128 || len(d.rbufs[0]) != 16+65535 {
+	if n, e := d.ReadPackets([][]byte{buf}, make([]int, 1), 3); n != 1 || e != nil || len(d.rbufs) != 128 || len(d.rbufs[0]) != tunOffset+device.MaxSegmentSize {
 		t.Fatal("nonnative fallback changed")
 	}
 }

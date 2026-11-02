@@ -24,10 +24,15 @@ func TestTransportIntegration_HealthPolicy(t *testing.T) {
 			srv, count := transportForwardServer(t, nil)
 			nm := transportManager(t, srv.URL)
 			var silent atomic.Bool
+			var consulted atomic.Int32
 			nm.transport.lastReply = func() time.Time {
 				if silent.Load() {
 					return time.Now().Add(-time.Minute)
 				}
+				// Counted only when provably fresh (after the silent check), so a
+				// non-zero count proves the monitor loop top already evaluated a
+				// fresh lastReply — the precondition for arming the probe budget.
+				consulted.Add(1)
 				return time.Now()
 			}
 			nm.transport.launchTransportSupervisor()
@@ -41,9 +46,12 @@ func TestTransportIntegration_HealthPolicy(t *testing.T) {
 				nm.transport.armTransportHealth()
 			}
 			if mode == "silent" {
-				// Synchronize a probe event before moving the clock source into the past.
+				// Synchronize before moving the clock source into the past: wait until
+				// the monitor loop has consulted a fresh lastReply, so the next checks
+				// event observes primed=true and arms the probe budget (a fixed sleep
+				// races the goroutine's first evaluation on slow runners).
 				nm.transport.requestNetworkCheck()
-				time.Sleep(30 * time.Millisecond)
+				monitorTickWait(t, func() bool { return consulted.Load() > 0 })
 				silent.Store(true)
 				nm.transport.requestNetworkCheck()
 				if !waitCancelled(g.ctx, 20*time.Second) {

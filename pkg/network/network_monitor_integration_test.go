@@ -671,6 +671,10 @@ func monitorHeartbeatClient(t *testing.T) (*Runtime, *testNetworkMonitor, *atomi
 	t.Cleanup(func() { cancel(); backend.Close(); transportAwait(t, backendDone) })
 	srv, count := transportForwardServer(t, map[int]string{config.PortTCP: backend.Addr().String()})
 	nm := transportManager(t, srv.URL)
+	// Route sampling is not under test here (the data plane is a channel TUN +
+	// SPDY); pin a deterministic resolver so real OS route lookups — unreliable
+	// on Windows runners — cannot flap routeChanged and request fresh evidence.
+	nm.routeTable.newRouteResolver = func() routeResolver { return endpointMonitorRoutes{} }
 	m := &testNetworkMonitor{state: monitorState("en0"), started: make(chan struct{}), closed: make(chan struct{})}
 	nm.transport.newMonitor = func(logger.Logf) (networkMonitorSource, error) { return m, nil }
 	nm.transport.startNetworkMonitor(nm.device.tunName)

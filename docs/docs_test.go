@@ -241,9 +241,7 @@ var claudeSymbols = []struct {
 	{"getRollbackFuncs", "rollback.go"},
 	{"executeRollbackFuncs", ""},
 	// daemon/action connection helpers
-	{"findConnection", "connection.go"},
-	{"removeConnection", "connection.go"},
-	{"resetCurrentConnection", ""},
+	{"connectionRegistry", "registry.go"},
 	{"cleanupConnection", "connection.go"},
 	{"getSudoTunIPs", ""},
 	{"resolveTunIP", ""},
