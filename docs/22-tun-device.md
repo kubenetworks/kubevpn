@@ -65,7 +65,7 @@ The shared adapter logic lives in `pkg/tun/batch.go` (`batchDevice`), embedded b
   `net.Conn`. Write copies one IP packet into scratch with the required header room and
   issues a single-packet batched write. Read hands out one packet per call, refilling from a
   batched read — this is only the non-batch fallback (e.g. `net.Pipe` in tests).
-- **`ReadPackets(bufs, sizes, off)`** — the segment-aware read hot path used by `pkg/core`
+- **`ReadPackets(bufs, sizes, off)`** — the segment-aware read hot path used by `pkg/tunnel/device.go`
   `tunDevice.pumpTunBatch`. One read returns a compact valid prefix at
   `bufs[i][off:off+sizes[i]]`, with `off` = the data plane's `tunReserve` (3).
   Qualified Linux native reads fill these buffers directly; other reads copy from scratch.
@@ -122,7 +122,7 @@ prefix is considered, valid packets are compacted, and the error is swallowed.
 
 ### 4.4 Read-error resilience
 
-The core read loop (`pkg/core` `tunDevice.pumpTun`, which dispatches to `pumpTunBatch` for
+The tunnel read loop (`pkg/tunnel/device.go` `tunDevice.pumpTun`, which dispatches to `pumpTunBatch` for
 batched devices or `pumpTunSingle` for plain `net.Conn`) tolerates transient read errors
 instead of tearing down the data plane. On a read error: if the context is cancelled it
 returns cleanly (normal shutdown, no noise); otherwise it logs a warning, backs off briefly
@@ -140,7 +140,7 @@ remaining pump-owned buffer exactly once. Dispatched buffers remain consumer-own
 
 ### 4.5 Memory trade-off (host allocation model)
 
-The Darwin-host allocation model in `pkg/core/memory_bench_test.go` measures explicit
+The Darwin-host allocation model in `pkg/tunnel/memory_bench_test.go` measures explicit
 capacities representing the Linux design; Darwin's actual `LPool` remains length/capacity
 65536. A requested 65538-byte backing allocation rounds to **73728 bytes (72 KiB)**,
 **8192 bytes more per distinct Linux pooled buffer** than before. Removing the adapter's
@@ -238,7 +238,8 @@ Each arch's `InstallWintunDriver()` reads its embedded DLL and calls the shared 
 missing or its bytes differ (content-compared to avoid needless rewrites/locking).
 
 `driver.InstallWireGuardTunDriver()` wraps this in `retry.OnError` (default backoff) and is called
-from `pkg/handler/network.go` before TUN creation. `UninstallWireGuardTunDriver()` simply removes
+from `pkg/network/runtime.go` before TUN creation (`pkg/network/device.go` assembles
+that device with the tunnel handlers). `UninstallWireGuardTunDriver()` simply removes
 the `wintun.dll` beside the executable (called from `pkg/util/util.go` cleanup).
 
 ### 9.2 TAP-Windows (OpenVPN, legacy fallback)

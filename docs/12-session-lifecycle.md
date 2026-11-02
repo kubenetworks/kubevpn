@@ -2,7 +2,7 @@
 
 ## Overview
 
-KubeVPN daemon actions (Connect, Sync) use `context.Context` to manage the lifecycle of SSH tunnels and VPN connections. The `SessionLifecycle` struct centralizes the session context + teardown, replacing the previous ad-hoc pattern of scattered `ctx/cancel` calls. `SessionLifecycle.Teardown` cancels context and detaches the logger; it is not a join barrier. The separate `SessionBase`/`SyncOptions` rollback registry and `NetworkManager.Stop` own resource cleanup and joined shutdown. Daemon actions keep kubeconfig in memory, with no temp kubeconfig file to remove (see [15-ssh-architecture.md](15-ssh-architecture.md)).
+KubeVPN daemon actions (Connect, Sync) use `context.Context` to manage the lifecycle of SSH tunnels and VPN connections. The `SessionLifecycle` struct centralizes the session context + teardown, replacing the previous ad-hoc pattern of scattered `ctx/cancel` calls. `SessionLifecycle.Teardown` cancels context and detaches the logger; it is not a join barrier. The separate `SessionBase`/`SyncOptions` rollback registry and `network.Runtime.Stop` own resource cleanup and joined shutdown. Daemon actions keep kubeconfig in memory, with no temp kubeconfig file to remove (see [15-ssh-architecture.md](15-ssh-architecture.md)).
 
 ## Why Not `resp.Context()`?
 
@@ -61,12 +61,12 @@ go grpcutil.ListenCancel(resp, session.Cancel)    ← client cancel → session 
 ds.InitClient(InitFactoryByBytes(req.KubeconfigBytes, ns))  ← Factory from bytes, no file
 ds.DoConnect(session.Ctx)                     ← DataSession, root daemon
     └── ds.ctx = WithCancel(session.Ctx)      ← internal lifecycle
-           └── NetworkManager.Start(ds.ctx)
+           └── network.Runtime.Start(ds.ctx)
                   ├── transport supervisor (SSH or port-forward generation)
                   ├── TUN + current-generation heartbeat readiness (60s startup budget)
                   └── network monitor, routes and DNS
 
-Teardown: cancellation requests shutdown; NetworkManager.Stop joins owned workers/resources
+Teardown: cancellation requests shutdown; network.Runtime.Stop joins owned workers/resources
 ```
 
 ### 2. Connect — User Daemon (Control Plane + SSH)
@@ -115,6 +115,17 @@ Teardown (on error): session.Cancel() → SSH closes, BUT VPN stays alive
 
 **Key design**: `cli.Connect(context.Background())` is intentional — the VPN connection must survive sync failure so the user can retry without reconnecting.
 
+## Registry Lock Boundary
+
+`daemon/action.connectionRegistry` owns ordered membership and the selected ID,
+not resource lifetime. Removal publishes the new membership/selection atomically,
+then callers sort and clean up detached sessions without holding its mutex.
+`ConnectionList` and `Status` likewise copy membership before peer-daemon RPC or
+session status reads. `connectMu` still serializes connect decisions through joined
+cleanup and replacement publication. Retirement by instance cannot erase a newer
+session sharing the same ConnectionID. These boundaries do not merge
+`SessionLifecycle` logging/context teardown with the handler rollback registry.
+
 ## Cleanup Two-Path Design
 
 Cleanup dispatches by type identity — no flag or nil-check needed:
@@ -155,13 +166,13 @@ the supervisor and runs cleanup, avoiding a supervisor self-join.
 
 ## Core Server Shutdown and Stack Ownership
 
-This increment leaves the root-client `NetworkManager` completion path unchanged:
+This increment leaves the root-client `network.Runtime` completion path unchanged:
 `tunCompletionHandler` cancels the manager when its TUN handler returns, and the external
 owner performs joined cleanup. `SessionLifecycle.Teardown` remains cancellation plus
 logger detach, not a join barrier.
 
 For the traffic-manager **server role**, `TunHandler` implements `FatalOnReturn() == true`
-(no forwarder). Its return is terminal for `handler.Run`, even if the TUN listener remains
+(no forwarder). Its return is terminal for `core.Serve` (delegated by `handler.Run`), even if the TUN listener remains
 blocked in `Accept`. `Run` cancels its context, closes listeners, joins accept loops, closes
 accepted connections outside its bookkeeping mutex, and joins their handlers before
 returning. An ordinary accepted TCP handler returning on EOF is **not** server-fatal.

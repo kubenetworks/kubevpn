@@ -38,7 +38,7 @@ func newRecordingConn(id string) (*recordingConn, *atomic.Bool) {
 func TestLeaveProxiesBeforeTeardown_All(t *testing.T) {
 	c1, left1 := newRecordingConn("id1")
 	c2, left2 := newRecordingConn("id2")
-	svr := &Server{connections: []handler.Connection{c1, c2}}
+	svr := &Server{registry: connectionRegistry{list: []handler.Connection{c1, c2}}}
 
 	svr.leaveProxiesBeforeTeardown(context.Background(), &rpc.DisconnectRequest{All: ptr.To(true)})
 
@@ -52,7 +52,7 @@ func TestLeaveProxiesBeforeTeardown_All(t *testing.T) {
 func TestLeaveProxiesBeforeTeardown_ByConnectionID(t *testing.T) {
 	c1, left1 := newRecordingConn("id1")
 	c2, left2 := newRecordingConn("id2")
-	svr := &Server{connections: []handler.Connection{c1, c2}}
+	svr := &Server{registry: connectionRegistry{list: []handler.Connection{c1, c2}}}
 
 	svr.leaveProxiesBeforeTeardown(context.Background(), &rpc.DisconnectRequest{ConnectionID: ptr.To("id2")})
 
@@ -68,7 +68,7 @@ func TestLeaveProxiesBeforeTeardown_ByConnectionID(t *testing.T) {
 // nothing (and does not panic).
 func TestLeaveProxiesBeforeTeardown_NoMatch(t *testing.T) {
 	c1, left1 := newRecordingConn("id1")
-	svr := &Server{connections: []handler.Connection{c1}}
+	svr := &Server{registry: connectionRegistry{list: []handler.Connection{c1}}}
 
 	svr.leaveProxiesBeforeTeardown(context.Background(), &rpc.DisconnectRequest{ConnectionID: ptr.To("missing")})
 
@@ -84,9 +84,9 @@ func TestLeaveProxiesBeforeTeardown_NoMatch(t *testing.T) {
 // called and nothing panics. This is the data-plane half of the contract that
 // recordingConn (ProxyController) covers for the control plane.
 func TestLeaveProxiesBeforeTeardown_SkipsDataPlaneOnlyConnections(t *testing.T) {
-	ctrl, leftCtrl := newRecordingConn("ctrl-id") // *ConnectOptions via embed → ProxyController
+	ctrl, leftCtrl := newRecordingConn("ctrl-id")       // *ConnectOptions via embed → ProxyController
 	ds := &handler.DataSession{ConnectionID: "data-id"} // DataPlane, NOT ProxyController
-	svr := &Server{connections: []handler.Connection{ctrl, ds}}
+	svr := &Server{registry: connectionRegistry{list: []handler.Connection{ctrl, ds}}}
 
 	// Must not panic on the DataSession even though it lacks LeaveAllProxyResources.
 	svr.leaveProxiesBeforeTeardown(context.Background(), &rpc.DisconnectRequest{All: ptr.To(true)})

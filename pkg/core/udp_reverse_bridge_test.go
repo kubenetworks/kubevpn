@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	framing "github.com/wencaiwulue/kubevpn/v2/pkg/internal/wire"
 	"io"
 	"net"
 	"testing"
@@ -158,7 +159,7 @@ func TestFramingUDPRelayEcho(t *testing.T) {
 						relayUDPOverTCP(ctx, &framingConn{Conn: raw, writeLimit: 1}, u)
 					}
 				}()
-				c, _ := NewUDPConnOverTCP(ctx, peer)
+				c, _ := framing.NewConn(ctx, peer)
 				defer c.Close()
 				_ = c.SetDeadline(time.Now().Add(3 * time.Second))
 				for _, payload := range [][]byte{[]byte("ping"), bytes.Repeat([]byte{9}, 1024)} {

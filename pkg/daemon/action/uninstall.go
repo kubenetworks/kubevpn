@@ -5,9 +5,9 @@ import (
 
 	"k8s.io/client-go/kubernetes"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/cluster/manager"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
@@ -43,9 +43,9 @@ func Uninstall(ctx context.Context, clientset kubernetes.Interface, ns string) e
 	// Remove the full set of traffic-manager resources KubeVPN creates in this namespace:
 	// the eight core resources named config.ConfigMapPodTrafficManager plus the -route and
 	// -proxy RBAC (and the cluster-scoped proxy ClusterRole/Binding in central mode).
-	// Reuses handler.CleanupTrafficManagerResources so the daemon-layer Uninstall and the
+	// Reuses manager.CleanupTrafficManagerResources so the daemon-layer Uninstall and the
 	// handler-layer connect cleanup cannot drift on which resources an uninstall removes.
-	handler.CleanupTrafficManagerResources(ctx, clientset, ns)
+	manager.CleanupTrafficManagerResources(ctx, clientset, ns)
 	_ = cleanupLocalContainer(ctx)
 	plog.StepDone(ctx, "Uninstalled traffic manager from namespace %q", ns)
 	return nil

@@ -150,7 +150,7 @@ still seeks the last N raw lines before filtering.
 ### 3b. In-cluster sidecars default to Debug
 
 The traffic-manager `server` and `control-plane` containers, and the injected fargate `server`
-sidecar, are deployed with `--debug` (`pkg/handler/traffmgr_resources.go`, `pkg/inject/container.go`)
+sidecar, are deployed with `--debug` (`pkg/cluster/manager/resources.go`, `pkg/inject/container.go`)
 so `kubectl logs` shows Debug by default. `control-plane` applies `config.Debug` to its logger in
 `controlplane.Main`. The `dns` container has no debug flag and is left at Info.
 

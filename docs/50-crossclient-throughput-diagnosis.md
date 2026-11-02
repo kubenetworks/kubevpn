@@ -6,6 +6,27 @@
 > **before the single-data-slot default**. Their values are unchanged. The separate
 > 2026-10-30 section below records a new matched comparison on the single-slot topology.
 
+## Current source navigation
+
+Historical commands and measured tables below retain their original package paths and
+results. After extraction, the benchmark fixture is `pkg/tunnel/xclient_throughput_test.go`;
+`client.go`, `slot.go`/`attempt.go`, `client_stack.go`, `server_endpoint.go` and `route.go`
+(all under `pkg/tunnel`) implement dispatch, joined connection attempts, direct injection
+and `Router` routing. Stack construction is in `pkg/tunnel/internal/netstack/stack.go`.
+Packet batching is in `pkg/tunnel/batch.go`; shared socket batching is in
+`pkg/internal/wire/batch.go`. No performance gain or rerun is claimed for this package move.
+
+Current-package equivalents (not executed in this documentation pass):
+
+```sh
+go test ./pkg/tunnel -run '^$' -bench BenchmarkCrossClientThroughput -benchmem -benchtime=2s -count=2
+go test ./pkg/tunnel -run '^$' -bench 'Benchmark(SlotBatchActivity|RoutePacketSingleMember|PumpTunBatchReuse)$' -benchmem -benchtime=2s -count=5
+go test ./pkg/tunnel -run '^$' -bench 'BenchmarkCrossClient(Modes|MixedModes)$' -benchmem -benchtime=2s -count=5
+```
+
+The `pkg/tun` adapter benchmark command is unchanged. Current runs are not reproductions
+of the historical commits unless the same historical implementation/fixtures are checked out.
+
 ## Symptom
 
 Two kubevpn clients; client **A** accessing a service on client **B**'s machine (A → B's TUN IP)
@@ -49,7 +70,7 @@ Two structural properties of B's receive side stand out:
 2. **All cross-client flows funnel through ONE shared inter-client gvisor stack** on B (a single
    `interClientInbound` channel, one `handleGvisorPacket`). Concurrency cannot widen it.
 
-## Measurement (in-process, no cluster, no TUN, no root)
+## Historical measurement (in-process, no cluster, no TUN, no root)
 
 `pkg/core/xclient_throughput_test.go` (`BenchmarkCrossClientThroughput`) wires the real data plane
 end-to-end over a clean loopback transport: originator stack A → real `tunDevice` + connection pool
@@ -187,7 +208,7 @@ deadlines and batching remain, and business flows still run concurrently. The pr
 is a data-only override for nil-stats 1/2/4/8-slot comparisons, not a CLI or environment flag.
 
 Heartbeat requests bypass the business queue through a separate queue/conn to the **same TCP
-forwarding endpoint 10801**, not xDS 9002. Replies use RouteHub's first-writable registered data
+forwarding endpoint 10801**, not xDS 9002. Replies use `tunnel.Router`'s first-writable registered data
 conn with fallback, not per-flow load balancing. There is one registered data conn per client
 address in steady state; control is excluded. The outer SSH/port-forward TCP transport remains
 shared, so separation is not an absolute liveness guarantee. Shared gvisor session state and
@@ -195,7 +216,7 @@ grace retention do not depend on four slots. No new throughput claim accompanies
 
 TCP writers and the TUN write path now drain only immediately available queued packets,
 without a batching timer: at most **32 frames / 64 KiB** per batch (a single legal maximum
-framed TCP packet may occupy **65,537 bytes**). `conn_batch.go` uses `net.Buffers`/writev for
+framed TCP packet may occupy **65,537 bytes**). `pkg/internal/wire/batch.go` uses `net.Buffers`/writev for
 raw `*net.TCPConn`; TLS/wrapped connections use a reusable bounded aggregate buffer rather
 than one TLS write per frame. Partial writes continue only on the same connection, never
 replay a partial frame after reconnect. `batchDevice.WritePackets` normalizes the platform
@@ -314,6 +335,32 @@ queued buffers; see [22-tun-device.md](22-tun-device.md#45-memory-trade-off-host
 No native Linux/Windows runtime, privileged TUN, race-detector, or WAN performance result
 is claimed. Event shutdown and retry pacing are validated by deterministic lifecycle
 regressions, not by throughput numbers.
+
+## Package-refactor verification (2026-11)
+
+The package refactor compared the preserved pre-refactor working tree with the new
+`tunnel` package using the same TCP/TLS fixtures, Go 1.26.3 darwin/arm64, CGO disabled,
+and five sequential two-second samples. These are separate runs from the October
+comparison above; the original working tree already contained its optimizations.
+
+Selected stats-enabled medians:
+
+| Path | Before | After |
+|---|---:|---:|
+| TCP A→B, 1 flow (MB/s) | 81.37 | 81.77 |
+| TCP A→B, 8 flows (MB/s) | 53.67 | 52.60 |
+| TLS A→B, 1 flow (MB/s) | 173.40 | 182.14 |
+| TLS A→B, 8 flows (MB/s) | 131.53 | 131.89 |
+| TCP mixed request p99 (ms) | 85.252 | 84.427 |
+| TLS mixed request p99 (ms) | 45.130 | 43.466 |
+| TLS mixed bulk (MB/s) | 139.20 | 131.10 |
+
+The before runs encountered a separate workspace's build activity. Most sample
+ranges overlap, and the mixed TLS bulk median fell despite a lower request p99.
+These measurements do not establish a speedup or prove the absence of every
+performance regression. The isolated slot, route and TUN-pump fixtures retained
+their allocation counts after the ownership/package changes. No real TUN, WAN,
+SSH or Kubernetes port-forward performance conclusion follows from these runs.
 
 ## Remaining work
 

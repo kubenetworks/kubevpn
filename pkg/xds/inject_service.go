@@ -15,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/cli-runtime/pkg/resource"
 
+	clusterworkload "github.com/wencaiwulue/kubevpn/v2/pkg/cluster/workload"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/inject"
@@ -86,14 +87,14 @@ func (s *TunConfigServer) ProxyInject(req *rpc.InjectRequest, stream rpc.TunConf
 		if err != nil {
 			return err
 		}
-		templateSpec, _, err := util.GetPodTemplateSpecPath(controller.Object.(*unstructured.Unstructured))
+		templateSpec, _, err := clusterworkload.GetPodTemplateSpecPath(controller.Object.(*unstructured.Unstructured))
 		if err != nil {
 			return status.Errorf(codes.Internal, "pod template spec of %s: %v", workload, err)
 		}
 		// A K8s Service workload needs a client-side port Mapper (SSH reverse tunnels
 		// back to the developer's machine). That cannot run in the pod, so report the
 		// workload + its pod selector back and let the client start the Mapper.
-		if util.IsK8sService(object) {
+		if clusterworkload.IsK8sService(object) {
 			services = append(services, &rpc.ServiceWorkload{
 				Workload: workload,
 				Selector: labels.SelectorFromSet(templateSpec.Labels).String(),
@@ -166,7 +167,7 @@ func (s *TunConfigServer) LeaveInject(req *rpc.InjectRequest, stream rpc.TunConf
 		}
 		// When this owner was the last rule, the sidecar is removed; a fargate Service
 		// also needs its target port restored to the original.
-		if empty && util.IsK8sService(object) {
+		if empty && clusterworkload.IsK8sService(object) {
 			if err := inject.RestoreServiceTargetPort(ctx, s.clientset, req.GetNamespace(), object.Name); err != nil {
 				return status.Errorf(codes.Internal, "restore service %s target port: %v", object.Name, err)
 			}
@@ -183,7 +184,7 @@ func (s *TunConfigServer) LeaveInject(req *rpc.InjectRequest, stream rpc.TunConf
 // the resolve+nodeID+error-wrap sequence stays in one place. Returns a gRPC
 // status.Errorf (codes.Internal) so callers can return it directly.
 func (s *TunConfigServer) resolveWorkloadNodeID(ctx context.Context, namespace, workload string) (object, controller *resource.Info, nodeID string, err error) {
-	object, controller, err = util.GetTopOwnerObject(ctx, s.factory, namespace, workload)
+	object, controller, err = clusterworkload.GetTopOwnerObject(ctx, s.factory, namespace, workload)
 	if err != nil {
 		return nil, nil, "", status.Errorf(codes.Internal, "resolve workload %s: %v", workload, err)
 	}

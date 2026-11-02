@@ -38,7 +38,7 @@ Runs inside a sidecar container (`syncthing`) in the sync clone pod:
 
 ### 3.2 Client (`StartClient`)
 
-Runs on the local machine, started by `SyncOptions.SyncDir()`:
+Runs on the local machine, started by the private `Runtime.syncDir()` in `pkg/handler/internal/syncworkload`:
 
 - **DeviceID**: `LocalDeviceID` (hardcoded in `pkg/config`)
 - **Folder**: Maps `localDir` as `SendReceive` with filesystem watcher (10ms delay, 3s rescan)
@@ -47,7 +47,7 @@ Runs on the local machine, started by `SyncOptions.SyncDir()`:
 - **API Key**: `SyncthingAPIKey` from config
 - **TLS**: Uses `LocalCert` from `pkg/config`
 
-Both client and server start with `detach=true` on the client side (non-blocking) and `detach` parameter on the server side.
+`StartClient` returns `(*ClientHandle, error)` after startup. The runtime owns the handle: `Stop()` cancels and waits, `Done()` closes only after the application (`app.Wait`) and its early service supervisor have exited, and `Err()` exposes the completed application's error. Startup failure also cleans up and waits for started resources before returning. Runtime cleanup joins the local clients and pod IP trackers before handler session/SSH rollback. `StartServer` retains its existing `detach` parameter and CLI behavior.
 
 ## 4. REST API Client (`api.go`)
 
@@ -58,7 +58,7 @@ Both client and server start with `detach=true` on the client side (non-blocking
 | `GetConfig` | `GET /rest/config` | Read current syncthing configuration |
 | `PutConfig` | `PUT /rest/config` | Update configuration (e.g., change remote address) |
 
-Used by `SyncDir()` to update the remote peer address when a pod is recreated (new IP).
+Used by `Runtime.syncDir()` to update the remote peer address when a pod is recreated (new IP).
 
 ## 5. Device Identity
 
@@ -75,7 +75,7 @@ The `cert.pem` and `key.pem` files in the syncthing package are the embedded cer
 
 ## 6. Pod IP Tracking
 
-When the sync pod is recreated (e.g., node eviction), the pod IP changes. `SyncDir()` runs a background goroutine that:
+When the sync pod is recreated (e.g., node eviction), the pod IP changes. `Runtime.syncDir()` runs a background goroutine that:
 
 1. Polls running pods matching the sync labels every 2 seconds
 2. Detects pod name changes (indicating a new pod)
@@ -86,8 +86,9 @@ When the sync pod is recreated (e.g., node eviction), the pod IP changes. `SyncD
 
 | File | Purpose |
 |------|---------|
-| `pkg/syncthing/syncthing.go` | StartClient, StartServer, app lifecycle |
+| `pkg/syncthing/syncthing.go` | StartClient, ClientHandle, StartServer, app lifecycle |
 | `pkg/syncthing/api.go` | REST API client for config updates |
-| `pkg/handler/sync_containers.go` | genSyncthingContainer, SyncDir |
-| `pkg/handler/sync.go` | SyncOptions, DoSync orchestration |
+| `pkg/handler/internal/syncworkload/containers.go` | genSyncthingContainer, private syncDir, pod IP tracker |
+| `pkg/handler/internal/syncworkload/runtime.go` | Clone and local-client ownership, Stop/join, workload cleanup |
+| `pkg/handler/sync.go` | SyncOptions configuration, runtime adapter, session rollback and progress output |
 | `pkg/config/config.go` | Device IDs, certs, syncthing paths |

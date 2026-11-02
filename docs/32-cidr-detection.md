@@ -22,21 +22,21 @@ because the CIDRs feed directly into TUN route setup and the gvisor stack. See
 [02-dual-daemon.md](02-dual-daemon.md).
 
 Entry points:
-- `util.GetCIDR()` — the multi-strategy detector with progress reporting (`pkg/util/cidr_detect.go`)
-- `util.GetClusterCIDRNoProbePod()` — the same strategy set without progress steps, for the
+- `discovery.GetCIDR()` — the multi-strategy detector with progress reporting (`pkg/cluster/discovery/cidr.go`)
+- `discovery.GetClusterCIDRNoProbePod()` — the same strategy set without progress steps, for the
   server-side warm-up (`pkg/xds`, see [46-server-side-cidr-dns-detection.md](46-server-side-cidr-dns-detection.md))
-- `ConnectOptions.getCIDR()` — the caching wrapper (`pkg/handler/connect.go`)
+- `DataSession.getCIDR()` — the caching wrapper (`pkg/handler/data_session.go`), with shared parsing/filter helpers in `pkg/handler/connect.go`
 
 ## 2. Architecture
 
 ```
-ConnectOptions.getCIDR(ctx)                         pkg/handler/connect.go
+DataSession.getCIDR(ctx)                         pkg/handler/data_session.go
   │
   ├── getAPIServerIPs()  ── resolve kubeconfig Host + SSH jump hosts → []net.IP
   │
   ├── Get(CLUSTER_CIDRS) from ConfigMap ──► non-empty? ─► parseCachedCIDRs() ─► RETURN (cached)
   │
-  └── cache miss ─► util.GetCIDR(ctx, clientset, managerNS)
+  └── cache miss ─► discovery.GetCIDR(ctx, clientset, managerNS)
                       │
                       │  ── "Detecting cluster CIDRs" step ──
                       ├── (1) GetCIDRByDumpClusterInfo   ── kube-system pod flags (both Pod + Service)
@@ -191,18 +191,20 @@ deletes the `CLUSTER_CIDRS_SCHEMA` key (or both keys).
   `--extra-route` / `ExtraRouteInfo` and DNS-driven routing.
 - Dual-stack clusters yield both IPv4 and IPv6 CIDRs; both flow through unchanged. See
   [38-ipv6-dual-stack.md](38-ipv6-dual-stack.md).
-- The same dedup/filter pair is reused on the network side in `network.go` against
+- The same dedup/filter pair is reused by `network.Runtime` in `pkg/network/routes.go` against
   `nm.cfg.APIServerIPs`, keeping client and server views consistent.
 
 ## 8. Related Files
 
 | File | Purpose |
 |---|---|
-| `pkg/util/cidr.go` | Pure helpers: `CIDRsToString`, `parseCIDRFromFlag`, `RemoveCIDRsContainingIPs`, `RemoveLargerOverlappingCIDRs`, `mergeToSupernet` (+ `cidrMergeFloorV4/V6`), `GetAPIServerIP` (no cluster I/O — unit-tested without a kubeconfig) |
-| `pkg/util/cidr_detect.go` | Cluster-I/O detectors: `GetCIDR`, `GetClusterCIDRNoProbePod`, the four strategy functions, `detectServiceCIDRs` (Strategy 2+3 union), `inferredCIDRFromIP` |
-| `pkg/handler/connect.go` | `getCIDR` caching wrapper, `parseCachedCIDRs`, `encodeCIDRs`, `dedupAndFilterCIDRs`, `getAPIServerIPs` |
+| `pkg/cluster/discovery/cidr_helpers.go` | Pure helpers: `CIDRsToString`, `parseCIDRFromFlag`, `RemoveCIDRsContainingIPs`, `RemoveLargerOverlappingCIDRs`, `mergeToSupernet` (+ `cidrMergeFloorV4/V6`), `GetAPIServerIP` (no cluster I/O — unit-tested without a kubeconfig) |
+| `pkg/cluster/discovery/cidr.go` | Cluster-I/O detectors: `GetCIDR`, `GetClusterCIDRNoProbePod`, the four strategy functions, `detectServiceCIDRs` (Strategy 2+3 union), `inferredCIDRFromIP` |
+| `pkg/handler/data_session.go` | `DataSession.getCIDR` caching wrapper and `getAPIServerIPs` |
+| `pkg/handler/connect.go` | Shared `parseCachedCIDRs`, `encodeCIDRs`, `dedupAndFilterCIDRs` |
+| `pkg/network/routes.go` | Runtime's route-specific CIDR filtering |
 | `pkg/handler/once.go` | Warms the CIDR cache during Helm `once` bootstrap |
-| `pkg/handler/traffmgr.go` | Pre-creates the `CLUSTER_CIDRS` ConfigMap key |
+| `pkg/cluster/manager/resources.go` | Pre-creates the `CLUSTER_CIDRS` ConfigMap key |
 | `pkg/config/config.go` | `KeyClusterCIDRs`, `KeyClusterCIDRsSchema`, `CurrentClusterCIDRsSchema` constants |
 
 ## 9. Related Docs

@@ -5,6 +5,7 @@ import (
 	"net"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	framing "github.com/wencaiwulue/kubevpn/v2/pkg/internal/wire"
 )
 
 // UDPOverTCPConnector wraps a TCP connection as a UDP-like datagram connection.
@@ -33,5 +34,5 @@ func (c *UDPOverTCPConnector) ConnectContext(ctx context.Context, conn net.Conn)
 			return nil, err
 		}
 	}
-	return NewUDPConnOverTCP(ctx, conn)
+	return framing.NewConn(ctx, conn)
 }

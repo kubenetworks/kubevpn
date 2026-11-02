@@ -1,10 +1,24 @@
 # TUN IP Hot Update Design
 
+> **Current implementation / historical draft boundary:** The design sketches and change
+> lists below retain pre-extraction names and superseded proposals; they are not a current
+> source inventory. The root client's `network.Runtime` (`pkg/network/runtime.go`) owns
+> networking. `pkg/network/address.go` implements `rentIP`, `ChangeTunIP`, `StartIPWatcher`
+> and generation-fenced lease updates; `routes.go`, `dns.go`, `device.go` and `monitor.go`
+> hold their respective effects, and `transport.go` owns SSH/port-forward recovery.
+> Kubernetes forwarding handles are in `pkg/cluster/portforward/session.go`.
+> `pkg/tunnel/client.go` re-reads device addresses for registration/heartbeats;
+> `attempt.go` owns each connection, and `route.go` defines `Router` (formerly `RouteHub`).
+> Control probes do not register routes: replies return on registered data connections.
+> Sidecar one-time allocation remains in `pkg/core/protocol_registry.go`; it does not start
+> a sidecar IP watcher. Use [18](18-gvisor-network-stack.md), [47](47-portforward-blackhole-liveness.md)
+> and [48](48-shared-server-gvisor-stack.md) for current packet/transport ownership.
+
 This document describes how TUN IPs are allocated and kept consistent across the **client side** (local machine) and the **sidecar side** (in-cluster workloads). Both sides obtain their IP from the same `TunConfigService` gRPC API provided by the control-plane.
 
 The two sides differ in how they handle a *runtime* IP change:
 
-- **Client side** — the client's TUN device IP can change at runtime (e.g. DHCP lease expiry after a sleep/wake cycle). The client subscribes to `WatchTunIP` and hot-updates its own TUN device via `NetworkManager.ChangeTunIP`.
+- **Client side** — the client's TUN device IP can change at runtime (e.g. DHCP lease expiry after a sleep/wake cycle). The client subscribes to `WatchTunIP` and hot-updates its own TUN device via `network.Runtime.ChangeTunIP` (`pkg/network/address.go`).
 - **Sidecar side** — the sidecar fetches its TUN IP **once at startup** and does not hot-update its own device. When a *client's* IP changes, the routing target is updated at the control-plane: `syncEnvoyRuleIP` rewrites `Rule.LocalTunIPv4/v6` in `ENVOY_CONFIG`, and envoy's xDS stream pushes the new endpoint to the sidecar. There is **no sidecar-side TUN watcher and no iptables DNAT to a hardcoded client IP** — that mechanism was removed by the unified proxy mode.
 
 > The unified proxy mode (VPN-only and Mesh both routed through envoy, TCP + UDP) and the IP-change push fix are specified in **[28-sleep-wake-ip-update.md](28-sleep-wake-ip-update.md)** — read it for the authoritative end-to-end design. This document focuses on the shared `TunConfigService` API and the client-side hot-update path.

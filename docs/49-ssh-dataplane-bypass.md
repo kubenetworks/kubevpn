@@ -14,7 +14,9 @@ the API server entirely.
 
 ## Current transport lifecycle
 
-`NetworkManager` now owns a single supervisor in `pkg/handler/network_transport.go`.
+`network.Runtime` (`pkg/network/runtime.go`) owns a single `transportSupervisor`
+in `pkg/network/transport.go`; its retry policy and underlay monitor live in
+`pkg/network/transport_policy.go` and `pkg/network/monitor.go`.
 The older `probeSSHDataPlane`/`sshForward`/`portForward` flow described below is
 superseded by generation-scoped sessions:
 
@@ -42,6 +44,22 @@ superseded by generation-scoped sessions:
   reassert the DHCP lease and can legitimately update the address. Shutdown cancels the
   parent first, retires the active generation, then waits startup/workers before clearing state.
 - No CLI flags, proto fields or dependency changes were added for this lifecycle.
+
+### Current code locations
+
+| Component | File | Entry point |
+|---|---|---|
+| Network lifecycle/startup health barrier | `pkg/network/runtime.go` | `Runtime.Start`, `Stop` |
+| SSH channel reachability and handle setup | `pkg/network/transport.go` | `transportSupervisor.prepareTransport` (3 s probe budget, all three ports) |
+| Publication/recovery/retirement | `pkg/network/transport.go` | `publishTransport`, `superviseTransport`, `monitorTransport`, `retireTransport` |
+| Kubernetes forwarding session | `pkg/cluster/portforward/session.go` | `StartPortForwardSession` |
+| Joined SSH forwarding handle | `pkg/ssh/tunnel.go` | `StartPortMap`, `PortMap.Stop` |
+| Correlated heartbeat evidence | `pkg/tunnel/heartbeat.go` | `HeartbeatStats` |
+| Service ports | `pkg/cluster/manager/resources.go` | `genService` |
+
+`probeSSHDataPlane`, `sshForward` and `portForwardOnce` no longer exist. The historical
+comparison below is not the current recovery contract: both transports can black-hole and
+both are monitored by the same correlated data-path heartbeat policy.
 
 ## Original design (historical)
 
@@ -94,7 +112,7 @@ It is now exposed on the `kubevpn-traffic-manager` Service as TCP so it is reach
 ClusterIP. This is required for SSH-mode and harmless for the standard port-forward path
 (which already forwarded to the pod directly).
 
-## Architecture comparison
+### Historical architecture comparison
 
 ```
 Standard path (port-forward):
@@ -112,7 +130,7 @@ SSH data-plane path:
 | Pod restart handling | Must re-find pod | ClusterIP is stable; kube-proxy updates endpoints |
 | Requirement | kubeconfig access | SSH access to a K8s node |
 
-## Liveness
+### Historical liveness
 
 - **Heartbeat watchdog** (`watchDataPlaneLiveness`): unchanged — operates at TUN layer
 - **Pod status watcher** (`CheckPodStatus`): not needed in SSH mode (ClusterIP is stable),
@@ -120,7 +138,7 @@ SSH data-plane path:
 - **SSH reconnection**: `PortMapUntil` internally reconnects SSH clients via its
   `connPool` (single-flight creation, health-aware eviction — see `pkg/ssh/pool.go`)
 
-## Code locations
+### Historical code locations
 
 | Component | File | Function |
 |---|---|---|

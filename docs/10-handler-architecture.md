@@ -2,15 +2,47 @@
 
 ## Overview
 
-`pkg/handler` is the core business logic layer for VPN connections, proxy management, and file synchronization. Responsibilities are distributed across four sub-managers:
+`pkg/handler` owns control/data session orchestration and the options consumed by the frozen CLI. Domain mechanisms and their resources live in dedicated components:
 
 ```
-ConnectOptions (session orchestrator)
-├── NetworkManager      — full networking lifecycle (port-forward, TUN, routes, DNS) + IP hot-reload
-├── ProxyManager        — sidecar injection/removal
-├── ConfigMapStore      — traffic manager ConfigMap access (cache-only reads, live writes)
-└── K8sClient           — Kubernetes access (embedded)
+Session orchestration (control and data remain separate)
+├── DataSession → network.Runtime      — transports, TUN, addresses, routes and DNS
+├── ConnectOptions → cluster/manager   — traffic manager deployment and upgrade
+├── ProxyManager                       — local port mappers; injection runs server-side
+├── SyncOptions → internal/syncworkload — clone and local Syncthing lifecycle
+├── ConfigMapStore                     — session-owned cache and live writes
+└── K8sClient                          — Kubernetes access (embedded)
 ```
+
+## Session Membership, Status and Persistence (Stage 4)
+
+`daemon/action.Server` is defined in `server.go` and explicitly owns a
+`connectionRegistry` (`registry.go`). The registry owns its mutex, ordered session
+list and selected ID. Snapshots clone the slice; ID lookup returns the first match,
+ID removal removes every duplicate and atomically reselects the first remaining
+session when necessary. Instance removal compares identity, so delayed retirement
+cannot remove a same-ID replacement. Setup, cleanup, status rendering and peer RPC
+run outside the registry lock; `connectMu` still spans connect decision through
+publication.
+
+`handler.Connection` exposes shared identity/lifecycle and value status only.
+`GetClusterName` replaces factory access by status consumers; `StatusSnapshot`
+returns cached Envoy text and copied sync presentation fields, never a Kubernetes
+client, informer or `SyncOptions`. `DataPlane` owns initialization, rollback
+registration and networking operations; `ProxyController` owns proxy/sync operations
+and the pod/cache-refresh capabilities those operations consume. Concrete control
+and sync types retain CLI-facing Kubernetes initialization/accessors. Control
+`Context()` still returns nil when no runtime context exists. No root proxy/sync
+stubs are needed.
+
+Persistence serializes `connectionRecord` and dedicated `syncRecord`/`routeRecord`
+values, not runtime session types. Explicit mapping retains the existing JSON
+names, null/omitempty behavior, original request bytes, OwnerID, SOCKS, route and
+sync configuration. Only concrete control sessions are persisted. Replay still
+replays `RequestRaw` through Connect and overrides its OwnerID with the stored
+nonempty owner; it does not independently restart sync workloads. No schema
+migration was introduced. SessionLifecycle remains logging-context teardown;
+handler rollback and ConfigMapStore remain session-owned.
 
 ## Session Types — C2-A Split
 
@@ -38,8 +70,8 @@ ConnectOptions (= ControlSession)     DataSession
 ├── SshHosts             []net.IP     ├── ReservedTunIPs func() []net.IP
 ├── proxyManager *ProxyManager        ├── ctx    context.Context    (set at start of DoConnect)
 ├── syncMu + Sync                     ├── cancel context.CancelFunc
-└── 6 data-plane STUBS                ├── nm     *NetworkManager
-                                      └── 6 control-plane STUBS
+└── ProxyController role             ├── nm     *network.Runtime
+                                      └── DataPlane role
 ```
 
 `ControlSession = ConnectOptions` is a type alias for semantic clarity. Both names compile identically.
@@ -49,8 +81,8 @@ ConnectOptions (= ControlSession)     DataSession
 | | User Daemon (ConnectOptions/ControlSession) | Root Daemon (DataSession) |
 |---|---|---|
 | Entry point | `redirectConnectToSudoDaemon` | `Connect` → `ds.DoConnect` |
-| IP acquisition | queries sudo daemon via `getSudoTunIPs` | `NetworkManager.rentIP` (in startTUN) |
-| Sub-managers | proxyManager, configMapStore | nm (*NetworkManager), configMapStore |
+| IP acquisition | queries sudo daemon via `getSudoTunIPs` | `network.Runtime.rentIP` (in startTUN) |
+| Sub-managers | proxyManager, configMapStore | nm (*network.Runtime), configMapStore |
 | Cleanup path | always `cleanupControlPlane` | always `cleanupDataPlane` |
 | Persistence | ✅ OffloadToConfig (json tags) | ❌ never persisted |
 
@@ -64,7 +96,7 @@ User Daemon:
 
 Root Daemon:
   connect.OwnerID = req.OwnerID
-  DoConnect → NetworkManager.Start()
+  DoConnect → network.Runtime.Start()
     → startTUN → rentIP(OwnerID, ExcludeIPs)
       → gRPC GetTunIP(ownerID) → TunConfigServer DHCP rent (via rentIP)
       → 198.18.0.5/32
@@ -78,37 +110,47 @@ User Daemon (when IP is needed):
   v4, v6 := resolveTunIP(connect, ips)  // match by ConnectionID
 ```
 
-**IP is entirely managed by the Root Daemon's NetworkManager.** The User Daemon no longer holds `LocalTunIPv4/v6`.
+**IP is entirely managed by the Root Daemon's network.Runtime.** The User Daemon no longer holds `LocalTunIPv4/v6`.
 
-## NetworkManager — Full Networking Lifecycle
+## network.Runtime — Full Networking Lifecycle
+
+Networking lives in `pkg/network`, not `pkg/handler`. `DataSession.nm` holds
+`*network.Runtime`, constructed with `network.New(network.Config)`. There is no
+handler alias. `DoConnect` explicitly copies `ExtraRouteInfo` into the independent
+`network.RouteConfig`; the network package never imports handler.
 
 ```go
-type NetworkManager struct {
-    cfg       NetworkConfig    // immutable configuration
-    ctx       context.Context  // independent context (Stop only cancels networking)
-    cancel    context.CancelFunc
-    tunName   string
-    extraHost []dns.Entry
-    dnsConfig *dns.Config
-}
-
-type NetworkConfig struct {
-    Clientset, RESTClient, Config  // K8s access
-    ManagerNamespace, WorkloadNamespace
-    CIDRs, APIServerIPs            // routing parameters
-    ExtraRouteInfo                 // extra routes/domains
-    Image, Lock                    // auxiliary
-    OwnerID                        // used by IP watcher
-    GetRunningPodList              // dependency injection
+// pkg/network/runtime.go
+type Runtime struct {
+    cfg        Config
+    transport  *transportSupervisor
+    addresses  tunAddresses
+    routeTable routeTable
+    device     tunDevice
+    dns        dnsState
+    stopOnce   sync.Once
 }
 ```
+
+`transportSupervisor` owns generation publication/retirement, connections, health
+checks, network monitoring, terminal errors, shared context and worker admission.
+It has no Runtime pointer: its cross-component dependencies are route addition,
+stale-route repair and a read-only route snapshot callback. Runtime coordinates
+address/route/DNS transactions through the supervisor's existing `applyGeneration`
+barrier. The recovery algorithm and generation cancellation semantics are unchanged.
+
+Source ownership: `config.go`, `runtime.go`, `transport.go`, `transport_policy.go`,
+`monitor.go`, `address.go`, `routes.go`, `dns.go`/`dns_helpers.go`, and `device.go`.
+OS routing seams belong to `routeTable`; listener construction belongs to `tunDevice`;
+monitor construction belongs to the supervisor. All seams remain private.
 
 ### Lifecycle API
 
 | Method | Description |
 |--------|-------------|
 | `Start(ctx)` | Starts: port-forward → TUN → routes → DNS |
-| `Stop()` | Stops: DNS → cancel context |
+| `Stop()` | Reject new work → cancel → retire/close transports → join startup/workers → clear DNS/state |
+| `Done()` / `Err()` | Observe cancellation and terminal cause without accessing private context; Stop is the join barrier |
 | `ChangeTunIP(ctx, v4, v6)` | Hot-reload TUN IP (without rebuilding the network stack) |
 | `StartIPWatcher(ctx)` | Background listener for TunConfigService IP change pushes |
 | `TunName()` | Returns the TUN device name |
@@ -118,7 +160,7 @@ type NetworkConfig struct {
 `--extra-domain` entries (`AddExtraRoute`) and `ExternalName` services (the DNS
 `HowToGetExternalName` callback) resolve to IPs by querying the in-cluster
 kubevpn DNS forward server directly over the TUN (`resolveDomainViaClusterDNS`
-in `connect_dns.go`, a plain miekg/dns A/AAAA query to `<server>:53`), not by
+in `pkg/network/dns_helpers.go`, a plain miekg/dns A/AAAA query to `<server>:53`), not by
 shelling `dig` inside the sidecar pod. The forward server handles search-list
 expansion and upstream forwarding, so cluster-internal names (private-link,
 ExternalName) resolve correctly. `AddExtraRoute` falls back to ingress
@@ -129,9 +171,9 @@ anymore, the sidecar image no longer depends on `dnsutils`.
 
 ```
 TunConfigService push (WatchTunIP stream)
-  → NetworkManager.ChangeTunIP(newIPv4, newIPv6)
+  → network.Runtime.ChangeTunIP(newIPv4, newIPv6)
     → tun.ChangeIP(tunName, old, new)     // OS-level change (fd unchanged)
-    → update nm.localTunIPv4/v6
+    → update Runtime address state
     → heartbeat automatically uses new IP on next tick   // re-read from OS
     → Server RouteHub automatically registers new IP     // AddRoute per packet
 ```
@@ -238,41 +280,34 @@ pkg/xds   → pkg/dhcp, pkg/daemon/rpc (server-side DHCP + TunConfigService)
 
 ## Completed Refactoring
 
-- **C1: Connection interface migration** (DONE): `Server.connections` is now typed
-  `[]handler.Connection` (not `[]*handler.ConnectOptions`). `handler.Connects` is also
-  `[]Connection`. The `Connection` interface gained five methods (`GetOwnerID`,
-  `GetWorkloadNamespace`, `GetAPIServerIPs`, `GetExtraCIDR`, `GetNetworkExtraHost`) so the daemon
-  layer talks to sessions exclusively through the interface — no raw struct field accesses remain
-  in `daemon/action`.
+- **C1: Connection interface migration** (DONE): the ordered registry stores
+  `handler.Connects` (`[]Connection`), not concrete control sessions. Network-specific
+  accessors belong to `DataPlane`; status consumes identity and value snapshots.
+  Persistence explicitly maps concrete control-session configuration to disk DTOs.
 - **C2-A: Full type split** (DONE): The dual-role `ConnectOptions` god struct was split into two
   types by role. An interim step (`dataPlaneState` pointer + `isDataPlane` bool) was explored and
   then superseded by the full split: `ConnectOptions` (= `ControlSession`, user daemon) and
   `DataSession` (root daemon). Both implement `Connection` and embed `SessionBase`. Cleanup routes
-  by type identity — no nil-check or flag needed. `DoConnect` is a real method on `DataSession`
-  and a stub on `ConnectOptions`. All interim types (`dataPlaneState`, `isDataPlane`) are gone.
-
-## Future Refactoring Direction
-
-- **Connection interface split**: Split `Connection` into `ControlConnection` and `DataConnection`
-  to eliminate the 6 stubs on each type. Requires updating all consumers of `[]Connection`
-  (persistence, quit, disconnect, status). Out of scope for C2-A.
+  by type identity — no nil-check or flag needed. `DoConnect` exists only on `DataSession`.
+  All interim types (`dataPlaneState`, `isDataPlane`) are gone.
+- **Stage 4: Registry and session boundary** (DONE): explicit registry ownership,
+  disk-only connection/sync records, and role-specific capabilities replace shared
+  Kubernetes/cache/sync access and wrong-plane stubs.
 
 ## File Layout
 
 ```
 pkg/handler/
 ├── session_base.go       SessionBase (shared base for ConnectOptions + DataSession)
-├── connect.go            ConnectOptions (ControlSession) — control-plane methods + 6 stubs
+├── connect.go            ConnectOptions (ControlSession) — control-plane methods + value status
 ├── control_session.go    type ControlSession = ConnectOptions (alias)
 ├── data_session.go       DataSession — data-plane methods, DoConnect, cleanupDataPlane
 ├── connection.go         Connection interface + compile-time assertions for both types
 ├── rollback.go           rollbackList — mutex-guarded rollback registry (embedded by SessionBase + SyncOptions)
 ├── cleaner.go            ConnectOptions.Cleanup + cleanupControlPlane + executeRollbackFuncs
-├── connect_tun.go        Run() server runner, healthCheck helpers
-├── connect_dns.go        detectNameserver helpers
+├── connect_tun.go        Run() delegates to core.Serve
 ├── connect_route.go      newTickerResetHandler
 ├── connect_upgrade.go    upgradeDeploy
-├── network.go            NetworkManager (Start/Stop/ChangeTunIP/IPWatcher)
 ├── proxy_manager.go      ProxyManager (Add/Remove/Leave)
 ├── configmap_store.go    ConfigMapStore (EnsureSynced/Get/GetConfigMap/Set)
 ├── proxy.go              Proxy/ProxyList data types

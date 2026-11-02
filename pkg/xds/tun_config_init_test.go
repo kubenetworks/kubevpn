@@ -12,7 +12,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 
@@ -22,16 +21,6 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 )
-
-// setFastInitBackoff shrinks initDHCPBackoff for the duration of a test so the
-// retry loop runs in milliseconds. Not parallel-safe (mutates a package var) —
-// these tests must not call t.Parallel().
-func setFastInitBackoff(t *testing.T, steps int) {
-	t.Helper()
-	orig := initDHCPBackoff
-	initDHCPBackoff = wait.Backoff{Duration: time.Millisecond, Factor: 1.0, Steps: steps}
-	t.Cleanup(func() { initDHCPBackoff = orig })
-}
 
 // serveTunConfigOverGRPC stands up a real gRPC server for s and returns a
 // connected client, mirroring the production wiring (register + serve + dial).
@@ -95,7 +84,6 @@ func trafficManagerObjects() []runtime.Object {
 // NewTunConfigServer must eventually succeed, and the resulting server must serve
 // TunConfigService so a client can allocate a TUN IP end-to-end over gRPC.
 func TestInit_TransientAPIFailure_RecoversAndServes(t *testing.T) {
-	setFastInitBackoff(t, 8)
 
 	// Fail the first 2 ConfigMap gets, then let InitDHCP succeed.
 	clientset := connRefusedClientset(2, trafficManagerObjects()...)
@@ -105,6 +93,7 @@ func TestInit_TransientAPIFailure_RecoversAndServes(t *testing.T) {
 		t.Fatalf("NewTunConfigServer should recover after transient failures, got: %v", err)
 	}
 
+	t.Cleanup(s.Close)
 	// Prove the data plane actually works: register + serve + allocate over gRPC.
 	client := serveTunConfigOverGRPC(t, s)
 	resp, err := client.GetTunIP(context.Background(), &rpc.TunIPRequest{
@@ -128,12 +117,13 @@ func TestInit_TransientAPIFailure_RecoversAndServes(t *testing.T) {
 // server. Main relies on this to exit fatally so K8s restarts the container,
 // instead of serving an xDS endpoint without TunConfigService.
 func TestInit_PermanentAPIFailure_IsFatal(t *testing.T) {
-	setFastInitBackoff(t, 3)
 
 	// A very large fail budget => every attempt fails.
 	clientset := connRefusedClientset(1<<30, trafficManagerObjects()...)
 
-	s, err := NewTunConfigServer(context.Background(), clientset, "kubevpn")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	s, err := NewTunConfigServer(ctx, clientset, "kubevpn")
 	if err == nil {
 		t.Fatal("NewTunConfigServer should fail when InitDHCP never succeeds")
 	}

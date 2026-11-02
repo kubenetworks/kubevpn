@@ -53,8 +53,8 @@ User Daemon:
 
 Root Daemon:
 1. Receives ConnectRequest with ConnectionID
-2. connect.ConnectionID = req.ConnectionID → stored on ConnectOptions
-3. DoConnect() → NetworkManager.Start()
+2. connect.ConnectionID = req.ConnectionID → stored on DataSession
+3. DoConnect() → network.Runtime.Start() (pkg/network/runtime.go)
 4. Connection appended to svr.connections[]
 ```
 

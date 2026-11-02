@@ -13,7 +13,6 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 )
 
 // saveRestoreDB saves the current DB file and restores it (or removes it) after
@@ -65,7 +64,7 @@ func validConfigWithConnectionYAML(t *testing.T) []byte {
 		t.Fatalf("setup: proto.Marshal: %v", err)
 	}
 	conf := &Config{
-		SecondaryConnect: []*handler.ConnectOptions{
+		SecondaryConnect: []*connectionRecord{
 			{RequestRaw: raw},
 		},
 	}
@@ -154,9 +153,9 @@ func TestLoadFromConfig_EmptySecondaryConnect(t *testing.T) {
 		t.Error("GetClient must not be called when SecondaryConnect is empty")
 	}
 
-	svr.connMu.RLock()
-	connCount := len(svr.connections)
-	svr.connMu.RUnlock()
+	svr.registry.mu.RLock()
+	connCount := len(svr.registry.list)
+	svr.registry.mu.RUnlock()
 	if connCount != 0 {
 		t.Errorf("expected 0 connections after early-exit, got %d", connCount)
 	}

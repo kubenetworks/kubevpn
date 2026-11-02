@@ -14,9 +14,11 @@ import (
 	v1 "k8s.io/api/core/v1"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/cluster/discovery"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dns"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/network"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
@@ -51,7 +53,7 @@ type DataSession struct {
 	// DataSession is never stored without DoConnect having been called).
 	ctx    context.Context
 	cancel context.CancelFunc
-	nm     *NetworkManager // the running network stack
+	nm     *network.Runtime // the running network stack
 }
 
 // InitClient initializes the Kubernetes clientset, REST client, and config from the given factory.
@@ -90,7 +92,7 @@ func (ds *DataSession) DoConnect(ctx context.Context) (err error) {
 	}
 
 	hostname, _ := os.Hostname() // best-effort; empty on failure is fine (omitted from TUN_ALLOCS)
-	ds.nm = newNetworkManager(NetworkConfig{
+	ds.nm = network.New(network.Config{
 		Clientset:         ds.clientset,
 		RESTClient:        ds.restclient,
 		Config:            ds.config,
@@ -98,7 +100,11 @@ func (ds *DataSession) DoConnect(ctx context.Context) (err error) {
 		WorkloadNamespace: ds.WorkloadNamespace,
 		CIDRs:             cidrs,
 		APIServerIPs:      apiServerIPs,
-		ExtraRouteInfo:    &ds.ExtraRouteInfo,
+		RouteConfig: &network.RouteConfig{
+			ExtraCIDR:   append([]string(nil), ds.ExtraRouteInfo.ExtraCIDR...),
+			ExtraDomain: append([]string(nil), ds.ExtraRouteInfo.ExtraDomain...),
+			ExtraNodeIP: ds.ExtraRouteInfo.ExtraNodeIP,
+		},
 		Image:             ds.Image,
 		Lock:              ds.Lock,
 		OwnerID:           ds.OwnerID,
@@ -114,7 +120,7 @@ func (ds *DataSession) DoConnect(ctx context.Context) (err error) {
 	// Observe manager termination outside its owned workers: Cleanup calls Stop,
 	// which joins those workers and must never be called by the supervisor itself.
 	go func() {
-		<-ds.nm.ctx.Done()
+		<-ds.nm.Done()
 		ds.cancel()
 		ds.Cleanup(context.WithoutCancel(ds.ctx))
 	}()
@@ -166,7 +172,7 @@ func (ds *DataSession) GetAPIServerIPs() []net.IP {
 	if ds.nm == nil {
 		return nil
 	}
-	return ds.nm.cfg.APIServerIPs
+	return ds.nm.APIServerIPs()
 }
 
 // GetNetworkExtraHost returns extra DNS host entries accumulated during route setup.
@@ -208,14 +214,23 @@ func (ds *DataSession) GetOriginKubeconfigPath() string {
 	return ds.OriginKubeconfigPath
 }
 
-// GetSocksListenAddr is a data-plane stub: the managed SOCKS5 proxy is a control-plane concern.
-func (ds *DataSession) GetSocksListenAddr() string { return "" }
+// GetClusterName provides identity without exposing the Kubernetes factory.
+func (ds *DataSession) GetClusterName() string { return util.GetKubeconfigCluster(ds.factory) }
 
-// GetSocksEgress is a data-plane stub: the managed SOCKS5 proxy is a control-plane concern.
-func (ds *DataSession) GetSocksEgress() bool { return false }
+func (ds *DataSession) StatusSnapshot(ctx context.Context) (SessionStatus, error) {
+	cm, err := ds.getConfigMapStore().GetConfigMap(ctx)
+	var status SessionStatus
+	if cm != nil {
+		status.Envoy = cm.Data[config.KeyEnvoy]
+	}
+	return status, err
+}
 
 // GetExtraCIDR returns the extra CIDR strings configured for this connection.
 func (ds *DataSession) GetExtraCIDR() []string {
+	if ds.nm != nil {
+		return ds.nm.ExtraCIDRs()
+	}
 	return ds.ExtraRouteInfo.ExtraCIDR
 }
 
@@ -237,24 +252,6 @@ func (ds *DataSession) Set(ctx context.Context, key, value string) error {
 // Get retrieves a value by key from the traffic manager ConfigMap, using the informer cache first.
 func (ds *DataSession) Get(ctx context.Context, key string) (string, error) {
 	return ds.getConfigMapStore().Get(ctx, key)
-}
-
-// GetTrafficManagerConfigMap returns the traffic manager ConfigMap from the informer cache.
-func (ds *DataSession) GetTrafficManagerConfigMap(ctx context.Context) (*v1.ConfigMap, error) {
-	return ds.getConfigMapStore().GetConfigMap(ctx)
-}
-
-func (ds *DataSession) RefreshConfigMapCache(ctx context.Context) error {
-	return ds.getConfigMapStore().Refresh(ctx)
-}
-
-// --- Connection interface: control-plane stubs (data-plane session does not proxy workloads) ---
-
-// GetSync returns nil on the data-plane session.
-// File sync is a control-plane responsibility; this is a safe read (the method is
-// on the shared Connection interface) returning "not applicable", not a stub.
-func (ds *DataSession) GetSync() *SyncOptions {
-	return nil
 }
 
 // --- Internal data-plane helpers ---
@@ -291,7 +288,7 @@ func (ds *DataSession) setupSignalHandler(ctx context.Context) {
 // getAPIServerIPs resolves the API server IPs from the kubeconfig host.
 // DataSession does not have SSH jump hosts (those are a control-plane concern).
 func (ds *DataSession) getAPIServerIPs() ([]net.IP, error) {
-	return util.GetAPIServerIP(ds.config.Host)
+	return discovery.GetAPIServerIP(ds.config.Host)
 }
 
 // getCIDR detects cluster Pod/Service CIDRs and API server IPs.
@@ -308,17 +305,17 @@ func (ds *DataSession) getCIDR(ctx context.Context) ([]*net.IPNet, []net.IP, err
 	}
 	if strings.TrimSpace(ipPoolStr) != "" {
 		cidrs := parseCachedCIDRs(ipPoolStr, apiServerIPs)
-		plog.StepDone(ctx, "Detected cluster CIDRs: %s (cached)", util.CIDRsToString(cidrs))
+		plog.StepDone(ctx, "Detected cluster CIDRs: %s (cached)", discovery.CIDRsToString(cidrs))
 		return cidrs, apiServerIPs, nil
 	}
 
-	raw := util.GetCIDR(ctx, ds.clientset, ds.ManagerNamespace)
+	raw := discovery.GetCIDR(ctx, ds.clientset, ds.ManagerNamespace)
 	cidrs := dedupAndFilterCIDRs(raw, apiServerIPs)
 	// Cache the RAW (deduped, unfiltered) CIDRs — NOT the per-client-filtered set.
 	// API-server IPs differ per client and every reader re-filters on read via
 	// parseCachedCIDRs, so caching a filtered set would hide a CIDR (the one holding
 	// this client's API-server IP) from other clients. See docs/46.
-	rawDeduped := util.RemoveLargerOverlappingCIDRs(raw)
+	rawDeduped := discovery.RemoveLargerOverlappingCIDRs(raw)
 	if len(rawDeduped) == 0 {
 		plog.G(ctx).Debugf("No cluster CIDRs detected (raw=%d)", len(raw))
 		return cidrs, apiServerIPs, nil

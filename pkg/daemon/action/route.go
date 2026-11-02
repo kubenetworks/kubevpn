@@ -16,9 +16,7 @@ import (
 // Route handles the Route RPC, adding or deleting a CIDR route on the TUN device for the active connection.
 func (svr *Server) Route(ctx context.Context, req *rpc.RouteRequest) (*rpc.RouteResponse, error) {
 	if !svr.IsSudo {
-		svr.connMu.RLock()
-		conn, _ := svr.findConnection(svr.currentConnectionID)
-		svr.connMu.RUnlock()
+		conn := svr.registry.current()
 		if conn == nil {
 			return nil, config.ErrConnectionNotFound
 		}

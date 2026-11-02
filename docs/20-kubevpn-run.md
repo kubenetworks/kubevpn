@@ -38,7 +38,7 @@ the `Leave` and `Disconnect` streams render with the spinner + `✓` UX via `grp
 off the terminal's `^C` echo. `--no-proxy` runs skip Leave (nothing was injected).
 
 > **Port coverage caveat (host mode).** The dev container is a standalone container published on
-> `host:<port>`, and the gvisor `LocalTCPForwarder` dials `127.0.0.1` (`pkg/core/gvisor_tcp_forwarder.go`).
+> `host:<port>`, and the gvisor `LocalTCPForwarder` dials `127.0.0.1` (`pkg/tunnel/internal/netstack/tcp.go`).
 > Under the unified mesh full-proxy, only the workload's **declared** ports are routed back to the
 > local machine; an undeclared port (e.g. `9090`) falls through the envoy `:15006` capture to
 > `origin_cluster` (the real app), so a run/sync e2e that probes `podIP:9090` will not reach the local

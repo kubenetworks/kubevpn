@@ -49,19 +49,15 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 	// context is terminal and must be retired before reusing its ConnectionID.
 	// Keep the nil-context fallback for tests / direct callers.
 	if req.ConnectionID != "" {
-		svr.connMu.RLock()
-		existing, _ := svr.findConnection(req.ConnectionID)
-		svr.connMu.RUnlock()
+		existing, _ := svr.registry.find(req.ConnectionID)
 		if existing != nil {
 			if existing.Context() == nil || existing.Context().Err() == nil {
 				plog.G(ctx).Infof("Data plane already established for connection %s", req.ConnectionID)
 				return resp.Send(&rpc.ConnectResponse{ConnectionID: req.ConnectionID})
 			}
-			svr.connMu.Lock()
-			svr.removeConnectionInstance(existing)
-			svr.connMu.Unlock()
+			svr.registry.removeInstance(existing)
 			// Cleanup is a join barrier; never wait for network/DNS teardown with
-			// connMu held, and never allocate the replacement before it finishes.
+			// the registry lock held, and never allocate the replacement before it finishes.
 			existing.Cleanup(context.WithoutCancel(ctx))
 		}
 	}
@@ -126,8 +122,6 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 	if resp.Context().Err() != nil {
 		return resp.Context().Err()
 	}
-	svr.connMu.Lock()
-	svr.connections = append(svr.connections, ds)
-	svr.connMu.Unlock()
+	svr.registry.add(ds, false)
 	return nil
 }

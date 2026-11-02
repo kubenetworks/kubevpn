@@ -2,7 +2,50 @@
 
 ## Overview
 
-KubeVPN uses a TUN device + gvisor network stack to create a VPN tunnel between a local client and a remote K8s cluster. All traffic between client and server is multiplexed over a single TCP connection using a custom datagram protocol (2-byte length header + payload).
+The data-plane implementation now lives in `pkg/tunnel`: `client.go`, `slot.go`,
+`attempt.go`, `server.go`, `peers.go`, `route.go`, `device.go`, `bridge.go`,
+`packet.go`, `batch.go` and `heartbeat.go`. Historical filenames below describe
+those same paths before extraction. `pkg/internal/wire` owns shared stream framing
+and batch socket writes; `tunnel/internal/netstack` owns stack construction and
+TCP/UDP/ICMP forwarders. `core` only assembles listeners/dialers and runs `Serve`.
+
+KubeVPN uses a TUN device + gvisor network stack between a local client and a remote
+Kubernetes cluster. The current default multiplexes business flows on one data connection
+plus a separate control connection to the same forwarding endpoint.
+
+### Current ownership and data paths
+
+- Root assembly: `pkg/network/runtime.go` → `pkg/network/device.go` → tunnel handlers;
+  `pkg/network/transport.go` owns SSH/port-forward generations. Transport replacement
+  retains the TUN and client stacks; `address.go` applies legitimate lease changes.
+- Client: `pkg/tunnel/client.go` dispatches directly to data slot 0. `slot.go` retains
+  queues/retry state, while `attempt.go` creates a `connAttempt` per dial, owns framing
+  declaration/registration plus `readGeneration`/`writeGeneration`, and joins both pumps
+  before retry. Multi-slot hashing is only a private nil-stats test override.
+- Server: `pkg/tunnel/route.go` defines `Router` with private route membership,
+  `peerRegistry` and `tunBridge`, not public `RouteMapTCP`/`TCPPacketChan` globals.
+  `server_endpoint.go` sends per-client stack output through `readFromEndpointWriteToRoute`
+  → Router → registered data conn. There is no direct per-connection stack reply writer.
+- Service lifetime: `core.Serve` (`pkg/core/serve.go`) calls handler `Start(serviceCtx)`
+  before accept, joins accepted handlers, then calls `Close` to join peer construction,
+  output and destruction. `peerRegistry` never borrows the first connection's context.
+  `bridge.go` separately owns queue admission/stop/drain. Connection handlers close and
+  join their buffered writer through `waitRun`; cancellation alone is not a join.
+- Heartbeat: `HeartbeatInterval` (5 s) → control queue/conn → per-client stack →
+  **registered data conn** → correlated `HeartbeatStats.observeReply`. Control does not
+  register routes and receives no direct reply. Type `2` is control; only `3..255` remain
+  reserved. Data registration is sent before queued business traffic on each new data conn.
+- Shared primitives: `pkg/internal/wire/conn.go` owns `Conn`, `ReadDatagram`,
+  `WriteDatagram`, `WriteFull`; `batch.go` owns `BatchWriter`. Pooled `packet` and packet
+  batches remain private to tunnel. `pkg/tunnel/internal/netstack` owns stack construction
+  and TCP/UDP/ICMP forwarders.
+
+The legacy diagrams, pseudocode and bug-fix/performance history below preserve earlier
+names/topologies (public RouteHub maps, four slots, broadcast heartbeats, old wrapper APIs).
+They are explanatory history, not current source declarations or new measurements. Read
+[18](../../docs/18-gvisor-network-stack.md) and [48](../../docs/48-shared-server-gvisor-stack.md)
+for current routing/lifetime details. Current packet tests run under `go test ./pkg/tunnel/...`;
+shared framing tests under `go test ./pkg/internal/wire`. No tests were run in this doc pass.
 
 ## Canonical buffer layout
 
@@ -26,12 +69,13 @@ may deliver several packets (wireguard-go Linux GSO splitting) into a batch of t
 ### Type prefix
 
 The 1-byte type prefix at `data[2]` (named constants in `packet.go`); it is a small
-extensible discriminator — values `2..255` are reserved for future packet types:
+extensible discriminator — values `3..255` are reserved for future packet types:
 
 | Prefix | Constant | Meaning | Action at receiver |
 |--------|----------|---------|--------------------|
 | `0` | `packetTypeToTUN` | Gvisor-processed packet (response from real network) | Write to TUN device directly |
 | `1` | `packetTypeToGvisor` | Raw IP packet (needs gvisor processing) | Inject into gvisor stack |
+| `2` | `packetTypeControl` | Control declaration / heartbeat ICMP | No route registration; replies use registered data conns |
 
 ## Batched / segment-aware TUN reads
 

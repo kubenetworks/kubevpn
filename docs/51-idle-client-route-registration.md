@@ -2,6 +2,15 @@
 
 ## 1. Overview
 
+Current source map: `pkg/tunnel/client.go` builds registrations; `attempt.go` sends them
+before business traffic; `device.go`/`device_address.go` resolve the current TUN addresses.
+`pkg/tunnel/route.go` defines `Router`, and `server_endpoint.go` routes stack output over
+registered data conns (never directly over control). `pkg/network/transport.go` now owns
+`transportSupervisor.monitorTransport`/`superviseTransport`; `transport_policy.go` owns
+`nextPortForwardDelay`. The old `watchLiveness`/`livenessOutcome`/`portForwardOnce` chain
+and old filenames in the causal/fix history below describe the incident-era implementation,
+not current APIs. The recorded counts, timelines and logs are unchanged.
+
 A single silent `return nil` on the client took a tunnel down for 20 hours and, through four
 downstream layers, ended up corrupting a lease record in the traffic manager's ConfigMap. This
 document records the causal chain, because every link in it was individually reasonable and only the
@@ -165,10 +174,10 @@ Both pre-existing tests covering route registration hand-crafted the announcemen
 test has a `registerRoute()` helper). Neither ever executed `registrationPayloads()`. The mechanism
 with no test was the one that broke.
 
-`pkg/core/registration_integration_test.go` drives the real data plane over loopback TCP into
-the real gvisor handler and `RouteHub`. The original coverage used four data slots plus control;
+`pkg/tunnel/registration_integration_test.go` drives the real data plane over loopback TCP into
+the real gvisor handler and `tunnel.Router`. The original coverage used four data slots plus control;
 current default expectations are **one registered data conn per client address**, plus one
-control conn excluded from RouteHub. It covers automatic registration, the heartbeat round trip,
+control conn excluded from `Router`. It covers automatic registration, the heartbeat round trip,
 recovery after a port-forward teardown, and a client which cannot determine its own addresses
 both failing to register **and saying so**. Multi-slot comparisons require the explicit private,
 data-only `poolSize` override with nil stats; they do not change production defaults.
@@ -195,6 +204,6 @@ should report `ok` rather than `unhealthy`.
 ## 6. Related Documents
 
 - [03-dhcp-ip-allocation.md](03-dhcp-ip-allocation.md) — lease mechanism and `TUN_ALLOCS` persistence
-- [08-heartbeat-health.md](08-heartbeat-health.md) — heartbeat, proactive registration, RouteHub
+- [08-heartbeat-health.md](08-heartbeat-health.md) — heartbeat, proactive registration, Router
 - [47-portforward-blackhole-liveness.md](47-portforward-blackhole-liveness.md) — the liveness watchdog
 - [09-tun-ip-hot-update.md](09-tun-ip-hot-update.md) — why addresses are re-read rather than cached

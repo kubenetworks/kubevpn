@@ -15,18 +15,14 @@ func (svr *Server) Unsync(resp rpc.Daemon_UnsyncServer) error {
 	logger, ctx := svr.initStreamLogger(resp, req.Level, func(msg string) error {
 		return resp.Send(&rpc.UnsyncResponse{Message: msg})
 	})
-	svr.connMu.RLock()
-	conn, _ := svr.findConnection(svr.currentConnectionID)
-	svr.connMu.RUnlock()
+	conn := svr.registry.current()
 	if conn == nil {
 		logger.Infof("No connection found")
 		return config.ErrConnectionNotFound
 	}
-	if sync := conn.GetSync(); sync != nil {
-		err = sync.Cleanup(ctx, req.Workloads...)
-		// SetSync is control-plane-only (ProxyController). Unsync runs in the user
-		// daemon where conn is a *ConnectOptions satisfying ProxyController.
-		if pc, ok := conn.(handler.ProxyController); ok {
+	if pc, ok := conn.(handler.ProxyController); ok {
+		if sync := pc.GetSync(); sync != nil {
+			err = sync.Cleanup(ctx, req.Workloads...)
 			pc.SetSync(nil)
 		}
 	}

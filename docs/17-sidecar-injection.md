@@ -136,7 +136,7 @@ See [16-envoy-controlplane.md](16-envoy-controlplane.md) ("Mesh-mode inbound cap
 #### Concrete symptom
 
 `kubevpn run` / `kubevpn sync` e2e probes `podIP:9090`. In host mode the dev container is published
-on `host:9090` and the gvisor `LocalTCPForwarder` dials `127.0.0.1` (`pkg/core/gvisor_tcp_forwarder.go`).
+on `host:9090` and the gvisor `LocalTCPForwarder` dials `127.0.0.1` (`pkg/tunnel/internal/netstack/tcp.go`).
 If `9090` is not a declared port, the request hits the `:15006` capture passthrough → `origin_cluster`
 → the real app, never the local dev process — so the probe fails. See [20-kubevpn-run.md](20-kubevpn-run.md).
 

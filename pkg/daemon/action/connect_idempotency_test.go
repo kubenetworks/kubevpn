@@ -58,7 +58,7 @@ func TestConnect_TerminalSessionDoesNotReportSuccess(t *testing.T) {
 	other := &handler.DataSession{ConnectionID: "other"}
 	logFile := &lumberjack.Logger{Filename: filepath.Join(t.TempDir(), "daemon.log")}
 	t.Cleanup(func() { _ = logFile.Close() })
-	svr := &Server{IsSudo: true, LogFile: logFile, connections: []handler.Connection{old, other}}
+	svr := &Server{IsSudo: true, LogFile: logFile, registry: connectionRegistry{list: []handler.Connection{old, other}}}
 	cancel()
 	// Invalid credentials make rebuilding fail before any real network operation.
 	// A terminal entry must not turn this failure into an idempotent success.
@@ -69,7 +69,7 @@ func TestConnect_TerminalSessionDoesNotReportSuccess(t *testing.T) {
 	if old.cleaned.Load() != 1 {
 		t.Fatal("terminal session cleanup was not joined")
 	}
-	if len(svr.connections) != 1 || svr.connections[0] != other {
+	if len(svr.registry.list) != 1 || svr.registry.list[0] != other {
 		t.Fatal("terminal entry retained or unrelated session removed")
 	}
 }
@@ -86,9 +86,8 @@ func TestConnect_SudoIdempotentOnDuplicateConnectionID(t *testing.T) {
 	const cid = "abc123def456"
 	existing := &handler.DataSession{ConnectionID: cid}
 	svr := &Server{
-		IsSudo:      true,
-		LogFile:     logFile,
-		connections: []handler.Connection{existing},
+		IsSudo:  true,
+		LogFile: logFile, registry: connectionRegistry{list: []handler.Connection{existing}},
 	}
 	resp := &fakeConnectServer{
 		ctx: context.Background(),
@@ -100,10 +99,10 @@ func TestConnect_SudoIdempotentOnDuplicateConnectionID(t *testing.T) {
 	}
 
 	// No duplicate data plane: the connection slice is unchanged and still the same instance.
-	if got := len(svr.connections); got != 1 {
+	if got := len(svr.registry.list); got != 1 {
 		t.Fatalf("expected 1 connection (no duplicate created), got %d", got)
 	}
-	if svr.connections[0] != existing {
+	if svr.registry.list[0] != existing {
 		t.Fatal("existing data-plane session must be preserved, not replaced")
 	}
 

@@ -9,6 +9,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/cluster/manager"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
@@ -104,9 +105,7 @@ func (svr *Server) redirectConnectToSudoDaemon(req *rpc.ConnectRequest, resp rpc
 
 	svr.connectMu.Lock()
 	defer svr.connectMu.Unlock()
-	svr.connMu.RLock()
-	existing, _ := svr.findConnection(connect.ConnectionID)
-	svr.connMu.RUnlock()
+	existing, _ := svr.registry.find(connect.ConnectionID)
 	if existing != nil {
 		// This temporary session never owned the existing proxy/sync resources.
 		// Even on RPC failure, only retire its SSH tunnel/logger, not control state.
@@ -115,9 +114,7 @@ func (svr *Server) redirectConnectToSudoDaemon(req *rpc.ConnectRequest, resp rpc
 		if err = svr.recoverDataPlane(resp.Context(), req, existing, resp, cli, &connResp, &connRespMu); err != nil {
 			return err
 		}
-		svr.connMu.Lock()
-		svr.currentConnectionID = connect.ConnectionID
-		svr.connMu.Unlock()
+		svr.registry.use(connect.ConnectionID)
 		logger.Infof("Connected with cluster")
 		return resp.Send(&rpc.ConnectResponse{
 			ConnectionID: connect.ConnectionID,
@@ -152,7 +149,11 @@ func (svr *Server) recoverDataPlane(ctx context.Context, req *rpc.ConnectRequest
 			return fmt.Errorf("failed to restore connection request: %w", err)
 		}
 	}
-	bytes, _, err := util.ConvertToKubeConfigBytes(existing.GetFactory())
+	control, ok := existing.(*handler.ConnectOptions)
+	if !ok {
+		return fmt.Errorf("connection %s is not a control session", existing.GetConnectionID())
+	}
+	bytes, _, err := util.ConvertToKubeConfigBytes(control.GetFactory())
 	if err != nil {
 		return fmt.Errorf("failed to serialize retained kubeconfig: %w", err)
 	}
@@ -181,7 +182,7 @@ func (svr *Server) recoverDataPlane(ctx context.Context, req *rpc.ConnectRequest
 func (svr *Server) detectAndSetManagerNamespace(ctx context.Context, req *rpc.ConnectRequest, connect *handler.ConnectOptions, logger *log.Logger) error {
 	if req.ManagerNamespace == "" {
 		var err error
-		req.ManagerNamespace, err = util.DetectManagerNamespace(plog.WithLogger(ctx, logger), connect.GetFactory(), req.Namespace)
+		req.ManagerNamespace, err = manager.DetectManagerNamespace(plog.WithLogger(ctx, logger), connect.GetFactory(), req.Namespace)
 		if err != nil {
 			return err
 		}
@@ -255,10 +256,7 @@ func (svr *Server) forwardConnectToSudo(
 	if resp.Context().Err() != nil {
 		return resp.Context().Err()
 	}
-	svr.connMu.Lock()
-	svr.connections = append(svr.connections, connect)
-	svr.currentConnectionID = connectionID
-	svr.connMu.Unlock()
+	svr.registry.add(connect, true)
 
 	// Start the user-daemon-managed local SOCKS5 proxy (if requested) now that the
 	// connection is live. It runs in-process, bound to the connection's context, and is

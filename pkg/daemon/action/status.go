@@ -31,15 +31,7 @@ func (svr *Server) Status(ctx context.Context, req *rpc.StatusRequest) (*rpc.Sta
 	}
 
 	if len(req.ConnectionIDs) != 0 {
-		svr.connMu.RLock()
-		var matched []handler.Connection
-		for _, connectionID := range req.ConnectionIDs {
-			if opt, _ := svr.findConnection(connectionID); opt != nil {
-				matched = append(matched, opt)
-			}
-		}
-		currentID := svr.currentConnectionID
-		svr.connMu.RUnlock()
+		matched, currentID := svr.registry.filter(req.ConnectionIDs)
 
 		var list []*rpc.Status
 		var lock = &sync.Mutex{}
@@ -50,7 +42,7 @@ func (svr *Server) Status(ctx context.Context, req *rpc.StatusRequest) (*rpc.Sta
 				defer wg.Done()
 				result := buildConnectionStatus(options, ips)
 				var err error
-				result.ProxyList, result.SyncList, err = buildProxyAndSyncStatus(ctx, options, options.GetSync())
+				result.ProxyList, result.SyncList, err = buildProxyAndSyncStatus(ctx, options)
 				if err != nil {
 					// Proxy/sync rendering failure is a ConfigMap-read issue, not a data-plane
 					// liveness signal — log it but leave the (heartbeat-based) status intact.
@@ -65,11 +57,7 @@ func (svr *Server) Status(ctx context.Context, req *rpc.StatusRequest) (*rpc.Sta
 		return &rpc.StatusResponse{List: list, CurrentConnectionID: currentID}, nil
 	}
 
-	svr.connMu.RLock()
-	snapshot := make([]handler.Connection, len(svr.connections))
-	copy(snapshot, svr.connections)
-	currentID := svr.currentConnectionID
-	svr.connMu.RUnlock()
+	snapshot, currentID := svr.registry.snapshot()
 
 	wg := sync.WaitGroup{}
 	wg.Add(len(snapshot))
@@ -79,7 +67,7 @@ func (svr *Server) Status(ctx context.Context, req *rpc.StatusRequest) (*rpc.Sta
 			defer wg.Done()
 			result := buildConnectionStatus(options, ips)
 			var err error
-			result.ProxyList, result.SyncList, err = buildProxyAndSyncStatus(ctx, options, options.GetSync())
+			result.ProxyList, result.SyncList, err = buildProxyAndSyncStatus(ctx, options)
 			if err != nil {
 				plog.G(ctx).Errorf("Error generating status: %v", err)
 				if result.Status != StatusFailed {
@@ -181,33 +169,32 @@ func buildConnectionStatus(connect handler.Connection, ips map[string]tunIP) *rp
 	}
 
 	info := rpc.Status{
-		ConnectionID:    connect.GetConnectionID(),
-		Cluster:         util.GetKubeconfigCluster(connect.GetFactory()),
-		Kubeconfig:      connect.GetOriginKubeconfigPath(),
-		Namespace:       connect.GetWorkloadNamespace(),
-		Status:          resolveStatus(connect, ips, tunName != ""),
-		Netif:           tunName,
-		IPv4:            v4,
-		IPv6:            v6,
-		SocksListenAddr: connect.GetSocksListenAddr(),
-		SocksEgress:     connect.GetSocksEgress(),
+		ConnectionID: connect.GetConnectionID(),
+		Cluster:      connect.GetClusterName(),
+		Kubeconfig:   connect.GetOriginKubeconfigPath(),
+		Namespace:    connect.GetWorkloadNamespace(),
+		Status:       resolveStatus(connect, ips, tunName != ""),
+		Netif:        tunName,
+		IPv4:         v4,
+		IPv6:         v6,
+	}
+	if pc, ok := connect.(handler.ProxyController); ok {
+		info.SocksListenAddr = pc.GetSocksListenAddr()
+		info.SocksEgress = pc.GetSocksEgress()
 	}
 	return &info
 }
 
-func buildProxyAndSyncStatus(ctx context.Context, connect handler.Connection, sync *handler.SyncOptions) ([]*rpc.Proxy, []*rpc.Sync, error) {
+func buildProxyAndSyncStatus(ctx context.Context, connect handler.Connection) ([]*rpc.Proxy, []*rpc.Sync, error) {
 	var proxyList []*rpc.Proxy
-	// Read the ConfigMap straight from the informer cache (near-real-time, zero API cost).
-	configMap, cmErr := connect.GetTrafficManagerConfigMap(ctx)
-	if cmErr != nil {
-		return nil, nil, cmErr
+	snapshot, err := connect.StatusSnapshot(ctx)
+	if err != nil {
+		return nil, nil, err
 	}
-	if configMap != nil {
+	if snapshot.Envoy != "" {
 		v := make([]*controlplane.Virtual, 0)
-		if str, ok := configMap.Data[config.KeyEnvoy]; ok {
-			if err := yaml.Unmarshal([]byte(str), &v); err != nil {
-				return nil, nil, err
-			}
+		if err := yaml.Unmarshal([]byte(snapshot.Envoy), &v); err != nil {
+			return nil, nil, err
 		}
 		for _, virtual := range v {
 			// deployments.apps.ry-server --> deployments.apps/ry-server
@@ -224,7 +211,7 @@ func buildProxyAndSyncStatus(ctx context.Context, connect handler.Connection, sy
 			}
 			proxyList = append(proxyList, &rpc.Proxy{
 				ConnectionID: connect.GetConnectionID(),
-				Cluster:      util.GetKubeconfigCluster(connect.GetFactory()),
+				Cluster:      connect.GetClusterName(),
 				Kubeconfig:   connect.GetOriginKubeconfigPath(),
 				Namespace:    virtual.Namespace,
 				Workload:     virtual.UID,
@@ -233,12 +220,12 @@ func buildProxyAndSyncStatus(ctx context.Context, connect handler.Connection, sy
 		}
 	}
 	var syncList []*rpc.Sync
-	if sync != nil {
+	if sync := snapshot.Sync; sync != nil {
 		for _, workload := range sync.Workloads {
 			var connectionID, cluster, kubeconfig, namespace string
 			if connect != nil {
 				connectionID = connect.GetConnectionID()
-				cluster = util.GetKubeconfigCluster(connect.GetFactory())
+				cluster = connect.GetClusterName()
 				kubeconfig = connect.GetOriginKubeconfigPath()
 				namespace = connect.GetWorkloadNamespace()
 			}
@@ -248,7 +235,7 @@ func buildProxyAndSyncStatus(ctx context.Context, connect handler.Connection, sy
 				Kubeconfig:       kubeconfig,
 				Namespace:        namespace,
 				Workload:         workload,
-				SyncthingGUIAddr: sync.GetSyncthingGUIAddr(),
+				SyncthingGUIAddr: sync.SyncthingGUIAddr,
 				RuleList: []*rpc.SyncRule{
 					{
 						Headers:     sync.Headers,

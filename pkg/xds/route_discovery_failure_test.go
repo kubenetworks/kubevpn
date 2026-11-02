@@ -3,6 +3,7 @@ package xds
 import (
 	"context"
 	"fmt"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/xds/internal/discovery"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -200,7 +201,9 @@ func (s *blockedDiscoveryServices) List(ctx context.Context, opts metav1.ListOpt
 func blockDiscovery(t *testing.T, env *testEnv, resource string, cacheOnly bool) *blockedDiscoveryClient {
 	t.Helper()
 	blocked := &blockedDiscoveryClient{Interface: env.server.clientset, resource: resource, cacheOnly: cacheOnly, entered: make(chan context.Context, 1), release: make(chan struct{}), finished: make(chan struct{})}
-	env.server.routes.clientset = blocked
+	env.server.routes.Close()
+	env.server.routes = discovery.New(context.Background(), blocked)
+	t.Cleanup(env.server.routes.Close)
 	t.Cleanup(blocked.open)
 	return blocked
 }
@@ -252,146 +255,6 @@ func awaitDiscoveryState(t *testing.T, condition func() bool) {
 			t.Fatal("discovery lifecycle did not reach expected state")
 		case <-ticker.C:
 		}
-	}
-}
-
-func TestIntegration_RouteDiscoverySharedLifecycle(t *testing.T) {
-	t.Parallel()
-	env := newTestEnv(t)
-	blocked := blockDiscovery(t, env, "pods", false)
-	aCtx, cancelA := context.WithCancel(context.Background())
-	defer cancelA()
-	bCtx, cancelB := context.WithCancel(context.Background())
-	defer cancelB()
-	a, err := env.client.WatchNamespaceRoutes(aCtx, &rpc.NamespaceRoutesRequest{Namespace: "test-ns"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case <-blocked.entered:
-	case <-time.After(5 * time.Second):
-		t.Fatal("initialization didn't start")
-	}
-	b, err := env.client.WatchNamespaceRoutes(bCtx, &rpc.NamespaceRoutesRequest{Namespace: "test-ns"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	broadcaster := env.server.routes
-	var hub *nsRouteHub
-	awaitDiscoveryState(t, func() bool {
-		broadcaster.mu.Lock()
-		defer broadcaster.mu.Unlock()
-		hub = broadcaster.hubs["test-ns"]
-		return hub != nil && hub.refs == 2
-	})
-	cancelA()
-	if result := awaitRouteReceive(t, receiveRouteAsync(a), time.Second); status.Code(result.err) != codes.Canceled {
-		t.Fatalf("A cancel: %+v", result)
-	}
-	awaitDiscoveryState(t, func() bool { broadcaster.mu.Lock(); defer broadcaster.mu.Unlock(); return hub.refs == 1 })
-	if hub.ctx.Err() != nil {
-		t.Fatal("canceling first subscriber canceled shared initialization")
-	}
-	blocked.open()
-	frame := recvRoutes(t, b)
-	if !frame.Snapshot || !frame.Enabled {
-		t.Fatalf("B snapshot: %+v", frame)
-	}
-	if _, err := env.server.clientset.CoreV1().Services("test-ns").Create(bCtx, mkSvc("later", "10.96.0.20", ""), metav1.CreateOptions{}); err != nil {
-		t.Fatal(err)
-	}
-	delta := recvRoutes(t, b)
-	if delta.Snapshot || len(delta.UpsertedServices) != 1 {
-		t.Fatalf("B delta: %+v", delta)
-	}
-	// A second active subscriber must survive B leaving just as B survived A
-	// leaving during initialization. It receives a complete snapshot first.
-	cCtx, cancelC := context.WithCancel(context.Background())
-	defer cancelC()
-	c, err := env.client.WatchNamespaceRoutes(cCtx, &rpc.NamespaceRoutesRequest{Namespace: "test-ns"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if snap := recvRoutes(t, c); len(snap.UpsertedServices) != 1 {
-		t.Fatalf("C snapshot: %+v", snap)
-	}
-	cancelB()
-	awaitDiscoveryState(t, func() bool { broadcaster.mu.Lock(); defer broadcaster.mu.Unlock(); return hub.refs == 1 })
-	if err := env.server.clientset.CoreV1().Services("test-ns").Delete(cCtx, "later", metav1.DeleteOptions{}); err != nil {
-		t.Fatal(err)
-	}
-	if removed := recvRoutes(t, c); !hasStr(removed.RemovedServiceKeys, "test-ns/later") {
-		t.Fatalf("C removal: %+v", removed)
-	}
-	cancelC()
-	awaitDiscoveryState(t, func() bool {
-		broadcaster.mu.Lock()
-		defer broadcaster.mu.Unlock()
-		return broadcaster.hubs["test-ns"] == nil && hub.ctx.Err() != nil
-	})
-	awaitDiscoveryState(t, func() bool { return hub.podInformer.IsStopped() && hub.svcInformer.IsStopped() })
-	// No stale generation may poison a later subscription.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	reconnected, err := env.client.WatchNamespaceRoutes(ctx, &rpc.NamespaceRoutesRequest{Namespace: "test-ns"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if snap := recvRoutes(t, reconnected); !snap.Enabled || len(snap.UpsertedServices) != 0 {
-		t.Fatalf("reconnect snapshot: %+v", snap)
-	}
-	broadcaster.mu.Lock()
-	fresh := broadcaster.hubs["test-ns"]
-	broadcaster.mu.Unlock()
-	if fresh == hub {
-		t.Fatal("reconnect reused stopped hub")
-	}
-}
-
-func TestIntegration_RouteDiscoveryLastWaiterAndServerCancel(t *testing.T) {
-	t.Parallel()
-	for _, serverCancel := range []bool{false, true} {
-		name := "last-waiter"
-		if serverCancel {
-			name = "server"
-		}
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			env := newTestEnv(t)
-			serverCtx, stopServer := context.WithCancel(context.Background())
-			defer stopServer()
-			env.server.routes.ctx = serverCtx
-			blocked := blockDiscovery(t, env, "pods", false)
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			stream, err := env.client.WatchNamespaceRoutes(ctx, &rpc.NamespaceRoutesRequest{Namespace: "test-ns"})
-			if err != nil {
-				t.Fatal(err)
-			}
-			select {
-			case <-blocked.entered:
-			case <-time.After(5 * time.Second):
-				t.Fatal("probe didn't start")
-			}
-			if serverCancel {
-				stopServer()
-			} else {
-				cancel()
-			}
-			select {
-			case <-blocked.finished:
-			case <-time.After(time.Second):
-				t.Fatal("cancellation left API probe running")
-			}
-			if r := awaitRouteReceive(t, receiveRouteAsync(stream), time.Second); status.Code(r.err) != codes.Canceled {
-				t.Fatalf("cancel response: %+v", r)
-			}
-			awaitDiscoveryState(t, func() bool {
-				env.server.routes.mu.Lock()
-				defer env.server.routes.mu.Unlock()
-				return len(env.server.routes.hubs) == 0
-			})
-		})
 	}
 }
 

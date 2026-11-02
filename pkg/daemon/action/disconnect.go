@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/cluster/manager"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dns"
@@ -72,19 +73,12 @@ func (svr *Server) Disconnect(resp rpc.Daemon_DisconnectServer) (err error) {
 
 	switch {
 	case req.GetAll():
-		svr.connMu.Lock()
-		connects := handler.Connects(svr.connections)
-		svr.connections = nil
-		svr.currentConnectionID = ""
-		svr.connMu.Unlock()
+		connects := svr.registry.takeAll()
 		for _, connect := range connects.Sort() {
 			cleanupConnection(ctx, connect)
 		}
 	case req.GetConnectionID() != "":
-		svr.connMu.Lock()
-		removed := svr.removeConnection(req.GetConnectionID())
-		svr.resetCurrentConnection(req.GetConnectionID())
-		svr.connMu.Unlock()
+		removed := svr.registry.removeByID(req.GetConnectionID())
 		for _, connect := range removed.Sort() {
 			cleanupConnection(ctx, connect)
 		}
@@ -105,10 +99,8 @@ func (svr *Server) Disconnect(resp rpc.Daemon_DisconnectServer) (err error) {
 		plog.StepDone(ctx, "Disconnected from the cluster")
 	}
 
-	svr.connMu.RLock()
-	empty := len(svr.connections) == 0
-	svr.connMu.RUnlock()
-	if empty {
+	remaining, _ := svr.registry.snapshot()
+	if len(remaining) == 0 {
 		if svr.IsSudo {
 			_ = dns.CleanupHosts()
 		}
@@ -122,9 +114,6 @@ func disconnectByKubeconfig(ctx context.Context, svr *Server, kubeconfigBytes st
 		return err
 	}
 	disconnect(ctx, svr, connectionID)
-	svr.connMu.Lock()
-	svr.resetCurrentConnection(connectionID)
-	svr.connMu.Unlock()
 	return nil
 }
 
@@ -142,7 +131,7 @@ func resolveConnectionIDByKubeconfig(ctx context.Context, jump *rpc.SshJump, kub
 	if err = connect.InitClient(util.InitFactoryByBytes(resolvedBytes, ns)); err != nil {
 		return "", err
 	}
-	managerNamespace, err := util.DetectManagerNamespace(ctx, connect.GetFactory(), ns)
+	managerNamespace, err := manager.DetectManagerNamespace(ctx, connect.GetFactory(), ns)
 	if err != nil {
 		return "", err
 	}
@@ -162,26 +151,20 @@ func (svr *Server) leaveProxiesBeforeTeardown(ctx context.Context, req *rpc.Disc
 	var targets handler.Connects
 	switch {
 	case req.GetAll():
-		svr.connMu.RLock()
-		targets = append(targets, svr.connections...)
-		svr.connMu.RUnlock()
+		targets, _ = svr.registry.snapshot()
 	case req.GetConnectionID() != "":
-		svr.connMu.RLock()
-		if c, i := svr.findConnection(req.GetConnectionID()); i != -1 {
+		if c, i := svr.registry.find(req.GetConnectionID()); i != -1 {
 			targets = targets.Append(c)
 		}
-		svr.connMu.RUnlock()
 	case req.KubeconfigBytes != nil && req.Namespace != nil:
 		id, err := resolveConnectionIDByKubeconfig(ctx, req.GetSshJump(), req.GetKubeconfigBytes(), req.GetNamespace())
 		if err != nil {
 			plog.G(ctx).Warnf("Resolve connection before leaving proxies failed: %v", err)
 			return
 		}
-		svr.connMu.RLock()
-		if c, i := svr.findConnection(id); i != -1 {
+		if c, i := svr.registry.find(id); i != -1 {
 			targets = targets.Append(c)
 		}
-		svr.connMu.RUnlock()
 	}
 	for _, conn := range targets {
 		// LeaveAllProxyResources is control-plane-only (ProxyController). In the
@@ -197,9 +180,7 @@ func (svr *Server) leaveProxiesBeforeTeardown(ctx context.Context, req *rpc.Disc
 }
 
 func disconnect(ctx context.Context, svr *Server, connectionID string) {
-	svr.connMu.Lock()
-	removed := svr.removeConnection(connectionID)
-	svr.connMu.Unlock()
+	removed := svr.registry.removeByID(connectionID)
 	for _, conn := range removed {
 		plog.G(ctx).Debugf("Disconnecting connection %q", connectionID)
 		cleanupConnection(ctx, conn)

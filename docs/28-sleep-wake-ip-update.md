@@ -1,5 +1,18 @@
 # Unified Proxy Mode and TUN IP Hot-Update Design
 
+> **Current source map:** The problem timelines, proposed code and migration checklist below
+> preserve their historical names/order. Host networking is now `network.Runtime`
+> (`pkg/network/runtime.go`), with `transport.go` for generation-scoped SSH/port-forward
+> recovery, `address.go` for `doWatchTunIP`/proposal handling/`ChangeTunIP`, `routes.go` for
+> route repair, `dns.go` for DNS, `device.go` for TUN assembly and `monitor.go` for underlay
+> events. Kubernetes forwarding is in `pkg/cluster/portforward`; CIDR detection is in
+> `pkg/cluster/discovery`. Packet forwarding is in `pkg/tunnel`, whose `Router` replaces
+> `RouteHub`. Periodic control heartbeats never register a route: data registration or
+> business traffic does, and heartbeat replies traverse that registered data path.
+> `core.Serve` owns service Start/Close and joins; a connection does not own server peers.
+> Historical diagrams showing broadcast heartbeats or the old Start order are not the
+> current lifecycle; see [18](18-gvisor-network-stack.md) and [47](47-portforward-blackhole-liveness.md).
+
 ## 1. Problem
 
 ### 1.1 Scenario

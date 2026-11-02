@@ -12,6 +12,7 @@ import (
 	v12 "k8s.io/client-go/kubernetes/typed/core/v1"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
+	clusterworkload "github.com/wencaiwulue/kubevpn/v2/pkg/cluster/workload"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
@@ -26,7 +27,7 @@ func (m *meshInjector) Inject(ctx context.Context) error {
 	plog.G(ctx).Debugf("Injecting mesh (VPN+Envoy) sidecar into %s/%s", o.Controller.Mapping.Resource.Resource, o.Controller.Name)
 	u := o.Controller.Object.(*unstructured.Unstructured)
 
-	templateSpec, path, err := util.GetPodTemplateSpecPath(u)
+	templateSpec, path, err := clusterworkload.GetPodTemplateSpecPath(u)
 	if err != nil {
 		return err
 	}
@@ -117,7 +118,7 @@ func injectedForManager(templateSpec *v1.PodTemplateSpec, managerNamespace strin
 // Returns (empty, found) where empty indicates all rules were removed and containers cleaned up.
 func UnpatchContainer(ctx context.Context, nodeID string, factory cmdutil.Factory, mapInterface v12.ConfigMapInterface, object *pkgresource.Info, ownerID string) (bool, error) {
 	u := object.Object.(*unstructured.Unstructured)
-	templateSpec, path, err := util.GetPodTemplateSpecPath(u)
+	templateSpec, path, err := clusterworkload.GetPodTemplateSpecPath(u)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to get template spec path: %v", err)
 		return false, err

@@ -37,17 +37,17 @@ var (
 
 // initServices sets config data locations, creates an early service supervisor
 // and an event logger, returning both for use by StartClient/StartServer.
-func initServices(ctx context.Context, facilityName, facilityDesc string) (*suture.Supervisor, events.Logger, error) {
+func initServices(ctx context.Context, facilityName, facilityDesc string) (*suture.Supervisor, events.Logger, <-chan error, error) {
 	if err := cmdutil.SetConfigDataLocationsFromFlags(pkgconfig.GetSyncthingPath(), "", ""); err != nil {
-		return nil, nil, fmt.Errorf("set syncthing data location: %w: %w", err, pkgconfig.ErrSyncthing)
+		return nil, nil, nil, fmt.Errorf("set syncthing data location: %w: %w", err, pkgconfig.ErrSyncthing)
 	}
 	spec := svcutil.SpecWithDebugLogger(logger.New().NewFacility(facilityName, facilityDesc))
 	earlyService := suture.New("early", spec)
-	earlyService.ServeBackground(ctx)
+	done := earlyService.ServeBackground(ctx)
 
 	evLogger := events.NewLogger()
 	earlyService.Add(evLogger)
-	return earlyService, evLogger, nil
+	return earlyService, evLogger, done, nil
 }
 
 // newDevice builds a DeviceConfiguration with common defaults.
@@ -65,12 +65,9 @@ func newDevice(id protocol.DeviceID, name string, addresses ...string) config.De
 // and arranges for graceful shutdown when ctx is cancelled. If detach is true
 // the caller does not block on app completion.
 func startApp(ctx context.Context, cfgWrapper config.Wrapper, evLogger events.Logger, cert tls.Certificate, detach bool) error {
-	ldb := backend.OpenMemory()
-	appOpts := syncthing.Options{NoUpgrade: true}
-
-	app, err := syncthing.New(cfgWrapper, ldb, evLogger, cert, appOpts)
+	app, err := newApp(cfgWrapper, evLogger, cert)
 	if err != nil {
-		return fmt.Errorf("create syncthing app: %w: %w", err, pkgconfig.ErrSyncthing)
+		return err
 	}
 	if err = app.Start(); err != nil {
 		return fmt.Errorf("start syncthing app: %w: %w", err, pkgconfig.ErrSyncthing)
@@ -87,11 +84,78 @@ func startApp(ctx context.Context, cfgWrapper config.Wrapper, evLogger events.Lo
 	return app.Error()
 }
 
-// StartClient starts a syncthing instance configured as a client, syncing localDir with the remote peer.
-func StartClient(ctx context.Context, localDir string, localAddr, remoteAddr string) error {
-	earlyService, evLogger, err := initServices(ctx, "main", "Main package")
+// ClientHandle owns the application and its early services. Done closes only
+// after both have exited; Stop is idempotent and waits for that completion.
+type ClientHandle struct {
+	cancel context.CancelFunc
+	done   chan struct{}
+	err    error
+}
+
+func (c *ClientHandle) Stop()                 { c.cancel(); <-c.done }
+func (c *ClientHandle) Done() <-chan struct{} { return c.done }
+func (c *ClientHandle) Err() error {
+	select {
+	case <-c.done:
+		return c.err
+	default:
+		return nil
+	}
+}
+
+// application is the lifecycle consumed here, also allowing controlled shutdown
+// tests without starting listeners or using the user's Syncthing directory.
+type application interface {
+	Start() error
+	Stop(svcutil.ExitStatus) svcutil.ExitStatus
+	Wait() svcutil.ExitStatus
+	Error() error
+}
+
+func newApp(cfg config.Wrapper, evLogger events.Logger, cert tls.Certificate) (application, error) {
+	ldb := backend.OpenMemory()
+	app, err := syncthing.New(cfg, ldb, evLogger, cert, syncthing.Options{NoUpgrade: true})
 	if err != nil {
-		return err
+		_ = ldb.Close()
+		return nil, fmt.Errorf("create syncthing app: %w: %w", err, pkgconfig.ErrSyncthing)
+	}
+	return app, nil
+}
+
+func startClientApp(ctx context.Context, cancel context.CancelFunc, earlyDone <-chan error, app application) (*ClientHandle, error) {
+	if err := app.Start(); err != nil {
+		app.Stop(svcutil.ExitSuccess)
+		app.Wait()
+		cancel()
+		<-earlyDone
+		return nil, fmt.Errorf("start syncthing app: %w: %w", err, pkgconfig.ErrSyncthing)
+	}
+	h := &ClientHandle{cancel: cancel, done: make(chan struct{})}
+	appDone := make(chan struct{})
+	go func() { app.Wait(); close(appDone) }()
+	go func() {
+		select {
+		case <-ctx.Done():
+			app.Stop(svcutil.ExitSuccess)
+		case <-appDone:
+		}
+		<-appDone
+		cancel()
+		<-earlyDone
+		h.err = app.Error()
+		close(h.done)
+	}()
+	return h, nil
+}
+
+// StartClient starts a client syncing localDir with the remote peer. The caller
+// owns the returned handle and must Stop it before tearing down its session.
+func StartClient(ctx context.Context, localDir string, localAddr, remoteAddr string) (*ClientHandle, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	earlyService, evLogger, earlyDone, err := initServices(ctx, "main", "Main package")
+	if err != nil {
+		cancel()
+		return nil, err
 	}
 
 	localID := pkgconfig.LocalDeviceID
@@ -127,12 +191,18 @@ func StartClient(ctx context.Context, localDir string, localAddr, remoteAddr str
 	}, localID, events.NoopLogger)
 	earlyService.Add(cfgWrapper)
 
-	return startApp(ctx, cfgWrapper, evLogger, pkgconfig.LocalCert, true)
+	app, err := newApp(cfgWrapper, evLogger, pkgconfig.LocalCert)
+	if err != nil {
+		cancel()
+		<-earlyDone
+		return nil, err
+	}
+	return startClientApp(ctx, cancel, earlyDone, app)
 }
 
 // StartServer starts a syncthing instance configured as a server, serving remoteDir for sync.
 func StartServer(ctx context.Context, detach bool, remoteDir string) error {
-	earlyService, evLogger, err := initServices(ctx, "", "")
+	earlyService, evLogger, _, err := initServices(ctx, "", "")
 	if err != nil {
 		return err
 	}

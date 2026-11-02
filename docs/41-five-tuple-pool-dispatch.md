@@ -2,6 +2,13 @@
 
 ## Overview
 
+Current implementation: `pkg/tunnel/client.go` owns dispatch, `pkg/tunnel/flow_hash.go`
+owns the optional multi-slot hash, `pkg/tunnel/slot.go` owns queue/retry lifetime and
+`pkg/tunnel/attempt.go` owns one connection's joined pumps. The return path is
+`tunnel.Router` (`pkg/tunnel/route.go`), with service-owned peers in `peers.go`.
+The historical extraction table below intentionally retains old filenames; current test
+navigation is `pkg/tunnel/flow_hash_test.go` and `go test ./pkg/tunnel/...`.
+
 The client now defaults to **one data `connSlot` plus one independent control slot**
 (see [01-network-architecture.md](01-network-architecture.md) and
 [18-gvisor-network-stack.md](18-gvisor-network-stack.md)). Default data dispatch selects
@@ -31,7 +38,7 @@ reason for existing (reducing head-of-line blocking, parallelizing throughput) i
 
 At the time of that design, the server ran an independent gvisor stack per pool connection
 with a symmetric return path, so the down-link concentrated on the same slot too.
-The current per-client shared stack and RouteHub return path no longer have that topology.
+The current per-client shared stack and `Router` return path no longer have that topology.
 
 ## Design: Stateless Five-Tuple Hash
 
@@ -68,9 +75,9 @@ slot. And because `N` is fixed (a dead slot reconnects in place and is never rem
 the array — see [22-tun-device.md](22-tun-device.md)), `hash % N` never changes underneath
 a live flow. No rehash, no flow migration.
 
-### The Return Path — RouteHub Routing
+### The Return Path — Router Routing
 
-With the shared server-side gvisor stack, replies from the stack are routed via RouteHub by
+With the shared server-side gvisor stack, replies from the stack are routed via `Router` by
 destination IP (the client's TUN IP). `readFromEndpointWriteToRoute` reads each response
 packet, parses its destination, and writes it to the first writable conn in the client's
 ConnList, with fallback — not per-flow load balancing or five-tuple affinity. The current
@@ -153,7 +160,7 @@ Server side, `RouteHub`, `ConnList`, `ParseIPFast`, the `Packet` type, and `pump
 
 ## Tests
 
-`pkg/core/flow_hash_test.go` (spread/integration examples explicitly use the private
+`pkg/tunnel/flow_hash_test.go` (spread/integration examples explicitly use the private
 multi-slot override with nil stats; they do not describe the default topology):
 
 - **Parsing** — TCP/UDP/SCTP ports, IPv4 variable IHL (options), IPv6, and every fallback

@@ -2,6 +2,15 @@
 
 ## Overview
 
+Current source boundaries: `pkg/network/runtime.go` coordinates host networking;
+`transport.go` owns SSH/port-forward generations, `address.go` owns allocation/IP watches,
+`routes.go` owns route effects, `dns.go` owns DNS setup, `device.go` assembles the TUN,
+and `monitor.go` observes underlay changes (all under `pkg/network`). Kubernetes forwarding
+sessions live in `pkg/cluster/portforward`; CIDR detection lives in `pkg/cluster/discovery`.
+`pkg/tunnel` owns packet/device/slot/router lifecycles, `pkg/tunnel/internal/netstack`
+owns gvisor construction and forwarders, and `pkg/internal/wire` owns stream framing and
+batch writes. `pkg/core` retains protocol/URI/TLS/SSH/UDP-relay assembly and `Serve`.
+
 KubeVPN creates a bidirectional network tunnel between a local machine and a Kubernetes cluster. All IP traffic (TCP, UDP, ICMP) flows through a TUN device on the client, gets encapsulated over TCP, and is forwarded via `kubectl port-forward` to a traffic manager pod running a userspace network stack (gvisor).
 
 > **Route source:** the cluster pod/service **CIDRs** are routed to the TUN device at connect
@@ -87,8 +96,8 @@ without waiting for an I/O mutex. These are safety contracts, not a wire-format 
 | `1` | INJECT | client→server | Inject into gvisor stack for TCP/UDP processing |
 | `1` | INJECT | server→client | Inject into client gvisor stack (rare: self-to-self traffic) |
 | `0` | DIRECT | server→client | Already processed by gvisor; write directly to TUN device |
-| `0` | FORWARD | server internal | Forward to another client via RouteHub (multi-client routing) |
-| `2` | CONTROL | client→server | Heartbeat control conn; handled separately, never registered in RouteHub |
+| `0` | FORWARD | server internal | Forward to another client via Router (multi-client routing) |
+| `2` | CONTROL | client→server | Heartbeat control conn; handled separately, never registered in Router |
 
 **Routing decision on server (data conn, per packet; control conns use `handleControlConn`):**
 ```go
@@ -99,7 +108,7 @@ if hub.HasRoute(dstKey) {
 } else if prefix == packetTypeToGvisor {
     // Inject into the per-client stack → TCP/UDP forwarder → real service.
     endpoint.InjectInbound(protocol, pkt)
-} else if !hub.enqueueTUN(ctx, packet) {
+} else if !hub.bridge.send(ctx, packet) {
     // Private TUN bridge did not take ownership (canceled/stopped).
     packet.release()
 }
@@ -128,14 +137,15 @@ TUN read → runConnPool → slot[0] → data conn ───────┐
 heartbeats() → controlSlot → control conn ────────┘
 
 Response path (including heartbeat replies):
-per-client gvisor stack → RouteHub → registered data conn
+per-client gvisor stack → Router → registered data conn
   → readFromConn → tunOutbound → writeToTun → TUN device
 ```
 
 Protocol-owned heartbeat replies are consumed by the client rather than written to TUN.
 Default outbound dispatch goes directly to slot 0, without parsing or hashing for slot
-selection. `connSlot` retains its queue, dial/reconnect lifecycle, read/write loops, deadlines
-and bounded batching. One tunnel data connection still multiplexes concurrent business flows;
+selection. `connSlot` (`pkg/tunnel/slot.go`) retains its queue and retry lifecycle;
+`connAttempt` (`pkg/tunnel/attempt.go`) owns one connection, declaration/registration,
+`readGeneration`/`writeGeneration`, deadlines and batching, and joins both pumps before retry. One tunnel data connection still multiplexes concurrent business flows;
 it does not serialize application requests or reduce business concurrency to one.
 
 The control slot has a separate queue and connection to the **same TCP forwarding endpoint
@@ -184,7 +194,7 @@ func flowHash(key flowKey, dstIP net.IP, slots int) int {
 
 3. **Session continuity**: The server shares one gvisor stack per client across that client's conns. Its grace period retains TCP state across brief transport gaps; this does not depend on four slots. See [48-shared-server-gvisor-stack.md](48-shared-server-gvisor-stack.md).
 
-4. **Shared response path**: Data responses reach the same `tunOutbound` channel and TUN device. RouteHub chooses the first writable registered conn with fallback, not per-flow load balancing.
+4. **Shared response path**: Data responses reach the same `tunOutbound` channel and TUN device. Router chooses the first writable registered conn with fallback, not per-flow load balancing.
 
 ### Configuration
 
@@ -249,10 +259,10 @@ MaxSize = 1000  // tunInbound, tunOutbound, per-slot channels
 ## Multi-Client Routing (Server-Side)
 
 When multiple kubevpn clients connect to the same traffic manager, the server
-maintains a `RouteHub` — a thread-safe routing table that maps client TUN IPs
+maintains a `Router` — a thread-safe routing table that maps client TUN IPs
 to their connection(s).
 
-### RouteHub and ConnList
+### Router and ConnList
 
 Each client IP maps to a `ConnList` — a list of TCP connections for that client,
 ordered **newest-first**: `AddRoute` prepends, so the most recently established
@@ -268,7 +278,7 @@ Multiple clients coexist in the same table:
 Client A (198.18.0.2):  1 registered data conn
 Client B (198.18.0.3):  1 registered data conn
 
-RouteHub.routes (private, guarded by hub.mu):
+Router.routes (private, guarded by hub.mu):
   198.18.0.2 → ConnList[ conn_A0 ]
   198.18.0.3 → ConnList[ conn_B0 ]
 ```
@@ -347,9 +357,11 @@ the default steady-state path has only `conn_A0` and `conn_B0`.
 ### Cleanup
 
 When a connection closes, `RemoveRoutesByConn(ctx, conn)` removes it from every
-`ConnList` under `hub.mu`. Empty-route deletion and the internal `emptyLocked` callback
-are serialized with registration and `addedLocked`. Callback lock order is `hub.mu` then
-`handler.mu`; callbacks only change metadata/timers, with no I/O, logging, or hub reentry.
+`ConnList` under `hub.mu`. Empty-route deletion and registration call the explicit
+`peerRegistry.onRouteEmptyLocked` / `onRouteAddedLocked` methods in the same transaction.
+Lock order is router then registry; transitions only change metadata/timers, with no I/O,
+logging, or router reentry. `core.Serve` starts that registry with the service context
+before accept and closes/joins it after connection handlers finish; no connection owns peers.
 
 This cleanup is driven by the server-side conn deadlines so that even a half-open
 ghost (no FIN/RST) is reclaimed: the read loop (`readFromTCPConnWriteToEndpoint`)
@@ -361,8 +373,9 @@ cannot restore it. See [08-heartbeat-health.md](08-heartbeat-health.md) §#3.
 
 There is no separate public-map `IsEmpty`/`Delete` transaction: the private table, validated
 snapshots, and identity-safe removal prevent stale writers from deleting restored routes.
-The private `tunQueue` bridge admits packets through cancellable `enqueueTUN`; shutdown
-signals `tunDone`, joins in-flight admission, then drains without closing the data channel.
+The separate `tunBridge` (`pkg/tunnel/bridge.go`) admits packets through cancellable
+`send`; `stop` signals shutdown, joins in-flight admission, then drains without closing
+the data channel. Connection handlers also join their `bufferedTCP` writer via `waitRun`.
 Server device sends are also cancellable. See [12-session-lifecycle.md](12-session-lifecycle.md)
 for server-device failure and joined shutdown.
 
@@ -381,7 +394,7 @@ This ensures a full-MTU TUN packet fits within a single Ethernet frame after all
 
 ## Data-Plane Package Boundaries
 
-The data-plane stack (`pkg/core`, `pkg/dns`) depends only on network primitives — it must not
+The data-plane stack (`pkg/tunnel`, its `internal/netstack`, `pkg/internal/wire`, and `pkg/dns`) depends only on network primitives — it must not
 pull in Kubernetes cluster-API, Helm, or Docker transitive dependencies. This is enforced by the
 `pkg/util/netutil` sub-package (C3 refactoring):
 
@@ -390,8 +403,7 @@ pull in Kubernetes cluster-API, Helm, or Docker transitive dependencies. This is
 | `pkg/util/netutil` | Pure transport/packet/TLS/gvisor primitives: `SafeWrite`/`SafeClose`, `HandleCrash`, `ParseIPFast`, `IsIPv6Enabled`, TUN device helpers, ICMP generation, `WriteProxyInfo`/`ParseProxyInfo`, TLS helpers | Only `pkg/config` and `pkg/log` from the kubevpn module |
 | `pkg/util` | K8s cluster-ops, Docker, Helm, file/upgrade helpers | K8s client-go, Helm, Docker, CNI libs, … |
 
-`pkg/core` and `pkg/dns` import `pkg/util/netutil` and have **no dependency on `pkg/util`**.
-This keeps the data-plane binary free of the heavy transitive closure that cluster-ops libraries
-bring. All 19 cmd/ files and all upper-layer packages (`pkg/handler`, `pkg/inject`, `pkg/run`,
-`pkg/daemon/action`) continue to import `pkg/util` directly — they were already at the top of
-the import graph and gain nothing from the split.
+Packet/stack code uses `pkg/util/netutil`, not the cluster helpers in `pkg/util`.
+`pkg/network` is the host-networking orchestrator and deliberately consumes Kubernetes
+clients plus `pkg/cluster/portforward` and `pkg/cluster/discovery`; it is not part of the
+cluster-independent packet layer. `pkg/core` remains the assembly/Serve boundary.

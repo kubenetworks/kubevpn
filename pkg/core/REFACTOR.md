@@ -1,5 +1,19 @@
 # Refactoring History
 
+> **Historical record, not current source layout.** Iterations below retain their original
+> `RouteHub`, exported packet/wrapper names, filenames, commands and verification claims.
+> Current packet/device/slot code lives in `pkg/tunnel`: `route.go` defines `Router`,
+> `slot.go` owns retry/queue lifetime, `attempt.go` owns a single `connAttempt` and joins
+> its pumps, `peers.go` owns service-context stacks, and `bridge.go` separately owns TUN
+> queue admission/drain. `buffered_conn.go` writers are joined by their connection owner.
+> Stack construction/forwarders live in `pkg/tunnel/internal/netstack`; framing and batch
+> socket I/O live in `pkg/internal/wire`. `pkg/core` retains URI/protocol/TLS/SSH/UDP-relay
+> assembly and `Serve`, which starts service handlers before accept and closes/joins peers
+> after connection handlers return. Root networking moved to `pkg/network.Runtime`.
+> For current data-plane tests, use `go test ./pkg/tunnel/...` (and `./pkg/internal/wire`
+> for framing); old `./pkg/core` commands below refer to their historical trees. This
+> documentation reconciliation does not add a new test or performance result.
+
 ## Iteration 1: RouteHub (completed)
 
 Extracted global `RouteMapTCP` and `TCPPacketChan` into `RouteHub` struct with dependency injection.

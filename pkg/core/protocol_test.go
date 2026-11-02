@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"crypto/tls"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/tunnel"
 	"net"
 	"strings"
 	"sync"
@@ -118,7 +119,7 @@ func (h *testProtoHandler) Handle(_ context.Context, _ net.Conn) {}
 
 func TestRegisterProtocol_GenerateServers_FullFlow(t *testing.T) {
 	const proto = "test-full-flow"
-	RegisterProtocol(proto, func(node *Node, hub *RouteHub) (net.Listener, Handler, error) {
+	RegisterProtocol(proto, func(node *Node, hub *tunnel.Router) (net.Listener, Handler, error) {
 		ln, err := net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
 			return nil, nil, err
@@ -154,11 +155,11 @@ func TestRegisterProtocol_GenerateServers_FullFlow(t *testing.T) {
 func TestRegisterProtocol_MultipleProtocols(t *testing.T) {
 	const proto1 = "test-multi-a"
 	const proto2 = "test-multi-b"
-	RegisterProtocol(proto1, func(node *Node, hub *RouteHub) (net.Listener, Handler, error) {
+	RegisterProtocol(proto1, func(node *Node, hub *tunnel.Router) (net.Listener, Handler, error) {
 		ln, err := net.Listen("tcp", "127.0.0.1:0")
 		return ln, &testProtoHandler{}, err
 	})
-	RegisterProtocol(proto2, func(node *Node, hub *RouteHub) (net.Listener, Handler, error) {
+	RegisterProtocol(proto2, func(node *Node, hub *tunnel.Router) (net.Listener, Handler, error) {
 		ln, err := net.Listen("tcp", "127.0.0.1:0")
 		return ln, &testProtoHandler{}, err
 	})
@@ -185,7 +186,7 @@ func TestRegisterProtocol_MultipleProtocols(t *testing.T) {
 
 func TestGenerateServersFromNodes_NilHub_PassedThrough(t *testing.T) {
 	const proto = "test-nilhub-pt"
-	RegisterProtocol(proto, func(node *Node, hub *RouteHub) (net.Listener, Handler, error) {
+	RegisterProtocol(proto, func(node *Node, hub *tunnel.Router) (net.Listener, Handler, error) {
 		if hub == nil {
 			t.Error("hub should not be nil after fallback creates one")
 		}
@@ -203,7 +204,7 @@ func TestGenerateServersFromNodes_NilHub_PassedThrough(t *testing.T) {
 
 func TestGenerateServersFromNodes_FactoryError(t *testing.T) {
 	const proto = "test-factory-err"
-	RegisterProtocol(proto, func(node *Node, hub *RouteHub) (net.Listener, Handler, error) {
+	RegisterProtocol(proto, func(node *Node, hub *tunnel.Router) (net.Listener, Handler, error) {
 		return nil, nil, net.ErrClosed
 	})
 	defer delete(protocolRegistry, proto)

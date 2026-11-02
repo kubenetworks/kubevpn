@@ -22,14 +22,14 @@ func TestFindConnection_ReturnsFirstMatch(t *testing.T) {
 	svr := &Server{}
 	a := &handler.ConnectOptions{ConnectionID: "abc123456789"}
 	b := &handler.ConnectOptions{ConnectionID: "def123456789"}
-	svr.connections = []handler.Connection{a, b}
+	svr.registry.list = []handler.Connection{a, b}
 
-	found, idx := svr.findConnection("abc123456789")
+	found, idx := svr.registry.find("abc123456789")
 	if found != a || idx != 0 {
 		t.Fatalf("expected (a, 0), got (%v, %d)", found, idx)
 	}
 
-	found, idx = svr.findConnection("def123456789")
+	found, idx = svr.registry.find("def123456789")
 	if found != b || idx != 1 {
 		t.Fatalf("expected (b, 1), got (%v, %d)", found, idx)
 	}
@@ -37,11 +37,11 @@ func TestFindConnection_ReturnsFirstMatch(t *testing.T) {
 
 func TestFindConnection_NotFound(t *testing.T) {
 	svr := &Server{}
-	svr.connections = []handler.Connection{
+	svr.registry.list = []handler.Connection{
 		&handler.ConnectOptions{ConnectionID: "abc123456789"},
 	}
 
-	found, idx := svr.findConnection("nonexistent12")
+	found, idx := svr.registry.find("nonexistent12")
 	if found != nil || idx != -1 {
 		t.Fatalf("expected (nil, -1), got (%v, %d)", found, idx)
 	}
@@ -52,73 +52,73 @@ func TestRemoveConnection_RemovesAllMatching(t *testing.T) {
 	a := &handler.ConnectOptions{ConnectionID: "abc123456789", OwnerID: "owner-a"}
 	b := &handler.ConnectOptions{ConnectionID: "abc123456789", OwnerID: "owner-b"}
 	c := &handler.ConnectOptions{ConnectionID: "other1234567"}
-	svr.connections = []handler.Connection{a, b, c}
+	svr.registry.list = []handler.Connection{a, b, c}
 
-	removed := svr.removeConnection("abc123456789")
+	removed := svr.registry.removeByID("abc123456789")
 
 	if len(removed) != 2 {
 		t.Fatalf("expected 2 removed, got %d", len(removed))
 	}
-	if len(svr.connections) != 1 {
-		t.Fatalf("expected 1 remaining, got %d", len(svr.connections))
+	if len(svr.registry.list) != 1 {
+		t.Fatalf("expected 1 remaining, got %d", len(svr.registry.list))
 	}
-	if svr.connections[0] != c {
+	if svr.registry.list[0] != c {
 		t.Fatal("wrong connection remaining")
 	}
 }
 
 func TestRemoveConnection_NoMatch(t *testing.T) {
 	svr := &Server{}
-	svr.connections = []handler.Connection{
+	svr.registry.list = []handler.Connection{
 		&handler.ConnectOptions{ConnectionID: "abc123456789"},
 	}
 
-	removed := svr.removeConnection("nonexistent12")
+	removed := svr.registry.removeByID("nonexistent12")
 	if len(removed) != 0 {
 		t.Fatalf("expected 0 removed, got %d", len(removed))
 	}
-	if len(svr.connections) != 1 {
+	if len(svr.registry.list) != 1 {
 		t.Fatal("should not modify connections when no match")
 	}
 }
 
 func TestResetCurrentConnection_PicksFirstRemaining(t *testing.T) {
 	svr := &Server{}
-	svr.connections = []handler.Connection{
+	svr.registry.list = []handler.Connection{
 		&handler.ConnectOptions{ConnectionID: "first1234567"},
 		&handler.ConnectOptions{ConnectionID: "second123456"},
 	}
-	svr.currentConnectionID = "removed123456"
+	svr.registry.currentID = "removed123456"
 
-	svr.resetCurrentConnection("removed123456")
+	svr.registry.resetCurrent("removed123456")
 
-	if svr.currentConnectionID != "first1234567" {
-		t.Fatalf("expected first remaining 'first1234567', got %q", svr.currentConnectionID)
+	if svr.registry.currentID != "first1234567" {
+		t.Fatalf("expected first remaining 'first1234567', got %q", svr.registry.currentID)
 	}
 }
 
 func TestResetCurrentConnection_ClearsWhenEmpty(t *testing.T) {
 	svr := &Server{}
-	svr.connections = nil
-	svr.currentConnectionID = "removed123456"
+	svr.registry.list = nil
+	svr.registry.currentID = "removed123456"
 
-	svr.resetCurrentConnection("removed123456")
+	svr.registry.resetCurrent("removed123456")
 
-	if svr.currentConnectionID != "" {
-		t.Fatalf("expected empty when no connections, got %q", svr.currentConnectionID)
+	if svr.registry.currentID != "" {
+		t.Fatalf("expected empty when no connections, got %q", svr.registry.currentID)
 	}
 }
 
 func TestResetCurrentConnection_NoOpIfDifferentID(t *testing.T) {
 	svr := &Server{}
-	svr.connections = []handler.Connection{
+	svr.registry.list = []handler.Connection{
 		&handler.ConnectOptions{ConnectionID: "keep12345678"},
 	}
-	svr.currentConnectionID = "keep12345678"
+	svr.registry.currentID = "keep12345678"
 
-	svr.resetCurrentConnection("other1234567")
+	svr.registry.resetCurrent("other1234567")
 
-	if svr.currentConnectionID != "keep12345678" {
+	if svr.registry.currentID != "keep12345678" {
 		t.Fatalf("should not change currentConnectionID when removedID doesn't match")
 	}
 }
@@ -209,21 +209,21 @@ func TestFault_DisconnectDuringActiveConnections(t *testing.T) {
 	a := &handler.ConnectOptions{ConnectionID: "conn-aaaa-1234", OwnerID: "owner-a"}
 	b := &handler.ConnectOptions{ConnectionID: "conn-bbbb-5678", OwnerID: "owner-b"}
 	c := &handler.ConnectOptions{ConnectionID: "conn-cccc-9012", OwnerID: "owner-c"}
-	svr.connections = []handler.Connection{a, b, c}
-	svr.currentConnectionID = "conn-bbbb-5678"
+	svr.registry.list = []handler.Connection{a, b, c}
+	svr.registry.currentID = "conn-bbbb-5678"
 
-	removed := svr.removeConnection("conn-bbbb-5678")
-	svr.resetCurrentConnection("conn-bbbb-5678")
+	removed := svr.registry.removeByID("conn-bbbb-5678")
+	svr.registry.resetCurrent("conn-bbbb-5678")
 
 	if len(removed) != 1 || removed[0] != b {
 		t.Fatalf("expected [b] removed, got %v", removed)
 	}
-	if len(svr.connections) != 2 {
-		t.Fatalf("expected 2 remaining, got %d", len(svr.connections))
+	if len(svr.registry.list) != 2 {
+		t.Fatalf("expected 2 remaining, got %d", len(svr.registry.list))
 	}
 	// currentConnectionID should be reset to first remaining
-	if svr.currentConnectionID != "conn-aaaa-1234" {
-		t.Fatalf("current should be first remaining, got %q", svr.currentConnectionID)
+	if svr.registry.currentID != "conn-aaaa-1234" {
+		t.Fatalf("current should be first remaining, got %q", svr.registry.currentID)
 	}
 }
 
@@ -231,23 +231,23 @@ func TestFault_DisconnectAll_CleansEverything(t *testing.T) {
 	// Simulate: disconnect --all
 	svr := &Server{}
 	for i := 0; i < 5; i++ {
-		svr.connections = append(svr.connections, &handler.ConnectOptions{
+		svr.registry.list = append(svr.registry.list, &handler.ConnectOptions{
 			ConnectionID: "conn-" + string(rune('a'+i)) + "123456789",
 		})
 	}
-	svr.currentConnectionID = "conn-c123456789"
+	svr.registry.currentID = "conn-c123456789"
 
-	all := handler.Connects(svr.connections)
-	svr.connections = nil
-	svr.currentConnectionID = ""
+	all := handler.Connects(svr.registry.list)
+	svr.registry.list = nil
+	svr.registry.currentID = ""
 
 	if len(all) != 5 {
 		t.Fatalf("expected 5 disconnected, got %d", len(all))
 	}
-	if svr.currentConnectionID != "" {
+	if svr.registry.currentID != "" {
 		t.Fatal("currentConnectionID should be empty after disconnect all")
 	}
-	if len(svr.connections) != 0 {
+	if len(svr.registry.list) != 0 {
 		t.Fatal("connections should be empty after disconnect all")
 	}
 }
@@ -276,9 +276,9 @@ func TestFault_CrashRestart_OwnerIDPreserved(t *testing.T) {
 
 func TestFault_FindConnection_EmptySlice(t *testing.T) {
 	svr := &Server{}
-	svr.connections = nil
+	svr.registry.list = nil
 
-	found, idx := svr.findConnection("anything")
+	found, idx := svr.registry.find("anything")
 	if found != nil || idx != -1 {
 		t.Fatal("empty connections slice should return nil, -1")
 	}
@@ -287,19 +287,19 @@ func TestFault_FindConnection_EmptySlice(t *testing.T) {
 func TestFault_RemoveConnection_FromSingleElement(t *testing.T) {
 	svr := &Server{}
 	only := &handler.ConnectOptions{ConnectionID: "only1234567"}
-	svr.connections = []handler.Connection{only}
-	svr.currentConnectionID = "only1234567"
+	svr.registry.list = []handler.Connection{only}
+	svr.registry.currentID = "only1234567"
 
-	removed := svr.removeConnection("only1234567")
-	svr.resetCurrentConnection("only1234567")
+	removed := svr.registry.removeByID("only1234567")
+	svr.registry.resetCurrent("only1234567")
 
 	if len(removed) != 1 {
 		t.Fatal("should remove the only connection")
 	}
-	if len(svr.connections) != 0 {
+	if len(svr.registry.list) != 0 {
 		t.Fatal("connections should be empty")
 	}
-	if svr.currentConnectionID != "" {
+	if svr.registry.currentID != "" {
 		t.Fatal("currentConnectionID should be cleared")
 	}
 }

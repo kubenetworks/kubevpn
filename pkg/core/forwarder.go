@@ -3,7 +3,11 @@ package core
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
+
+	"github.com/wencaiwulue/kubevpn/v2/pkg/internal/wire"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/tunnel"
 )
 
 var errEmptyForwarder = errors.New("empty forwarder")
@@ -81,4 +85,25 @@ type Transporter interface {
 type Server struct {
 	Listener net.Listener
 	Handler  Handler
+}
+
+// TunnelConfig passes only dialing behavior across the data-plane boundary.
+func (f *Forwarder) TunnelConfig() *tunnel.DialConfig {
+	if f.IsEmpty() {
+		return nil
+	}
+	return &tunnel.DialConfig{Addr: f.Addr, DialContext: func(ctx context.Context) (*wire.Conn, error) {
+		conn, err := f.DialContext(ctx)
+		if err != nil {
+			return nil, err
+		}
+		framed, ok := conn.(*wire.Conn)
+		if !ok || framed == nil {
+			if !ok && conn != nil {
+				_ = conn.Close()
+			}
+			return nil, fmt.Errorf("tunnel connector returned %T, expected non-nil *wire.Conn", conn)
+		}
+		return framed, nil
+	}}
 }

@@ -6,13 +6,14 @@ The client defaults to **one data `connSlot` plus one independent control slot**
 business dispatch goes directly to slot 0 without slot-selection parsing/hashing; lifecycle,
 batching and business concurrency are preserved. Heartbeat requests bypass the business queue
 via a separate control queue/conn to the **same TCP forwarding endpoint 10801**, not xDS 9002.
-The control conn is excluded from RouteHub; replies use the registered data conn (first writable
+The control conn is excluded from `tunnel.Router`; replies use the registered data conn (first writable
 with fallback, not per-flow balancing). There is one registered conn per current client address
 in steady state. The outer SSH/port-forward TCP transport remains shared, and data-path stalls
 can delay replies: separation is not an absolute liveness guarantee.
 
 The historical watchdog/port-forward loops described below have been replaced by
-one transport supervisor in `pkg/handler/network_transport.go`, shared by SSH and
+one `transportSupervisor` in `pkg/network/transport.go`, owned by `network.Runtime`
+(`pkg/network/runtime.go`) and shared by SSH and
 Kubernetes port-forward. The 30-second unprimed and `3 * HeartbeatInterval` steady
 thresholds remain (sampled every 5 s). Health is armed after TUN startup; bootstrap uses
 10-second GetTunIP calls and waits for a **current-generation data heartbeat** within the
@@ -27,7 +28,7 @@ fixed port. Healthy current SSH/port-forward is sticky; only failure switches pa
 bounded backoff. Authentication/trust/configuration failures are terminal. Heartbeats carry
 nonce/generation/counter with bounded outstanding state (128 / 30 s); see docs/08.
 
-`network_monitor.go` integrates the existing vendored **netmon 1.74.1** API. Callbacks only
+`pkg/network/monitor.go` integrates the existing vendored **netmon 1.74.1** API. Callbacks only
 coalesce wakeups; the supervisor compares current interface/route state, not callback Old/New.
 `TimeJumped` remains sticky until consumed. Sampling follows actual API/SSH/proxy egress and
 IPv4/IPv6 default-route fallbacks, excluding this connection's TUN identity. Route lookups send
@@ -41,9 +42,18 @@ waits for `startupDone` and all workers (including monitor/TUN handlers), then c
 errors cancel the manager; DataSession observes that cancellation outside the
 supervisor and performs cleanup without self-joining.
 
+Current source navigation: `pkg/network/address.go` owns rentIP/IPWatcher,
+`pkg/network/routes.go` owns RouteWatcher and route-source repair, and
+`pkg/network/transport_policy.go` holds retry/liveness constants.
+`pkg/cluster/portforward/session.go` owns joinable `PortForwardSession` handles;
+`pkg/cluster/portforward/forward.go` contains the `PortForwardPod` wrapper.
+`pkg/tunnel/attempt.go` owns each connection's declaration/registration and joined pumps;
+`pkg/tunnel/heartbeat.go` validates probe evidence. The filenames and removed helpers
+inside the historical sections below are retained only as incident provenance.
+
 ### Slot-local rapid-failure pacing
 
-`pkg/core/conn_slot.go` independently paces each data/control slot when dialing succeeds
+`pkg/tunnel/slot.go` independently paces each data/control slot when dialing succeeds
 but declaration, registration, reading or writing repeatedly fails rapidly. This prevents
 a hot reconnect loop without adding another transport supervisor. Default delays are:
 

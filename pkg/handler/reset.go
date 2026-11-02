@@ -17,6 +17,7 @@ import (
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"sigs.k8s.io/yaml"
 
+	clusterworkload "github.com/wencaiwulue/kubevpn/v2/pkg/cluster/workload"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/inject"
@@ -31,7 +32,7 @@ func (c *ConnectOptions) Reset(ctx context.Context, namespace string, workloads 
 	}
 
 	var err error
-	workloads, _, err = util.NormalizedResource(c.factory, namespace, workloads)
+	workloads, _, err = clusterworkload.NormalizedResource(c.factory, namespace, workloads)
 	if err != nil {
 		return err
 	}
@@ -96,14 +97,14 @@ func resetConfigMap(ctx context.Context, mapInterface v1.ConfigMapInterface, nam
 }
 
 func removeInjectContainer(ctx context.Context, factory cmdutil.Factory, clientset kubernetes.Interface, namespace, workload string) error {
-	object, controller, err := util.GetTopOwnerObject(ctx, factory, namespace, workload)
+	object, controller, err := clusterworkload.GetTopOwnerObject(ctx, factory, namespace, workload)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to get unstructured object: %v", err)
 		return err
 	}
 
 	u := controller.Object.(*unstructured.Unstructured)
-	templateSpec, depth, err := util.GetPodTemplateSpecPath(u)
+	templateSpec, depth, err := clusterworkload.GetPodTemplateSpecPath(u)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to get template spec path: %v", err)
 		return err
@@ -135,10 +136,10 @@ func removeInjectContainer(ctx context.Context, factory cmdutil.Factory, clients
 	}
 	workloadRef := fmt.Sprintf("%s/%s", controller.Mapping.Resource.Resource, controller.Name)
 	// reset restores the original spec; a timed-out rollout must not undo it.
-	if err = util.RolloutStatus(ctx, factory, controller.Namespace, workloadRef, false); err != nil {
+	if err = clusterworkload.RolloutStatus(ctx, factory, controller.Namespace, workloadRef, false); err != nil {
 		plog.G(ctx).Warnf("Rollout status check failed for %s: %v", workloadRef, err)
 	}
-	if !util.IsK8sService(object) {
+	if !clusterworkload.IsK8sService(object) {
 		return nil
 	}
 

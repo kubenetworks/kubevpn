@@ -2,9 +2,16 @@
 
 ## 1. Overview
 
-The core package (`pkg/core`) implements the VPN tunnel network layer using Google's gvisor userspace TCP/IP stack. It handles all packet forwarding between TUN devices and remote connections, supporting TCP, UDP, and ICMP protocols. This is the largest package in the project (~8200 lines).
+The tunnel package (`pkg/tunnel`) owns packet forwarding between TUN devices and remote connections. Its `internal/netstack` package constructs gvisor TCP/UDP/ICMP stacks and forwarders without importing the parent tunnel package. Shared length-prefix connections and batch socket I/O live in `pkg/internal/wire`; pooled `Packet` references and packet batches remain in tunnel.
+
+`pkg/core` retains URI parsing, protocol factories, TCP/TLS dialing, SSH, UDP relay/reverse bridge and `Serve`. `core.NewRouteHub` returns the real `*tunnel.Router` (not an alias). `Forwarder.TunnelConfig` supplies a dial function, preserving core's retry/connector/TLS policy without a reverse dependency. `Serve` starts factory-created service handlers before accept and closes/joins their peers after connection handlers finish. `pkg/network` consumes tunnel handlers and heartbeat statistics.
 
 ## 2. Architecture
+
+Diagram labels retain the older descriptive names: `ClientDevice` is now
+`tunDevice` + `clientTransport`, and `readFromConn`/`writeToConn` are the attempt's
+`readGeneration`/`writeGeneration`. `Packet` in the ownership discussion means the
+now-private `packet` type in `pkg/tunnel/packet.go`, not an exported core API.
 
 ```
                      Local Machine (Client)                          Traffic Manager (Server)
@@ -14,7 +21,7 @@ The core package (`pkg/core`) implements the VPN tunnel network layer using Goog
 │               ▲            │                │     │        │           ▲                      │
 │               │            │ direct slot 0 │     │        │           │                      │
 │               │            ▼                │     │        ▼           │                      │
-│          tunOutbound    slot[0]              │     │     RouteHub ──► tunOutbound              │
+│          tunOutbound    slot[0]              │     │     Router ──► tunOutbound              │
 │               ▲            │                │     │        ▲                                  │
 │               │            ▼                │     │        │                                  │
 │         readFromConn   writeToConn          │     │   readFromRemote                          │
@@ -72,22 +79,23 @@ Examples:
 ```
 TunHandler → tunDevice + serverTransport → serve:
   pumpTun → routeOutbound → tunInbound → routeTun → WriteToRoutePacket(ctx, ...) → remote conn
-  writeToTun ← tunOutbound ← routeTCPToTun ← RouteHub.tunQueue ← enqueueTUN(ctx, packet)
+  writeToTun ← tunOutbound ← routeTCPToTun ← Router.bridge.queue ← bridge.send(ctx, packet)
 ```
 
-Server queue sends and packet routing are context-aware. `stopTUNBridge` signals stop,
-joins in-flight `enqueueTUN` admission, and drains the private queue without closing its
+Server queue sends and packet routing are context-aware. The separate `tunBridge`
+(`pkg/tunnel/bridge.go`) owns `send` admission and `stop`/join/drain without closing its
 data channel. Device `serve` joins routines before the final device-queue drain.
-Server-role `FatalOnReturn()` makes a returned TUN handler terminal for `handler.Run`:
-cancel, close listeners/connections, join accept loops and accepted handlers. Ordinary
-TCP EOF is not fatal; root-client NetworkManager completion is unchanged (see [12](12-session-lifecycle.md)).
+Server-role `FatalOnReturn()` makes a returned TUN handler terminal for `core.Serve`:
+cancel, close listeners/connections, join accept loops and accepted handlers, then close/join
+service peers. Ordinary TCP EOF is not fatal; root-client completion is owned by
+`network.Runtime` (see [12](12-session-lifecycle.md)).
 
-The server reads IP packets from the TUN device, looks up the destination in `RouteHub`, and writes to the appropriate remote connection. Incoming packets from remote connections are written back to the TUN device.
+The server reads IP packets from the TUN device, looks up the destination in `Router`, and writes to the appropriate remote connection. Incoming packets from remote connections are written back to the TUN device.
 
 **Packet framing**: IP data is read at `buf[3:]`, leaving room for `[2-byte length][1-byte type prefix]`. The type prefix byte (`1` = IP packet) distinguishes different payload types.
 
 **Shared read loop**: both server and client read from the TUN via one generic loop,
-`tunDevice.pumpTun(ctx, errLabel, dispatch)` (in `tun_device.go`). It owns the pooled-buffer
+`tunDevice.pumpTun(ctx, errLabel, dispatch)` (in `pkg/tunnel/device.go`). It owns the pooled-buffer
 read at `buf[3:]`, `ParseIPFast`, and read/parse error handling (read error → `errChan` + stop;
 parse error → drop + continue), then hands each packet to a per-side `dispatch` callback.
 The server's `routeOutbound` dispatch debug-logs and sends to `tunInbound`, releasing the
@@ -108,15 +116,16 @@ to `tunInbound` for the pool to distribute.
 
 **Connection pool**: The default is **one data slot plus one independent control slot**. Outbound data goes directly to slot 0 without parsing/hashing for slot selection. The private `poolSize` remains a data-only override for nil-stats tests/benchmarks comparing 1/2/4/8 slots; there is no CLI or environment flag. Multi-slot tests retain `flowHash` affinity, falling back to `ipHash(dst)` for packets without usable ports. The server shares one gvisor stack per client across its conns, with grace retention across reconnects independent of slot count (see [48-shared-server-gvisor-stack.md](48-shared-server-gvisor-stack.md)). One data conn multiplexes concurrent business flows; it does not limit business concurrency to one. See [41-five-tuple-pool-dispatch.md](41-five-tuple-pool-dispatch.md).
 
-**`connSlot`**: each slot retains its inbound queue, connection lifecycle (`run` dial/reconnect
-loop), `readFromConn`, `writeToConn`, deadlines and bounded batching. `runConnPool` starts
-`go slot.run(ctx)` and uses blocking data-queue sends to preserve backpressure. Default dispatch
-selects slot 0 directly; only multi-slot tests hash for selection. Both reader and writer refresh
-conn deadlines lazily via `periodicDeadline` rather than resetting them per packet.
+**`connSlot`** (`pkg/tunnel/slot.go`) retains its inbound queue and retry loop.
+Each `connAttempt` (`pkg/tunnel/attempt.go`) owns exactly one dial/handshake and the
+`readGeneration`/`writeGeneration` pumps. It closes the connection and joins both pumps
+before the next attempt may consume the shared queue. `runConnPool` uses blocking data-queue
+sends for backpressure; default dispatch selects slot 0, and only multi-slot tests hash.
+`periodicDeadline` refreshes deadlines lazily; the attempt writer retains bounded batching.
 
 **Heartbeats**: Periodic ICMP requests use the independent control queue/conn to the **same
 TCP forwarding endpoint 10801**, not xDS 9002, bypassing the business queue. Control is excluded
-from RouteHub; replies use the registered data conn. The outer SSH/port-forward TCP transport
+from Router; replies use the registered data conn. The outer SSH/port-forward TCP transport
 is still shared and replies depend on data-path progress, so this is not an absolute liveness
 guarantee.
 
@@ -126,26 +135,24 @@ guarantee.
 
 | File | Responsibility |
 |------|----------------|
-| `packet.go` | The `Packet` value type (`NewPacket`/`Data`/`Length`), the gvisor `copyPacketToPool` helper, and `logIPPacket` (the debug packet-log helper — the only `gopacket/layers` user among these files) |
-| `tun_device.go` | Shared `tunDevice` base (`tun`, the inbound/outbound channels, `errChan`), `writeToTun`, `Close`, the generic `pumpTun` read loop, and `drainPacketChan` |
-| `tun_client.go` | `clientTransport`, connection pool dispatch and heartbeats |
-| `conn_slot.go` | `connSlot` queues, dial/reconnect and read/write loops |
-| `tun_server.go` | `serverTransport` routing (`routeTun`/`routeTCPToTun`) |
-| `tun_handler.go` | Role selection, `FatalOnReturn`, and joined device `serve` |
+| `pkg/tunnel/packet.go` | Private `packet`/`newPacket`, reference ownership, `copyPacketToPool`, packet logging |
+| `pkg/tunnel/device.go` | Shared `tunDevice`, `writeToTun`, `Close`, `pumpTun` and queue drain |
+| `pkg/tunnel/client.go` | `clientTransport`, pool dispatch and heartbeats |
+| `pkg/tunnel/slot.go`, `pkg/tunnel/attempt.go` | Queue/retry lifetime; single-connection ownership and joined pumps |
+| `pkg/tunnel/server_device.go` | `serverTransport` routing (`routeTun`/`routeTCPToTun`) |
+| `pkg/tunnel/device_handler.go` | Role selection, `FatalOnReturn`, and joined device `serve` |
 
-## 6. RouteHub — Packet Routing
+## 6. Router — Packet Routing
 
-`RouteHub` is the central routing table shared between TUN and gvisor handlers:
+`Router` is the central routing table shared between TUN and gvisor handlers:
 
 ```go
-// Selected fields; private metadata is accessed through RouteHub operations.
-type RouteHub struct {
-    mu          sync.Mutex
-    routes      map[string]*ConnList
-    tunQueue    chan *Packet
-    tunDone     chan struct{}
-    emptyLocked func(ipKey string)
-    addedLocked func(ipKey string)
+// Selected fields; private metadata is accessed through Router operations.
+type Router struct {
+    mu     sync.Mutex
+    routes map[string]*ConnList
+    peers  *peerRegistry
+    bridge *tunBridge
 }
 ```
 
@@ -167,15 +174,20 @@ not used for the framed-packet path.
 
 **Route registration/lifetime**: `AddRoute(ctx, srcIP, conn)` registers data packets and
 proactive registration echoes, but refuses a closed `bufferedTCP`. Its stop callback removes
-routes even before reader cleanup. Route changes and internal `addedLocked`/`emptyLocked`
-callbacks are serialized under `hub.mu`; callback lock order is hub then `handler.mu`,
-with metadata/timer updates only (no I/O, logging, or hub reentry). Periodic control probes
+routes even before reader cleanup. Route changes call `peerRegistry.onRouteAddedLocked` /
+`onRouteEmptyLocked` under `hub.mu`, then the registry mutex, with metadata/timer updates
+only (no I/O, logging, or hub reentry). The registry is started with the service context by
+`core.Serve`, never by the first accepted connection. Periodic control probes
 do not register routes. See [48](48-shared-server-gvisor-stack.md) for grace epochs and
 [08](08-heartbeat-health.md) for read/write deadlines.
 
 ## 7. Protocol Encapsulation
 
-### 7.1 UDPOverTCP (`conn_udp_over_tcp.go`)
+### 7.1 Datagram framing (`pkg/internal/wire/conn.go`)
+
+The former `UDPConnOverTCP` is now `wire.Conn` (imported as `framing` by the tunnel).
+The shared helpers are `ReadDatagram`, `WriteDatagram` and `WriteFull`; the legacy names
+in the protocol discussion below refer to those operations, not APIs still exported by core.
 
 Provides UDP-like datagram semantics over a TCP stream using length-prefix framing:
 
@@ -208,14 +220,14 @@ reports actual wire progress and errors, continues positive short writes only on
 writer, and converts zero progress without an error to `io.ErrShortWrite`. A partial frame
 failure must never trigger fallback/replay onto another connection.
 
-`relayUDPOverTCP` in `gvisor_udp_handler.go` closes both TCP and UDP endpoints on first copy
+`relayUDPOverTCP` in `pkg/core/udp_relay.go` closes both TCP and UDP endpoints on first copy
 completion or cancellation, then joins both copy workers. This is the UDP-over-TCP relay's
 ownership contract, not a claim about all gvisor forwarder goroutines.
 
-### 7.3 BufferedTCP (`conn_buffered_tcp.go`)
+### 7.3 BufferedTCP (`pkg/tunnel/buffered_conn.go`)
 
 Wraps a TCP connection with an **async write queue** to coalesce syscalls under load.
-`NewBufferedTCP` starts a single `run(ctx)` goroutine that drains a buffered channel
+`newBufferedTCP` starts a single `run(ctx)` goroutine that drains a buffered channel
 (`ch chan *Packet`, capacity `MaxSize`) and writes each framed packet to the socket. Two enqueue
 paths:
 
@@ -232,7 +244,9 @@ Stop sets `closed`, closes the admission-stop `done` channel, and invokes the in
 route-removal callback. Close then closes the underlying transport outside route metadata
 locks. `run` also closes on exit, including idle/pre-canceled cases, joins in-flight enqueue
 admission and drains the remaining packets. The data channel is never closed; `done` is
-not a writer-completion join signal. Closed writers cannot be registered again.
+not a writer-completion join signal. The connection handler separately calls `waitRun()`
+(`runDone`) after cancellation/Close, so its owner joins the writer before returning.
+Closed writers cannot be registered again.
 
 ### 7.4 Reference-Counted Packet Pool (`packet.go`)
 
@@ -265,12 +279,12 @@ This is modeled on gvisor's chunk refcount (`buffer.View.Clone`/`Release`). Type
 
 ### 8.1 Stack Creation
 
-`newGvisorStack(ctx, tun, tcpFwd, udpFwd)` creates a gvisor network stack with:
+`netstack.New(ctx, tun, tcpFwd, udpFwd)` (`pkg/tunnel/internal/netstack/stack.go`) creates a gvisor network stack with:
 - IPv4 + IPv6 network protocols
 - TCP + UDP + **ICMP** transport protocols (`tcp`, `udp`, `icmp.NewProtocol4`, `icmp.NewProtocol6`). ICMP **must** be registered here: gvisor's `SetTransportProtocolHandler` is a no-op for a protocol that is not in this list, so without it the `ICMPForwarder` handler below is never installed and echo requests (ping, and the heartbeat echo replies in `08-heartbeat-health.md`) get no response.
 - SACK, TTL=64, moderate receive buffer, forwarding enabled
 - Stock gvisor TCP send/receive buffer ranges (autotuning up to 4MB via `ModerateReceiveBuffer`). NOTE: raising these to Tailscale's 8MiB/6MiB was tried and reverted — Tailscale assumes one UDP flow per peer, but KubeVPN multiplexes every flow over a shared TCP tunnel, where an oversized single-flow buffer causes head-of-line bloat that starves other flows (see `08-heartbeat-health.md` §#3)
-- `GVisorGSOSupported` on the link endpoint of **both** the server stack (`gvisor_tcp_handler.go`) and the client local stacks (`gvisor_local_tcp_handler.go`, self-to-self + inter-client) — gvisor performs software segmentation internally, complementing the TUN-side GRO (`docs/22-tun-device.md` §4.2). We deliberately avoid `HostGSOSupported`: these endpoints feed a TCP tunnel, not a host NIC, so host-GSO would push super-MTU segments onto the wire that macOS/Windows clients cannot write to their TUN. (TX checksum offload is deliberately NOT enabled: gvisor-generated inner packets are ultimately delivered to a real kernel that validates the checksum, so skipping it would cause silent drops — unlike RX checksum offload, which only skips gvisor's own injection-time validation.)
+- `GVisorGSOSupported` on the link endpoint of **both** the server stack (`pkg/tunnel/peers.go`) and the client local stacks (`pkg/tunnel/client_stack.go`, self-to-self + inter-client) — gvisor performs software segmentation internally, complementing the TUN-side GRO (`docs/22-tun-device.md` §4.2). We deliberately avoid `HostGSOSupported`: these endpoints feed a TCP tunnel, not a host NIC, so host-GSO would push super-MTU segments onto the wire that macOS/Windows clients cannot write to their TUN. (TX checksum offload is deliberately NOT enabled: gvisor-generated inner packets are ultimately delivered to a real kernel that validates the checksum, so skipping it would cause silent drops — unlike RX checksum offload, which only skips gvisor's own injection-time validation.)
 - Promiscuous mode + spoofing enabled (accepts all packets)
 - Default routes for all IPv4 and IPv6 traffic
 
@@ -280,27 +294,27 @@ Two variants:
 
 ### 8.2 Transport Forwarders
 
-**TCPForwarder** (`gvisor_tcp_forwarder.go`):
+**TCPForwarder** (`pkg/tunnel/internal/netstack/tcp.go`):
 - Intercepts TCP SYN from gvisor stack
 - Created with rcvWnd = `tcp.DefaultReceiveBufferSize` (not 0, which would start at the minimum window) and `tcpForwarderMaxInFlight` = 8192 (Tailscale's Linux value)
 - Dials the real destination (e.g., the actual service IP)
 - Relays data bidirectionally between gvisor gonet.Conn and the real TCP conn
 - Both relay goroutines are guaranteed to finish: after the first completes, both sides get `SetReadDeadline(1s)` to unblock the second goroutine
 
-**UDPForwarder** (`gvisor_udp_forwarder.go`):
+**UDPForwarder** (`pkg/tunnel/internal/netstack/udp.go`):
 - Intercepts UDP packets from gvisor stack
 - Dials the real destination UDP address
 - Relays with configurable timeouts (5-minute idle)
 
-**ICMPForwarder** (`gvisor_icmp_forwarder.go`):
+**ICMPForwarder** (`pkg/tunnel/internal/netstack/icmp.go`):
 - Forwards ICMP echo requests via raw socket
 - Returns responses back through the gvisor stack
 
 ### 8.3 TUN Endpoints
 
-**gvisor_tun_endpoint.go**: Server-side, bridges tunnel conns to a **per-client** gvisor
+**pkg/tunnel/server_endpoint.go**: Server-side, bridges tunnel conns to a **per-client** gvisor
 `channel.Endpoint`. `readFromTCPConnWriteToEndpoint` routes registered peer traffic directly,
-injects cluster-bound traffic into that client's stack, or hands packets to `enqueueTUN`.
+injects cluster-bound traffic into that client's stack, or hands packets to `hub.bridge.send`.
 `readFromEndpointWriteToRoute` uses blocking, context-aware `WriteToRoutePacket`; each client
 has an independent output loop, rather than a single shared loop with non-blocking drops.
 Oversized stack output that cannot fit its pooled framed buffer is dropped, not truncated.
@@ -312,7 +326,7 @@ bounded grace interval, not one refreshed by probes; data registration invalidat
 `clientStack.done` covers the owned output loop plus stack destruction only, not every
 foreign-library goroutine. See [48-shared-server-gvisor-stack.md](48-shared-server-gvisor-stack.md).
 
-**gvisor_local_tun_endpoint.go**: Client-side, bridges between the local TUN device and gvisor for local traffic (src==dst).
+**pkg/tunnel/client_endpoint.go**: Client-side, bridges between the local TUN device and gvisor for local traffic (src==dst).
 
 ## 9. Sidecar IP Allocation
 
@@ -345,23 +359,15 @@ Forwarder.DialContext()
 
 | File | Purpose |
 |------|---------|
-| `gvisor_stack.go` | gvisor stack creation (NewStack, NewLocalStack) |
-| `tun_server.go` | Server transport and routing |
-| `tun_client.go` | Client transport, connection pool, heartbeats |
-| `tun_device.go` | Shared tunDevice and device I/O |
-| `route.go` | RouteHub, ConnList, protocol registry, GenerateServers |
-| `node.go` | Node URI parsing |
-| `forwarder.go` | Forwarder, Handler, Connector, Transporter interfaces |
-| `protocol_registry.go` | Protocol factory registration + tun/gtcp/gudp/ssh factories |
-| `gvisor_tcp_forwarder.go` | TCP forwarding through gvisor |
-| `gvisor_udp_forwarder.go` | UDP forwarding through gvisor |
-| `gvisor_icmp_forwarder.go` | ICMP forwarding |
-| `gvisor_tun_endpoint.go` | TCP↔gvisor bridge (server side) |
-| `gvisor_local_tun_endpoint.go` | TUN↔gvisor bridge (client side) |
-| `gvisor_tcp_handler.go` | gvisor TCP listener handler (gtcp) |
-| `gvisor_udp_handler.go` | gvisor UDP listener handler (gudp) |
-| `conn_udp_over_tcp.go` | UDP-over-TCP datagram framing |
-| `gvisor_udp_handler.go` | UDP-over-TCP relay, endpoint close and copy-worker join |
-| `conn_buffered_tcp.go` | Buffered TCP wrapper |
-| `transporter_tcp.go` | TCP Transporter with optional TLS |
-| `ssh.go` | SSH protocol listener/handler |
+| `pkg/tunnel/internal/netstack/stack.go` | gvisor construction (`New`, `NewStack`, `NewLocalStack`) |
+| `pkg/tunnel/internal/netstack/tcp.go`, `udp.go`, `icmp.go` | TCP/UDP/ICMP forwarders |
+| `pkg/tunnel/server_device.go`, `client.go`, `device.go` | Server/client transport and shared device I/O |
+| `pkg/tunnel/route.go`, `bridge.go` | Router/ConnList identity transactions and separate TUN bridge |
+| `pkg/tunnel/server.go`, `peers.go`, `server_endpoint.go` | Connection handlers, service-owned per-IP stacks and endpoint routing |
+| `pkg/tunnel/client_stack.go`, `client_endpoint.go` | Session-level local/inter-client stacks and endpoint pumps |
+| `pkg/tunnel/buffered_conn.go`, `batch.go` | Joined buffered writer and packet batches |
+| `pkg/internal/wire/conn.go`, `batch.go` | Shared datagram framing and batch socket writes |
+| `pkg/core/node.go`, `forwarder.go` | URI parsing and retry/connector/TLS dialing; `TunnelConfig` boundary |
+| `pkg/core/protocol_registry.go`, `servers.go`, `serve.go` | Factory registration, server assembly and joined serving lifetime |
+| `pkg/core/udp_relay.go` | UDP-over-TCP relay, endpoint close and copy-worker join |
+| `pkg/core/transporter_tcp.go`, `ssh.go` | TCP/TLS transporter and SSH protocol listener/handler |

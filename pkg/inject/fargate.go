@@ -12,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes"
 
+	clusterworkload "github.com/wencaiwulue/kubevpn/v2/pkg/cluster/workload"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
@@ -26,7 +27,7 @@ func (f *fargateInjector) Inject(ctx context.Context) error {
 	plog.G(ctx).Debugf("Injecting fargate (SSH+Envoy) sidecar into %s/%s", o.Controller.Mapping.Resource.Resource, o.Controller.Name)
 	u := o.Controller.Object.(*unstructured.Unstructured)
 
-	templateSpec, path, err := util.GetPodTemplateSpecPath(u)
+	templateSpec, path, err := clusterworkload.GetPodTemplateSpecPath(u)
 	if err != nil {
 		return err
 	}

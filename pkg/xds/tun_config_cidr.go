@@ -7,9 +7,9 @@ import (
 
 	"k8s.io/apimachinery/pkg/util/sets"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/cluster/discovery"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 // WarmClusterCIDRCache detects the cluster CIDRs in-cluster (once, best-effort) and
@@ -34,7 +34,7 @@ func (s *TunConfigServer) WarmClusterCIDRCache(ctx context.Context) {
 	// so it infers CIDRs from kube-system component flags, a rejected (dry-run) Service
 	// create, and existing pod IPs -- no pods/create or pods/exec RBAC needed. See docs/46.
 	s.warmClusterCIDRCache(ctx, func() []*net.IPNet {
-		return util.GetClusterCIDRNoProbePod(ctx, s.clientset, s.namespace)
+		return discovery.GetClusterCIDRNoProbePod(ctx, s.clientset, s.namespace)
 	})
 }
 
@@ -61,7 +61,7 @@ func (s *TunConfigServer) warmClusterCIDRCache(ctx context.Context, detect func(
 		return
 	}
 
-	deduped := util.RemoveLargerOverlappingCIDRs(detect())
+	deduped := discovery.RemoveLargerOverlappingCIDRs(detect())
 	if len(deduped) == 0 {
 		if cacheEmpty {
 			plog.G(ctx).Warnf("[TunConfig] CIDR warm-up: no CIDRs detected; clients fall back to local detection")

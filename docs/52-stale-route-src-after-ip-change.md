@@ -30,15 +30,17 @@ traffic manager.
 
 macOS resolves the source address for a route **once, when the route is created**, and stores it
 in the entry. Nothing re-derives it afterwards. So when the TUN address changes —
-`NetworkManager.ChangeTunIP` → `tun.ChangeIP`, driven by the lease push in
+`network.Runtime.ChangeTunIP` (`pkg/network/address.go`) → `tun.ChangeIP`, driven by the lease push in
 [09-tun-ip-hot-update.md](09-tun-ip-hot-update.md) — every route installed under the old address
 keeps sourcing packets from it, even though it has been removed from the interface.
 
 Outbound packets then leave carrying an address that belongs to somebody else. The server's
-`RouteHub` either delivers the reply to that other client's connection or drops it outright
+`tunnel.Router` (`pkg/tunnel/route.go`) either delivers the reply to that other client's connection or drops it outright
 (`No route for stack output`, see [51-idle-client-route-registration.md](51-idle-client-route-registration.md)),
 so the local machine sees total silence. Heartbeats keep the connection "healthy" because the
-control conn is a separate path, which is why `status` stays green.
+control request uses the current device address rather than the kernel's stale route source.
+The reply still returns over a registered data conn, not directly over control: this validates
+the tunnel round trip but not the kernel's source selection for business destinations.
 
 This is the second failure mode of the same change.
 [45-tun-ip-change-stale-address.md](45-tun-ip-change-stale-address.md) fixed the first one — the
@@ -163,7 +165,7 @@ the kernel re-derive the ifa from the gateway. Re-asserting is now the operation
 stale source, and it corrects it **in place** — unlike a delete/add pair, the route is never
 briefly absent.
 
-### 4.2 Refresh what the kernel has, not what we remember (`pkg/handler/network.go`)
+### 4.2 Refresh what the kernel has, not what we remember (`pkg/network/routes.go`)
 
 `refreshCIDRRoutes` became `refreshTunRoutes`, driven by `tun.ListRoutes` — the routes the kernel
 currently holds on the device, identified by `RTF_STATIC` (the flag kubevpn always sets; the
@@ -176,17 +178,18 @@ which is exactly how the first gap came about. Linux and Windows choose the sour
 transmit time, so `ListRoutes` reports nothing there and the refresh is a no-op — Linux needs the
 ordering fix in section 3.1 instead.
 
-### 4.3 Judge a route by its source, not just its device (`pkg/handler/network.go`)
+### 4.3 Judge a route by its source, not just its device (`pkg/network/routes.go`)
 
 `routedViaTunWithCurrentSrc` replaces the `ifi.Name == nm.tunName` test in `AddRoute` and
 `AddRouteCIDR`. `netroute` already returned the source address; it was being discarded. A route
 whose source is not the TUN's current address is no longer "already installed", so the ordinary
 route-watcher push repairs it.
 
-### 4.4 Notice it without being asked (`pkg/handler/network.go`)
+### 4.4 Notice it without being asked (`pkg/network/routes.go`)
 
-`repairStaleRouteSrc` runs in `watchDataPlaneLiveness` whenever the watchdog tears a session
-down. Before blaming the port-forward it asks the kernel which source a cluster destination would
+`repairStaleRouteSrc` is now called by `transportSupervisor.monitorTransport`
+(`pkg/network/transport.go`) on macOS before retiring a generation for expired heartbeat
+health (the older caller was `watchDataPlaneLiveness`). Before blaming the port-forward it asks the kernel which source a cluster destination would
 get; a mismatch is reported by name — dead address and current address both — through
 `plog.Throttle`, and the routes are re-asserted.
 
@@ -208,7 +211,7 @@ appearing later lands here too, visibly, instead of going dark.
   (`netlink.RouteGet`, i.e. `ip route get`) rather than going through netroute, which substitutes
   the interface's first address when a route carries no prefsrc — for IPv6 usually the
   link-local one, which would answer a different question. It runs anywhere with `/dev/net/tun`.
-- `pkg/handler/route_src_integration_test.go: TestIntegration_RouteSrc_SurvivesTunIPChange` —
+- `pkg/network/route_src_integration_test.go: TestIntegration_RouteSrc_SurvivesTunIPChange` —
   renting an IP over the real gRPC `TunConfigService`, then an eight-phase story (install from all
   three sources, both families → healthy re-announcement must not churn → IP change → refresh →
   regression to the stale state → watcher push repairs it → watchdog repairs it unprompted →

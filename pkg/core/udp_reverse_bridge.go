@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	framing "github.com/wencaiwulue/kubevpn/v2/pkg/internal/wire"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
@@ -19,16 +20,16 @@ import (
 // TCP-only, so envoy's UDP inbound (forwarded to 127.0.0.1:envoyPort in the pod)
 // cannot reach the developer. This bridge carries UDP over a single TCP control
 // connection that the developer opens directly to the sidecar (reachable via the
-// VPN), reusing the length-prefixed UDPConnOverTCP framing.
+// VPN), reusing the length-prefixed framing.Conn framing.
 //
 //	envoy --udp--> 127.0.0.1:envoyPort (pod)
 //	             ServeUDPReverse: UDP listen -> frame over ctrl conn ----+
-//	                                                                     | TCP (UDPConnOverTCP)
+//	                                                                     | TCP (framing.Conn)
 //	             DialUDPReverse: read frames -> UDP dial 127.0.0.1:local +--> dev udpServer
 //
 // Wire format: the dev side first writes the 2-byte big-endian target UDP port
 // (envoyPort) so the pod knows which port to listen on; the rest of the stream
-// is UDPConnOverTCP datagrams.
+// is framing.Conn datagrams.
 
 // udpBridgeHandler serves the pod side of the reverse-UDP bridge: each accepted
 // control connection drives one ServeUDPReverse.
@@ -83,7 +84,7 @@ func DialUDPReverse(ctx context.Context, conn net.Conn, envoyPort, localPort int
 	}
 	var hdr [2]byte
 	binary.BigEndian.PutUint16(hdr[:], uint16(envoyPort))
-	if _, err := writeFull(conn, hdr[:]); err != nil {
+	if _, err := framing.WriteFull(conn, hdr[:]); err != nil {
 		return fmt.Errorf("write udp-bridge port header: %w", err)
 	}
 
@@ -146,7 +147,7 @@ func (u *listenUDP) Close() error { return u.c.Close() }
 
 // relayUDPReverse pumps datagrams between the length-prefixed TCP control stream
 // (conn) and a UDP endpoint in both directions until either side errors or ctx is
-// done. Framing is done inline (writeDatagram / readDatagramPacket) so the UDP->TCP
+// done. Framing is done inline (framing.WriteDatagram / framing.ReadDatagram) so the UDP->TCP
 // direction is zero-copy: UDP is read into the reserved headroom and the length
 // header is stamped in place.
 func relayUDPReverse(ctx context.Context, conn net.Conn, udpEnd udpEndpoint) {
@@ -159,12 +160,12 @@ func relayUDPReverse(ctx context.Context, conn net.Conn, udpEnd udpEndpoint) {
 		buf := config.LPool.Get().([]byte)
 		defer config.LPool.Put(buf)
 		for {
-			n, err := udpEnd.readFrom(buf[datagramHeaderLen:])
+			n, err := udpEnd.readFrom(buf[framing.HeaderLen:])
 			if err != nil {
 				errChan <- err
 				return
 			}
-			if err = writeDatagram(conn, buf, n); err != nil {
+			if err = framing.WriteDatagram(conn, buf, n); err != nil {
 				errChan <- err
 				return
 			}
@@ -176,7 +177,7 @@ func relayUDPReverse(ctx context.Context, conn net.Conn, udpEnd udpEndpoint) {
 		buf := config.LPool.Get().([]byte)
 		defer config.LPool.Put(buf)
 		for {
-			dgram, err := readDatagramPacket(conn, buf)
+			dgram, err := framing.ReadDatagram(conn, buf)
 			if err != nil {
 				errChan <- err
 				return

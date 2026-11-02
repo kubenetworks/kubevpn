@@ -19,15 +19,14 @@ import (
 )
 
 func TestFindConnection_Found(t *testing.T) {
-	svr := &Server{
-		connections: []handler.Connection{
-			&handler.ConnectOptions{ManagerNamespace: "ns1"},
-			&handler.ConnectOptions{ManagerNamespace: "ns2"},
-		},
+	svr := &Server{registry: connectionRegistry{list: []handler.Connection{
+		&handler.ConnectOptions{ManagerNamespace: "ns1"},
+		&handler.ConnectOptions{ManagerNamespace: "ns2"},
+	}},
 	}
 	// We need GetConnectionID — but that requires DHCP init.
 	// Test the nil case instead
-	conn, idx := svr.findConnection("nonexistent")
+	conn, idx := svr.registry.find("nonexistent")
 	if conn != nil || idx != -1 {
 		t.Fatalf("expected nil/-1 for nonexistent, got %v/%d", conn, idx)
 	}
@@ -35,7 +34,7 @@ func TestFindConnection_Found(t *testing.T) {
 
 func TestFindConnection_Nil(t *testing.T) {
 	svr := &Server{}
-	conn, idx := svr.findConnection("")
+	conn, idx := svr.registry.find("")
 	if conn != nil || idx != -1 {
 		t.Fatal("expected nil/-1 for empty server")
 	}

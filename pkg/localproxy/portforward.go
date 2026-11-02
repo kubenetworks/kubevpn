@@ -11,7 +11,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/cluster/portforward"
 )
 
 type kubePortForwarder struct {
@@ -43,7 +43,7 @@ func (k *kubePortForwarder) DialPod(ctx context.Context, namespace, podName stri
 	readyChan := make(chan struct{})
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- util.PortForwardPod(
+		errCh <- portforward.PortForwardPod(
 			k.config,
 			k.restClient,
 			podName,

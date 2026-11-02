@@ -2,9 +2,62 @@ package core
 
 import (
 	"context"
+	"io"
 	"net"
 	"testing"
 )
+
+func TestTunnelConfigTypedConnectorBoundary(t *testing.T) {
+	for _, framed := range []bool{false, true} {
+		t.Run(map[bool]string{false: "reject-raw", true: "framed-roundtrip"}[framed], func(t *testing.T) {
+			raw, peer := net.Pipe()
+			defer peer.Close()
+			defer raw.Close()
+			attempts := 0
+			f := &Forwarder{Addr: "pipe", MaxRetries: 2, Transporter: &mockTransporter{dialFn: func(context.Context, string) (net.Conn, error) {
+				attempts++
+				if attempts == 1 {
+					return nil, net.ErrClosed
+				}
+				return raw, nil
+			}}, Connector: &mockConnector{connectFn: func(ctx context.Context, c net.Conn) (net.Conn, error) {
+				if framed {
+					return NewUDPOverTCPConnector().ConnectContext(ctx, c)
+				}
+				return c, nil
+			}}}
+			conn, err := f.TunnelConfig().DialContext(context.Background())
+			if attempts != 2 {
+				t.Fatalf("retry policy changed: %d", attempts)
+			}
+			if !framed {
+				if err == nil || conn != nil {
+					t.Fatal("unframed connector accepted")
+				}
+				if _, err := peer.Write([]byte("closed")); err == nil {
+					t.Fatal("rejected transport leaked")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer conn.Close()
+			done := make(chan error, 1)
+			go func() { _, err := conn.Write([]byte("ok")); done <- err }()
+			var frame [4]byte
+			if _, err := io.ReadFull(peer, frame[:]); err != nil {
+				t.Fatal(err)
+			}
+			if frame != [4]byte{0, 2, 'o', 'k'} {
+				t.Fatalf("framing changed: %v", frame)
+			}
+			if err := <-done; err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
 
 func TestParseNode_Valid(t *testing.T) {
 	node, err := ParseNode("tcp://127.0.0.1:8080")

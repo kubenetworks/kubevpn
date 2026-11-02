@@ -25,9 +25,9 @@ import (
 // by sync.Once so a dead stream does not spam on every log line), and Write
 // reports success so logging continues to the file-backed side of the logger.
 type streamWriter struct {
-	send     func(msg string) error
-	once     sync.Once
-	logFail  func(error)
+	send    func(msg string) error
+	once    sync.Once
+	logFail func(error)
 }
 
 func (w *streamWriter) Write(p []byte) (int, error) {
@@ -45,8 +45,10 @@ func (w *streamWriter) Write(p []byte) (int, error) {
 
 func newStreamWriter(send func(string) error) io.Writer {
 	return &streamWriter{
-		send:    send,
-		logFail: func(err error) { plog.G(context.Background()).Warnf("stream log send failed (client stream closed?): %v", err) },
+		send: send,
+		logFail: func(err error) {
+			plog.G(context.Background()).Warnf("stream log send failed (client stream closed?): %v", err)
+		},
 	}
 }
 

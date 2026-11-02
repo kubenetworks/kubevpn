@@ -1,5 +1,16 @@
 # 46. Server-Side CIDR & DNS Detection (design)
 
+> **Historical proposal with implemented status below.** The Context/cache-problem sections
+> describe the old implementation, not today's client behavior. Detection now lives in
+> `pkg/cluster/discovery/cidr.go` (`GetCIDR`, `GetClusterCIDRNoProbePod`); pure helpers live
+> in `cidr_helpers.go`. Both detector entry points are probe-pod/exec-free. The client
+> wrapper is `DataSession.getCIDR` in `pkg/handler/data_session.go`; it caches raw CIDRs
+> and filters per client on read. Host DNS setup is `network.Runtime.setupDNS` in
+> `pkg/network/dns.go`, with connectivity helpers in `dns_helpers.go`; it is no longer
+> `NetworkManager` in `handler/network.go`. TUN queues/`MaxSize` moved to `pkg/tunnel/device.go`.
+> The historical validation status below is retained, not a claim of verification in this
+> documentation-only pass. See [32](32-cidr-detection.md) for current detector navigation.
+
 ## Context
 
 `kubevpn connect` currently performs two *cluster-view* discovery steps **on the client**

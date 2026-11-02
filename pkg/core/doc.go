@@ -1,14 +1,8 @@
-// Package core implements the TUN-based network tunnel protocol using gvisor.
-// It handles packet routing, TCP/UDP forwarding, connection pooling, and the
-// gvisor userspace network stack between the local TUN device and the remote
-// traffic manager pod.
-//
-// Key types:
-//   - Server: pairs a net.Listener with a Handler
-//   - Forwarder: dials remote with retry and transport wrapping
-//   - RouteHub: maps client IPs to their TCP connections for routing
-//   - tunDevice: the symmetric TUN engine; its transport strategy is clientTransport
-//     (client-side connection pool, N parallel slots) or serverTransport (RouteHub routing)
-//
-// This package should NOT contain Kubernetes API calls, DNS config, or sidecar injection.
+// Package core assembles protocol servers and outbound connections from Node URIs.
+// It owns TCP/TLS dialing, connectors, SSH listeners, UDP relay/reverse bridge and
+// Serve's listener/accepted-handler lifecycle. Packet routing, connection slots,
+// TUN devices, heartbeats and gvisor peer resources belong to package tunnel.
+// NewRouteHub returns tunnel's actual Router; Forwarder passes a dial function
+// across that boundary without coupling tunnel to core assembly.
+// DNS configuration and sidecar injection do not belong here.
 package core

@@ -191,10 +191,15 @@ Returns a joinable `*PortMap` with `Addr()`, `Done()`, `Err()` (after Done), and
 - `Stop` cancels, closes the listener/active sockets/pool, and waits for forwarding workers
 - `PortMapUntil` remains the asynchronous context-owned compatibility wrapper; it discards the handle
 
-The root data-plane supervisor uses `StartPortMap` handles for all three manager ports, probes
+The root data-plane `transportSupervisor` (`pkg/network/transport.go`, owned by
+`network.Runtime` in `pkg/network/runtime.go`) uses `StartPortMap` handles for all three manager ports, probes
 actual SSH channels before publication, and supplies generation-aware data/gRPC dialers with
 dynamic loopback endpoints. Healthy SSH or port-forward remains sticky; only failure switches
 paths. Authentication/trust failures are terminal, not a reason to bypass policy via fallback.
+The alternate Kubernetes path uses `pkg/cluster/portforward/session.go`.
+`pkg/tunnel` owns the data/control slots and heartbeat correlation; gvisor forwarders live
+in `pkg/tunnel/internal/netstack`. Service lifetime is driven by `core.Serve`
+(`pkg/core/serve.go`), which starts peers before accept and joins them after handlers return.
 
 ##### Connection pool — `connPool` (`pool.go`)
 
@@ -497,7 +502,7 @@ SshStart(ctx, req):
     │   │   ├── tun: net=198.18.0.0/32 (default server IP)
     │   │   └── gtcp: :10801 (gvisor TCP listener)
     │   │
-    │   ├── Start handler.Run(sshCtx, servers)
+    │   ├── Start core.Serve(sshCtx, servers)
     │   │
     │   └── Record sshServerIP, sshCancelFunc
     │

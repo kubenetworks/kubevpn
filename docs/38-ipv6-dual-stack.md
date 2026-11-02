@@ -32,13 +32,13 @@ benchmarking (RFC 2544 / RFC 5180), chosen to avoid colliding with real cluster 
 DHCP (pkg/dhcp)            RentIP → (IPv4, IPv6) pair from two ipallocator.Range bitmaps
    │                       ReleaseIPs dispatches by ip.To4()==nil
    ▼
-NetworkManager (handler)   localTunIPv4 + localTunIPv6 ; resp.IPv6 → v6 CIDR
+Runtime (pkg/network)   localTunIPv4 + localTunIPv6 ; resp.IPv6 → v6 CIDR
    │                       ChangeTunIP(newIPv4, newIPv6) hot-updates both
    ▼
 TUN device (pkg/tun)       assigns both addresses; per-OS v6 path
    │                       routes + iptables/ip6tables per family
    ▼
-gvisor stack (pkg/core)    ipv4.NewProtocol + ipv6.NewProtocol; forwarding on both
+gvisor (tunnel/internal/netstack)    ipv4.NewProtocol + ipv6.NewProtocol; forwarding on both
    │
    ▼
 DNS (pkg/dns)              resolver set for AF_INET and AF_INET6
@@ -54,9 +54,10 @@ The `Manager` holds **two** `ipallocator.Range` bitmaps (v4 over `config.CIDR`, 
 a v4+v6 pair. `InRange` and `ReleaseIPs` dispatch by `ip.To4() != nil`. See
 [03-dhcp-ip-allocation.md](03-dhcp-ip-allocation.md).
 
-### 3.2 NetworkManager — the v4/v6 pair holder (`pkg/handler/network.go`)
+### 3.2 network.Runtime — the v4/v6 pair holder (`pkg/network/address.go`)
 
-`localTunIPv4` and `localTunIPv6` (`*net.IPNet`) are the data-plane's canonical pair, exposed via
+`Runtime.addresses` (`tunAddresses`) holds `localTunIPv4` and `localTunIPv6`
+(`*net.IPNet`), the data-plane's canonical pair, exposed via
 `LocalTunIPv4()`/`LocalTunIPv6()`. When the control plane returns a TUN IP, a non-empty
 `resp.IPv6` is parsed into the v6 CIDR; `ChangeTunIP(newIPv4, newIPv6)` hot-updates both without
 restarting the stack — see [09-tun-ip-hot-update.md](09-tun-ip-hot-update.md).
@@ -72,7 +73,7 @@ Both addresses are assigned to the interface. The v6 path is platform-specific:
 Routing mirrors this: `iptables_linux.go` programs `nat PREROUTING` DNAT for IPv4 and the parallel
 `ip6tables` rule for IPv6. See [22-tun-device.md](22-tun-device.md).
 
-### 3.4 gvisor stack — both network protocols (`pkg/core/gvisor_stack.go`)
+### 3.4 gvisor stack — both network protocols (`pkg/tunnel/internal/netstack/stack.go`)
 
 The stack registers `ipv4.NewProtocol` **and** `ipv6.NewProtocol`, sets per-protocol options on
 `ipv6.ProtocolNumber`, and enables forwarding for both via `SetForwardingDefaultAndAllNICs`. See
@@ -98,18 +99,18 @@ variants** — dual-stack (`envoy.yaml`, `fargate_envoy.yaml`) and IPv4-only (`e
 
 | Function | Location | Checks |
 |---|---|---|
-| `util.IsIPv6Enabled` (non-Windows) | `pkg/util/net_others.go` | a non-loopback IPv6 address exists on any interface |
-| `util.IsIPv6Enabled` (Windows) | `pkg/util/net_windows.go` | Windows registry IPv6 flag |
+| `netutil.IsIPv6Enabled` (non-Windows) | `pkg/util/netutil/net_others.go` | a non-loopback IPv6 address exists on any interface |
+| `netutil.IsIPv6Enabled` (Windows) | `pkg/util/netutil/net_windows.go` | Windows registry IPv6 flag |
 | `util.DetectPodSupportIPv6` | `pkg/util` | whether pods in the manager namespace support IPv6 (picks envoy template) |
-| `util.IsIPv6(packet)` | `pkg/util/net.go` | inspects the IP version nibble of a raw packet (used in the data plane to route by family) |
+| `netutil.IsIPv6(packet)` | `pkg/util/netutil/net.go` | inspects the IP version nibble of a raw packet (used in the data plane to route by family) |
 
 When IPv6 is unavailable, allocation/assignment of the v6 half is skipped and the IPv4-only envoy
 template is used, so a v4-only host still works.
 
 ## 5. Packet-Level Family Dispatch
 
-In the data plane, raw packets are classified by `util.IsIPv6` (first-nibble check) to pick the
-right handling path; ICMPv6 packets are built via `util.GenICMPPacketIPv6` for the v6 heartbeat,
+In the data plane, raw packets are classified by `netutil.IsIPv6` (first-nibble check) to pick the
+right handling path; ICMPv6 packets are built via `netutil.GenICMPPacketIPv6` for the v6 heartbeat,
 paralleling the IPv4 ICMP heartbeat in [08-heartbeat-health.md](08-heartbeat-health.md).
 
 ## 6. Related Files
@@ -118,12 +119,13 @@ paralleling the IPv4 ICMP heartbeat in [08-heartbeat-health.md](08-heartbeat-hea
 |---|---|
 | `pkg/config/config.go` | `IPv4Pool`/`IPv6Pool`, `CIDR`/`CIDR6`, `RouterIP`/`RouterIP6` |
 | `pkg/dhcp/dhcp.go` | paired v4/v6 allocation over two bitmaps |
-| `pkg/handler/network.go` | `localTunIPv4`/`localTunIPv6`, `ChangeTunIP` |
+| `pkg/network/address.go` | `Runtime.addresses`, `localTunIPv4`/`localTunIPv6`, `ChangeTunIP` |
+| `pkg/network/runtime.go`, `device.go`, `routes.go`, `dns.go` | Runtime lifecycle and per-family host effects |
 | `pkg/tun/ip_*.go`, `pkg/tun/iptables_linux.go` | per-OS v6 address + ip6tables |
-| `pkg/core/gvisor_stack.go` | dual network protocol registration + forwarding |
+| `pkg/tunnel/internal/netstack/stack.go` | dual network protocol registration + forwarding |
 | `pkg/dns/dns_windows.go` | `SetDNS(AF_INET6)` |
 | `pkg/inject/envoy.go`, `container.go`, `fargate.go` | v6 rule propagation + template selection |
-| `pkg/util/net_others.go`, `net_windows.go`, `net.go` | `IsIPv6Enabled`, `IsIPv6`, ICMPv6 |
+| `pkg/util/netutil/net_others.go`, `net_windows.go`, `net.go` | `IsIPv6Enabled`, `IsIPv6`, ICMPv6 |
 
 ## 7. Related Docs
 

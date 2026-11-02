@@ -3,7 +3,9 @@ package handler
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net"
+	"slices"
 	"strings"
 	"sync"
 
@@ -12,6 +14,8 @@ import (
 	"k8s.io/client-go/tools/cache"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/cluster/discovery"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/cluster/manager"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
@@ -24,7 +28,7 @@ import (
 type ConnectOptions struct {
 	SessionBase
 
-	// Persisted for daemon restart replay (json tag required).
+	// Copied into action.connectionRecord for daemon restart replay.
 	RequestRaw []byte `json:"RequestRaw,omitempty"`
 
 	// Identity: set from the incoming ConnectRequest and persisted (json tags).
@@ -53,6 +57,25 @@ type ConnectOptions struct {
 	// ConnectRequest, so no live handle is stored here).
 	SocksListenAddr string `json:"SocksListenAddr,omitempty"`
 	SocksEgress     bool   `json:"SocksEgress,omitempty"`
+}
+
+// GetClusterName provides identity without exposing the Kubernetes factory.
+func (c *ConnectOptions) GetClusterName() string { return util.GetKubeconfigCluster(c.factory) }
+
+// StatusSnapshot copies presentation data while the session retains cache ownership.
+func (c *ConnectOptions) StatusSnapshot(ctx context.Context) (SessionStatus, error) {
+	cm, err := c.getConfigMapStore().GetConfigMap(ctx)
+	var status SessionStatus
+	if cm != nil {
+		status.Envoy = cm.Data[config.KeyEnvoy]
+	}
+	if s := c.GetSync(); s != nil {
+		status.Sync = &SyncStatus{
+			Workloads: slices.Clone(s.Workloads), Headers: maps.Clone(s.Headers),
+			TargetWorkloadNames: maps.Clone(s.TargetWorkloadNames), SyncthingGUIAddr: s.GetSyncthingGUIAddr(),
+		}
+	}
+	return status, err
 }
 
 // GetSocksListenAddr returns the listen address of the managed SOCKS5 proxy, or "" if none.
@@ -138,13 +161,6 @@ func (c *ConnectOptions) EnsureConfigMapSynced(ctx context.Context) error {
 	return c.getConfigMapStore().EnsureSynced(ctx)
 }
 
-// GetTrafficManagerConfigMap returns the traffic manager ConfigMap from the warm informer
-// cache (see EnsureConfigMapSynced). Returns (nil, nil) on a cache miss — never a blocking
-// live-API GET.
-func (c *ConnectOptions) GetTrafficManagerConfigMap(ctx context.Context) (*v1.ConfigMap, error) {
-	return c.getConfigMapStore().GetConfigMap(ctx)
-}
-
 func (c *ConnectOptions) RefreshConfigMapCache(ctx context.Context) error {
 	return c.getConfigMapStore().Refresh(ctx)
 }
@@ -201,30 +217,14 @@ func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace s
 // This is a control-plane responsibility and should be called from the user daemon
 // before calling the sudo daemon, so the TunConfigService is available for IP allocation.
 func (c *ConnectOptions) CreateOutboundPod(ctx context.Context) error {
-	created, err := createOutboundPod(ctx, c.clientset, c.ManagerNamespace, c.Image, c.ImagePullSecretName)
-	if err != nil {
-		// Tag generic deploy failures; an already-classified cause (RBAC, pod-ready
-		// timeout, image pull) keeps its own, more specific code.
-		return fmt.Errorf("%w: %w", err, config.ErrTrafficManagerDeploy)
-	}
-	// An existing central manager's RBAC is managed by its installer. Connecting
-	// users need not have RBAC-management permissions; the manager uses its own
-	// ServiceAccount for route discovery and injection.
-	if !created && c.ManagerNamespace == config.DefaultNamespaceKubevpn {
-		return nil
-	}
-	// Provision capabilities for newly created managers and keep reconciling
-	// workload-namespace permissions for per-namespace managers on every connect.
-	ensureRouteRBAC(ctx, c.clientset, c.WorkloadNamespace, c.ManagerNamespace)
-	// Grant the manager SA the verbs to inject sidecars in the workload namespace, so
-	// server-side ProxyInject works. Idempotent, best-effort: if the user cannot create
-	// this RBAC, server-side ProxyInject reports the manager's authorization failure.
-	ensureProxyRBAC(ctx, c.clientset, c.WorkloadNamespace, c.ManagerNamespace)
-	return nil
+	return manager.Ensure(ctx, manager.Config{
+		Clientset: c.clientset, ManagerNamespace: c.ManagerNamespace,
+		WorkloadNamespace: c.WorkloadNamespace, Image: c.Image, ImagePullSecretName: c.ImagePullSecretName,
+	})
 }
 
 func dedupAndFilterCIDRs(cidrs []*net.IPNet, apiServerIPs []net.IP) []*net.IPNet {
-	return util.RemoveCIDRsContainingIPs(util.RemoveLargerOverlappingCIDRs(cidrs), apiServerIPs)
+	return discovery.RemoveCIDRsContainingIPs(discovery.RemoveLargerOverlappingCIDRs(cidrs), apiServerIPs)
 }
 
 // parseCachedCIDRs parses a space-separated CIDR string (from ConfigMap cache)

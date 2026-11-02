@@ -16,6 +16,7 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/tun"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/tunnel"
 )
 
 func init() {
@@ -29,7 +30,7 @@ func init() {
 // udpBridgeProtocolFactory creates the reverse-UDP bridge listener used by the
 // fargate sidecar to carry UDP inbound back to the developer (the SSH reverse
 // tunnel is TCP-only).
-func udpBridgeProtocolFactory(node *Node, hub *RouteHub) (net.Listener, Handler, error) {
+func udpBridgeProtocolFactory(node *Node, hub *tunnel.Router) (net.Listener, Handler, error) {
 	listener, err := net.Listen("tcp", node.Addr)
 	if err != nil {
 		return nil, nil, err
@@ -38,7 +39,7 @@ func udpBridgeProtocolFactory(node *Node, hub *RouteHub) (net.Listener, Handler,
 	return listener, UDPBridgeHandler(), nil
 }
 
-func tunProtocolFactory(node *Node, hub *RouteHub) (net.Listener, Handler, error) {
+func tunProtocolFactory(node *Node, hub *tunnel.Router) (net.Listener, Handler, error) {
 	var forwarder *Forwarder
 	if node.Forward != "" {
 		var err error
@@ -60,7 +61,7 @@ func tunProtocolFactory(node *Node, hub *RouteHub) (net.Listener, Handler, error
 		}
 	}
 
-	handler := TunHandler(forwarder, hub, nil)
+	handler := tunnel.TunHandler(forwarder.TunnelConfig(), hub, nil)
 	listener, err := tun.Listener(tun.Config{
 		Name:    node.Get("name"),
 		Addr:    addr,
@@ -120,29 +121,6 @@ func requestTunIPFromXDS() (ipv4, ipv6 string, err error) {
 	return resp.IPv4, resp.IPv6, nil
 }
 
-// GetTunDeviceIPByName returns the IPs assigned to the named interface within kubevpn CIDRs.
-func GetTunDeviceIPByName(tunName string) (ipv4, ipv6, dockerIPv4 net.IP, err error) {
-	ifc, err := net.InterfaceByName(tunName)
-	if err != nil {
-		return
-	}
-	addrs, err := ifc.Addrs()
-	if err != nil {
-		return
-	}
-	for _, addr := range addrs {
-		if ipNet, ok := addr.(*net.IPNet); ok {
-			if config.CIDR.Contains(ipNet.IP) {
-				ipv4 = ipNet.IP
-			}
-			if config.CIDR6.Contains(ipNet.IP) {
-				ipv6 = ipNet.IP
-			}
-		}
-	}
-	return
-}
-
 func parseRoutes(str string) []types.Route {
 	var routes []types.Route
 	for _, s := range strings.Split(str, ",") {
@@ -153,8 +131,8 @@ func parseRoutes(str string) []types.Route {
 	return routes
 }
 
-func gtcpProtocolFactory(node *Node, hub *RouteHub) (net.Listener, Handler, error) {
-	handler := GvisorTCPHandler(hub)
+func gtcpProtocolFactory(node *Node, hub *tunnel.Router) (net.Listener, Handler, error) {
+	handler := tunnel.GvisorTCPHandler(hub)
 	listener, err := GvisorTCPListener(node.Addr)
 	if err != nil {
 		return nil, nil, err
@@ -162,7 +140,7 @@ func gtcpProtocolFactory(node *Node, hub *RouteHub) (net.Listener, Handler, erro
 	return listener, handler, nil
 }
 
-func gudpProtocolFactory(node *Node, hub *RouteHub) (net.Listener, Handler, error) {
+func gudpProtocolFactory(node *Node, hub *tunnel.Router) (net.Listener, Handler, error) {
 	handler := GvisorUDPHandler()
 	listener, err := GvisorUDPListener(node.Addr)
 	if err != nil {
@@ -171,7 +149,7 @@ func gudpProtocolFactory(node *Node, hub *RouteHub) (net.Listener, Handler, erro
 	return listener, handler, nil
 }
 
-func sshProtocolFactory(node *Node, hub *RouteHub) (net.Listener, Handler, error) {
+func sshProtocolFactory(node *Node, hub *tunnel.Router) (net.Listener, Handler, error) {
 	handler := SSHHandler()
 	listener, err := SSHListener(node.Addr)
 	if err != nil {

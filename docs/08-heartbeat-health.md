@@ -36,20 +36,22 @@ The **#1 correlated TUN heartbeat and the transport supervisor are the primary t
 
 ### #1 TUN Heartbeat
 
-**File:** `pkg/core/tun_client.go` — `ClientDevice.heartbeats()`
+**Files:** `pkg/tunnel/client.go` — `clientTransport.heartbeats()`;
+`pkg/tunnel/heartbeat.go` — `HeartbeatStats`; `pkg/network/transport.go` —
+`transportSupervisor.monitorTransport()` (health and generation recovery).
 
 **What:** Sends ICMP Echo packets from the client's TUN IP to the router IP (`198.18.0.0`) every `config.HeartbeatInterval` (5 s). This is deliberately shorter than `config.KeepAliveTime` (60 s, which drives the deadlines and TCP keepalive) so the black-hole watchdog can detect a silent tunnel in seconds; sending more often only helps the server read deadline (`KeepAliveTime*3`).
 
 **Why necessary:**
 - Tests the round trip through the forwarding endpoint and a registered data conn
-- Keeps the dedicated control connection active; the control conn never registers in RouteHub
+- Keeps the dedicated control connection active; the control conn never registers in Router
 - Data-slot registration echoes separately register the TUN IP via `hub.AddRoute(src, conn)` on connect; without registration or business traffic, cross-client routing and heartbeat replies have no return route
 
-**Control slot, not broadcast:** The default is one data `connSlot` plus one independent control slot. Periodic heartbeats use a separate control queue/conn through the **same TCP forwarding endpoint 10801**, not xDS 9002, so requests bypass the business queue. The server excludes the control conn from `RouteHub`; replies return through the registered data conn (first writable with fallback, not per-flow balancing). The outer SSH/port-forward TCP transport remains shared, and replies still depend on data-path progress: this is not an absolute liveness guarantee. Data-slot read/write activity refreshes deadlines; idle data slots may reconnect. The earlier all-slot broadcast design is historical.
+**Control slot, not broadcast:** The default is one data `connSlot` plus one independent control slot. Periodic heartbeats use a separate control queue/conn through the **same TCP forwarding endpoint 10801**, not xDS 9002, so requests bypass the business queue. The server excludes the control conn from `Router`; replies return through the registered data conn (first writable with fallback, not per-flow balancing). The outer SSH/port-forward TCP transport remains shared, and replies still depend on data-path progress: this is not an absolute liveness guarantee. Data-slot read/write activity refreshes deadlines; idle data slots may reconnect. The earlier all-slot broadcast design is historical.
 
-**Proactive registration on (re)connect:** Each data slot writes a registration echo **directly on the new connection**, before queued traffic (`connSlot.run` / `clientTransport.registrationPayloads()`). This avoids queue drops and registers its TUN IP immediately. A successfully written, correlated announcement reply can prime liveness within ~RTT; it need not wait for the periodic control heartbeat.
+**Proactive registration on (re)connect:** Each data slot writes a registration echo **directly on the new connection**, before queued traffic (`connAttempt.run` in `pkg/tunnel/attempt.go` / `clientTransport.registrationPayloads()`). This avoids queue drops and registers its TUN IP immediately. A successfully written, correlated announcement reply can prime liveness within ~RTT; it need not wait for the periodic control heartbeat.
 
-**The announcement is load-bearing, and failing to send it is fatal for an idle client.** The heartbeat leaves on the control conn, which the server deliberately keeps out of `RouteHub`, so the echo reply must return over a *data* conn — that is what proves the data path works. Therefore the only things that can create a route are a data slot's announcement or real outbound user traffic. If the announcement produces nothing, an idle client is invisible: the server generates every echo reply and drops it (`No route for stack output -> x, dropping`), the watchdog never primes, and the port-forward is torn down every 30 s indefinitely. This happened for 20 hours in the field because `registrationPayloads()` re-derived the client's own address by scanning the OS interface table on every reconnect and silently returned nil when that scan failed. The address now comes from `tunDevice.addrs()`, a name-based lookup that an unrelated NIC cannot break, and producing no payload warns instead of returning quietly. See [51-idle-client-route-registration.md](51-idle-client-route-registration.md).
+**The announcement is load-bearing, and failing to send it is fatal for an idle client.** The heartbeat leaves on the control conn, which the server deliberately keeps out of `Router`, so the echo reply must return over a *data* conn — that is what proves the data path works. Therefore the only things that can create a route are a data slot's announcement or real outbound user traffic. If the announcement produces nothing, an idle client is invisible: the server generates every echo reply and drops it (`No route for stack output -> x, dropping`), the watchdog never primes, and the port-forward is torn down every 30 s indefinitely. This happened for 20 hours in the field because `registrationPayloads()` re-derived the client's own address by scanning the OS interface table on every reconnect and silently returned nil when that scan failed. The address now comes from `tunDevice.addrs()`, a name-based lookup that an unrelated NIC cannot break, and producing no payload warns instead of returning quietly. See [51-idle-client-route-registration.md](51-idle-client-route-registration.md).
 
 **Correlated reply observation:** `HeartbeatStats.observeReply` validates gateway source, session nonce, transport generation, monotonic probe counter, ICMP identity and destination against an actually written probe. Outstanding probes are bounded to **128 entries / 30 s**; duplicates, expired probes and retired-generation replies cannot renew health. Protocol-owned replies are consumed; unrelated application gateway pings remain TUN traffic. Production does not use the legacy test helper `MarkReply()`.
 
@@ -84,15 +86,19 @@ accounting does not consume shared probe state or change reply attribution.
 
 ### #3 TCP Read/Write Deadline
 
-**Files:** client — `pkg/core/tun_client.go` (`readFromConn()`, `writeToConn()`); server — `pkg/core/gvisor_tun_endpoint.go` (`readFromTCPConnWriteToEndpoint()`, `readFromEndpointWriteToTCPConn()`) and `pkg/core/conn_buffered_tcp.go` (`bufferedTCP.run()`).
+**Files:** client — `pkg/tunnel/attempt.go` (`connAttempt.readGeneration`,
+`writeGeneration`); server — `pkg/tunnel/server_endpoint.go`
+(`readFromTCPConnWriteToEndpoint`, `readFromEndpointWriteToRoute`) and
+`pkg/tunnel/buffered_conn.go` (`bufferedTCP.run`). `pkg/tunnel/slot.go` retains
+queue/retry ownership; each attempt closes and joins its pumps before the next dial.
 
 **What:** Sets socket deadlines on tunnel TCP connections, on **both** ends. Read timeout is 180s, write timeout is 60s.
 
 **Why necessary:** Detects application-level stalls where the TCP connection is alive but the remote side has stopped processing data.
 - **Client side:** a stall triggers slot reconnection.
-- **Server side:** a stall (e.g. a client that slept or had its NAT rebound, so no FIN/RST ever arrives) evicts the now-stale "ghost" conn from `RouteHub`. The read timeout exits `readFromTCPConnWriteToEndpoint`, whose deferred `RemoveRoutesByConn` deletes the route; the write timeout closes a conn whose half-open socket would otherwise buffer (and black-hole) reverse traffic until the kernel send buffer fills. Without these, a ghost conn lingered until OS keepalive (#2) eventually noticed — minutes of silently dropped reverse traffic. The two server writers (`bufferedTCP.run` and `readFromEndpointWriteToTCPConn`) share the same socket; both use the 60s timeout and refresh before each write, so neither observes the other's deadline as prematurely expired.
+- **Server side:** a stall (e.g. a client that slept or had its NAT rebound, so no FIN/RST ever arrives) evicts the now-stale "ghost" conn from `Router`. The read timeout exits `readFromTCPConnWriteToEndpoint`, whose deferred `RemoveRoutesByConn` deletes the route; the write timeout closes a conn whose half-open socket would otherwise buffer (and black-hole) reverse traffic until the kernel send buffer fills. Without these, a ghost conn lingered until OS keepalive (#2) eventually noticed — minutes of silently dropped reverse traffic. Stack output uses `readFromEndpointWriteToRoute` → `Router` → the registered data conn's buffered writer, not a second direct stack-to-socket writer. The connection handler closes and joins that writer via `waitRun` before returning.
 
-**Client-side liveness is active-in-either-direction (important).** The read (180s) deadline is the slot's idle/liveness detector, but a slot can be busy **sending** while receiving nothing. In the historical multi-slot topology (still available as a private nil-stats test override), bulk data's reverse traffic could use a *different* pool slot because server route selection is first-writable fallback, not flow-affine. The default now has one data slot; periodic control heartbeats do not broadcast across data slots. So `writeToConn` also pushes the **read** deadline forward on each successful write (`UDPConnOverTCP` embeds the same conn, so both goroutines drive the one underlying read deadline; `SetReadDeadline` is safe with an in-flight `Read`). Without this, an actively-sending slot would hit the 180s read-idle timeout mid-transfer and be torn down. A slot idle in **both** directions still times out. This originally manifested as a mid-SCP disconnect (`read i/o timeout` → `operation aborted` → RST → RTO retransmit storm), because the aborted slot also hosted the *per-slot* inter-client gvisor stack; that stack has since been made transport-level (decoupled from any slot — see `pkg/core/DATA_FLOW.md`), so the two fixes are independent and complementary.
+**Client-side liveness is active-in-either-direction (important).** The read (180s) deadline is the slot's idle/liveness detector, but a slot can be busy **sending** while receiving nothing. In the historical multi-slot topology (still available as a private nil-stats test override), bulk data's reverse traffic could use a *different* pool slot because server route selection is first-writable fallback, not flow-affine. The default now has one data slot; periodic control heartbeats do not broadcast across data slots. So `connAttempt.writeGeneration` (formerly `writeToConn`) also pushes the **read** deadline forward on each successful write (`wire.Conn` (`pkg/internal/wire/conn.go`, formerly `UDPConnOverTCP`) embeds the same conn, so both goroutines drive the one underlying read deadline; `SetReadDeadline` is safe with an in-flight `Read`). Without this, an actively-sending slot would hit the 180s read-idle timeout mid-transfer and be torn down. A slot idle in **both** directions still times out. This originally manifested as a mid-SCP disconnect (`read i/o timeout` → `operation aborted` → RST → RTO retransmit storm), because the aborted slot also hosted the *per-slot* inter-client gvisor stack; that stack has since been made transport-level (decoupled from any slot — see `pkg/core/DATA_FLOW.md`), so the two fixes are independent and complementary.
 
 **Optimization:** Deadlines are not reset on every packet. They are only refreshed when >50% of the timeout has elapsed, reducing syscalls from 1/packet to ~1/90s.
 
@@ -228,10 +234,10 @@ func deriveConnectionStatus(tunUp bool, lastHeartbeat time.Time) string {
 ```
 root daemon (data plane)                       user daemon (control plane)
 ─────────────────────────                      ───────────────────────────
-connSlot.readFromConn
+connAttempt.readGeneration
   └─ HeartbeatStats.observeReply()                Status RPC
        ▲                                          └─ sudoHealthSnapshot() ── #6 monitor cache
-NetworkManager.LastHeartbeat()                        │  (probeSudo → sudo Status string)
+network.Runtime.LastHeartbeat()                        │  (probeSudo → sudo Status string)
        ▲                                              ▼
 DataSession.GetLastHeartbeat()              resolveStatus(connect, ips, tunUp)
        ▲                                          └─ user: ip.status from sudo

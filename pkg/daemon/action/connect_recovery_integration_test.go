@@ -84,7 +84,7 @@ users:
 	old.SetSync(&handler.SyncOptions{Workloads: []string{"deployment/web"}})
 	logFile := &lumberjack.Logger{Filename: filepath.Join(t.TempDir(), "daemon.log")}
 	t.Cleanup(func() { _ = logFile.Close() })
-	svr := &Server{LogFile: logFile, GetClient: func(bool) (rpc.DaemonClient, error) { return cli, nil }, connections: []handler.Connection{old, &handler.ConnectOptions{ConnectionID: "other"}}}
+	svr := &Server{LogFile: logFile, GetClient: func(bool) (rpc.DaemonClient, error) { return cli, nil }, registry: connectionRegistry{list: []handler.Connection{old, &handler.ConnectOptions{ConnectionID: "other"}}}}
 	// A cached healthy result must never mask the fresh root verdict.
 	svr.sudoHealth = map[string]tunIP{old.ConnectionID: {status: StatusOk}}
 	return svr, old, req
@@ -150,7 +150,7 @@ func TestConnectRecovery_UserRetainsControlAndOriginalEndpoint(t *testing.T) {
 			peer := &recoveryPeer{state: initial}
 			svr, old, req := recoveryUserFixture(t, recoveryGRPCClient(t, peer))
 			originalSync := old.GetSync()
-			other := svr.connections[1]
+			other := svr.registry.list[1]
 			lifecycle := NewSessionLifecycle(logrus.New())
 			defer lifecycle.Teardown()
 			old.AddRollbackFunc(func() error { lifecycle.Teardown(); return nil })
@@ -159,7 +159,7 @@ func TestConnectRecovery_UserRetainsControlAndOriginalEndpoint(t *testing.T) {
 				if err := svr.redirectConnectToSudoDaemon(proto.Clone(req).(*rpc.ConnectRequest), stream, logrus.New()); err != nil {
 					t.Fatal(err)
 				}
-				if len(svr.connections) != 2 || svr.connections[0] != old || svr.connections[1] != other || old.GetSync() != originalSync || lifecycle.Ctx.Err() != nil {
+				if len(svr.registry.list) != 2 || svr.registry.list[0] != old || svr.registry.list[1] != other || old.GetSync() != originalSync || lifecycle.Ctx.Err() != nil {
 					t.Fatal("recovery replaced/cleaned control metadata, SSH lifecycle, or sibling")
 				}
 			}
@@ -199,7 +199,7 @@ func TestConnectRecovery_StatusErrorIsNotSuccess(t *testing.T) {
 	if status.Code(err) != codes.Unavailable {
 		t.Fatalf("expected root Status failure, got %v", err)
 	}
-	if len(svr.connections) != 2 || svr.connections[0] != old || old.GetSync() == nil {
+	if len(svr.registry.list) != 2 || svr.registry.list[0] != old || old.GetSync() == nil {
 		t.Fatal("transient failure discarded metadata")
 	}
 	peer.mu.Lock()
@@ -216,7 +216,7 @@ func TestConnectRecovery_RebuildFailureCanRetry(t *testing.T) {
 	if status.Code(err) != codes.PermissionDenied {
 		t.Fatalf("rebuild error hidden: %v", err)
 	}
-	if len(svr.connections) != 2 || svr.connections[0] != old || old.GetSync() == nil {
+	if len(svr.registry.list) != 2 || svr.registry.list[0] != old || old.GetSync() == nil {
 		t.Fatal("failed recovery discarded control state")
 	}
 	peer.mu.Lock()
@@ -259,8 +259,8 @@ func (s *recoveryDataSession) DoConnect(ctx context.Context) error { s.ctx = ctx
 func (s *recoveryDataSession) Context() context.Context            { return s.ctx }
 func (s *recoveryDataSession) GetLastHeartbeat() time.Time         { return s.heartbeat }
 func (s *recoveryDataSession) GetLocalTunIP() (string, string)     { return "127.0.0.1", "" }
-func (s *recoveryDataSession) GetTrafficManagerConfigMap(context.Context) (*v1.ConfigMap, error) {
-	return nil, s.configMapErr
+func (s *recoveryDataSession) StatusSnapshot(context.Context) (handler.SessionStatus, error) {
+	return handler.SessionStatus{}, s.configMapErr
 }
 func (s *recoveryDataSession) Cleanup(ctx context.Context) {
 	s.once.Do(func() {
@@ -371,18 +371,17 @@ func TestConnectRecovery_RootSerializedReplacement(t *testing.T) {
 		}
 	}
 	<-cleanupDone
-	root.connMu.Lock()
-	replacement, _ := root.findConnection(control.ConnectionID)
+	replacement, _ := root.registry.find(control.ConnectionID)
 	// Simulate a delayed registry retirement using the originally observed instance.
-	root.removeConnectionInstance(old)
-	retained, _ := root.findConnection(control.ConnectionID)
-	sibling, _ := root.findConnection("other")
-	count := len(root.connections)
-	root.connMu.Unlock()
+	root.registry.removeInstance(old)
+	retained, _ := root.registry.find(control.ConnectionID)
+	sibling, _ := root.registry.find("other")
+	members, _ := root.registry.snapshot()
+	count := len(members)
 	if len(built) != 3 || replacement == old || retained != replacement || sibling != other || count != 2 {
 		t.Fatal("replacement duplicated, erased by delayed retirement, or removed sibling")
 	}
-	if user.connections[0] != control || control.GetSync() == nil {
+	if user.registry.list[0] != control || control.GetSync() == nil {
 		t.Fatal("control metadata lost")
 	}
 	if err := connect(rootReq); err != nil {
@@ -415,7 +414,7 @@ func TestConnectRecovery_StatusTimeoutPreservesControl(t *testing.T) {
 	if err == nil || time.Since(start) > time.Second {
 		t.Fatalf("unbounded or successful stalled Status: %v", err)
 	}
-	if len(svr.connections) != 2 || svr.connections[0] != old || old.GetSync() == nil {
+	if len(svr.registry.list) != 2 || svr.registry.list[0] != old || old.GetSync() == nil {
 		t.Fatal("timeout discarded control state")
 	}
 }

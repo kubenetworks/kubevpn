@@ -29,7 +29,7 @@ Client B (1 data slot) ─┐
                          ├→ Stack-B (lifetime: client B session) → TCPForwarder → cluster
 Client B reconnects ─────┘
 
-Inter-client (A→B): direct forwarding via RouteHub (no gvisor stack involved)
+Inter-client (A→B): direct forwarding via Router (no gvisor stack involved)
 ```
 
 ### 2.2 Control/Data Plane Separation (Client Side)
@@ -44,7 +44,7 @@ Control Plane:
                       ↑ requests bypass the business queue
 ```
 
-| Connection | Type Prefix | Server Behavior | RouteHub |
+| Connection | Type Prefix | Server Behavior | Router |
 |------------|-------------|-----------------|----------|
 | Data slot (×1) | `packetTypeToGvisor` (0x01) | `AddRoute` + gvisor inject | Registered |
 | Control slot (×1) | `packetTypeControl` (0x02) | `handleControlConn` | NOT registered |
@@ -73,10 +73,10 @@ The **first datagram** on a conn declares its type:
 
 ### Server `handleControlConn`
 
-- Does **NOT** call `AddRoute` (conn never appears in RouteHub)
+- Does **NOT** call `AddRoute` (conn never appears in Router)
 - Does **NOT** participate in data routing
 - Reads heartbeat ICMP echo → injects into per-client gvisor stack → stack generates reply
-- Reply routes back via registered data conns (through RouteHub): first writable with fallback,
+- Reply routes back via registered data conns (through Router): first writable with fallback,
   not per-flow load balancing; the default has one registered conn per client address in steady state
 - Read deadline: KeepAliveTime×3 (5 s heartbeats normally keep it active; stalls can still time out)
 
@@ -124,10 +124,19 @@ this is a resource-retention policy, not proof that the client process is gone.
 
 ### Serialized grace transitions
 
-RouteHub owns a private `routes` table under `hub.mu`. Internal `addedLocked` and
-`emptyLocked` callbacks execute inside the route transaction and acquire `handler.mu`
-**after** the hub mutex. They only update state/timers: no socket I/O, logging, or hub
-reentry. Stack construction and destruction occur outside these metadata locks.
+`tunnel.Router` owns its route table and one explicit `peerRegistry`. Route membership
+changes synchronously invoke that registry inside the same transaction, with lock order
+router mutex → registry mutex. Handler constructors no longer replace route callbacks;
+multiple listeners share the registry. Transitions only update state/timers: no socket
+I/O, logging, or router reentry. Stack construction and destruction occur outside locks.
+The registry counts candidate construction as well as published output/destruction
+workers, so terminal `Close` joins unpublished and retiring peers too.
+
+`core.Serve` calls `Start(serviceContext)` before accepting connections and calls `Close`
+after accepted handlers join. A connection context never becomes the peer parent.
+Ordinary EOF or connection cancellation retains peers; server TUN fatal completion
+terminates the service. The separate `tunBridge` owns queue/admission/stop/drain state;
+its terminal stop does not stop the route table.
 
 `armGraceLocked` captures both the stack pointer and `graceEpoch`. `expireGrace` validates
 that the client map still contains that expected stack, the same epoch is armed, and there
@@ -155,7 +164,7 @@ registration cancels it. `clientStack.done` tracks completion of its owned outpu
 
 ### 6.1 Session continuity
 
-A pool-slot drop removes one conn from RouteHub but the client's stack is intact. Gvisor's TCP
+A pool-slot drop removes one conn from Router but the client's stack is intact. Gvisor's TCP
 state (seq, window, congestion) survives. When the slot reconnects, responses flow through the
 new conn.
 
@@ -174,10 +183,11 @@ conn intact, whereas cancellation during active raw I/O closes the selected conn
 frame error never falls back or resends; positive short writes continue on the same conn.
 
 The `bufferedTCP` stop callback removes routes and registration refuses closed writers.
-Its final drain joins admission, and the private TUN bridge similarly uses `enqueueTUN`
-plus stop/join/drain without closing the data channel. Server-role `TunHandler.FatalOnReturn`
-makes device completion terminal for `handler.Run`, which cancels and joins accepted
-handlers; ordinary TCP EOF is not fatal. Root-client NetworkManager completion is unchanged.
+Its final drain joins admission, and its connection owner separately joins the writer with
+`waitRun`. The private `tunBridge.send`/`stop` similarly use stop/join/drain without closing
+the data channel. Server-role `tunHandler.FatalOnReturn` makes device completion terminal
+for `core.Serve`, which cancels and joins accepted handlers before closing service peers;
+ordinary TCP EOF is not fatal. Root-client completion remains owned by `network.Runtime`.
 
 ### 6.3 Heartbeat independence
 
@@ -202,17 +212,20 @@ type clientStack struct {
     graceArmed bool
 }
 
-type gvisorTCPHandler struct {
-    hub      *RouteHub
+type peerRegistry struct {
+    hub      *Router
     newStack stackConstructor
-    ctx      context.Context
+    ctx      context.Context // explicit service parent
     mu       sync.Mutex
     clients  map[string]*clientStack
+    workers  sync.WaitGroup // construction + output + destruction
 }
+
+type gvisorTCPHandler struct { *peerRegistry }
 
 type connSlot struct {
     ...
-    isControl bool  // true = control conn (heartbeat only, no RouteHub)
+    isControl bool  // true = control conn (heartbeat only, no Router)
 }
 ```
 
@@ -220,12 +233,14 @@ type connSlot struct {
 
 | File | Role |
 |------|------|
-| `packet.go` | `packetTypeControl` constant |
-| `gvisor_tcp_handler.go` | Per-client stack map, `handleControlConn`, grace timer |
-| `gvisor_tun_endpoint.go` | First-packet type detection, per-client endpoint injection |
-| `tun_client.go` | controlSlot, blocking runConnPool, heartbeats via controlSlot |
-| `conn_slot.go` | `isControl` field, control declaration on connect |
-| `route.go` | Private routes, validated member snapshots, `emptyLocked`/`addedLocked`, cancellable TUN bridge |
+| `pkg/tunnel/packet.go` | `packetTypeControl` constant |
+| `pkg/tunnel/server.go`, `peers.go` | Connection handler; service-owned stacks, grace epochs and worker joins |
+| `pkg/tunnel/server_endpoint.go` | First-packet detection, routing and endpoint injection |
+| `pkg/tunnel/client.go` | controlSlot, blocking runConnPool, heartbeats via controlSlot |
+| `pkg/tunnel/slot.go`, `attempt.go` | Long-lived queue/retry loop; single-dial handshake, failure timestamp and joined pumps |
+| `pkg/tunnel/route.go`, `bridge.go` | Route/member identity transactions; separately owned cancellable TUN bridge |
+| `pkg/internal/wire` | Framing, uint16 limits, damaged-stream closure and reusable batch socket writer |
+| `pkg/tunnel/internal/netstack` | Stateless stack construction and TCP/UDP/ICMP forwarders |
 
 ## 8. Resource Usage
 
