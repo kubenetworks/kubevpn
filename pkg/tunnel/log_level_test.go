@@ -11,10 +11,9 @@ import (
 )
 
 // TestNoInfoLevelLogging enforces the logging architecture rule (docs/13): the
-// data-plane core is internal tracing, so it must log at Debug only — never at
-// Info. Info streams to the CLI by default (StreamHook), which is what flooded
-// the connect output with per-packet [Gvisor-*]/[Route] lines. This guard fails
-// if any .Info(/.Infof( logging call reappears in a non-test file under pkg/core.
+// per-packet tunnel tracing must remain Debug. The owner sampler's bounded recovery
+// and observation-gap events are the only Info exceptions; never allow packet,
+// flow, or connection success logs through this guard.
 func TestNoInfoLevelLogging(t *testing.T) {
 	entries, err := os.ReadDir(".")
 	if err != nil {
@@ -40,6 +39,11 @@ func TestNoInfoLevelLogging(t *testing.T) {
 				return true
 			}
 			if sel.Sel.Name == "Info" || sel.Sel.Name == "Infof" {
+				if name == "datapath_diagnostics.go" && len(call.Args) > 0 {
+					if text, ok := call.Args[0].(*ast.BasicLit); ok && (strings.HasPrefix(text.Value, `"datapath_recovered `) || strings.HasPrefix(text.Value, `"datapath observation_gap:`)) {
+						return true
+					}
+				}
 				pos := fset.Position(sel.Pos())
 				t.Errorf("%s:%d: Info-level logging is forbidden in pkg/core (data-plane internals must use Debug); found .%s(",
 					filepath.Base(name), pos.Line, sel.Sel.Name)

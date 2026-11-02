@@ -11,12 +11,13 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip/link/sniffer"
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 
-	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	netutil "github.com/wencaiwulue/kubevpn/v2/pkg/util/netutil"
 )
 
 func readFromEndpointWriteToTun(ctx context.Context, endpoint *channel.Endpoint, out chan<- *packet, headroom int) {
+	stage := diagnosticStage(ctx, "gvisor_output_enqueue", "local", -1, 0)
+	defer stage.close()
 	prefix := fmt.Sprintf("[gVISOR]%s ", plog.GenStr(plog.GetFields(ctx)))
 	for ctx.Err() == nil {
 		pkt := endpoint.ReadContext(ctx)
@@ -30,10 +31,9 @@ func readFromEndpointWriteToTun(ctx context.Context, endpoint *channel.Endpoint,
 			src, dst, _, _ := netutil.ParseIPFast(buf[tunReserve : datagramHeaderLen+length])
 			// Honor cancellation so this goroutine cannot block forever on a full
 			// channel after its consumer has stopped draining (e.g. reconnect/shutdown).
-			select {
-			case out <- newPacket(buf[:], length, src, dst):
-			case <-ctx.Done():
-				config.LPool.Put(buf[:])
+			packet := newPacket(buf[:], length, src, dst)
+			if !diagnosticEnqueue(ctx, out, packet, stage) {
+				packet.release()
 				return
 			}
 		}
@@ -41,6 +41,8 @@ func readFromEndpointWriteToTun(ctx context.Context, endpoint *channel.Endpoint,
 }
 
 func readFromGvisorInboundWriteToEndpoint(ctx context.Context, in <-chan *packet, endpoint *channel.Endpoint) {
+	stage := diagnosticStage(ctx, "gvisor_inject", "local", -1, 0)
+	defer stage.close()
 	defer drainPacketChan(in)
 	prefix := fmt.Sprintf("[gVISOR]%s ", plog.GenStr(plog.GetFields(ctx)))
 	for {
@@ -65,7 +67,9 @@ func readFromGvisorInboundWriteToEndpoint(ctx context.Context, in <-chan *packet
 			})
 			packet.release()
 			logStackPacket(ctx, prefix, sniffer.DirectionRecv, protocol, pkt)
+			token := stage.begin()
 			endpoint.InjectInbound(protocol, pkt)
+			stage.finish(token, 1, len(ip), ctx.Err() == nil)
 			pkt.DecRef()
 		case <-ctx.Done():
 			return

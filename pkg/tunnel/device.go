@@ -64,11 +64,13 @@ type tunDevice struct {
 	// addrsFn overrides how the device's addresses are resolved. Production leaves it nil (the
 	// name-based lookup); only tests that drive a device without a real TUN set it, mirroring
 	// clientTransport.poolSize.
-	addrsFn     func() (v4, v6, dockerV4 net.IP)
-	tunInbound  chan *packet
-	tunOutbound chan *packet
-	errChan     chan error
-	transport   transport
+	addrsFn      func() (v4, v6, dockerV4 net.IP)
+	tunInbound   chan *packet
+	tunOutbound  chan *packet
+	errChan      chan error
+	transport    transport
+	enqueueStage *datapathStage
+	drops        datapathDrops
 }
 
 // newTunDevice constructs a tunDevice bound to tun, resolving the device's OS interface name once
@@ -116,6 +118,8 @@ func (d *tunDevice) routines() []namedRoutine {
 // readFromTun reads IP packets from the TUN and hands each to the transport, which decides how
 // it is routed (client: hash to a conn-pool slot or local gvisor; server: enqueue for Router).
 func (d *tunDevice) readFromTun(ctx context.Context) {
+	d.enqueueStage = diagnosticStage(ctx, "tun_enqueue", "tun", -1, 0)
+	defer d.enqueueStage.close()
 	d.pumpTun(ctx, d.transport.label(), func(buf []byte, n int, src, dst net.IP) {
 		d.transport.routeOutbound(ctx, buf, n, src, dst)
 	})
@@ -167,7 +171,7 @@ func (d *tunDevice) pumpTunSingle(ctx context.Context, errLabel string, dispatch
 		consecutiveErrors = 0
 		src, dst, _, parseErr := netutil.ParseIPFast(buf[tunReserve : tunReserve+n])
 		if parseErr != nil {
-			plog.G(ctx).Errorf("%s Unknown packet, dropping: %v", errLabel, parseErr)
+			d.drops.report(ctx, dropInvalid, nil)
 			config.LPool.Put(buf[:])
 			continue
 		}
@@ -221,7 +225,7 @@ func (d *tunDevice) pumpTunBatchWithPool(ctx context.Context, errLabel string, b
 			}
 			src, dst, _, parseErr := netutil.ParseIPFast(buf[tunReserve : tunReserve+size])
 			if parseErr != nil {
-				plog.G(ctx).Errorf("%s Unknown packet, dropping: %v", errLabel, parseErr)
+				d.drops.report(ctx, dropInvalid, nil)
 				continue
 			}
 			bufs[i] = nil // transfer ownership before a consumer can retain or release it
@@ -252,6 +256,9 @@ func (d *tunDevice) pumpTunBatchWithPool(ctx context.Context, errLabel string, b
 }
 
 func (d *tunDevice) writeToTun(ctx context.Context) {
+	stage := diagnosticStage(ctx, "tun_write", "tun", -1, 0)
+	defer stage.close()
+	stage.setQueue(d.tunOutbound)
 	defer netutil.HandleCrash()
 	defer drainPacketChan(d.tunOutbound)
 	var batch packetBatch
@@ -266,6 +273,7 @@ func (d *tunDevice) writeToTun(ctx context.Context) {
 		for i, p := range batch.packets[:batch.n] {
 			bufs[i] = p.data[tunReserve : datagramHeaderLen+p.length]
 		}
+		token := stage.begin(batch.n, batchDiagnosticBytes(batch.packets[:batch.n])-batch.n*typePrefixLen)
 		var err error
 		if batched {
 			var n int
@@ -280,6 +288,7 @@ func (d *tunDevice) writeToTun(ctx context.Context) {
 				err = io.ErrShortWrite
 			}
 		}
+		stage.finish(token, batch.n, batchDiagnosticBytes(batch.packets[:batch.n])-batch.n*typePrefixLen, err == nil && ctx.Err() == nil)
 		clear(bufs[:batch.n])
 		batch.release()
 		if err != nil {

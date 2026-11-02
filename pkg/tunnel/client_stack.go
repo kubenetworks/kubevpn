@@ -69,12 +69,14 @@ func newInterClientStack(ctx context.Context, out chan<- *packet, headroom int) 
 	// push super-MTU segments a TUN cannot write). See gvisorLocalHandler.Run.
 	endpoint.SupportedGSOKind = stack.GVisorGSOSupported
 	s := netstack.NewLocalStack(ctx, sniffLink(ctx, endpoint, fmt.Sprintf("[gVISOR]%s ", plog.GenStr(plog.GetFields(ctx)))))
+	native := diagnosticGvisor(ctx, s, endpoint, MaxSize, "client_interclient", nil)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		defer netutil.HandleCrash()
 		defer s.Destroy()
 		defer endpoint.Close()
+		defer native.close()
 		readFromEndpointWriteToTun(ctx, endpoint, out, headroom)
 	}()
 	return &interClientStack{endpoint: endpoint, stack: s, done: done}
@@ -126,6 +128,8 @@ func (h *gvisorLocalHandler) Run(ctx context.Context) {
 	}()
 	s := netstack.NewLocalStack(ctx, sniffLink(ctx, endpoint, fmt.Sprintf("[gVISOR]%s ", plog.GenStr(plog.GetFields(ctx)))))
 	defer s.Destroy()
+	native := diagnosticGvisor(ctx, s, endpoint, MaxSize, "client_local", nil)
+	defer native.close()
 	defer func() { cancel(); workers.Wait() }()
 	select {
 	case <-h.errChan:

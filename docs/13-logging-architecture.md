@@ -147,6 +147,60 @@ the user daemon which has no tun) **or** its tag matches; only a line tagged wit
 is dropped. Tags match as whole tokens, so `connID=abc` doesn't match `connID=abcdef`. `--lines N`
 still seeks the last N raw lines before filtering.
 
+### Default anomaly summaries
+
+Normal traffic remains quiet at Info. Data-path owners run an independent one-second sampler;
+operations still active after five seconds emit `datapath_stall`, with reminders at most every
+30 seconds per stage. Successful completion of warned work emits `datapath_recovered` once.
+Cancellation, failed admission and generation retirement do not imply recovery. Long-lived
+session queues use `scope=session`; individual client socket stages carry their generation.
+The server sampler belongs to `tunnel.peerRegistry`'s service lifetime, not its first accepted
+connection; client device diagnostics follow the existing device owner.
+
+Stall summaries include stage, role, slot, peer TUN IP when known, queue depth/capacity,
+current write-batch in-flight packets/bytes, completion counts and last-success age (`never`
+before any success). An empty queue is not evidence that its consumer has completed a batch.
+No claim of application delivery follows from local socket write completion. Sampling gaps
+reset the observation baseline rather than immediately blaming a worker after a long pause.
+Stage details and native gVisor summaries share a limit of 16 per sample, with omitted counts
+and rotation. Drop flushing has a separate bounded budget; this is not a global 16-line limit.
+
+`datapath_drop` counters distinguish `route_missing`, `all_routes_failed`, `invalid`, and
+`oversized`. Packet-processing goroutines only update counters; the existing owner sampler
+emits summaries. Peer/reason reminders are independent, pending counts are flushed even after
+traffic stops, and quiet identities expire. Each owner retains at most 128 peer identities;
+excess counts use `peer_tun_ip=untracked` instead of misattributing them to a tracked peer.
+Peer addresses are read while their packet buffer is still owned, before release to the pool.
+
+`gvisor_stats` adds native stack-counter evidence to the same sampler, without packet-path
+hooks. It reports nonzero retransmission/RTO, forwarder-capacity, IP/UDP error, and native drop
+deltas at most once per stack per 30 seconds. Each summary carries `stack_id`, role,
+`scope=stack`, an accumulation window, current TCP connection gauges and outbound channel
+queue depth/capacity. Only a server per-client stack has an attributable peer TUN IP; shared
+client-local/inter-client statistics do not identify an individual peer. Stack IDs and baselines
+survive retained-stack tunnel reconnects, not stack replacement.
+
+Rate-limited or budget-suppressed deltas are retained even if traffic stops. RST-only, gauge-only,
+and normal idle activity stay silent. TCP RTO/retransmission here describes inner gVisor TCP,
+not outer SSH/port-forward TCP or application deadlines; the pinned gVisor's SYN/SYN-ACK retries
+are not included in these two counters. Resets can be normal. Native drop/error categories
+overlap and are not added into a total-loss claim; outbound queue depth cannot reveal all
+queue-full drops. These summaries neither change VPN health nor force reconnection. See
+[18-gvisor-network-stack.md](18-gvisor-network-stack.md#84-native-stack-diagnostics).
+
+`target_dial` in the netstack leaf reports the actual TCP target, `cluster`/`local` role,
+source TUN IP, elapsed time, and typed reason (`timeout`, `refused`, `unreachable`, `other`).
+It reuses the existing dial deadline, not per-SYN tracing. Failure counts are limited by reason
+within each forwarder; success at another target does not reset them. Local-forwarder logs
+retain the session logger without changing its existing dial cancellation policy.
+
+These summaries use existing daemon/container logs without `--debug`. The stream hook remains
+message-only, so inspect log files for structured transport fields. No new HTTP endpoint,
+packet capture, profile upload or automatic panic is added. A permanently blocked logging sink
+can still block a supervisor or owner waiting for its sampler; individual native source cleanup
+does not wait for logging, but that is not a whole-owner shutdown guarantee. Profiles and
+goroutine stacks remain separate on-demand tools; idle reads/watch streams alone are not deadlocks.
+
 ### 3b. In-cluster sidecars default to Debug
 
 The traffic-manager `server` and `control-plane` containers, and the injected fargate `server`

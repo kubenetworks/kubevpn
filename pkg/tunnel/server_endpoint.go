@@ -25,6 +25,8 @@ import (
 // routes them to the correct client via Router. Each client has its own reader goroutine,
 // so blocking on a slow client only affects that client's stack.
 func (h *peerRegistry) readFromEndpointWriteToRoute(ctx context.Context, endpoint *channel.Endpoint) {
+	stage := diagnosticStage(ctx, "route_dispatch", "server", -1, 0)
+	defer stage.close()
 	for ctx.Err() == nil {
 		pkt := endpoint.ReadContext(ctx)
 		if pkt == nil {
@@ -34,7 +36,7 @@ func (h *peerRegistry) readFromEndpointWriteToRoute(ctx context.Context, endpoin
 
 		buf := config.LPool.Get().([]byte)
 		if tunReserve+pkt.Size() > config.LargeBufferSize {
-			plog.G(ctx).Warnf("[Gvisor-TCP] dropping oversized packet (%d bytes) that cannot be framed", pkt.Size())
+			h.drops.report(ctx, dropOversized, nil)
 			config.LPool.Put(buf)
 			pkt.DecRef()
 			continue
@@ -48,7 +50,7 @@ func (h *peerRegistry) readFromEndpointWriteToRoute(ctx context.Context, endpoin
 
 		_, dstIP, _, parseErr := netutil.ParseIPFast(buf[tunReserve : tunReserve+ipLen])
 		if parseErr != nil {
-			plog.G(ctx).Warnf("[Gvisor-TCP] Failed to parse stack output IP header: %v", parseErr)
+			h.drops.report(ctx, dropInvalid, nil)
 			config.LPool.Put(buf)
 			continue
 		}
@@ -58,19 +60,15 @@ func (h *peerRegistry) readFromEndpointWriteToRoute(ctx context.Context, endpoin
 		buf[datagramHeaderLen] = packetTypeToTUN
 
 		p := newPacket(buf, payloadLen, nil, dstIP)
+		token := stage.begin()
 		usedConn, err := h.hub.WriteToRoutePacket(ctx, string(dstIP), p)
-		p.release()
+		stage.finish(token, 1, payloadLen, err == nil && ctx.Err() == nil)
 		if err != nil {
-			// Throttled Warn, not Debug: this is the server's only account of "I answered the
-			// client and threw the answer away". A client whose data conns never announce a route
-			// is invisible here — its heartbeat replies are all dropped, its liveness watchdog
-			// force-reconnects forever, and at Debug level the log says nothing at all.
-			dataPlaneWarn.Warnf(ctx, "no-route:"+string(dstIP),
-				"[Gvisor-TCP] No route for %s: dropping traffic addressed to it (client has not announced "+
-					"its TUN IP on any data conn)", net.IP(dstIP))
+			h.reportRouteDrop(ctx, err, dstIP)
 		} else if plog.IsDebugEnabled(ctx) {
 			plog.G(ctx).Debugf("[Gvisor-TCP] Stack output -> %s via %s", net.IP(dstIP), usedConn.RemoteAddr())
 		}
+		p.release()
 	}
 }
 
@@ -79,6 +77,14 @@ func (h *peerRegistry) readFromEndpointWriteToRoute(ctx context.Context, endpoin
 // appropriate per-client gvisor stack. If the first datagram is a control frame
 // (packetTypeControl), the conn is handed off to handleControlConn instead.
 func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, conn net.Conn) {
+	inject := diagnosticStage(ctx, "gvisor_inject", "server", -1, 0)
+	defer inject.close()
+	dispatch := diagnosticStage(ctx, "route_dispatch", "server", -1, 0)
+	defer dispatch.close()
+	readStage := diagnosticStage(ctx, "socket_read", "server", -1, 0)
+	defer readStage.close()
+	tunEnqueue := diagnosticStage(ctx, "tun_out_enqueue", "server", -1, 0)
+	defer tunEnqueue.close()
 	tcpConn, _ := framing.NewConn(ctx, conn)
 	defer tcpConn.Close()
 	defer h.hub.RemoveRoutesByConn(ctx, conn)
@@ -103,6 +109,7 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 			config.LPool.Put(buf[:])
 			return
 		}
+		readStage.progress(1, read)
 		if read == 0 {
 			plog.G(ctx).Warnf("[Gvisor-TCP] Read empty packet from conn (length=%d)", read)
 			config.LPool.Put(buf[:])
@@ -126,18 +133,20 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 		} else if netutil.IsIPv6(ip) {
 			protocol = header.IPv6ProtocolNumber
 		} else {
-			plog.G(ctx).Errorf("[Gvisor-TCP] Unknown packet, dropping")
+			h.drops.report(ctx, dropInvalid, nil)
 			config.LPool.Put(buf[:])
 			continue
 		}
 
 		src, dst, ipProtocol, parseErr := netutil.ParseIPFast(ip)
 		if parseErr != nil {
-			plog.G(ctx).Errorf("[Gvisor-TCP] Failed to parse IP header: %v", parseErr)
+			h.drops.report(ctx, dropInvalid, nil)
 			config.LPool.Put(buf[:])
 			continue
 		}
 
+		inject.setPeer(src)
+		dispatch.setPeer(src)
 		if !h.hub.AddRoute(ctx, src, conn) {
 			config.LPool.Put(buf[:])
 			return
@@ -146,20 +155,18 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 		if h.hub.HasRoute(dstKey) {
 			pkt := newPacket(buf, read, src, dst)
 			binary.BigEndian.PutUint16(buf[:datagramHeaderLen], uint16(read))
+			token := dispatch.begin()
 			usedConn, writeErr := h.hub.WriteToRoutePacket(ctx, dstKey, pkt)
-			pkt.release()
+			dispatch.finish(token, 1, read, writeErr == nil && ctx.Err() == nil)
 			if writeErr != nil {
-				plog.G(ctx).Warnf("[Gvisor-TCP] All routes dead for %s: %v", dst, writeErr)
+				h.reportRouteDrop(ctx, writeErr, dst)
 			} else if plog.IsDebugEnabled(ctx) {
 				plog.G(ctx).Debugf("[Gvisor-TCP] Routed %s -> %s via %s", src, dst, usedConn.RemoteAddr())
 			}
+			pkt.release()
 		} else if (config.CIDR.Contains(dst) || config.CIDR6.Contains(dst)) &&
 			ipProtocol != 1 && ipProtocol != 58 {
-			// Same reasoning as the stack-output drop above: an unannounced peer silently swallows
-			// inter-client traffic, so say so once per peer per interval.
-			dataPlaneWarn.Warnf(ctx, "no-peer:"+string(dst),
-				"[Gvisor-TCP] Peer route missing for %s: dropping TCP/UDP from %s (peer has not announced "+
-					"its TUN IP on any data conn)", net.IP(dst), net.IP(src))
+			h.drops.report(ctx, dropRouteMissing, dst)
 			config.LPool.Put(buf[:])
 			continue
 		} else if buf[datagramHeaderLen] == packetTypeToGvisor {
@@ -174,14 +181,16 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 			})
 			config.LPool.Put(buf[:])
 			logStackPacket(ctx, "[gVISOR] ", sniffer.DirectionRecv, protocol, pkt)
+			token := inject.begin()
 			cs.endpoint.InjectInbound(protocol, pkt)
+			inject.finish(token, 1, read, ctx.Err() == nil)
 			pkt.DecRef()
 			if plog.IsDebugEnabled(ctx) {
 				plog.G(ctx).Debugf("[Gvisor-TCP] Injected to stack: %s -> %s, protocol=%s, length=%d", src, dst, layers.IPProtocol(ipProtocol).String(), read)
 			}
 		} else {
 			pkt := newPacket(buf[:], read, src, dst)
-			if !h.hub.bridge.send(ctx, pkt) {
+			if !h.hub.bridge.sendObserved(ctx, pkt, tunEnqueue) {
 				pkt.release()
 				return
 			}

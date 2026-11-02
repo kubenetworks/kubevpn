@@ -96,9 +96,7 @@ func (t *clientTransport) routeOutbound(ctx context.Context, buf []byte, n int, 
 		out = t.gvisorInbound
 	}
 	packet := newPacket(buf[:], n+typePrefixLen, src, dst)
-	select {
-	case out <- packet:
-	case <-ctx.Done():
+	if !diagnosticEnqueue(ctx, out, packet, t.dev.enqueueStage) {
 		packet.release()
 	}
 }
@@ -139,6 +137,8 @@ func (t *clientTransport) runConnPool(ctx context.Context) {
 	}
 	defer func() { cancel(); wg.Wait() }()
 
+	stage := diagnosticStage(ctx, "slot_enqueue", "data", 0, 0)
+	defer stage.close()
 	// Drain the shared tunInbound; only multi-slot test pools require hash dispatch.
 	// Data packets block on the slot channel to propagate backpressure to the OS TCP stack,
 	// preventing silent drops that cause catastrophic RTO stalls.
@@ -154,9 +154,7 @@ func (t *clientTransport) runConnPool(ctx context.Context) {
 					key := parseFiveTupleInline(packet.data[tunReserve : datagramHeaderLen+packet.length])
 					slot = flowHash(key, packet.dst, n)
 				}
-				select {
-				case t.slots[slot].inbound <- packet:
-				case <-ctx.Done():
+				if !diagnosticEnqueue(ctx, t.slots[slot].inbound, packet, stage) {
 					packet.release()
 					return
 				}
@@ -257,7 +255,7 @@ func (t *clientTransport) heartbeats(ctx context.Context) {
 		buf := config.LPool.Get().([]byte)
 		n := copy(buf[tunReserve:], payload)
 		buf[datagramHeaderLen] = packetTypeControl
-		if !trySendToSlot(slot.inbound, newPacket(buf, n+typePrefixLen, nil, nil)) {
+		if !t.stats.enqueueProbe(slot.inbound, newPacket(buf, n+typePrefixLen, nil, nil)) {
 			dataPlaneWarn.Warnf(ctx, "hb-slot-full", "[Client] Heartbeat dropped: control slot queue full")
 		}
 	}

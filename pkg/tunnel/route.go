@@ -14,10 +14,11 @@ import (
 // ConnList holds multiple connections for the same client IP, supporting
 // write-with-fallback when a connection is dead.
 type ConnList struct {
-	mu        sync.Mutex // membership only; never held during I/O
-	gateOnce  sync.Once
-	writeGate chan struct{} // raw frame serialization, independent of membership
-	members   []*routeMember
+	mu                    sync.Mutex // membership only; never held during I/O
+	gateOnce              sync.Once
+	writeGate             chan struct{} // raw frame serialization, independent of membership
+	members               []*routeMember
+	gateStage, writeStage *datapathStage
 }
 
 // A fresh membership identity prevents an old write from removing a re-added conn.
@@ -167,6 +168,19 @@ func (cl *ConnList) lockWrite(ctx context.Context) error {
 			return err
 		}
 		return nil
+	default:
+	}
+	w := cl.gateStage.wait()
+	ok := false
+	defer func() { cl.gateStage.waited(w, ok) }()
+	select {
+	case cl.writeGate <- struct{}{}:
+		if err := ctx.Err(); err != nil {
+			cl.unlockWrite()
+			return err
+		}
+		ok = true
+		return nil
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -225,7 +239,14 @@ func (cl *ConnList) writeMembers(ctx context.Context, members routeMembersSnapsh
 				close(closed)
 			})
 		}
+		var token uint64
+		if !buffered {
+			token = cl.writeStage.begin()
+		}
 		n, err := fn(m.conn)
+		if !buffered {
+			cl.writeStage.finish(token, 1, n, err == nil && ctx.Err() == nil)
+		}
 		canceledWrite := false
 		if stop != nil && !stop() {
 			<-closed // no late Close can escape this write
@@ -304,6 +325,9 @@ func (hub *Router) AddRoute(ctx context.Context, srcIP net.IP, conn net.Conn) bo
 	created := list == nil
 	if created {
 		list = &ConnList{}
+		routeCtx := context.WithoutCancel(ctx)
+		list.gateStage = diagnosticStage(routeCtx, "raw_write_gate", "server", -1, 0)
+		list.writeStage = diagnosticStage(routeCtx, "raw_socket_write", "server", -1, 0)
 		hub.routes[key] = list
 	}
 	added := list.Add(conn)
@@ -312,6 +336,14 @@ func (hub *Router) AddRoute(ctx context.Context, srcIP net.IP, conn net.Conn) bo
 		hub.peers.onRouteAddedLocked(key)
 	}
 	hub.mu.Unlock()
+	if added {
+		list.gateStage.setPeer(srcIP)
+		list.writeStage.setPeer(srcIP)
+		if c, ok := conn.(*bufferedTCP); ok {
+			c.enqueueStage.setPeer(srcIP)
+			c.writeStage.setPeer(srcIP)
+		}
+	}
 	if created {
 		plog.G(ctx).Debugf("[Route] Add route: %s -> %s-%s", srcIP, conn.LocalAddr(), conn.RemoteAddr())
 	} else if added {
@@ -423,6 +455,10 @@ func (hub *Router) RemoveRoutesByConn(ctx context.Context, conn net.Conn) {
 }
 
 func (hub *Router) deleteEmptyLocked(key string) {
+	if list := hub.routes[key]; list != nil {
+		list.gateStage.close()
+		list.writeStage.close()
+	}
 	delete(hub.routes, key)
 	hub.peers.onRouteEmptyLocked(key)
 }

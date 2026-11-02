@@ -3,14 +3,11 @@ package tunnel
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"net"
-	"time"
 
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
-
-// slowPathWarnThreshold logs a perf warning when a packet hot-path operation blocks longer than this.
-const slowPathWarnThreshold = 20 * time.Millisecond
 
 // serverTransport is the traffic-manager (hub) half of the tun device. Packets read from the
 // server's TUN are routed to the owning client connection via Router; packets that the gvisor
@@ -40,22 +37,17 @@ func (t *serverTransport) routeOutbound(ctx context.Context, buf []byte, n int, 
 	// length is type+IP so routeTun can frame without further arithmetic.
 	logIPPacket(ctx, "[TUN]", buf[tunReserve:tunReserve+n])
 	buf[datagramHeaderLen] = packetTypeToGvisor
-	sendStart := time.Now()
 	packet := newPacket(buf[:], n+typePrefixLen, src, dst)
-	select {
-	case t.dev.tunInbound <- packet:
-	case <-ctx.Done():
+	if !diagnosticEnqueue(ctx, t.dev.tunInbound, packet, t.dev.enqueueStage) {
 		packet.release()
-		return
-	}
-	if elapsed := time.Since(sendStart); elapsed > slowPathWarnThreshold {
-		plog.G(ctx).Warnf("[Perf] Slow tunInbound send: %s -> %s blocked %v (channel backpressure)", src, dst, elapsed)
 	}
 }
 
 // routeTun drains tunInbound and writes each packet to the connection registered for its
 // destination IP in Router (with dead-conn fallback inside WriteToRoute).
 func (t *serverTransport) routeTun(ctx context.Context) {
+	stage := diagnosticStage(ctx, "route_dispatch", "tun", -1, 0)
+	defer stage.close()
 	defer drainPacketChan(t.dev.tunInbound)
 	for {
 		select {
@@ -69,17 +61,21 @@ func (t *serverTransport) routeTun(ctx context.Context) {
 			// the route by reference (zero-copy); the chosen conn takes a reference and we drop
 			// ours below.
 			binary.BigEndian.PutUint16(packet.data[:datagramHeaderLen], uint16(packet.length))
-			writeStart := time.Now()
+			token := stage.begin()
 			conn, err := t.hub.WriteToRoutePacket(ctx, dstKey, packet)
-			if elapsed := time.Since(writeStart); elapsed > slowPathWarnThreshold {
-				plog.G(ctx).Warnf("[Perf] Slow WriteToRoute: %s -> %s took %v", packet.src, packet.dst, elapsed)
-			}
-			packet.release()
+			stage.finish(token, 1, packet.length, err == nil && ctx.Err() == nil)
 			if err != nil {
-				plog.G(ctx).Warnf("[TUN] No route for %s -> %s, dropping", packet.src, packet.dst)
+				if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+					reason := dropRoutesFailed
+					if errors.Is(err, errNoRoute) {
+						reason = dropRouteMissing
+					}
+					t.dev.drops.report(ctx, reason, packet.dst)
+				}
 			} else if plog.IsDebugEnabled(ctx) {
 				plog.G(ctx).Debugf("[TUN] Routed %s -> %s via %s", packet.src, packet.dst, conn.RemoteAddr())
 			}
+			packet.release()
 		case <-ctx.Done():
 			return
 		}
@@ -89,6 +85,8 @@ func (t *serverTransport) routeTun(ctx context.Context) {
 // routeTCPToTun bridges packets that the gvisor stacks could not route locally (delivered on
 // Router.bridge.queue) back to the server's TUN via tunOutbound.
 func (t *serverTransport) routeTCPToTun(ctx context.Context) {
+	stage := diagnosticStage(ctx, "tun_out_enqueue", "tun", -1, 0)
+	defer stage.close()
 	defer t.hub.bridge.stop()
 	for {
 		select {
@@ -96,9 +94,7 @@ func (t *serverTransport) routeTCPToTun(ctx context.Context) {
 			if packet == nil {
 				return
 			}
-			select {
-			case t.dev.tunOutbound <- packet:
-			case <-ctx.Done():
+			if !diagnosticEnqueue(ctx, t.dev.tunOutbound, packet, stage) {
 				packet.release()
 				return
 			}

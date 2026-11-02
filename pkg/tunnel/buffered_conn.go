@@ -13,19 +13,24 @@ import (
 
 type bufferedTCP struct {
 	net.Conn
-	ch        chan *packet
-	closed    atomic.Bool
-	runDone   chan struct{} // closes after batch release and final queue drain
-	done      chan struct{} // stops enqueues; run joins producers before its final drain
-	enqueue   sync.RWMutex
-	stopOnce  sync.Once
-	closeOnce sync.Once // separate from route stop callbacks; never closes under their locks
-	closeErr  error
-	onStop    func(*bufferedTCP) // immutable, installed before run starts
+	ch                       chan *packet
+	closed                   atomic.Bool
+	runDone                  chan struct{} // closes after batch release and final queue drain
+	done                     chan struct{} // stops enqueues; run joins producers before its final drain
+	enqueue                  sync.RWMutex
+	stopOnce                 sync.Once
+	closeOnce                sync.Once // separate from route stop callbacks; never closes under their locks
+	closeErr                 error
+	onStop                   func(*bufferedTCP) // immutable, installed before run starts
+	enqueueStage, writeStage *datapathStage
 }
 
 func newBufferedTCP(ctx context.Context, conn net.Conn, onStop func(*bufferedTCP)) *bufferedTCP {
 	c := &bufferedTCP{Conn: conn, ch: make(chan *packet, MaxSize), done: make(chan struct{}), runDone: make(chan struct{}), onStop: onStop}
+	c.enqueueStage = diagnosticStage(ctx, "buffered_enqueue", "server", -1, 0)
+	c.writeStage = diagnosticStage(ctx, "socket_write", "server", -1, 0)
+	c.enqueueStage.setQueue(c.ch)
+	c.writeStage.setQueue(c.ch)
 	go c.run(ctx)
 	return c
 }
@@ -44,6 +49,19 @@ func (c *bufferedTCP) writePacket(ctx context.Context, pkt *packet) error {
 	}
 	select {
 	case c.ch <- pkt:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-c.done:
+		return net.ErrClosed
+	default:
+	}
+	w := c.enqueueStage.wait()
+	ok := false
+	defer func() { c.enqueueStage.waited(w, ok) }()
+	select {
+	case c.ch <- pkt:
+		ok = true
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
@@ -94,6 +112,7 @@ func (c *bufferedTCP) waitRun() { <-c.runDone }
 
 func (c *bufferedTCP) run(ctx context.Context) {
 	defer close(c.runDone)
+	defer c.enqueueStage.close()
 	stopClose := context.AfterFunc(ctx, func() { _ = c.Close() })
 	defer stopClose()
 	var batch packetBatch
@@ -108,6 +127,8 @@ func (c *bufferedTCP) run(ctx context.Context) {
 		drainPacketChan(c.ch)
 		c.enqueue.Unlock()
 	}()
+	stage := c.writeStage
+	defer stage.close()
 	var writer frameBatchWriter
 	dl := &periodicDeadline{timeout: config.KeepAliveTime, set: c.Conn.SetWriteDeadline}
 	for !c.closed.Load() && batch.next(ctx, c.ch, maxBatchFrames, c.done) {
@@ -116,7 +137,9 @@ func (c *bufferedTCP) run(ctx context.Context) {
 			_ = c.Close()
 			return
 		}
-		_, err := writer.write(c.Conn, batch.packets[:batch.n])
+		token := stage.begin(batch.n, batchDiagnosticBytes(batch.packets[:batch.n]))
+		n, err := writer.write(c.Conn, batch.packets[:batch.n])
+		stage.finish(token, n, batchDiagnosticBytes(batch.packets[:n]), err == nil && ctx.Err() == nil)
 		batch.release()
 		if err != nil {
 			plog.G(ctx).Errorf("[TCP] Failed to write packet: %v", err)

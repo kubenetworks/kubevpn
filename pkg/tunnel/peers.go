@@ -34,15 +34,19 @@ type graceTimer interface{ Stop() bool }
 
 // peerRegistry owns per-IP stacks and grace timers under hub.mu -> mu.
 type peerRegistry struct {
-	hub       *Router
-	newStack  stackConstructor
-	ctx       context.Context
-	cancel    context.CancelFunc
-	mu        sync.Mutex
-	clients   map[string]*clientStack
-	afterFunc func(time.Duration, func()) graceTimer
-	workers   sync.WaitGroup
-	stopped   bool
+	hub            *Router
+	newStack       stackConstructor
+	ctx            context.Context
+	cancel         context.CancelFunc
+	mu             sync.Mutex
+	clients        map[string]*clientStack
+	afterFunc      func(time.Duration, func()) graceTimer
+	workers        sync.WaitGroup
+	stopped        bool
+	diagnostics    *datapathDiagnostics
+	diagnosticDone chan struct{}
+	nextConnID     uint64 // protected by mu; server-local identity
+	drops          datapathDrops
 }
 
 // Start binds peers to the service, never to its first accepted connection.
@@ -50,7 +54,16 @@ func (h *peerRegistry) Start(ctx context.Context) {
 	h.hub.mu.Lock()
 	h.mu.Lock()
 	if h.ctx == nil && !h.stopped {
-		h.ctx, h.cancel = context.WithCancel(ctx)
+		h.diagnostics = newDatapathDiagnostics()
+		h.diagnostics.drops = &h.drops
+		h.ctx, h.cancel = context.WithCancel(withDatapathDiagnostics(ctx, h.diagnostics))
+		h.diagnosticDone = make(chan struct{})
+		h.workers.Add(1)
+		go func() {
+			defer h.workers.Done()
+			defer close(h.diagnosticDone)
+			h.diagnostics.run(h.ctx)
+		}()
 	}
 	h.mu.Unlock()
 	h.hub.mu.Unlock()
@@ -93,7 +106,7 @@ func (h *peerRegistry) getOrCreateClientStack(srcKey string) *clientStack {
 	}
 
 	// Construction can be expensive and must not stall unrelated route operations.
-	stackCtx, stackCancel := context.WithCancel(parent)
+	stackCtx, stackCancel := context.WithCancel(plog.WithField(parent, "peer_tun_ip", net.IP(srcKey).String()))
 	endpoint := channel.New(MaxSize, uint32(config.DefaultMTU), tcpip.GetRandMacAddr())
 	endpoint.LinkEPCapabilities = stack.CapabilityRXChecksumOffload
 	endpoint.SupportedGSOKind = stack.GVisorGSOSupported
@@ -129,6 +142,7 @@ func (h *peerRegistry) getOrCreateClientStack(srcKey string) *clientStack {
 		return existing
 	}
 
+	native := diagnosticGvisor(stackCtx, s, endpoint, MaxSize, "server_client", net.IP(srcKey))
 	outputDone := make(chan struct{})
 	go func() {
 		defer close(outputDone)
@@ -138,6 +152,7 @@ func (h *peerRegistry) getOrCreateClientStack(srcKey string) *clientStack {
 	go func() {
 		defer h.workers.Done()
 		<-stackCtx.Done()
+		native.close()
 		h.hub.mu.Lock()
 		h.mu.Lock()
 		if h.clients[srcKey] == cs {

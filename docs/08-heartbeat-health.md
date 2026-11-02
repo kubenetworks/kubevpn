@@ -57,6 +57,21 @@ The **#1 correlated TUN heartbeat and the transport supervisor are the primary t
 
 **Diagnostics:** One data slot and one control slot have independently locked activity counters (bytes, packets, reconnects, timestamps, bounded reasons). Probe send/reply attribution and arrival slot are recorded separately: a reply need not return on its sending slot, so these counters are not per-slot health verdicts. Generation retirement fences old evidence; network-change checks use `ClearPending()` without changing generation. See [47-portforward-blackhole-liveness.md](47-portforward-blackhole-liveness.md).
 
+`HeartbeatSnapshot.ProbeState` distinguishes `not_queued`, `queued_not_written`,
+`written_no_reply`, and `matched_reply`. Admission evidence is removed when a queued probe is
+consumed, even if deadline setup or generation validation subsequently fails. `ClearPending`
+resets diagnostic evidence but does not discard queued packets; probes are still stamped and
+correlated at their actual write. A newer unanswered write is not hidden by an older valid reply.
+The transport supervisor records the snapshot before retirement clears generation-local evidence.
+
+The ordinary Info-level connection also runs a one-second stage sampler. It warns after
+five seconds of active socket/TUN writing or queue handoff without completing that work, repeats
+no more often than every 30 seconds per stage, and records successful recovery once. Waiting for
+input on an idle reader is not a stall. Queue depth and the currently written batch are separate
+observations: an empty queue can coexist with a blocked write. The gateway heartbeat bypasses
+actual OS TUN I/O, so a healthy heartbeat does not rule out a blocked TUN writer or an unreachable
+application destination. See [13-logging-architecture.md](13-logging-architecture.md).
+
 **Batched activity accounting:** `slotActivity(slot, generation, read, packets, bytes)`
 commits counts and timestamps with one slot lock and one clock read per accepted update.
 The writer sums only the complete-frame prefix reported by `frameBatchWriter`, including

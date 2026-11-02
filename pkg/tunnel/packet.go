@@ -67,7 +67,9 @@ type packet struct {
 	// fan-out across conn slots, or an async bufferedTCP queue) without copying — each
 	// consumer release()s when done and the last one frees. Modeled on gvisor's chunk
 	// refcount (buffer.View.Clone / Release).
-	refs atomic.Int32
+	refs        atomic.Int32
+	probeEpoch  uint64
+	probeQueued bool
 }
 
 // acquire adds a reference to the packet's buffer. Pair every acquire with a release.

@@ -25,6 +25,7 @@ type connAttempt struct {
 	conn                         net.Conn
 	cancel                       context.CancelFunc
 	loops                        sync.WaitGroup
+	directWriteStage             *datapathStage
 }
 
 func (a *connAttempt) observeFailure() {
@@ -41,6 +42,12 @@ func (a *connAttempt) run(ctx context.Context, generation uint64) {
 
 	// Fence each underlying connection, not this long-lived slot. A
 	// generation change during Dial discards that connection and retries.
+	role := "data"
+	if a.isControl {
+		role = "control"
+	}
+	a.directWriteStage = diagnosticStage(subCtx, "socket_write", role, a.id, generation)
+	defer a.directWriteStage.close()
 	conn, err := a.forward.DialContext(subCtx)
 	if err != nil {
 		a.dialFailure = true
@@ -145,6 +152,10 @@ func (c *slotFailureConn) Close() error {
 // s.interClientInbound. conn is the framed *framing.Conn in production (typed as net.Conn so
 // tests can drive it with a raw pipe).
 func (s *connAttempt) readGeneration(ctx context.Context, conn net.Conn, errChan chan error, generation uint64) {
+	inject := diagnosticStage(ctx, "gvisor_inject", "data", s.id, generation)
+	defer inject.close()
+	enqueue := diagnosticStage(ctx, "tun_out_enqueue", "data", s.id, generation)
+	defer enqueue.close()
 	defer netutil.HandleCrash()
 	dl := &periodicDeadline{timeout: config.KeepAliveTime * 3, set: conn.SetReadDeadline}
 	for ctx.Err() == nil {
@@ -187,7 +198,9 @@ func (s *connAttempt) readGeneration(ctx context.Context, conn net.Conn, errChan
 			// so a busy stack never stalls this reader — heartbeat-reply liveness is preserved.
 			// nil-safe for tests that drive a slot in isolation.
 			if s.interClient != nil {
+				token := inject.begin()
 				s.interClient.InjectIP(ip)
+				inject.finish(token, 1, len(ip), ctx.Err() == nil)
 			}
 			config.LPool.Put(buf[:])
 		} else {
@@ -197,10 +210,9 @@ func (s *connAttempt) readGeneration(ctx context.Context, conn net.Conn, errChan
 				config.LPool.Put(buf[:])
 				continue
 			}
-			select {
-			case s.tunOutbound <- newPacket(buf[:], n, nil, nil):
-			case <-ctx.Done():
-				config.LPool.Put(buf[:])
+			packet := newPacket(buf[:], n, nil, nil)
+			if !diagnosticEnqueue(ctx, s.tunOutbound, packet, enqueue) {
+				packet.release()
 				return
 			}
 		}
@@ -231,10 +243,12 @@ func (s *connAttempt) writePayload(conn net.Conn, payload []byte, generation uin
 		s.stats.finishProbe(id, false)
 		return 0, err
 	}
+	token := s.directWriteStage.begin(1, len(payload))
 	n, err := conn.Write(payload)
 	if err != nil && s.now != nil {
 		s.observeFailure()
 	}
+	s.directWriteStage.finish(token, 1, n, err == nil && n == len(payload))
 	s.stats.finishProbe(id, err == nil && n == len(payload))
 	if err == nil {
 		s.stats.slotActivity(s.id, generation, false, 1, n)
@@ -243,6 +257,13 @@ func (s *connAttempt) writePayload(conn net.Conn, payload []byte, generation uin
 }
 
 func (s *connAttempt) writeGeneration(ctx context.Context, rawConn net.Conn, errChan chan error, generation uint64) {
+	role := "data"
+	if s.isControl {
+		role = "control"
+	}
+	stage := diagnosticStage(ctx, "socket_write", role, s.id, generation)
+	defer stage.close()
+	stage.setQueue(s.inbound)
 	defer netutil.HandleCrash()
 	dl := &periodicDeadline{timeout: config.KeepAliveTime, set: rawConn.SetWriteDeadline}
 	// readDL keeps this slot's read (liveness) deadline alive on write activity. A slot busy
@@ -265,6 +286,9 @@ func (s *connAttempt) writeGeneration(ctx context.Context, rawConn net.Conn, err
 		limit = 1
 	}
 	for batch.next(ctx, s.inbound, limit, nil) {
+		for _, p := range batch.packets[:batch.n] {
+			s.stats.dequeueProbe(p)
+		}
 		if err := dl.refresh(); err != nil {
 			if s.now != nil {
 				s.observeFailure()
@@ -286,10 +310,12 @@ func (s *connAttempt) writeGeneration(ctx context.Context, rawConn net.Conn, err
 		for _, p := range batch.packets[:batch.n] {
 			binary.BigEndian.PutUint16(p.data[:datagramHeaderLen], uint16(p.length))
 		}
+		token := stage.begin(batch.n, batchDiagnosticBytes(batch.packets[:batch.n]))
 		complete, err := writer.write(rawConn, batch.packets[:batch.n])
 		if err != nil && s.now != nil {
 			s.observeFailure()
 		}
+		stage.finish(token, complete, batchDiagnosticBytes(batch.packets[:complete]), err == nil && ctx.Err() == nil)
 		s.stats.finishProbe(probeID, err == nil && complete == batch.n)
 		if s.stats != nil && complete > 0 {
 			bytes := 0

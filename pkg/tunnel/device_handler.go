@@ -79,7 +79,12 @@ func serve(ctx context.Context, dev *tunDevice) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	diagnostics := newDatapathDiagnostics()
+	diagnostics.drops = &dev.drops
+	ctx = withDatapathDiagnostics(ctx, diagnostics)
 	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() { defer wg.Done(); diagnostics.run(ctx) }()
 	for _, r := range dev.routines() {
 		wg.Add(1)
 		go func(r namedRoutine) {

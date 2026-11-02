@@ -30,6 +30,7 @@ func isHeartbeatEchoReply(ipPacket []byte) bool {
 // index ConnPoolSize is control. Counters are cumulative,
 // not health verdicts: reverse traffic need not arrive on the request's slot.
 type HeartbeatSnapshot struct {
+	ProbeState                                string // not_queued, queued_not_written, written_no_reply, matched_reply
 	Generation                                uint64
 	LastReply                                 time.Time
 	LastRTT                                   time.Duration
@@ -67,15 +68,19 @@ type pendingProbe struct {
 type HeartbeatStats struct {
 	// Lock order: mu (probe state), then individual slotMu. packet activity
 	// takes only its own slot lock and never contends on pending probes.
-	mu          sync.Mutex
-	slotMu      [ConnPoolSize + 1]sync.Mutex
-	nonce       [16]byte
-	initialized bool
-	counter     uint64
-	pending     map[uint64]pendingProbe
-	wake        chan struct{}
-	now         func() time.Time
-	snapshot    HeartbeatSnapshot
+	mu                       sync.Mutex
+	slotMu                   [ConnPoolSize + 1]sync.Mutex
+	nonce                    [16]byte
+	initialized              bool
+	counter                  uint64
+	epoch                    uint64
+	queued                   int
+	written                  bool
+	lastWritten, lastMatched uint64
+	pending                  map[uint64]pendingProbe
+	wake                     chan struct{}
+	now                      func() time.Time
+	snapshot                 HeartbeatSnapshot
 }
 
 func (h *HeartbeatStats) clock() time.Time {
@@ -111,6 +116,9 @@ func (h *HeartbeatStats) BeginGeneration() uint64 {
 		h.slotMu[i].Unlock()
 	}
 	clear(h.pending)
+	h.epoch++
+	h.queued, h.written = 0, false
+	h.lastWritten, h.lastMatched = 0, 0
 	return h.snapshot.Generation
 }
 
@@ -124,8 +132,46 @@ func (h *HeartbeatStats) ClearPending() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	clear(h.pending)
+	h.epoch++
+	h.queued, h.written = 0, false
+	h.lastWritten, h.lastMatched = 0, 0
 	h.snapshot.LastReply = time.Time{}
 	h.snapshot.LastRTT = 0
+}
+
+// enqueueProbe publishes the epoch and admission evidence atomically with respect
+// to ClearPending. The channel send is nonblocking and contains no I/O.
+func (h *HeartbeatStats) enqueueProbe(ch chan *packet, p *packet) bool {
+	if h == nil {
+		return trySendToSlot(ch, p)
+	}
+	h.mu.Lock()
+	p.probeEpoch, p.probeQueued = h.epoch, true
+	select {
+	case ch <- p:
+		h.queued++
+		h.mu.Unlock()
+		return true
+	default:
+		h.mu.Unlock()
+		p.release()
+		return false
+	}
+}
+
+// dequeueProbe retires admission evidence exactly once, independently of whether
+// this writer can prepare or transmit the packet. ClearPending only fences the
+// bookkeeping epoch; queued payloads still receive correlation at actual write.
+func (h *HeartbeatStats) dequeueProbe(p *packet) {
+	if h == nil || !p.probeQueued {
+		return
+	}
+	h.mu.Lock()
+	if p.probeEpoch == h.epoch {
+		h.queued--
+	}
+	p.probeQueued = false
+	h.mu.Unlock()
 }
 
 func (h *HeartbeatStats) Generation() uint64 {
@@ -207,6 +253,25 @@ func (h *HeartbeatStats) Snapshot() HeartbeatSnapshot {
 		h.slotMu[i].Unlock()
 	}
 	s.Pending = len(h.pending)
+	s.ProbeState = "not_queued"
+	if h.queued > 0 || s.Pending > 0 {
+		s.ProbeState = "queued_not_written"
+	}
+	if h.written {
+		s.ProbeState = "written_no_reply"
+	}
+	if !s.LastReply.IsZero() && h.lastMatched >= h.lastWritten && h.queued == 0 {
+		s.ProbeState = "matched_reply"
+	}
+	if h.queued > 0 {
+		s.ProbeState = "queued_not_written"
+	}
+	for _, p := range h.pending {
+		if !p.written {
+			s.ProbeState = "queued_not_written"
+			break
+		}
+	}
 	return s
 }
 
@@ -291,6 +356,7 @@ func (h *HeartbeatStats) prepareProbe(ip []byte, generation uint64, slot int) ([
 func (h *HeartbeatStats) accept(id uint64, p pendingProbe) {
 	delete(h.pending, id)
 	h.snapshot.Replies++
+	h.lastMatched = max(h.lastMatched, id)
 	rtt := p.reply.Sub(p.sent)
 	if p.reply.After(h.snapshot.LastReply) {
 		h.snapshot.LastReply = p.reply
@@ -325,6 +391,8 @@ func (h *HeartbeatStats) finishProbe(id uint64, success bool) {
 		return
 	}
 	h.snapshot.Sent++
+	h.written = true
+	h.lastWritten = max(h.lastWritten, id)
 	if p.slot >= 0 && p.slot <= ConnPoolSize {
 		h.slotMu[p.slot].Lock()
 		h.snapshot.Slots[p.slot].ProbesSent++

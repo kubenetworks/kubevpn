@@ -48,6 +48,15 @@ func newTCPHandler(hub *Router, constructor stackConstructor) *gvisorTCPHandler 
 }
 
 func (h *gvisorTCPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
+	h.mu.Lock()
+	diagnostics := h.diagnostics
+	h.nextConnID++
+	localConnID := h.nextConnID
+	h.mu.Unlock()
+	if diagnostics != nil {
+		ctx = withDatapathDiagnostics(ctx, diagnostics)
+	}
+	ctx = plog.WithField(ctx, "server_conn", localConnID)
 	connCtx, cancel := context.WithCancel(ctx)
 	conn := newBufferedTCP(connCtx, tcpConn, func(c *bufferedTCP) {
 		h.hub.RemoveRoutesByConn(connCtx, c)
@@ -67,6 +76,8 @@ func (h *gvisorTCPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 // echoes from the client and injects them into the client's gvisor stack. Stack
 // output routes echo replies through registered data connections, not this control conn.
 func (h *gvisorTCPHandler) handleControlConn(ctx context.Context, tcpConn net.Conn) {
+	inject := diagnosticStage(ctx, "gvisor_inject", "server_control", -1, 0)
+	defer inject.close()
 	dl := &periodicDeadline{timeout: config.KeepAliveTime * 3, set: tcpConn.SetReadDeadline}
 
 	for ctx.Err() == nil {
@@ -91,6 +102,7 @@ func (h *gvisorTCPHandler) handleControlConn(ctx context.Context, tcpConn net.Co
 			continue
 		}
 
+		inject.setPeer(src)
 		// Inject heartbeat ICMP into the client's per-client gvisor stack.
 		// The stack's ICMP forwarder generates a reply, which readFromEndpointWriteToRoute
 		// routes back to the client via Router (through data conns, not this control conn).
@@ -107,7 +119,9 @@ func (h *gvisorTCPHandler) handleControlConn(ctx context.Context, tcpConn net.Co
 			Payload: buffer.MakeWithData(ip),
 		})
 		config.LPool.Put(buf[:])
+		token := inject.begin()
 		cs.endpoint.InjectInbound(protocol, pkt)
+		inject.finish(token, 1, read, ctx.Err() == nil)
 		pkt.DecRef()
 	}
 }

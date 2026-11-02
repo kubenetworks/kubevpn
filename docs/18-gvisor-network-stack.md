@@ -328,6 +328,52 @@ foreign-library goroutine. See [48-shared-server-gvisor-stack.md](48-shared-serv
 
 **pkg/tunnel/client_endpoint.go**: Client-side, bridges between the local TUN device and gvisor for local traffic (src==dst).
 
+### 8.4 Native stack diagnostics
+
+The data-path owner sampler in `pkg/tunnel/datapath_diagnostics.go` reads selected native
+counters through `gvisor_diagnostics.go` once per second. It does not install a per-segment
+TCP probe or create another ticker per stack. These are embedded **netstack** statistics;
+`runsc`/Sentry sandbox diagnostics do not describe these stacks. `Stack.Stats()` contains live
+counter pointers, so `.Value()` is copied into a private numeric snapshot. Each counter read
+is atomic; the collection is not a transactional snapshot.
+
+| Native statistic | Meaning and limits |
+|---|---|
+| TCP `Retransmits`, `Timeouts` | Inner gVisor sender retransmissions and RTO expirations, not outer SSH/port-forward TCP or application deadlines. The pinned SYN/SYN-ACK retry path does not increment these counters; zero does not exclude a stalled handshake. |
+| TCP `ForwardMaxInFlightDrop` | Requests rejected at the forwarder limit. `Complete` currently waits until relay termination, so this is not simply simultaneous handshakes. |
+| TCP `ResetsSent`, `ResetsReceived` | Context for other anomalies; resets alone do not trigger a warning. |
+| TCP `CurrentEstablished`, `CurrentConnected` | Current gauges, never unsigned-subtracted as error deltas. |
+| IP `MalformedPacketsReceived`, `OutgoingPacketErrors` | Native parsing/output errors, not a complete tunnel-drop count. |
+| UDP `ReceiveBufferErrors`, `MalformedPacketsReceived`, `ChecksumErrors`, `PacketSendErrors` | Native errors; receive-buffer errors also cover invalid receive state. Production RX checksum offload can bypass checksum validation. |
+| `DroppedPackets` | Native transport-layer drops, not summed with overlapping protocol errors as total loss. |
+| `channel.Endpoint.NumQueued()` | Current outbound packet count paired with endpoint capacity; not bytes, residence time or drops. |
+
+Sources follow stack lifetimes with monotonic local `stack_id` values:
+
+- `server_client`: registered by the service-owned peer registry after successful publication,
+  attributed to that peer's TUN IP. Slot reconnects retaining the stack retain its ID/baseline.
+- `client_interclient`: the shared inbound peer-to-local stack, not attributed to one peer.
+- `client_local`: the self-to-self stack, likewise reported at stack scope.
+
+The initial baseline is captured at registration. Canceled sources are rejected or removed,
+and unregister precedes stack destruction. The sampler copies references under a short registry
+lock; native reads and logs run outside route, peer and registry locks. Individual native source
+cleanup and stack destruction do not wait for log output; a whole owner joining a sampler may
+still wait for a permanently blocked sink.
+
+Nonzero error/retransmission/RTO deltas emit `gvisor_stats` at Warn at most once per stack per
+30 seconds. Normal idle, gauge-only and RST-only changes remain quiet. Suppressed deltas survive
+rate limits, detail budgets, quiet periods and sampler gaps. Windows describe the accumulated
+observation interval. Stale timestamps are rejected; a decreasing counter rebases that field
+without unsigned underflow or erasing unrelated pending errors. Stage details and native
+summaries share a rotating 16-detail budget; drop flushing has a separate bounded budget.
+
+A full channel can return a short packet count without error, which the default qdisc does not
+propagate: IP errors cannot reconstruct queue-full drops. Direct peer routing may bypass gVisor,
+so healthy native counters do not prove progress at every routing, tunnel or TUN stage. Statistics
+do not change heartbeat health or trigger reconnect. No endpoint TCPInfo/protocol probe, capture,
+new HTTP endpoint, telemetry upload or global logging emitter is installed.
+
 ## 9. Sidecar IP Allocation
 
 The `tun` protocol factory handles sidecar self-DHCP:
