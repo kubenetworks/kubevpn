@@ -14,14 +14,17 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/sirupsen/logrus"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/core"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/tun"
 	gossh "golang.org/x/crypto/ssh"
@@ -947,6 +950,211 @@ func TestTransportIntegration_LateDialNeverPublished(t *testing.T) {
 	c := <-d.peer
 	if _, e = c.Write([]byte("late")); e == nil {
 		t.Fatal("late dial socket not closed")
+	}
+}
+
+func TestTransportDiagnostics_TerminalFailureDoesNotPromiseRetry(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = io.WriteString(w, `{"kind":"Status","apiVersion":"v1","status":"Failure","code":403,"message":"denied"}`)
+	}))
+	defer srv.Close()
+	nm := transportManager(t, srv.URL)
+	ctx, cancel, logs := watcherContext(t, logrus.InfoLevel)
+	defer cancel()
+	nm.transport.ctx, nm.transport.cancel = ctx, cancel
+	nm.transport.launchTransportSupervisor()
+	transportAwait(t, ctx.Done())
+	nm.Stop()
+	text := logs.String()
+	if !strings.Contains(text, "transport stopped") || !strings.Contains(text, "reason=terminal") {
+		t.Fatalf("terminal cause missing: %s", text)
+	}
+	if strings.Contains(text, "retry_in=") || strings.Contains(text, "next_kind=") || strings.Contains(text, "transport recovered") {
+		t.Fatalf("terminal failure promised retry/recovery: %s", text)
+	}
+}
+
+func TestTransportDiagnostics_SSHFallbackExplainsPath(t *testing.T) {
+	srv, _ := transportForwardServer(t, nil)
+	nm := transportManager(t, srv.URL)
+	ctx, cancel, logs := watcherContext(t, logrus.InfoLevel)
+	defer cancel()
+	nm.transport.ctx, nm.transport.cancel = ctx, cancel
+	configureTransportSSH(nm, transportSSHServer(t, false, gossh.ConnectionFailed))
+	nm.transport.launchTransportSupervisor()
+	waitCtx, stop := context.WithTimeout(ctx, 5*time.Second)
+	defer stop()
+	g, err := nm.transport.waitTransport(waitCtx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nm.Stop()
+	text := logs.String()
+	for _, want := range []string{"transport prepare_failed", "kind=ssh", "stage=ssh_channel", "next_kind=port-forward", "retry_in=0s"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("missing %q in %s", want, text)
+		}
+	}
+	if g.kind != transportPF || strings.Contains(text, "transport recovered") {
+		t.Fatalf("fallback publication falsely implies liveness: %s", text)
+	}
+}
+
+func TestTransportDiagnostics_FailureDeltaSpansKindsAndPhases(t *testing.T) {
+	srv, _ := transportForwardServer(t, nil)
+	nm := transportManager(t, srv.URL)
+	ctx, cancel, logs := watcherContext(t, logrus.InfoLevel)
+	defer cancel()
+	nm.transport.ctx, nm.transport.cancel = ctx, cancel
+	configureTransportSSH(nm, transportSSHServer(t, false, gossh.ConnectionFailed))
+	var listings atomic.Int32
+	nm.cfg.GetRunningPodList = func(context.Context) ([]v1.Pod, error) {
+		if listings.Add(1) == 2 {
+			return nil, context.DeadlineExceeded
+		}
+		return []v1.Pod{{}}, nil
+	}
+	nm.transport.launchTransportSupervisor()
+	waitCtx, stop := context.WithTimeout(ctx, 5*time.Second)
+	defer stop()
+	first, err := nm.transport.waitTransport(waitCtx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// SSH preparation logs once, then fallback publishes port-forward. Its
+	// retirement emits a failure record and resets the supervisor-wide delta.
+	nm.transport.signalTransportFailure(first.id, context.DeadlineExceeded)
+	// The next SSH failure is throttled. Port-forward's first preparation
+	// failure is eligible and must include both failures, not just its own.
+	next := waitNextTransport(t, nm, first.id)
+	nm.Stop()
+	text := logs.String()
+	if first.kind != transportPF || next.kind != transportPF || listings.Load() != 3 {
+		t.Fatalf("expected fallback, failed preparation, then fallback: %s", text)
+	}
+	var sshFailures, retirements, pfFailures int
+	for _, line := range strings.Split(text, "\n") {
+		if strings.Contains(line, " failures_delta=") {
+			t.Fatalf("ambiguous per-kind failure label: %s", line)
+		}
+		switch {
+		case strings.Contains(line, "transport prepare_failed") && strings.Contains(line, "kind=ssh"):
+			sshFailures++
+			if !strings.Contains(line, "supervisor_failures_delta=1") {
+				t.Fatalf("first preparation delta missing: %s", line)
+			}
+		case strings.Contains(line, "transport retiring"):
+			retirements++
+			if !strings.Contains(line, "supervisor_failures_delta=1") {
+				t.Fatalf("retirement delta did not reset after preparation record: %s", line)
+			}
+		case strings.Contains(line, "transport prepare_failed") && strings.Contains(line, "kind=port-forward"):
+			pfFailures++
+			if !strings.Contains(line, "stage=pod_list") || !strings.Contains(line, "supervisor_failures_delta=2") {
+				t.Fatalf("delta must include suppressed SSH and current port-forward failure: %s", line)
+			}
+		}
+	}
+	if sshFailures != 1 || retirements != 1 || pfFailures != 1 {
+		t.Fatalf("expected throttled SSH failure and eligible cross-kind summary: %s", text)
+	}
+}
+
+func TestTransportDiagnostics_RecoveryNeedsValidatedHeartbeat(t *testing.T) {
+	ctx, cancel, logs := watcherContext(t, logrus.InfoLevel)
+	defer cancel()
+	srv, _ := transportForwardServer(t, nil)
+	nm := transportManager(t, srv.URL)
+	nm.transport.ctx, nm.transport.cancel = ctx, cancel
+	nm.transport.launchTransportSupervisor()
+	first, err := nm.transport.waitTransport(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// This deliberately uses the existing test-only health seam. Packet-level
+	// nonce/write/reply validation is exercised by tunnel's correlation integration tests.
+	nm.transport.heartbeatStats.MarkReply()
+	nm.transport.signalTransportFailure(first.id, context.DeadlineExceeded)
+	current := waitNextTransport(t, nm, first.id)
+	conn, err := nm.transport.dialTransport(ctx, endpointTCP, core.TCPTransporter(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	transportEcho(t, conn)
+	if strings.Contains(logs.String(), "transport recovered") || !nm.transport.heartbeatStats.LastReply().IsZero() {
+		t.Fatal("publication, ordinary echo and old-generation health are not recovery")
+	}
+	nm.transport.armTransportHealth()
+	// Let the monitor arm before supplying new validated health. No fake TUN
+	// addresses or ambient interface changes are needed for this supervisor test.
+	awaitWatcher(t, 7*time.Second, "fresh-heartbeat recovery", func() bool {
+		nm.transport.heartbeatStats.MarkReply()
+		nm.transport.requestNetworkCheck()
+		return strings.Contains(logs.String(), "transport recovered")
+	})
+	text := logs.String()
+	if !strings.Contains(text, fmt.Sprintf("generation=%d", current.id)) || !strings.Contains(text, "evidence=current_generation_heartbeat_reply") {
+		t.Fatalf("missing recovery attribution: %s", text)
+	}
+	nm.transport.requestNetworkCheck()
+	nm.Stop()
+	if strings.Count(logs.String(), "transport recovered") != 1 {
+		t.Fatalf("recovery must be logged once: %s", logs.String())
+	}
+}
+
+func TestTransportDiagnostics_PrepareFailureAndRetirement(t *testing.T) {
+	srv, _ := transportForwardServer(t, nil)
+	nm := transportManager(t, srv.URL)
+	ctx, cancel, logs := watcherContext(t, logrus.InfoLevel)
+	defer cancel()
+	nm.transport.ctx = plog.WithField(ctx, "connID", "diagnostic-client")
+	nm.transport.cancel = cancel
+	var attempts atomic.Int32
+	nm.cfg.GetRunningPodList = func(context.Context) ([]v1.Pod, error) {
+		if attempts.Add(1) == 1 {
+			return nil, errors.New("temporary pod listing failure\nforged entry https://user:credential-marker@proxy.example/?token=credential-marker")
+		}
+		return []v1.Pod{{}}, nil
+	}
+	nm.transport.launchTransportSupervisor()
+	waitCtx, stop := context.WithTimeout(ctx, 5*time.Second)
+	defer stop()
+	g, err := nm.transport.waitTransport(waitCtx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	awaitWatcher(t, time.Second, "prepare failure summary", func() bool {
+		return strings.Contains(logs.String(), "transport prepare_failed")
+	})
+	text := logs.String()
+	for _, want := range []string{"connID=diagnostic-client", "kind=port-forward", "stage=pod_list", "attempt=1", "retry_in=200ms"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("missing %q in %s", want, text)
+		}
+	}
+	if strings.Contains(text, "\nforged entry") || strings.Contains(text, "credential-marker") || strings.Contains(text, "transport recovered") {
+		t.Fatalf("unsafe error text or premature recovery: %s", text)
+	}
+	nm.transport.signalTransportFailure(g.id, context.DeadlineExceeded)
+	next := waitNextTransport(t, nm, g.id)
+	awaitWatcher(t, time.Second, "retirement summary", func() bool {
+		return strings.Contains(logs.String(), "transport retiring")
+	})
+	text = logs.String()
+	if !strings.Contains(text, fmt.Sprintf("generation=%d", g.id)) || !strings.Contains(text, "reason=deadline") {
+		t.Fatalf("retirement lost original generation/cause: %s", text)
+	}
+	if strings.Contains(text, "transport recovered") {
+		t.Fatalf("publication without heartbeat is not recovery: %s", text)
+	}
+	nm.transport.signalTransportFailure(g.id, context.DeadlineExceeded)
+	nm.Stop()
+	if next.id <= g.id || strings.Count(logs.String(), "transport retiring") != 1 {
+		t.Fatalf("stale failure or cancellation logged as new fault: %s", logs.String())
 	}
 }
 

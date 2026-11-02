@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/netip"
 	"runtime"
@@ -85,6 +86,8 @@ type transportHandle interface {
 type transportGeneration struct {
 	id         uint64
 	kind       transportKind
+	stage      string // preparation stage, read only after prepareTransport returns
+	diagnostic *transportDiagnostics
 	ctx        context.Context
 	cancel     context.CancelFunc
 	endpoints  transportEndpoints
@@ -363,7 +366,7 @@ func terminalTransportError(err error) bool {
 
 func (nm *transportSupervisor) prepareTransport(ctx context.Context, kind transportKind) (g *transportGeneration, err error) {
 	gctx, cancel := context.WithCancel(ctx)
-	g = &transportGeneration{kind: kind, ctx: gctx, cancel: cancel, conns: make(map[*generationConn]struct{})}
+	g = &transportGeneration{kind: kind, stage: "configuration", ctx: gctx, cancel: cancel, conns: make(map[*generationConn]struct{})}
 	defer func() {
 		if err != nil {
 			cancel()
@@ -380,6 +383,7 @@ func (nm *transportSupervisor) prepareTransport(ctx context.Context, kind transp
 		}
 		probeCtx, probeCancel := context.WithTimeout(gctx, 3*time.Second)
 		defer probeCancel()
+		g.stage = "service_lookup"
 		svc, e := nm.cfg.Clientset.CoreV1().Services(nm.cfg.ManagerNamespace).Get(probeCtx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 		if e != nil {
 			return g, e
@@ -388,12 +392,14 @@ func (nm *transportSupervisor) prepareTransport(ctx context.Context, kind transp
 		if e != nil {
 			return g, fmt.Errorf("SSH service has no reachable ClusterIP: %w", e)
 		}
+		g.stage = "ssh_handshake"
 		client, e := ssh.DialSshRemote(probeCtx, nm.cfg.SshConf, probeCtx.Done())
 		if e != nil {
 			return g, e
 		}
 		// PortMap's listeners are lazy. Check actual SSH channels before publication,
 		// without sending any fake VPN packets to the manager.
+		g.stage = "ssh_channel"
 		for _, port := range ports {
 			c, e := client.DialContext(probeCtx, "tcp", netip.AddrPortFrom(ip, uint16(port)).String())
 			if e != nil {
@@ -403,6 +409,7 @@ func (nm *transportSupervisor) prepareTransport(ctx context.Context, kind transp
 			c.Close()
 		}
 		client.Close()
+		g.stage = "ssh_portmap"
 		for _, port := range ports {
 			h, e := ssh.StartPortMap(gctx, nm.cfg.SshConf, netip.AddrPortFrom(ip, uint16(port)), netip.MustParseAddrPort("127.0.0.1:0"))
 			if e != nil {
@@ -415,6 +422,7 @@ func (nm *transportSupervisor) prepareTransport(ctx context.Context, kind transp
 		if nm.cfg.Config == nil || nm.cfg.RESTClient == nil || nm.cfg.GetRunningPodList == nil {
 			return g, fmt.Errorf("invalid transport configuration: port-forward requires Kubernetes client")
 		}
+		g.stage = "pod_list"
 		listCtx, listCancel := context.WithTimeout(gctx, portForwardPodListTimeout)
 		pods, e := nm.cfg.GetRunningPodList(listCtx)
 		listCancel()
@@ -425,6 +433,7 @@ func (nm *transportSupervisor) prepareTransport(ctx context.Context, kind transp
 			return g, fmt.Errorf("no running traffic manager pod")
 		}
 		_ = nm.addRoute(util.GetPodIP(pods[0])...)
+		g.stage = "port_forward"
 		h, e := portforward.StartPortForwardSession(gctx, nm.cfg.Config, nm.cfg.RESTClient, pods[0].Name, nm.cfg.ManagerNamespace, ports)
 		if e != nil {
 			return g, e
@@ -434,6 +443,7 @@ func (nm *transportSupervisor) prepareTransport(ctx context.Context, kind transp
 			addresses = append(addresses, h.Ports()[port])
 		}
 	}
+	g.stage = "endpoints"
 	for _, addr := range addresses {
 		if addr == "" {
 			return g, fmt.Errorf("transport endpoint missing")
@@ -474,6 +484,115 @@ func (nm *transportSupervisor) waitTransportHealthy(ctx context.Context) error {
 	}
 }
 
+// transportDiagnostics is owned by the supervisor goroutine, including its
+// synchronous monitor. It observes recovery without participating in decisions.
+type transportDiagnostics struct {
+	warnings *plog.Throttle
+	baseline tunnel.HeartbeatSnapshot
+	outage   time.Time
+	failures uint64 // total prepare/retire failures in the current outage
+	// pending counts all supervisor prepare/retire failures since the last
+	// emitted failure record, across kinds and stages; recovery also resets it.
+	pending uint64
+	attempt uint64
+}
+
+func transportKindName(kind transportKind) string {
+	if kind == transportSSH {
+		return "ssh"
+	}
+	return "port-forward"
+}
+
+var errTransportHeartbeatExpired = errors.New("data-plane heartbeat expired")
+
+func transportFailureReason(err error) string {
+	if terminalTransportError(err) {
+		return "terminal"
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "deadline"
+	}
+	var timeout net.Error
+	if errors.As(err, &timeout) && timeout.Timeout() {
+		return "timeout"
+	}
+	if errors.Is(err, errTransportHeartbeatExpired) {
+		return "heartbeat_expired"
+	}
+	if err == nil {
+		return "transport_closed"
+	}
+	return "transport_error"
+}
+
+func transportDiagnosticError(err error) string {
+	// Transport errors can embed proxy URLs or credential-plugin output. Keep
+	// only typed classifications; truncating arbitrary text does not redact it.
+	if err == nil {
+		return "closed"
+	}
+	if errors.Is(err, config.ErrSSHAuth) {
+		return "ssh_authentication_failed"
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) {
+		return "connection_closed"
+	}
+	if apierrors.IsForbidden(err) || apierrors.IsUnauthorized(err) {
+		return "authorization_denied"
+	}
+	if code := status.Code(err); code != codes.Unknown {
+		return "rpc_" + code.String()
+	}
+	return transportFailureReason(err)
+}
+
+func (d *transportDiagnostics) failed(now time.Time) {
+	if d.outage.IsZero() {
+		d.outage = now
+	}
+	d.failures++
+	d.pending++
+}
+
+func (d *transportDiagnostics) recovered(ctx context.Context, g *transportGeneration, snapshot tunnel.HeartbeatSnapshot) {
+	if d == nil || d.outage.IsZero() || snapshot.Generation != g.id || snapshot.LastReply.IsZero() {
+		return
+	}
+	plog.G(ctx).WithFields(map[string]any{
+		"generation": g.id, "kind": transportKindName(g.kind),
+		"outage": time.Since(d.outage).Round(time.Millisecond), "failures": d.failures,
+		"evidence": "current_generation_heartbeat_reply",
+	}).Info("transport recovered")
+	d.outage = time.Time{}
+	d.failures, d.pending = 0, 0
+	d.warnings.Reset()
+}
+
+func (d *transportDiagnostics) retiring(ctx context.Context, g *transportGeneration, primed bool, err error, snapshot tunnel.HeartbeatSnapshot) {
+	d.failed(time.Now())
+	if !d.warnings.Allow("retire:" + transportKindName(g.kind)) {
+		return
+	}
+	age := "never"
+	if !snapshot.LastReply.IsZero() {
+		age = time.Since(snapshot.LastReply).Round(time.Millisecond).String()
+	}
+	plog.G(ctx).WithFields(map[string]any{
+		"generation": g.id, "kind": transportKindName(g.kind), "primed": primed,
+		"reason": transportFailureReason(err), "error": transportDiagnosticError(err),
+		"heartbeat_age": age, "pending_probes": snapshot.Pending,
+		"sent_total": snapshot.Sent, "replies_total": snapshot.Replies, "probe_state": snapshot.ProbeState,
+		"sent_delta": snapshot.Sent - d.baseline.Sent, "replies_delta": snapshot.Replies - d.baseline.Replies,
+		"data_connected": snapshot.Slots[0].Connected, "control_connected": snapshot.Slots[tunnel.ConnPoolSize].Connected,
+		"data_read_packets": snapshot.Slots[0].ReadPackets, "data_write_packets": snapshot.Slots[0].WritePackets,
+		"data_last_read": snapshot.Slots[0].LastRead, "data_last_write": snapshot.Slots[0].LastWrite,
+		"control_write_packets": snapshot.Slots[tunnel.ConnPoolSize].WritePackets,
+		"location":              "undetermined", "supervisor_failures_delta": d.pending,
+	}).Warn("transport retiring")
+	d.pending = 0
+}
+
 func (nm *transportSupervisor) launchTransportSupervisor() {
 	nm.startWorker(func() { nm.superviseTransport(nm.ctx) })
 }
@@ -485,14 +604,19 @@ func (nm *transportSupervisor) superviseTransport(ctx context.Context) {
 	index, failed := 0, 0
 	delay := portForwardReconnectDelay
 	consecutiveDead := 0
+	diagnostic := &transportDiagnostics{warnings: plog.NewThrottle(30 * time.Second)}
 	for ctx.Err() == nil {
 		if nm.terminalCause() != nil {
 			nm.cancel()
 			return
 		}
 		hadSession := false
+		diagnostic.attempt++
+		prepareStarted := time.Now()
 		g, err := nm.prepareTransport(ctx, kinds[index])
 		if err == nil {
+			diagnostic.baseline = nm.heartbeatStats.Snapshot()
+			g.diagnostic = diagnostic
 			if !nm.publishTransport(g) {
 				nm.retireTransport(g)
 				if nm.terminalCause() != nil {
@@ -502,6 +626,9 @@ func (nm *transportSupervisor) superviseTransport(ctx context.Context) {
 			}
 			started := time.Now()
 			primed, e := nm.monitorTransport(ctx, g)
+			if ctx.Err() == nil {
+				diagnostic.retiring(ctx, g, primed, e, nm.heartbeatStats.Snapshot())
+			}
 			nm.retireTransport(g)
 			err = e
 			if ctx.Err() != nil {
@@ -520,6 +647,19 @@ func (nm *transportSupervisor) superviseTransport(ctx context.Context) {
 			if primed {
 				failed = 0
 			}
+		} else if ctx.Err() == nil {
+			diagnostic.failed(time.Now())
+			if diagnostic.warnings.Allow("prepare:" + transportKindName(g.kind)) {
+				plog.G(ctx).WithFields(map[string]any{
+					"attempt": diagnostic.attempt, "kind": transportKindName(g.kind), "stage": g.stage,
+					"elapsed": time.Since(prepareStarted).Round(time.Millisecond), "reason": transportFailureReason(err),
+					"error": transportDiagnosticError(err), "supervisor_failures_delta": diagnostic.pending,
+				}).Warn("transport prepare_failed")
+				diagnostic.pending = 0
+			}
+		}
+		if ctx.Err() != nil {
+			return
 		}
 		if terminal := nm.terminalCause(); terminal != nil {
 			err = terminal
@@ -529,7 +669,9 @@ func (nm *transportSupervisor) superviseTransport(ctx context.Context) {
 			nm.err = err
 			nm.notifyTransportLocked()
 			nm.mu.Unlock()
-			plog.G(ctx).Errorf("Transport stopped: %v", err)
+			plog.G(ctx).WithFields(map[string]any{
+				"kind": transportKindName(g.kind), "reason": "terminal", "error": transportDiagnosticError(err),
+			}).Error("transport stopped")
 			nm.cancel()
 			return
 		}
@@ -538,13 +680,20 @@ func (nm *transportSupervisor) superviseTransport(ctx context.Context) {
 		// Try the other configured path immediately. Once all paths have failed,
 		// apply the existing bounded backoff, including never-primed black holes.
 		if failed >= len(kinds) {
-			if !nm.waitNetworkRetry(ctx, delay) {
+			retryCtx := plog.WithFields(ctx, map[string]any{
+				"next_kind": transportKindName(kinds[index]), "attempt": diagnostic.attempt,
+			})
+			if !nm.waitNetworkRetry(retryCtx, delay, diagnostic.warnings) {
 				return
 			}
 			if !hadSession {
 				delay = nextPortForwardDelay(delay, 0, true)
 			}
 			failed = 0
+		} else if diagnostic.warnings.Allow("switch:" + transportKindName(kinds[index])) {
+			plog.G(ctx).WithFields(map[string]any{
+				"next_kind": transportKindName(kinds[index]), "attempt": diagnostic.attempt, "retry_in": time.Duration(0),
+			}).Info("transport retry")
 		}
 	}
 }
@@ -596,6 +745,9 @@ func (nm *transportSupervisor) monitorTransport(ctx context.Context, g *transpor
 				last = nm.lastReply()
 			}
 			if last.After(armedAt) {
+				if !primed && ctx.Err() == nil {
+					g.diagnostic.recovered(ctx, g, nm.heartbeatStats.Snapshot())
+				}
 				primed = true
 			}
 			if !probeRequested.IsZero() && last.After(probeRequested) {
@@ -614,7 +766,7 @@ func (nm *transportSupervisor) monitorTransport(ctx context.Context, g *transpor
 				if runtime.GOOS == "darwin" {
 					nm.repairRoutes(ctx)
 				}
-				return primed, fmt.Errorf("data-plane heartbeat expired")
+				return primed, errTransportHeartbeatExpired
 			}
 		}
 		select {

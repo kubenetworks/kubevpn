@@ -324,10 +324,16 @@ func (nm *transportSupervisor) networkOffline() bool {
 	return name == "" || !ok || !iface.up
 }
 
-func (nm *transportSupervisor) waitNetworkRetry(ctx context.Context, delay time.Duration) bool {
+func (nm *transportSupervisor) waitNetworkRetry(ctx context.Context, delay time.Duration, warnings *plog.Throttle) bool {
 	nm.consumeNetworkChange()
-	if nm.networkOffline() && delay < livenessCheckInterval {
+	offline := nm.networkOffline()
+	if offline && delay < livenessCheckInterval {
 		delay = livenessCheckInterval
+	}
+	if ctx.Err() == nil && warnings.Allow("retry") {
+		plog.G(ctx).WithFields(map[string]any{
+			"retry_in": delay, "offline": offline, "wake_on_network_change": true,
+		}).Info("transport retry")
 	}
 	timer := time.NewTimer(delay)
 	defer timer.Stop()

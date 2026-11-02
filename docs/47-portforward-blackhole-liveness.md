@@ -51,6 +51,31 @@ Current source navigation: `pkg/network/address.go` owns rentIP/IPWatcher,
 `pkg/tunnel/heartbeat.go` validates probe evidence. The filenames and removed helpers
 inside the historical sections below are retained only as incident provenance.
 
+### Default transport diagnostics
+
+The supervisor records preparation failures at Warn with a local attempt number, transport kind,
+preparation stage and safe error classification. Retry events report the selected next kind and
+actual scheduled delay, including the offline minimum; a network-change event may wake that wait
+early. Authentication/configuration failures report `transport stopped`, without promising a retry.
+
+Before retiring a failed generation, `transport retiring` captures its heartbeat age, probe state,
+cumulative send/reply counts and data/control slot activity. The snapshot is taken **before**
+`BeginGeneration` clears the old evidence. `location=undetermined` deliberately avoids turning a
+missing reply into an assertion about SSH, port-forward, the server, or an intermediate network hop.
+A successful local write is not delivery confirmation. Error summaries use typed classifications,
+not arbitrary upstream error text that could contain proxy credentials.
+
+After a reported failure, `transport recovered` requires a nonempty validated heartbeat timestamp
+for the current generation; preparation, publication and loopback TCP dialing are insufficient.
+Failure summaries are limited to one per 30 seconds per supervisor, phase and transport kind.
+`supervisor_failures_delta` counts all preparation/retirement failures since the supervisor's
+previous emitted failure summary, including suppressed failures of other kinds or phases. The
+adjacent kind/stage/reason describes the current event, not every occurrence in that aggregate.
+Recovery's `failures` field is the separate outage-wide total. User cancellation does not produce a
+failure/recovery event. These logs do not change watchdog thresholds or recovery decisions.
+Logging remains synchronous: a permanently blocked logging backend can delay supervisor progress;
+this is not a bounded-sink or shutdown guarantee.
+
 ### Slot-local rapid-failure pacing
 
 `pkg/tunnel/slot.go` independently paces each data/control slot when dialing succeeds
