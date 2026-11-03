@@ -9,7 +9,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/core"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/endpoint"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/tun"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/tunnel"
@@ -33,7 +33,7 @@ func (nm *Runtime) startTUN(ctx context.Context, forwardAddress string) error {
 		return err
 	}
 
-	forwardNode, err := core.ParseNode(forwardAddress)
+	forwardNode, err := endpoint.ParseNode(forwardAddress)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to parse forward node %s: %v", forwardAddress, err)
 		return err
@@ -99,18 +99,18 @@ func buildTunConfig(v4, v6 *net.IPNet, routes []types.Route) tun.Config {
 
 // startTunServer creates the TUN listener, wires up the gvisor handler and forwarder,
 // starts the server goroutine, and resolves the TUN device name.
-func (nm *Runtime) startTunServer(ctx context.Context, forwardNode *core.Node, forwardAddress string, secretData map[string][]byte, tunConfig tun.Config) error {
-	forwarder := &core.Forwarder{
+func (nm *Runtime) startTunServer(ctx context.Context, forwardNode *endpoint.Node, forwardAddress string, secretData map[string][]byte, tunConfig tun.Config) error {
+	forwarder := &endpoint.Forwarder{
 		Addr:        forwardNode.Addr,
-		Connector:   core.NewUDPOverTCPConnector(),
-		Transporter: &generationTransporter{nm: nm.transport, base: core.TCPTransporter(secretData), endpoint: endpointTCP},
+		Connector:   endpoint.NewUDPOverTCPConnector(),
+		Transporter: &generationTransporter{nm: nm.transport, base: endpoint.TCPTransporter(secretData), endpoint: endpointTCP},
 		MaxRetries:  5,
 	}
 
 	plog.StepStart(ctx, "Creating TUN device")
 	// heartbeatStats is allocated once in New; reuse it (do not re-assign) so the
 	// liveness watchdog and status queries observe the same instance without a data race.
-	handler := tunnel.TunHandler(forwarder.TunnelConfig(), core.NewRouteHub(), nm.transport.heartbeatStats)
+	handler := tunnel.TunHandler(forwarder.TunnelConfig(), endpoint.NewRouteHub(), nm.transport.heartbeatStats)
 	newListener := nm.device.newTunListener
 	if newListener == nil {
 		newListener = tun.Listener
@@ -121,13 +121,13 @@ func (nm *Runtime) startTunServer(ctx context.Context, forwardNode *core.Node, f
 		return fmt.Errorf("create tun listener: %w: %w", err, config.ErrTunDeviceFailed)
 	}
 
-	server := core.Server{
+	server := endpoint.Server{
 		Listener: listener,
 		Handler:  &tunCompletionHandler{Handler: handler, cancel: nm.transport.cancel},
 	}
 
 	if !nm.transport.startWorker(func() {
-		if err := core.Serve(ctx, []core.Server{server}); err != nil && ctx.Err() == nil {
+		if err := endpoint.Serve(ctx, []endpoint.Server{server}); err != nil && ctx.Err() == nil {
 			plog.G(ctx).Errorf("[Client] Local TUN server exited: %v", err)
 			nm.transport.cancel()
 		}
@@ -165,7 +165,7 @@ func (nm *Runtime) getTunDeviceName() (string, error) {
 // A TUN handler exiting is terminal even if its listener's Accept is still
 // blocked. Cancel the manager; its external owner performs joined cleanup.
 type tunCompletionHandler struct {
-	core.Handler
+	endpoint.Handler
 	cancel context.CancelFunc
 }
 

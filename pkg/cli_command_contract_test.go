@@ -38,6 +38,8 @@ func TestCLICommandContract(t *testing.T) {
 		{"run", "--help"},
 		{"status", "--help"},
 		{"version", "--help"},
+		{"server", "--help"},
+		{"server", "--definitely-invalid-flag"},
 		{"--definitely-invalid-flag"},
 		{"connect", "--definitely-invalid-flag"},
 	} {

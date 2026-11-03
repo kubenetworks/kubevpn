@@ -198,8 +198,8 @@ dynamic loopback endpoints. Healthy SSH or port-forward remains sticky; only fai
 paths. Authentication/trust failures are terminal, not a reason to bypass policy via fallback.
 The alternate Kubernetes path uses `pkg/cluster/portforward/session.go`.
 `pkg/tunnel` owns the data/control slots and heartbeat correlation; gvisor forwarders live
-in `pkg/tunnel/internal/netstack`. Service lifetime is driven by `core.Serve`
-(`pkg/core/serve.go`), which starts peers before accept and joins them after handlers return.
+in `pkg/tunnel/internal/netstack`. Service lifetime is driven by `endpoint.Serve`
+(`pkg/endpoint/serve.go`), which starts peers before accept and joins them after handlers return.
 
 ##### Connection pool — `connPool` (`pool.go`)
 
@@ -502,7 +502,7 @@ SshStart(ctx, req):
     │   │   ├── tun: net=198.18.0.0/32 (default server IP)
     │   │   └── gtcp: :10801 (gvisor TCP listener)
     │   │
-    │   ├── Start core.Serve(sshCtx, servers)
+    │   ├── Start endpoint.Serve(sshCtx, servers)
     │   │
     │   └── Record sshServerIP, sshCancelFunc
     │

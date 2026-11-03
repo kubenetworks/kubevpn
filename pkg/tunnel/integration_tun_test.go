@@ -5,7 +5,7 @@
 // and not safe to run alongside the rest of the unit suite, so they live behind the `tun` build
 // tag and run on demand / in a dedicated CI step:
 //
-//	sudo go test ./pkg/core/... -tags=tun -run TestTUN -timeout=120s -v
+//	sudo go test ./pkg/tunnel/... -tags=tun -run TestTUN -timeout=120s -v
 package tunnel
 
 import (
@@ -63,7 +63,7 @@ func tunTestContext(t *testing.T) context.Context {
 // =============================================================================
 // Integration tests requiring a real TUN device.
 //
-// Run with: go test ./pkg/core/... -tags=tun -run TestTUN -timeout=60s -v
+// Run with: go test ./pkg/tunnel/... -tags=tun -run TestTUN -timeout=60s -v
 //
 // These tests create actual TUN interfaces, route traffic through them,
 // and verify the full kubevpn data path end-to-end:
@@ -632,7 +632,7 @@ func mustParseCIDR(s string) net.IPNet {
 //  9. Multiple sequential requests on a persistent connection
 //  10. Route registration: verify Router has client route
 //
-// Run: sudo go test ./pkg/core/... -tags=tun -run TestTUN_ClientDevice -timeout=120s -v
+// Run: sudo go test ./pkg/tunnel/... -tags=tun -run TestTUN_ClientDevice -timeout=120s -v
 // =============================================================================
 func TestTUN_ClientDevice_FullPipeline(t *testing.T) {
 	ctx := tunTestContext(t)

@@ -57,11 +57,11 @@ A test cluster is available at `/data/.kube/config`:
 ## Architecture
 
 ```
-cmd/kubevpn/cmds/     CLI command definitions (DO NOT MODIFY in refactoring)
+cmd/kubevpn/cmds/     CLI command definitions (frozen; server.go rename-only exception below)
 pkg/
 ├── config/            Constants, image config, syncthing paths
 ├── controlplane/      Envoy xDS control plane (gRPC, config cache)
-├── core/              Network protocol core (TUN, gvisor, TCP/UDP forwarding)
+├── endpoint/          Protocol/URI/TLS/SSH/UDP-relay assembly and Serve
 ├── cp/                File copy (kubectl cp equivalent)
 ├── daemon/            gRPC daemon server
 │   ├── action/        Per-command daemon handlers (connect, proxy, leave, etc.)
@@ -157,7 +157,7 @@ pkg/
 ### Design Patterns in Use
 
 - **Strategy pattern** in `pkg/inject` — `Injector` interface with `NewInjector` factory
-- **Strategy pattern** in `pkg/core` — `stackConstructor` function type for gvisor stack creation
+- **Strategy pattern** in `pkg/tunnel/server.go` — `stackConstructor` function type for gvisor stack creation
 - **Embedded struct** in `pkg/handler` — `K8sClient` bundles (clientset, restclient, config, factory) + `InitClient`/`GetFactory`/`GetClientset` methods; embedded via `SessionBase` by `ConnectOptions`/`DataSession`, and directly by `SyncOptions`
 - **Session lifecycle** in `daemon/action` — `SessionLifecycle` owns the daemon session context + `Teardown()` (cancel + logger detach); the rollback/cleanup registry lives separately in `handler.rollbackList` + `SessionBase.cleanup`
 - **Rollback registry** in `pkg/handler` — `rollbackList` (mutex-guarded `AddRollbackFunc`/`getRollbackFuncs`) embedded by `SessionBase` and `SyncOptions`; run snapshots via `executeRollbackFuncs`
@@ -312,7 +312,7 @@ func TestAddEnvoyConfig(t *testing.T) {
 - One user leaves → other's rule untouched; last user leaves → Virtual removed
 - Crash recovery: same OwnerID re-proxy → rule updated, not duplicated
 
-**Fault injection** (`core/fault_injection_test.go`):
+**Fault injection** (`tunnel/fault_injection_test.go`):
 - `net.Pipe()` + `Close()` to simulate TCP disconnect
 - `flakyConn` wrapper to fail after N writes
 - Real TCP listener for read deadline timeout tests
@@ -331,7 +331,7 @@ When refactoring backend code (`pkg/`):
 
 0. **Read `docs/` design documents first** — before any code change, read the relevant design docs in `docs/` to understand the full architecture. Changes must be consistent with the documented design (dual-daemon model, OwnerID ownership, DHCP lifecycle, logging architecture, etc.). If a change conflicts with the docs, update the docs as part of the same commit. Key docs: `02-dual-daemon.md` (which daemon runs what), `05-owner-id.md` (envoy rule ownership), `13-logging-architecture.md` (log routing), `14-rpc-daemon-mapping.md` (RPC → daemon mapping), `33-client-upgrade.md` (client self-upgrade: download/atomic-swap/rollback).
 1. **Every refactoring must include integration tests** — wire up real components (gRPC, DHCP, ConfigMap, connection management) against `fake.NewSimpleClientset()`. Structure tests as multi-phase stories (connect → proxy → leave → crash → reconnect). Never write single-function unit tests as a substitute.
-2. **Never touch `cmd/`** — CLI is frozen
+2. **Never touch `cmd/`** — CLI is frozen. Sole approved exception for the `pkg/core` → `pkg/endpoint` rename: `cmd/kubevpn/cmds/server.go` may change only the import path and `core` → `endpoint` package qualifiers. No CLI behavior or other CLI file may change.
 3. **Always `go build ./...` after changes** — catch compile errors immediately
 4. **Run `go test` and `go vet`** on affected packages before committing
 5. **Commit per logical change** — don't bundle unrelated fixes

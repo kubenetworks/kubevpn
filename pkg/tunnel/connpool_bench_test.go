@@ -18,7 +18,7 @@ package tunnel
 // bypasses hashing. Application flow count and tunnel slot count are distinct axes.
 //
 // Run:
-//	go test ./pkg/core/ -run '^$' -bench BenchmarkConnPool -benchmem -benchtime=2s -count=3
+//	go test ./pkg/tunnel/ -run '^$' -bench BenchmarkConnPool -benchmem -benchtime=2s -count=3
 //
 // Historical measurements, before current batching/single-slot default (arm64,
 // -benchtime=1s -count=3, MB/s averaged over the 3 runs):

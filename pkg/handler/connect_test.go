@@ -15,7 +15,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/wencaiwulue/kubevpn/v2/pkg/core"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/endpoint"
 )
 
 func TestRoute(t *testing.T) {
@@ -83,13 +83,13 @@ func TestParseNode(t *testing.T) {
 	tests := []struct {
 		name    string
 		args    args
-		want    *core.Node
+		want    *endpoint.Node
 		wantErr bool
 	}{
 		{
 			name: "",
 			args: args{s: "tun:/tcp://remote-addr:9080?net=10.10.10.10/24&gw=10.10.10.1&mtu=1500&route=10.10.10.10/24&route=10.10.10.11/24"},
-			want: &core.Node{
+			want: &endpoint.Node{
 				Addr:     "",
 				Protocol: "tun",
 				Forward:  "tcp://remote-addr:9080",
@@ -108,7 +108,7 @@ func TestParseNode(t *testing.T) {
 		{
 			name: "",
 			args: args{s: "tun:/tcp://remote-addr:9080?net=10.10.10.10/24&gw=10.10.10.1&mtu=1500&route=10.10.10.10/24,10.10.10.11/24"},
-			want: &core.Node{
+			want: &endpoint.Node{
 				Addr:     "",
 				Protocol: "tun",
 				Forward:  "tcp://remote-addr:9080",
@@ -126,7 +126,7 @@ func TestParseNode(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := core.ParseNode(tt.args.s)
+			got, err := endpoint.ParseNode(tt.args.s)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ParseNode() error = %v, wantErr %v", err, tt.wantErr)
 				return

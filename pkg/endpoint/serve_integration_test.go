@@ -1,4 +1,4 @@
-package core_test
+package endpoint_test
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wencaiwulue/kubevpn/v2/pkg/core"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/endpoint"
 )
 
 // A packet-device surrogate with an existing loopback address exercises real
@@ -58,7 +58,7 @@ func TestStage3_RunServerTUNFatal(t *testing.T) {
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		done <- core.Serve(ctx, []core.Server{{Listener: &serverShutdownListener{Listener: ln, conn: tun}, Handler: tunnel.TunHandler(nil, core.NewRouteHub(), nil)}})
+		done <- endpoint.Serve(ctx, []endpoint.Server{{Listener: &serverShutdownListener{Listener: ln, conn: tun}, Handler: tunnel.TunHandler(nil, endpoint.NewRouteHub(), nil)}})
 	}()
 	select {
 	case <-tun.read:
@@ -86,7 +86,7 @@ func TestStage3_RunServerTUNFatal(t *testing.T) {
 
 // lifecycleHandler wraps the real tunnel handler to observe service sequencing.
 type lifecycleHandler struct {
-	core.Handler
+	endpoint.Handler
 	service interface {
 		Start(context.Context)
 		Close() error
@@ -107,7 +107,7 @@ func (h *lifecycleHandler) Handle(ctx context.Context, c net.Conn) {
 }
 
 func TestServe_StartsAndJoinsRealTunnelService(t *testing.T) {
-	servers, err := core.GenerateServers([]string{"gtcp://127.0.0.1:0"}, core.NewRouteHub())
+	servers, err := endpoint.GenerateServers([]string{"gtcp://127.0.0.1:0"}, endpoint.NewRouteHub())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestServe_StartsAndJoinsRealTunnelService(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
-	go func() { done <- core.Serve(ctx, servers) }()
+	go func() { done <- endpoint.Serve(ctx, servers) }()
 	select {
 	case <-observed.started:
 	case <-time.After(3 * time.Second):
@@ -165,7 +165,7 @@ func TestStage3_RunOrdinaryEOFIsNotFatal(t *testing.T) {
 	handled := make(chan struct{}, 2)
 	done := make(chan error, 1)
 	go func() {
-		done <- core.Serve(ctx, []core.Server{{Listener: ln, Handler: serverShutdownEOFHandler{done: handled}}})
+		done <- endpoint.Serve(ctx, []endpoint.Server{{Listener: ln, Handler: serverShutdownEOFHandler{done: handled}}})
 	}()
 	for i := 0; i < 2; i++ {
 		c, err := net.Dial("tcp", ln.Addr().String())

@@ -281,7 +281,7 @@ Fargate generates two random ports per container port (`EnvoyListenerPort` + `en
 The SSH reverse tunnel (`ExposeLocalPortToRemote`) is TCP-only, so it cannot
 carry UDP back to the developer. For UDP container ports the sidecar runs a
 reverse-UDP bridge listener (`kubevpn server -l udpbridge://:<PortUDPBridge>`,
-`pkg/core/udp_reverse_bridge.go`): the developer opens a TCP control connection
+`pkg/endpoint/udp_reverse_bridge.go`): the developer opens a TCP control connection
 to it (reachable via the VPN at `podIP:PortUDPBridge`) and announces the envoy
 port; the sidecar then UDP-listens on `127.0.0.1:envoyPort` (where envoy's UDP
 proxy forwards) and relays datagrams over the control connection using the
@@ -305,5 +305,5 @@ ports and the SSH reverse tunnel for TCP ports (protocol comes from the
 | `pkg/handler/leave.go` | Cleanup: header-based rule matching, Service restoration |
 | `pkg/handler/reset.go` | Hard reset: remove all rules, restore Service |
 | `pkg/ssh/reverse.go` | `ExposeLocalPortToRemote()` — SSH reverse tunnel (TCP) |
-| `pkg/core/udp_reverse_bridge.go` | `ServeUDPReverse`/`DialUDPReverse` + `udpbridge` protocol — reverse-UDP bridge |
+| `pkg/endpoint/udp_reverse_bridge.go` | `ServeUDPReverse`/`DialUDPReverse` + `udpbridge` protocol — reverse-UDP bridge |
 | `pkg/daemon/action/status.go` | Status reporting: fargate-aware device detection |

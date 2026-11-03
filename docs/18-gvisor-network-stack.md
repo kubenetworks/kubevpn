@@ -4,14 +4,14 @@
 
 The tunnel package (`pkg/tunnel`) owns packet forwarding between TUN devices and remote connections. Its `internal/netstack` package constructs gvisor TCP/UDP/ICMP stacks and forwarders without importing the parent tunnel package. Shared length-prefix connections and batch socket I/O live in `pkg/internal/wire`; pooled `Packet` references and packet batches remain in tunnel.
 
-`pkg/core` retains URI parsing, protocol factories, TCP/TLS dialing, SSH, UDP relay/reverse bridge and `Serve`. `core.NewRouteHub` returns the real `*tunnel.Router` (not an alias). `Forwarder.TunnelConfig` supplies a dial function, preserving core's retry/connector/TLS policy without a reverse dependency. `Serve` starts factory-created service handlers before accept and closes/joins their peers after connection handlers finish. `pkg/network` consumes tunnel handlers and heartbeat statistics.
+`pkg/endpoint` retains URI parsing, protocol factories, TCP/TLS dialing, SSH, UDP relay/reverse bridge and `Serve`. `endpoint.NewRouteHub` returns the real `*tunnel.Router` (not an alias). `Forwarder.TunnelConfig` supplies a dial function, preserving endpoint's retry/connector/TLS policy without a reverse dependency. `Serve` starts factory-created service handlers before accept and closes/joins their peers after connection handlers finish. `pkg/network` consumes tunnel handlers and heartbeat statistics.
 
 ## 2. Architecture
 
 Diagram labels retain the older descriptive names: `ClientDevice` is now
 `tunDevice` + `clientTransport`, and `readFromConn`/`writeToConn` are the attempt's
 `readGeneration`/`writeGeneration`. `Packet` in the ownership discussion means the
-now-private `packet` type in `pkg/tunnel/packet.go`, not an exported core API.
+now-private `packet` type in `pkg/tunnel/packet.go`, not an exported endpoint API.
 
 ```
                      Local Machine (Client)                          Traffic Manager (Server)
@@ -85,7 +85,7 @@ TunHandler → tunDevice + serverTransport → serve:
 Server queue sends and packet routing are context-aware. The separate `tunBridge`
 (`pkg/tunnel/bridge.go`) owns `send` admission and `stop`/join/drain without closing its
 data channel. Device `serve` joins routines before the final device-queue drain.
-Server-role `FatalOnReturn()` makes a returned TUN handler terminal for `core.Serve`:
+Server-role `FatalOnReturn()` makes a returned TUN handler terminal for `endpoint.Serve`:
 cancel, close listeners/connections, join accept loops and accepted handlers, then close/join
 service peers. Ordinary TCP EOF is not fatal; root-client completion is owned by
 `network.Runtime` (see [12](12-session-lifecycle.md)).
@@ -177,7 +177,7 @@ proactive registration echoes, but refuses a closed `bufferedTCP`. Its stop call
 routes even before reader cleanup. Route changes call `peerRegistry.onRouteAddedLocked` /
 `onRouteEmptyLocked` under `hub.mu`, then the registry mutex, with metadata/timer updates
 only (no I/O, logging, or hub reentry). The registry is started with the service context by
-`core.Serve`, never by the first accepted connection. Periodic control probes
+`endpoint.Serve`, never by the first accepted connection. Periodic control probes
 do not register routes. See [48](48-shared-server-gvisor-stack.md) for grace epochs and
 [08](08-heartbeat-health.md) for read/write deadlines.
 
@@ -187,7 +187,7 @@ do not register routes. See [48](48-shared-server-gvisor-stack.md) for grace epo
 
 The former `UDPConnOverTCP` is now `wire.Conn` (imported as `framing` by the tunnel).
 The shared helpers are `ReadDatagram`, `WriteDatagram` and `WriteFull`; the legacy names
-in the protocol discussion below refer to those operations, not APIs still exported by core.
+in the protocol discussion below refer to those operations, not APIs exported by endpoint.
 
 Provides UDP-like datagram semantics over a TCP stream using length-prefix framing:
 
@@ -220,7 +220,7 @@ reports actual wire progress and errors, continues positive short writes only on
 writer, and converts zero progress without an error to `io.ErrShortWrite`. A partial frame
 failure must never trigger fallback/replay onto another connection.
 
-`relayUDPOverTCP` in `pkg/core/udp_relay.go` closes both TCP and UDP endpoints on first copy
+`relayUDPOverTCP` in `pkg/endpoint/udp_relay.go` closes both TCP and UDP endpoints on first copy
 completion or cancellation, then joins both copy workers. This is the UDP-over-TCP relay's
 ownership contract, not a claim about all gvisor forwarder goroutines.
 
@@ -413,7 +413,7 @@ Forwarder.DialContext()
 | `pkg/tunnel/client_stack.go`, `client_endpoint.go` | Session-level local/inter-client stacks and endpoint pumps |
 | `pkg/tunnel/buffered_conn.go`, `batch.go` | Joined buffered writer and packet batches |
 | `pkg/internal/wire/conn.go`, `batch.go` | Shared datagram framing and batch socket writes |
-| `pkg/core/node.go`, `forwarder.go` | URI parsing and retry/connector/TLS dialing; `TunnelConfig` boundary |
-| `pkg/core/protocol_registry.go`, `servers.go`, `serve.go` | Factory registration, server assembly and joined serving lifetime |
-| `pkg/core/udp_relay.go` | UDP-over-TCP relay, endpoint close and copy-worker join |
-| `pkg/core/transporter_tcp.go`, `ssh.go` | TCP/TLS transporter and SSH protocol listener/handler |
+| `pkg/endpoint/node.go`, `forwarder.go` | URI parsing and retry/connector/TLS dialing; `TunnelConfig` boundary |
+| `pkg/endpoint/protocol_registry.go`, `servers.go`, `serve.go` | Factory registration, server assembly and joined serving lifetime |
+| `pkg/endpoint/udp_relay.go` | UDP-over-TCP relay, endpoint close and copy-worker join |
+| `pkg/endpoint/transporter_tcp.go`, `ssh.go` | TCP/TLS transporter and SSH protocol listener/handler |

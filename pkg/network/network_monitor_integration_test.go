@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/core"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/endpoint"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/header"
@@ -665,7 +665,7 @@ func monitorHeartbeatClient(t *testing.T) (*Runtime, *testNetworkMonitor, *atomi
 	}
 	backendDone := make(chan struct{})
 	go func() {
-		core.Serve(ctx, []core.Server{{Listener: backend, Handler: monitorEchoGateway{}}})
+		endpoint.Serve(ctx, []endpoint.Server{{Listener: backend, Handler: monitorEchoGateway{}}})
 		close(backendDone)
 	}()
 	t.Cleanup(func() { cancel(); backend.Close(); transportAwait(t, backendDone) })
@@ -688,7 +688,7 @@ func monitorHeartbeatClient(t *testing.T) (*Runtime, *testNetworkMonitor, *atomi
 	ep := channel.New(256, 1500, tcpip.GetRandMacAddr())
 	tunCtx, tunCancel := context.WithCancel(ctx)
 	device := &transportPacketTUN{ep, tunCtx, tunCancel}
-	handler := tunnel.TunHandler((&core.Forwarder{Addr: "manager", Transporter: &generationTransporter{nm.transport, plainTransportDialer{}, endpointTCP}, Connector: core.NewUDPOverTCPConnector()}).TunnelConfig(), core.NewRouteHub(), nm.transport.heartbeatStats)
+	handler := tunnel.TunHandler((&endpoint.Forwarder{Addr: "manager", Transporter: &generationTransporter{nm.transport, plainTransportDialer{}, endpointTCP}, Connector: endpoint.NewUDPOverTCPConnector()}).TunnelConfig(), endpoint.NewRouteHub(), nm.transport.heartbeatStats)
 	done := make(chan struct{})
 	go func() { handler.Handle(nm.transport.ctx, device); close(done) }()
 	t.Cleanup(func() { nm.Stop(); device.Close(); transportAwait(t, done); ep.Close() })

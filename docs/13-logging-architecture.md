@@ -130,10 +130,10 @@ them to the CLI.
 
 Connection-scoped handlers tag their context with the connection ID via
 `plog.WithField(ctx, action.LogFieldConnID, id)`, and the data plane adds the TUN device name via
-`plog.WithField(ctx, plog.FieldTun, name)` (core `TunHandler`). The server format renders them as a
+`plog.WithField(ctx, plog.FieldTun, name)` (`pkg/tunnel/device_handler.go`, `tunHandler`). The server format renders them as a
 `[connID=xxxx tun=utun5]` prefix (via `GenStr`), so concurrent operations sharing one daemon log
 file can be filtered apart. The StreamHook uses the message-only client format, so the prefix never
-reaches CLI stdout. core/gVISOR logs inherit the tags automatically through `plog.GetFields(ctx)`.
+reaches CLI stdout. endpoint/tunnel/gVISOR logs inherit the tags automatically through `plog.GetFields(ctx)`.
 
 The root daemon tags `connID` from `req.ConnectionID` **as soon as the request arrives** (idempotency
 guard, setup, data plane, and cleanup all carry it). The user daemon tags it only after computing the

@@ -22,9 +22,10 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/core"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
+
+	"github.com/wencaiwulue/kubevpn/v2/pkg/endpoint"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/tun"
 	gossh "golang.org/x/crypto/ssh"
@@ -274,7 +275,7 @@ func TestTransportReview_RejectTunWorkerClosesListener(t *testing.T) {
 	}
 	defer ln.Close()
 	nm.device.newTunListener = func(tun.Config) (net.Listener, error) { return ln, nil }
-	if e := nm.startTunServer(context.Background(), &core.Node{Addr: "manager"}, "manager", nil, tun.Config{}); !errors.Is(e, net.ErrClosed) {
+	if e := nm.startTunServer(context.Background(), &endpoint.Node{Addr: "manager"}, "manager", nil, tun.Config{}); !errors.Is(e, net.ErrClosed) {
 		t.Fatalf("rejected worker: %v", e)
 	}
 	if c, e := net.DialTimeout("tcp", ln.Addr().String(), time.Second); e == nil {
@@ -536,7 +537,7 @@ func TestTransportIntegration_TLSHandshakeRejectsUntrustedPeer(t *testing.T) {
 	secret := map[string][]byte{config.TLSCertKey: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: pair.Certificate[0]}), config.TLSPrivateKeyKey: pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: key}), config.TLSServerName: []byte("untrusted.invalid")}
 	nm := New(Config{})
 	seedTransportEndpoint(t, nm, tlsServer.Listener.Addr().String())
-	c, e := nm.transport.dialTransport(context.Background(), endpointTCP, core.TCPTransporter(secret))
+	c, e := nm.transport.dialTransport(context.Background(), endpointTCP, endpoint.TCPTransporter(secret))
 	if c != nil {
 		c.Close()
 		t.Fatal("lazy TLS connection escaped without verification")
@@ -746,7 +747,7 @@ func TestTransportIntegration_GvisorApplicationSurvivesReplacement(t *testing.T)
 	}
 	backendDone := make(chan struct{})
 	go func() {
-		core.Serve(ctx, []core.Server{{Listener: backend, Handler: tunnel.GvisorLocalTCPHandler(core.NewRouteHub())}})
+		endpoint.Serve(ctx, []endpoint.Server{{Listener: backend, Handler: tunnel.GvisorLocalTCPHandler(endpoint.NewRouteHub())}})
 		close(backendDone)
 	}()
 	srv, _ := transportForwardServer(t, map[int]string{config.PortTCP: backend.Addr().String()})
@@ -760,17 +761,17 @@ func TestTransportIntegration_GvisorApplicationSurvivesReplacement(t *testing.T)
 	if g.kind != transportSSH {
 		t.Fatal("initial path is not SSH")
 	}
-	endpoint := channel.New(256, 1500, tcpip.GetRandMacAddr())
-	origin := tunnel.NewLocalStack(ctx, endpoint)
+	linkEP := channel.New(256, 1500, tcpip.GetRandMacAddr())
+	origin := tunnel.NewLocalStack(ctx, linkEP)
 	defer origin.Destroy()
-	defer endpoint.Close()
+	defer linkEP.Close()
 	addr := tcpip.AddrFrom4([4]byte{198, 18, 0, 10})
 	if e := origin.AddProtocolAddress(1, tcpip.ProtocolAddress{Protocol: header.IPv4ProtocolNumber, AddressWithPrefix: addr.WithPrefix()}, stack.AddressProperties{}); e != nil {
 		t.Fatal(e)
 	}
 	tunCtx, tunCancel := context.WithCancel(ctx)
-	device := &transportPacketTUN{endpoint, tunCtx, tunCancel}
-	handler := tunnel.TunHandler((&core.Forwarder{Addr: "manager", Transporter: &generationTransporter{nm.transport, plainTransportDialer{}, endpointTCP}, Connector: core.NewUDPOverTCPConnector()}).TunnelConfig(), core.NewRouteHub(), nm.transport.heartbeatStats)
+	device := &transportPacketTUN{linkEP, tunCtx, tunCancel}
+	handler := tunnel.TunHandler((&endpoint.Forwarder{Addr: "manager", Transporter: &generationTransporter{nm.transport, plainTransportDialer{}, endpointTCP}, Connector: endpoint.NewUDPOverTCPConnector()}).TunnelConfig(), endpoint.NewRouteHub(), nm.transport.heartbeatStats)
 	tunDone := make(chan struct{})
 	go func() { handler.Handle(ctx, device); close(tunDone) }()
 	dialCtx, dialCancel := context.WithTimeout(ctx, 10*time.Second)
@@ -826,7 +827,7 @@ func TestTransportIntegration_RunJoinsHandler(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan struct{})
-	go func() { core.Serve(ctx, []core.Server{{Listener: ln, Handler: h}}); close(done) }()
+	go func() { endpoint.Serve(ctx, []endpoint.Server{{Listener: ln, Handler: h}}); close(done) }()
 	c, e := net.Dial("tcp", ln.Addr().String())
 	if e != nil {
 		t.Fatal(e)
@@ -875,8 +876,8 @@ func TestTransportIntegration_GenerationRetiresAllEndpoints(t *testing.T) {
 		t.Fatal("publish failed")
 	}
 	var active []net.Conn
-	for _, endpoint := range []transportEndpoint{endpointTCP, endpointUDP, endpointXDS} {
-		c, e := nm.transport.dialTransport(nm.transport.ctx, endpoint, core.TCPTransporter(nil))
+	for _, targetEndpoint := range []transportEndpoint{endpointTCP, endpointUDP, endpointXDS} {
+		c, e := nm.transport.dialTransport(nm.transport.ctx, targetEndpoint, endpoint.TCPTransporter(nil))
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -1078,7 +1079,7 @@ func TestTransportDiagnostics_RecoveryNeedsValidatedHeartbeat(t *testing.T) {
 	nm.transport.heartbeatStats.MarkReply()
 	nm.transport.signalTransportFailure(first.id, context.DeadlineExceeded)
 	current := waitNextTransport(t, nm, first.id)
-	conn, err := nm.transport.dialTransport(ctx, endpointTCP, core.TCPTransporter(nil))
+	conn, err := nm.transport.dialTransport(ctx, endpointTCP, endpoint.TCPTransporter(nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1194,7 +1195,7 @@ func TestTransportIntegration_SupervisorBootstrapRecoverySticky(t *testing.T) {
 	for range 10 {
 		nm.transport.requestNetworkCheck()
 	}
-	c, e := nm.transport.dialTransport(ctx, endpointTCP, core.TCPTransporter(nil))
+	c, e := nm.transport.dialTransport(ctx, endpointTCP, endpoint.TCPTransporter(nil))
 	if e != nil {
 		t.Fatal(e)
 	}

@@ -7,7 +7,7 @@
 > its pumps, `peers.go` owns service-context stacks, and `bridge.go` separately owns TUN
 > queue admission/drain. `buffered_conn.go` writers are joined by their connection owner.
 > Stack construction/forwarders live in `pkg/tunnel/internal/netstack`; framing and batch
-> socket I/O live in `pkg/internal/wire`. `pkg/core` retains URI/protocol/TLS/SSH/UDP-relay
+> socket I/O live in `pkg/internal/wire`. `pkg/endpoint` retains URI/protocol/TLS/SSH/UDP-relay
 > assembly and `Serve`, which starts service handlers before accept and closes/joins peers
 > after connection handlers return. Root networking moved to `pkg/network.Runtime`.
 > For current data-plane tests, use `go test ./pkg/tunnel/...` (and `./pkg/internal/wire`

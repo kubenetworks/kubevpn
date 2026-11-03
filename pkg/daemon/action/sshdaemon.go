@@ -8,8 +8,8 @@ import (
 	"github.com/containernetworking/cni/pkg/types"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/core"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/endpoint"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/tun"
@@ -43,12 +43,12 @@ func (svr *Server) SshStart(ctx context.Context, req *rpc.SshStartRequest) (resp
 			}
 		}()
 
-		nodes := []*core.Node{
-			core.NewNode("tun", "").WithParam("net", defaultServerIP),
-			core.NewNode("gtcp", fmt.Sprintf(":%d", config.PortTCP)),
+		nodes := []*endpoint.Node{
+			endpoint.NewNode("tun", "").WithParam("net", defaultServerIP),
+			endpoint.NewNode("gtcp", fmt.Sprintf(":%d", config.PortTCP)),
 		}
-		var servers []core.Server
-		servers, err = core.GenerateServersFromNodes(nodes, core.NewRouteHub())
+		var servers []endpoint.Server
+		servers, err = endpoint.GenerateServersFromNodes(nodes, endpoint.NewRouteHub())
 		if err != nil {
 			plog.G(ctx).Errorf("Failed to parse route: %v", err)
 			return

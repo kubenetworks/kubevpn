@@ -9,7 +9,7 @@ and `monitor.go` observes underlay changes (all under `pkg/network`). Kubernetes
 sessions live in `pkg/cluster/portforward`; CIDR detection lives in `pkg/cluster/discovery`.
 `pkg/tunnel` owns packet/device/slot/router lifecycles, `pkg/tunnel/internal/netstack`
 owns gvisor construction and forwarders, and `pkg/internal/wire` owns stream framing and
-batch writes. `pkg/core` retains protocol/URI/TLS/SSH/UDP-relay assembly and `Serve`.
+batch writes. `pkg/endpoint` retains protocol/URI/TLS/SSH/UDP-relay assembly and `Serve`.
 
 KubeVPN creates a bidirectional network tunnel between a local machine and a Kubernetes cluster. All IP traffic (TCP, UDP, ICMP) flows through a TUN device on the client, gets encapsulated over TCP, and is forwarded via `kubectl port-forward` to a traffic manager pod running a userspace network stack (gvisor).
 
@@ -360,7 +360,7 @@ When a connection closes, `RemoveRoutesByConn(ctx, conn)` removes it from every
 `ConnList` under `hub.mu`. Empty-route deletion and registration call the explicit
 `peerRegistry.onRouteEmptyLocked` / `onRouteAddedLocked` methods in the same transaction.
 Lock order is router then registry; transitions only change metadata/timers, with no I/O,
-logging, or router reentry. `core.Serve` starts that registry with the service context
+logging, or router reentry. `endpoint.Serve` starts that registry with the service context
 before accept and closes/joins it after connection handlers finish; no connection owns peers.
 
 This cleanup is driven by the server-side conn deadlines so that even a half-open
@@ -406,4 +406,4 @@ pull in Kubernetes cluster-API, Helm, or Docker transitive dependencies. This is
 Packet/stack code uses `pkg/util/netutil`, not the cluster helpers in `pkg/util`.
 `pkg/network` is the host-networking orchestrator and deliberately consumes Kubernetes
 clients plus `pkg/cluster/portforward` and `pkg/cluster/discovery`; it is not part of the
-cluster-independent packet layer. `pkg/core` remains the assembly/Serve boundary.
+cluster-independent packet layer. `pkg/endpoint` remains the assembly/Serve boundary.

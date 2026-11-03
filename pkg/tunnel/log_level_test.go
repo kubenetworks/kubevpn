@@ -17,7 +17,7 @@ import (
 func TestNoInfoLevelLogging(t *testing.T) {
 	entries, err := os.ReadDir(".")
 	if err != nil {
-		t.Fatalf("read pkg/core: %v", err)
+		t.Fatalf("read pkg/tunnel: %v", err)
 	}
 	fset := token.NewFileSet()
 	for _, e := range entries {
@@ -45,7 +45,7 @@ func TestNoInfoLevelLogging(t *testing.T) {
 					}
 				}
 				pos := fset.Position(sel.Pos())
-				t.Errorf("%s:%d: Info-level logging is forbidden in pkg/core (data-plane internals must use Debug); found .%s(",
+				t.Errorf("%s:%d: Info-level logging is forbidden in pkg/tunnel (data-plane internals must use Debug); found .%s(",
 					filepath.Base(name), pos.Line, sel.Sel.Name)
 			}
 			return true

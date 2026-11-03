@@ -15,7 +15,7 @@ import (
 	"k8s.io/kubectl/pkg/util/templates"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/core"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/endpoint"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
@@ -45,7 +45,7 @@ func CmdServer(cmdutil.Factory) *cobra.Command {
 			ctx := cmd.Context()
 			logger := plog.InitLoggerForServer()
 			logger.SetLevel(util.If(config.Debug, log.DebugLevel, log.InfoLevel))
-			servers, err := core.GenerateServers(listeners, core.NewRouteHub())
+			servers, err := endpoint.GenerateServers(listeners, endpoint.NewRouteHub())
 			if err != nil {
 				plog.G(ctx).Errorf("Parse server failed: %v", err)
 				return err

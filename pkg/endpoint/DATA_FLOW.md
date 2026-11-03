@@ -7,7 +7,7 @@ The data-plane implementation now lives in `pkg/tunnel`: `client.go`, `slot.go`,
 `packet.go`, `batch.go` and `heartbeat.go`. Historical filenames below describe
 those same paths before extraction. `pkg/internal/wire` owns shared stream framing
 and batch socket writes; `tunnel/internal/netstack` owns stack construction and
-TCP/UDP/ICMP forwarders. `core` only assembles listeners/dialers and runs `Serve`.
+TCP/UDP/ICMP forwarders. `endpoint` only assembles listeners/dialers and runs `Serve`.
 
 KubeVPN uses a TUN device + gvisor network stack between a local client and a remote
 Kubernetes cluster. The current default multiplexes business flows on one data connection
@@ -26,7 +26,7 @@ plus a separate control connection to the same forwarding endpoint.
   `peerRegistry` and `tunBridge`, not public `RouteMapTCP`/`TCPPacketChan` globals.
   `server_endpoint.go` sends per-client stack output through `readFromEndpointWriteToRoute`
   → Router → registered data conn. There is no direct per-connection stack reply writer.
-- Service lifetime: `core.Serve` (`pkg/core/serve.go`) calls handler `Start(serviceCtx)`
+- Service lifetime: `endpoint.Serve` (`pkg/endpoint/serve.go`) calls handler `Start(serviceCtx)`
   before accept, joins accepted handlers, then calls `Close` to join peer construction,
   output and destruction. `peerRegistry` never borrows the first connection's context.
   `bridge.go` separately owns queue admission/stop/drain. Connection handlers close and

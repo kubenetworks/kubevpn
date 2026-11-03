@@ -10,8 +10,10 @@
 > `pkg/tunnel/client.go` re-reads device addresses for registration/heartbeats;
 > `attempt.go` owns each connection, and `route.go` defines `Router` (formerly `RouteHub`).
 > Control probes do not register routes: replies return on registered data connections.
-> Sidecar one-time allocation remains in `pkg/core/protocol_registry.go`; it does not start
-> a sidecar IP watcher. Use [18](18-gvisor-network-stack.md), [47](47-portforward-blackhole-liveness.md)
+> Sidecar one-time allocation remains in `pkg/endpoint/protocol_registry.go`; it does not start
+> a sidecar IP watcher. The validation command below is historical; its current package equivalent
+> is `go test ./pkg/xds/... ./pkg/tun/... ./pkg/tunnel/... ./pkg/endpoint/...` (not run for this rename).
+> Use [18](18-gvisor-network-stack.md), [47](47-portforward-blackhole-liveness.md)
 > and [48](48-shared-server-gvisor-stack.md) for current packet/transport ownership.
 
 This document describes how TUN IPs are allocated and kept consistent across the **client side** (local machine) and the **sidecar side** (in-cluster workloads). Both sides obtain their IP from the same `TunConfigService` gRPC API provided by the control-plane.
@@ -247,7 +249,7 @@ func tunProtocolFactory(node *Node, hub *RouteHub) (net.Listener, Handler, error
 }
 ```
 
-The actual implementation is `tunProtocolFactory` + `requestTunIPFromControlPlane` in `pkg/core/protocol_registry.go`. The factory fetches the IP once (when `net=` is empty) and creates the TUN device; it does **not** start any watcher goroutine.
+The actual implementation is `tunProtocolFactory` + `requestTunIPFromControlPlane` in `pkg/endpoint/protocol_registry.go`. The factory fetches the IP once (when `net=` is empty) and creates the TUN device; it does **not** start any watcher goroutine.
 
 #### 4.5 No Sidecar-Side Hot-Update (Removed)
 

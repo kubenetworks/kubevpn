@@ -24,7 +24,7 @@ package tunnel
 // no longer regress with concurrency.
 //
 // Run:
-//	go test ./pkg/core/ -run '^$' -bench BenchmarkCrossClient -benchmem -benchtime=2s -count=3
+//	go test ./pkg/tunnel/ -run '^$' -bench BenchmarkCrossClient -benchmem -benchtime=2s -count=3
 
 import (
 	"context"

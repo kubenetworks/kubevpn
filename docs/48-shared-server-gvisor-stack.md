@@ -132,7 +132,7 @@ I/O, logging, or router reentry. Stack construction and destruction occur outsid
 The registry counts candidate construction as well as published output/destruction
 workers, so terminal `Close` joins unpublished and retiring peers too.
 
-`core.Serve` calls `Start(serviceContext)` before accepting connections and calls `Close`
+`endpoint.Serve` calls `Start(serviceContext)` before accepting connections and calls `Close`
 after accepted handlers join. A connection context never becomes the peer parent.
 Ordinary EOF or connection cancellation retains peers; server TUN fatal completion
 terminates the service. The separate `tunBridge` owns queue/admission/stop/drain state;
@@ -186,7 +186,7 @@ The `bufferedTCP` stop callback removes routes and registration refuses closed w
 Its final drain joins admission, and its connection owner separately joins the writer with
 `waitRun`. The private `tunBridge.send`/`stop` similarly use stop/join/drain without closing
 the data channel. Server-role `tunHandler.FatalOnReturn` makes device completion terminal
-for `core.Serve`, which cancels and joins accepted handlers before closing service peers;
+for `endpoint.Serve`, which cancels and joins accepted handlers before closing service peers;
 ordinary TCP EOF is not fatal. Root-client completion remains owned by `network.Runtime`.
 
 ### 6.3 Heartbeat independence

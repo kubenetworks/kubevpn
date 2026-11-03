@@ -9,7 +9,7 @@
 > `pkg/cluster/discovery`. Packet forwarding is in `pkg/tunnel`, whose `Router` replaces
 > `RouteHub`. Periodic control heartbeats never register a route: data registration or
 > business traffic does, and heartbeat replies traverse that registered data path.
-> `core.Serve` owns service Start/Close and joins; a connection does not own server peers.
+> `endpoint.Serve` owns service Start/Close and joins; a connection does not own server peers.
 > Historical diagrams showing broadcast heartbeats or the old Start order are not the
 > current lifecycle; see [18](18-gvisor-network-stack.md) and [47](47-portforward-blackhole-liveness.md).
 

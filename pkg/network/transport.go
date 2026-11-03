@@ -18,7 +18,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/cluster/portforward"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/core"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/endpoint"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/tunnel"
@@ -122,7 +122,7 @@ func (c *generationConn) Close() error {
 
 type generationTransporter struct {
 	nm       *transportSupervisor
-	base     core.Transporter
+	base     endpoint.Transporter
 	endpoint transportEndpoint
 }
 
@@ -194,7 +194,7 @@ func (nm *transportSupervisor) retireTransport(g *transportGeneration) {
 	})
 }
 
-func (nm *transportSupervisor) dialTransport(ctx context.Context, endpoint transportEndpoint, base core.Transporter) (net.Conn, error) {
+func (nm *transportSupervisor) dialTransport(ctx context.Context, endpoint transportEndpoint, base endpoint.Transporter) (net.Conn, error) {
 	g, err := nm.waitTransport(ctx)
 	if err != nil {
 		return nil, err
@@ -202,7 +202,7 @@ func (nm *transportSupervisor) dialTransport(ctx context.Context, endpoint trans
 	return nm.dialGeneration(ctx, g, endpoint, base)
 }
 
-func (nm *transportSupervisor) dialGeneration(ctx context.Context, g *transportGeneration, endpoint transportEndpoint, base core.Transporter) (net.Conn, error) {
+func (nm *transportSupervisor) dialGeneration(ctx context.Context, g *transportGeneration, endpoint transportEndpoint, base endpoint.Transporter) (net.Conn, error) {
 	nm.mu.Lock()
 	if g.retired || g.ctx.Err() != nil || nm.active != g {
 		nm.mu.Unlock()

@@ -267,7 +267,7 @@ type ConfigMapStore struct {
 ```
 pkg/daemon/action  → pkg/handler (via Connection interface)
 pkg/daemon/grpcutil → pkg/daemon/rpc
-pkg/handler        → pkg/config, pkg/util, pkg/core, pkg/inject, pkg/dns, pkg/tun
+pkg/handler        → pkg/config, pkg/util, pkg/endpoint, pkg/inject, pkg/dns, pkg/tun
 pkg/handler        → pkg/daemon/rpc (gRPC client only: TunConfigService)
 pkg/ssh            → pkg/config, pkg/util (no dependency on daemon/rpc)
 pkg/util           → pkg/config (no dependency on upper-layer packages)
@@ -305,7 +305,7 @@ pkg/handler/
 ├── connection.go         Connection interface + compile-time assertions for both types
 ├── rollback.go           rollbackList — mutex-guarded rollback registry (embedded by SessionBase + SyncOptions)
 ├── cleaner.go            ConnectOptions.Cleanup + cleanupControlPlane + executeRollbackFuncs
-├── connect_tun.go        Run() delegates to core.Serve
+├── connect_tun.go        Run() delegates to endpoint.Serve
 ├── connect_route.go      newTickerResetHandler
 ├── connect_upgrade.go    upgradeDeploy
 ├── proxy_manager.go      ProxyManager (Add/Remove/Leave)

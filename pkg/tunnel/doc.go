@@ -11,5 +11,5 @@
 // Packet buffers and reference ownership stay private to this package. Wire
 // framing and gvisor construction are implemented by their respective leaf
 // packages. Callers provide dial configuration and explicitly start and close
-// server handlers through the service lifecycle used by core.Serve.
+// server handlers through the service lifecycle used by endpoint.Serve.
 package tunnel

@@ -60,16 +60,16 @@ func checkArchitectureDependencies(root, modulePath string) ([]string, error) {
 	for _, leaf := range []string{"config", "log", "driver", "dhcp", "tun", "ssh", "dns", "inject", "controlplane"} {
 		rules = append(rules, boundary{
 			from: "pkg/" + leaf,
-			deny: []string{"pkg/handler", "pkg/core", "pkg/network", "pkg/tunnel", "pkg/daemon/action"},
+			deny: []string{"pkg/handler", "pkg/endpoint", "pkg/network", "pkg/tunnel", "pkg/daemon/action"},
 		})
 	}
 	// These rules activate naturally when the source packages are introduced.
 	// Legacy callers are intentionally unrestricted until their migration stage.
 	rules = append(rules,
-		boundary{"pkg/cluster", []string{"pkg/handler", "pkg/core", "pkg/network", "pkg/tunnel", "pkg/xds", "pkg/daemon/action"}},
+		boundary{"pkg/cluster", []string{"pkg/handler", "pkg/endpoint", "pkg/network", "pkg/tunnel", "pkg/xds", "pkg/daemon/action"}},
 		boundary{"pkg/network", []string{"pkg/handler", "pkg/xds", "pkg/daemon/action"}},
-		boundary{"pkg/tunnel", []string{"pkg/handler", "pkg/core", "pkg/network", "pkg/cluster", "pkg/xds", "pkg/inject", "pkg/controlplane", "pkg/daemon/action", "pkg/daemon/rpc", "k8s.io", "sigs.k8s.io", "github.com/spf13/cobra", "google.golang.org/grpc"}},
-		boundary{"pkg/xds/internal", []string{"pkg/handler", "pkg/core", "pkg/network", "pkg/tunnel", "pkg/daemon/action", "pkg/daemon/rpc", "google.golang.org/grpc"}},
+		boundary{"pkg/tunnel", []string{"pkg/handler", "pkg/endpoint", "pkg/network", "pkg/cluster", "pkg/xds", "pkg/inject", "pkg/controlplane", "pkg/daemon/action", "pkg/daemon/rpc", "k8s.io", "sigs.k8s.io", "github.com/spf13/cobra", "google.golang.org/grpc"}},
+		boundary{"pkg/xds/internal", []string{"pkg/handler", "pkg/endpoint", "pkg/network", "pkg/tunnel", "pkg/daemon/action", "pkg/daemon/rpc", "google.golang.org/grpc"}},
 	)
 	within := func(path, parent string) bool {
 		return path == parent || strings.HasPrefix(path, parent+"/")
@@ -132,7 +132,7 @@ func checkArchitectureDependencies(root, modulePath string) ([]string, error) {
 			if within(source, "pkg/tunnel/internal/netstack") && target == "pkg/tunnel" {
 				reject("netstack must not import its parent tunnel package")
 			}
-			if within(source, "pkg/internal/wire") && (within(target, "pkg/tunnel") || within(target, "pkg/core")) {
+			if within(source, "pkg/internal/wire") && (within(target, "pkg/tunnel") || within(target, "pkg/endpoint")) {
 				reject("wire framing must not import its consumers")
 			}
 			if within(source, "pkg/xds/internal") && within(target, "pkg/xds") && !within(target, "pkg/xds/internal") {
@@ -162,7 +162,13 @@ func TestArchitectureDependencyFixtures(t *testing.T) {
 		wantReject bool
 	}{
 		{"leaf_action", "tun/source.go", modulePath + "/pkg/daemon/action", true},
-		{"leaf_core", "dns/source.go", modulePath + "/pkg/core", true},
+		{"leaf_endpoint", "dns/source.go", modulePath + "/pkg/endpoint", true},
+		{"cluster_endpoint", "cluster/source.go", modulePath + "/pkg/endpoint", true},
+		{"tunnel_endpoint", "tunnel/source.go", modulePath + "/pkg/endpoint", true},
+		{"wire_endpoint", "internal/wire/source.go", modulePath + "/pkg/endpoint", true},
+		{"xds_domain_endpoint", "xds/internal/leases/source.go", modulePath + "/pkg/endpoint", true},
+		{"network_endpoint_allowed", "network/source.go", modulePath + "/pkg/endpoint", false},
+		{"endpoint_tunnel_allowed", "endpoint/source.go", modulePath + "/pkg/tunnel", false},
 		{"leaf_rpc_allowed", "inject/source.go", modulePath + "/pkg/daemon/rpc", false},
 		{"network_rpc_allowed", "network/source.go", modulePath + "/pkg/daemon/rpc", false},
 		{"rpc_prefix_not_action", "ssh/source.go", modulePath + "/pkg/daemon/actionhelper", false},
@@ -175,7 +181,6 @@ func TestArchitectureDependencyFixtures(t *testing.T) {
 		{"tunnel_stdlib", "tunnel/source.go", "net", false},
 		{"netstack_parent", "tunnel/internal/netstack/source.go", modulePath + "/pkg/tunnel", true},
 		{"wire_tunnel", "internal/wire/source.go", modulePath + "/pkg/tunnel", true},
-		{"wire_core", "internal/wire/source.go", modulePath + "/pkg/core", true},
 		{"cluster_util_aggregate", "cluster/internal/source.go", modulePath + "/pkg/util", true},
 		{"cluster_util_leaf", "cluster/source.go", modulePath + "/pkg/util/netutil", false},
 		{"cluster_kubernetes_allowed", "cluster/source.go", "k8s.io/client-go/kubernetes", false},

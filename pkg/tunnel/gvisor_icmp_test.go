@@ -90,7 +90,7 @@ func TestICMPv4EchoReply(t *testing.T) {
 }
 
 // TestICMPv4EchoReply_LocalStack guards the SECOND trigger path of the same refcount bug:
-// readFromGvisorInboundWriteToEndpoint (pkg/core/gvisor_local_tun_endpoint.go) injects into a
+// readFromGvisorInboundWriteToEndpoint (pkg/tunnel/client_endpoint.go) injects into a
 // netstack.NewLocalStack the exact same way (NewPacketBuffer -> InjectInbound -> DecRef). Both netstack.NewStack and
 // netstack.NewLocalStack register the same netstack.ICMPForwarder via netstack.New, so an ICMP echo on the local /
 // reverse path double-DecRefs identically. This test would panic before the netstack.ICMPForwarder fix.

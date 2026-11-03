@@ -164,7 +164,7 @@ cannot publish after retirement. TUN serving routines join before their final qu
 Terminal transport errors cancel the manager; `DataSession` observes cancellation outside
 the supervisor and runs cleanup, avoiding a supervisor self-join.
 
-## Core Server Shutdown and Stack Ownership
+## Server Shutdown and Stack Ownership
 
 This increment leaves the root-client `network.Runtime` completion path unchanged:
 `tunCompletionHandler` cancels the manager when its TUN handler returns, and the external
@@ -172,12 +172,12 @@ owner performs joined cleanup. `SessionLifecycle.Teardown` remains cancellation 
 logger detach, not a join barrier.
 
 For the traffic-manager **server role**, `TunHandler` implements `FatalOnReturn() == true`
-(no forwarder). Its return is terminal for `core.Serve` (delegated by `handler.Run`), even if the TUN listener remains
+(no forwarder). Its return is terminal for `endpoint.Serve` (delegated by `handler.Run`), even if the TUN listener remains
 blocked in `Accept`. `Run` cancels its context, closes listeners, joins accept loops, closes
 accepted connections outside its bookkeeping mutex, and joins their handlers before
 returning. An ordinary accepted TCP handler returning on EOF is **not** server-fatal.
 
-Core shutdown has explicit ownership boundaries:
+Server shutdown has explicit ownership boundaries:
 
 - Server device sends to `tunInbound`/`tunOutbound` select on cancellation. The private
   RouteHub TUN bridge uses `enqueueTUN(ctx, pkt)`; success transfers a packet reference,
