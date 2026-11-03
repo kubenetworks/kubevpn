@@ -145,6 +145,35 @@ func monitorQuiet(t *testing.T, nm *Runtime, last time.Time) {
 	}
 }
 
+// waitHeartbeatQuiescence blocks until heartbeat replies stop changing for a
+// short window. The heartbeat client's periodic 5s ticker (config.HeartbeatInterval)
+// is phase-locked with the monitor's own 5s tick, so a probe reply and the next
+// periodic reply can land back-to-back on a slow runner; snapshotting between
+// the two makes the delayed-callback assertions compare against a stale "fresh".
+// With periodic replies 5s apart, a 500ms quiet window proves the next reply is
+// still seconds away, keeping the following 120ms assertion window safe.
+func waitHeartbeatQuiescence(t *testing.T, nm *Runtime) {
+	t.Helper()
+	for {
+		before := nm.transport.heartbeatStats.Snapshot().Replies
+		deadline := time.Now().Add(500 * time.Millisecond)
+		quiet := true
+		for quiet && time.Now().Before(deadline) {
+			select {
+			case <-nm.transport.ctx.Done():
+				t.Fatal("manager canceled")
+			case <-time.After(5 * time.Millisecond):
+				if nm.transport.heartbeatStats.Snapshot().Replies != before {
+					quiet = false
+				}
+			}
+		}
+		if quiet {
+			return
+		}
+	}
+}
+
 // These use the running PF supervisor, but hold notifications so only its
 // existing tick can discover a routing/state change.
 func monitorTickWait(t *testing.T, f func() bool) {
@@ -348,6 +377,9 @@ func TestNetworkMonitorReview_DelayedConsumedDeltaKeepsFreshEcho(t *testing.T) {
 	})
 	// Wait for a valid post-reset reply, then deliver the old notification.
 	monitorWait(t, func() bool { return !nm.LastHeartbeat().IsZero() })
+	// Let the phase-locked probe + periodic reply pair finish before capturing
+	// the "fresh" snapshot the delayed callback is asserted against.
+	waitHeartbeatQuiescence(t, nm)
 	fresh := nm.transport.heartbeatStats.Snapshot()
 	callback(&netmon.ChangeDelta{Old: old, New: next})
 	select {

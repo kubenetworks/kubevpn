@@ -46,6 +46,13 @@ func TestTransportIntegration_HealthPolicy(t *testing.T) {
 				nm.transport.armTransportHealth()
 			}
 			if mode == "silent" {
+				// Shrink the retire threshold: 3×HeartbeatInterval (15s) plus slow-runner
+				// drift eats most of the 20s budget below; 3s retires within one monitor
+				// tick and leaves ample margin. Same override pattern as
+				// TestNetworkMonitorIntegration_UnhealthyChangeRecoversOnlyAffectedManager.
+				threshold := livenessSteadyThreshold
+				livenessSteadyThreshold = 3 * time.Second
+				defer func() { livenessSteadyThreshold = threshold }()
 				// Synchronize before moving the clock source into the past: wait until
 				// the monitor loop has consulted a fresh lastReply, so the next checks
 				// event observes primed=true and arms the probe budget (a fixed sleep

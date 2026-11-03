@@ -7,7 +7,6 @@ import (
 	"io"
 	"net"
 	"sync"
-	"syscall"
 	"time"
 
 	"gvisor.dev/gvisor/pkg/tcpip"
@@ -37,9 +36,9 @@ func (f *targetDialFailures) report(ctx context.Context, role, source, target st
 	switch {
 	case errors.As(err, &timeout) && timeout.Timeout():
 		reason, index = "timeout", 0
-	case errors.Is(err, syscall.ECONNREFUSED):
+	case dialConnRefused(err):
 		reason, index = "refused", 1
-	case errors.Is(err, syscall.ENETUNREACH), errors.Is(err, syscall.EHOSTUNREACH):
+	case dialUnreachable(err):
 		reason, index = "unreachable", 2
 	}
 	now := time.Now()

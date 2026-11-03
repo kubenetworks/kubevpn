@@ -660,13 +660,23 @@ func (u *ut) kubevpnProxyWithServiceMeshAndK8sServicePortMap(t *testing.T) {
 }
 
 func (u *ut) kubevpnLeave(t *testing.T) {
-	cmd := exec.Command("kubevpn", "leave", "deployments/reviews")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	err := cmd.Run()
-	if err != nil {
-		t.Fatal(err)
+	// The leave RPC dials the in-cluster traffic manager over the minikube
+	// service network; CI runners hit transient deadline-exceeded blips, so
+	// retry a bounded number of times before failing (same rationale as
+	// meshHealthCheckBackoff, see docs/43-macos-ci-apiserver-flakiness.md).
+	var err error
+	for range 3 {
+		cmd := exec.Command("kubevpn", "leave", "deployments/reviews")
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		err = cmd.Run()
+		if err == nil {
+			return
+		}
+		t.Logf("kubevpn leave deployments/reviews attempt failed: %v", err)
+		time.Sleep(5 * time.Second)
 	}
+	t.Fatal(err)
 }
 
 func (u *ut) kubevpnLeaveService(t *testing.T) {
