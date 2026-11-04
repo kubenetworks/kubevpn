@@ -21,6 +21,12 @@ func waitCancelled(ctx context.Context, timeout time.Duration) bool {
 func TestTransportIntegration_HealthPolicy(t *testing.T) {
 	for _, mode := range []string{"unarmed", "fresh", "silent", "stale-event"} {
 		t.Run(mode, func(t *testing.T) {
+			if mode == "silent" {
+				threshold := livenessSteadyThreshold
+				livenessSteadyThreshold = 3 * time.Second
+				// Registered before the fixtures so their workers stop before restoration.
+				t.Cleanup(func() { livenessSteadyThreshold = threshold })
+			}
 			srv, count := transportForwardServer(t, nil)
 			nm := transportManager(t, srv.URL)
 			var silent atomic.Bool
@@ -29,11 +35,10 @@ func TestTransportIntegration_HealthPolicy(t *testing.T) {
 				if silent.Load() {
 					return time.Now().Add(-time.Minute)
 				}
-				// Counted only when provably fresh (after the silent check), so a
-				// non-zero count proves the monitor loop top already evaluated a
-				// fresh lastReply — the precondition for arming the probe budget.
+				// Stay strictly after arming even when the platform clock has coarse resolution.
+				last := time.Now().Add(time.Second)
 				consulted.Add(1)
-				return time.Now()
+				return last
 			}
 			nm.transport.launchTransportSupervisor()
 			ctx, cancel := context.WithTimeout(nm.transport.ctx, 8*time.Second)
@@ -46,19 +51,11 @@ func TestTransportIntegration_HealthPolicy(t *testing.T) {
 				nm.transport.armTransportHealth()
 			}
 			if mode == "silent" {
-				// Shrink the retire threshold: 3×HeartbeatInterval (15s) plus slow-runner
-				// drift eats most of the 20s budget below; 3s retires within one monitor
-				// tick and leaves ample margin. Same override pattern as
-				// TestNetworkMonitorIntegration_UnhealthyChangeRecoversOnlyAffectedManager.
-				threshold := livenessSteadyThreshold
-				livenessSteadyThreshold = 3 * time.Second
-				defer func() { livenessSteadyThreshold = threshold }()
-				// Synchronize before moving the clock source into the past: wait until
-				// the monitor loop has consulted a fresh lastReply, so the next checks
-				// event observes primed=true and arms the probe budget (a fixed sleep
-				// races the goroutine's first evaluation on slow runners).
-				nm.transport.requestNetworkCheck()
-				monitorTickWait(t, func() bool { return consulted.Load() > 0 })
+				// A second callback proves the monitor processed the first fresh reply.
+				monitorTickWait(t, func() bool {
+					nm.transport.requestNetworkCheck()
+					return consulted.Load() >= 2
+				})
 				silent.Store(true)
 				nm.transport.requestNetworkCheck()
 				if !waitCancelled(g.ctx, 20*time.Second) {

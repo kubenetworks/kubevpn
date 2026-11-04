@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -32,8 +33,8 @@ const (
 	// self-heal — network.go's watchLiveness forces a reconnect within
 	// livenessStartupDeadline (30s). A single un-retried 5s dial that lands in that
 	// window aborts the whole connect ("envoy sidecar injection failed"); retrying past
-	// 30s turns the blip into a short delay instead. Leave stays single-shot (best
-	// effort — the manager's lease reaper reclaims rules), so only inject retries.
+	// 30s turns the blip into a short delay instead. Leave uses a shorter retry budget
+	// since it is a user-interactive, best-effort operation.
 	managerDialRetryBudget = 45 * time.Second
 
 	// managerDialRetryBackoff is the pause between inbound-injection dial attempts.
@@ -58,18 +59,6 @@ func (c *ConnectOptions) resolveManagerAddr(ctx context.Context) (string, error)
 		return "", fmt.Errorf("traffic manager service has no ClusterIP")
 	}
 	return net.JoinHostPort(svc.Spec.ClusterIP, strconv.Itoa(int(config.PortXDS))), nil
-}
-
-// dialManager dials the traffic manager's TunConfigService over the VPN (its Service
-// ClusterIP:9002, reachable once connected). Single blocking attempt bounded by
-// managerDialTimeout — used by the best-effort leave path (the manager's lease reaper
-// reclaims rules if it fails, so leave does not retry).
-func (c *ConnectOptions) dialManager(ctx context.Context) (*grpc.ClientConn, error) {
-	addr, err := c.resolveManagerAddr(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return c.dialManagerAddr(ctx, addr)
 }
 
 // dialManagerAddr performs one blocking gRPC dial to addr, bounded by managerDialTimeout.
@@ -159,18 +148,29 @@ func (c *ConnectOptions) createRemoteInboundViaManager(ctx context.Context, name
 	return nil
 }
 
-// managerLeaveRetryBudget bounds the total time LeaveInject retries on transient errors.
-// Shorter than inject (15s vs 45s) since leave is a user-interactive operation.
+// managerLeaveRetryBudget bounds admission of LeaveInject retries on transient errors,
+// not the duration of an admitted dial or stream. Shorter than inject (15s vs 45s)
+// since leave is a user-interactive operation.
 const managerLeaveRetryBudget = 15 * time.Second
 
 // leaveViaManager unpatches workloads server-side via the manager's LeaveInject RPC over
 // the VPN. An empty workloads slice means "leave all workloads this OwnerID proxies in
 // the namespace" (the manager derives them from ENVOY_CONFIG) — used by disconnect
-// cleanup. Retries on transient gRPC errors (Unavailable/EOF); LeaveInject is idempotent.
+// cleanup. Resolves the Service once, then retries transient dial and gRPC errors;
+// LeaveInject is idempotent.
 func (c *ConnectOptions) leaveViaManager(ctx context.Context, namespace string, workloads []string, ownerID string) error {
 	deadline := time.Now().Add(managerLeaveRetryBudget)
+	addr, err := c.resolveManagerAddr(ctx)
+	if err != nil {
+		return err
+	}
+	return c.leaveViaManagerAddr(ctx, addr, namespace, workloads, ownerID, deadline)
+}
+
+// leaveViaManagerAddr retries dial + LeaveInject without bounding the stream's context.
+func (c *ConnectOptions) leaveViaManagerAddr(ctx context.Context, addr, namespace string, workloads []string, ownerID string, deadline time.Time) error {
 	for attempt := 1; ; attempt++ {
-		err := c.tryLeaveInject(ctx, namespace, workloads, ownerID)
+		err := c.tryLeaveInject(ctx, addr, namespace, workloads, ownerID)
 		if err == nil {
 			return nil
 		}
@@ -187,8 +187,8 @@ func (c *ConnectOptions) leaveViaManager(ctx context.Context, namespace string, 
 }
 
 // tryLeaveInject performs a single attempt of dial + LeaveInject stream.
-func (c *ConnectOptions) tryLeaveInject(ctx context.Context, namespace string, workloads []string, ownerID string) error {
-	conn, err := c.dialManager(ctx)
+func (c *ConnectOptions) tryLeaveInject(ctx context.Context, addr, namespace string, workloads []string, ownerID string) error {
+	conn, err := c.dialManagerAddr(ctx, addr)
 	if err != nil {
 		return err
 	}
@@ -218,10 +218,10 @@ func (c *ConnectOptions) tryLeaveInject(ctx context.Context, namespace string, w
 	return nil
 }
 
-// isTransientGRPC reports whether err is a transient gRPC error worth retrying.
+// isTransientGRPC reports whether err is a transient dial or gRPC error worth retrying.
 func isTransientGRPC(err error) bool {
 	code := status.Code(err)
-	return code == codes.Unavailable || code == codes.DeadlineExceeded
+	return errors.Is(err, context.DeadlineExceeded) || code == codes.Unavailable || code == codes.DeadlineExceeded
 }
 
 // startServiceMappers starts a client-side port Mapper for each K8s Service workload the

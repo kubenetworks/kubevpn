@@ -273,10 +273,12 @@ client-side injection path. The client only sends intent over gRPC and streams p
   the local port **Mapper** (SSH reverse tunnels back to the developer's machine, see
   [26-sync-mode.md] / `proxy_mapper.go`).
 - **Client dials the manager over the VPN.** After connect the manager Service ClusterIP
-  is routable, so the user daemon dials `ClusterIP:9002` directly (`dialManager` /
+  is routable, so the user daemon dials `ClusterIP:9002` directly (`dialManagerAddr` /
   `createRemoteInboundViaManager` / `leaveViaManager` in `pkg/handler/inject_client.go`).
   Connection setup is bounded by `managerDialTimeout` (`WithBlock`); the RPC itself keeps
-  the parent context (rollout waits can be long).
+  the parent context (rollout waits can be long). Leave resolves the Service once and fails
+  immediately on lookup/configuration errors; transient dial deadlines and gRPC failures
+  retry within the existing leave retry budget, unless the caller has cancelled.
 - **No local fallback.** If the manager is unreachable or injection fails, the operation
   fails and the error is surfaced — there is no local injection path to fall back to
   (this is a deliberate choice: clients force-upgrade the manager, and the RBAC below is
@@ -323,7 +325,7 @@ The only difference between mesh and fargate templates is that listeners generat
 | `pkg/inject/virtual_store.go` | `VirtualStore` — unified read-modify-write path for `ENVOY_CONFIG` |
 | `pkg/controlplane/virtual.go` | `Virtual`/`Rule`/`ContainerPort` types + pure helpers, consumed by inject and xds |
 | `pkg/xds/inject_service.go` | Server-side `ProxyInject`/`LeaveInject` RPCs run in the manager pod |
-| `pkg/handler/inject_client.go` | Client-side delegation over the VPN + fallback (`dialManager`, `createRemoteInboundViaManager`, `leaveViaManager`) |
+| `pkg/handler/inject_client.go` | Client-side delegation over the VPN, without local fallback (`dialManagerAddr`, `createRemoteInboundViaManager`, `leaveViaManager`) |
 | `docs/06-fargate-mode.md` | Fargate mode architecture |
 | `docs/05-owner-id.md` | OwnerID rule ownership |
 | `docs/44-server-side-route-discovery.md` | Sibling server-side capability + the `-route` RBAC pattern mirrored here |

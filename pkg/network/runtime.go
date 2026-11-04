@@ -108,7 +108,7 @@ func (nm *Runtime) Start(ctx context.Context) (err error) {
 	// (StartRouteWatcher below), instead of a client-side cluster-wide list-watch.
 	plog.StepDone(nm.transport.ctx, "Added %d pod/service CIDR routes", len(nm.cfg.CIDRs))
 
-	// Pre-route the traffic manager's ClusterIP through TUN so that dialManager
+	// Pre-route the traffic manager's ClusterIP through TUN so that dialManagerAddr
 	// (server-side inject) sees a consistent path from SYN onward. Without this,
 	// the route watcher adds the /32 asynchronously and can split a TCP connection
 	// mid-handshake: SYN via pod network, ACK via TUN → gvisor RSTs the orphan ACK.

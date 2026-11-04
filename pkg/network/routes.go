@@ -232,7 +232,7 @@ func (nm *Runtime) AddRoute(ipStrList ...string) error {
 
 // addTrafficManagerServiceRoute adds /32 TUN routes for the traffic manager's
 // ClusterIPs. Called synchronously during Start, before the async route watcher,
-// so that dialManager's SYN travels through TUN from the start — preventing
+// so that dialManagerAddr's SYN travels through TUN from the start — preventing
 // a mid-handshake route split (SYN via eth0, ACK via TUN) that makes gvisor
 // RST the connection it never saw a SYN for.
 func (nm *Runtime) addTrafficManagerServiceRoute(ctx context.Context) error {
