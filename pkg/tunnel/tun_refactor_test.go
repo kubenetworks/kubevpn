@@ -106,33 +106,3 @@ func TestTrySendToSlot_DropsWhenFull(t *testing.T) {
 	config.LPool.Put(first.data[:])
 }
 
-// TestBroadcastToSlots_DeliversToAll verifies a heartbeat reaches every slot. All slots
-// share one reference-counted buffer (no clone), so each received packet is released
-// rather than freed directly — the buffer returns to the pool after the last release.
-func TestBroadcastToSlots_DeliversToAll(t *testing.T) {
-	const n = 3
-	slots := make([]*connSlot, n)
-	for i := range slots {
-		slots[i] = &connSlot{id: i, inbound: make(chan *packet, 1)}
-	}
-
-	buf := config.LPool.Get().([]byte)
-	buf[2] = 1
-	payload := buildIPv4Packet(net.IPv4(198, 18, 0, 2), net.IPv4(198, 18, 0, 1), []byte("hb"))
-	ln := copy(buf[3:], payload)
-	pkt := &packet{data: buf, length: ln + 1}
-
-	broadcastToSlots(slots, pkt)
-
-	for i := range slots {
-		select {
-		case got := <-slots[i].inbound:
-			if got.length != pkt.length {
-				t.Fatalf("slot %d got length %d, want %d", i, got.length, pkt.length)
-			}
-			got.release()
-		default:
-			t.Fatalf("slot %d did not receive the broadcast", i)
-		}
-	}
-}

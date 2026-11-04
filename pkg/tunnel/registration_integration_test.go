@@ -23,6 +23,7 @@ package tunnel
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	framing "github.com/wencaiwulue/kubevpn/v2/pkg/internal/wire"
 	"net"
@@ -413,8 +414,8 @@ func TestIntegration_SingleDataSlot_ControlBypassesFullQueue(t *testing.T) {
 			if len(frame) <= typePrefixLen || frame[0] != packetTypeToGvisor {
 				t.Fatal("control traffic entered business queue")
 			}
-			key := parseFiveTupleInline(frame[typePrefixLen:])
-			if !key.hasPorts || key.srcPort != uint16(20000+i%8) {
+			srcPort, ok := l4SrcPort(frame[typePrefixLen:])
+			if !ok || srcPort != uint16(20000+i%8) {
 				t.Fatalf("business packet %d reordered or corrupted", i)
 			}
 		case <-time.After(5 * time.Second):
@@ -464,4 +465,47 @@ func TestRegistrationPayloadsUseInjectedAddresses(t *testing.T) {
 	if got := blind.registrationPayloads(context.Background()); got != nil {
 		t.Fatalf("got %d payloads with no addresses, want none", len(got))
 	}
+}
+
+// l4SrcPort extracts the source port of a port-bearing L4 header from a raw IPv4 packet,
+// for packet-integrity assertions in these tests. Returns false when the header is
+// truncated or the protocol carries no ports.
+func l4SrcPort(ipData []byte) (uint16, bool) {
+	if len(ipData) < 20 {
+		return 0, false
+	}
+	switch ipData[9] {
+	case 6, 17, 132: // TCP, UDP, SCTP
+	default:
+		return 0, false
+	}
+	ihl := int(ipData[0]&0x0f) * 4
+	if ihl < 20 || len(ipData) < ihl+2 {
+		return 0, false
+	}
+	return binary.BigEndian.Uint16(ipData[ihl : ihl+2]), true
+}
+
+// buildIPv4PacketWithPorts builds a minimal IPv4 packet carrying only an L4 header with
+// ports (no payload), for queue-priming and integrity checks in these tests.
+func buildIPv4PacketWithPorts(src, dst net.IP, proto uint8, srcPort, dstPort uint16) []byte {
+	pkt := make([]byte, 20+4)
+	pkt[0] = 0x45 // version=4, IHL=5
+	binary.BigEndian.PutUint16(pkt[2:4], uint16(len(pkt)))
+	pkt[8] = 64 // TTL
+	pkt[9] = proto
+	copy(pkt[12:16], src.To4())
+	copy(pkt[16:20], dst.To4())
+	binary.BigEndian.PutUint16(pkt[20:22], srcPort)
+	binary.BigEndian.PutUint16(pkt[22:24], dstPort)
+	return pkt
+}
+
+// makePoolPacket wraps a raw IP packet in a pool buffer as a client-outbound packet.
+func makePoolPacket(ip []byte) *packet {
+	buf := config.LPool.Get().([]byte)[:]
+	copy(buf[tunReserve:], ip)
+	buf[datagramHeaderLen] = packetTypeToGvisor
+	src, dst, _, _ := netutil.ParseIPFast(ip)
+	return newPacket(buf, typePrefixLen+len(ip), src, dst)
 }

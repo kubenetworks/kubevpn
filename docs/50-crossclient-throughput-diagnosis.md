@@ -47,7 +47,7 @@ the stage the two modes **share** — the cross-client path itself, not the tran
 
 ```
 A: app → kernel TCP → TUN → routeOutbound → tunInbound
-   → runConnPool: flowHash(5-tuple) picks ONE of A's 4 pool slots (tun_client.go)
+   → runConnPool: A's single data slot (client.go)
    → connSlot.writeToConn → transport(SPDY|SSH) → TM:10801
 TM: readFromTCPConnWriteToEndpoint → AddRoute(A); HasRoute(B)?
    → RouteHub.WriteToRoutePacket(B)  (hairpin, raw forward — NOT injected into TM's stack)
@@ -113,8 +113,8 @@ Findings:
    Asymmetric with the blocking-backpressure send path. Prime suspect.
 2. **Single shared inter-client gvisor stack on B** — one stack/one channel for all cross-client
    flows; does not scale with concurrency (throughput drops as flows rise). Serialization point.
-3. **Single-flow pinned to one pool slot** (`flowHash`) — a single flow cannot use pool
-   parallelism; on port-forward all slots share one SPDY connection anyway. (Contributor, not the
+3. **Single-flow single data slot** — a single flow cannot use connection
+   parallelism; on port-forward the data and control conns share one SPDY connection anyway. (Contributor, not the
    dominant term in these clean-loopback numbers.)
 4. **gvisor userspace TCP window cap (≤4MB)** vs the multi-hop BDP of a real A↔TM↔B path — to be
    quantified in the CI e2e (real RTT), not visible on loopback.
@@ -204,8 +204,8 @@ concurrent non-debug connections stay silent.
 
 The default now uses **one data `connSlot` plus one independent control slot**. Data dispatch
 goes directly to slot 0 without slot-selection parsing/hashing; `connSlot` lifecycle, queues,
-deadlines and batching remain, and business flows still run concurrently. The private `poolSize`
-is a data-only override for nil-stats 1/2/4/8-slot comparisons, not a CLI or environment flag.
+deadlines and batching remain, and business flows still run concurrently. There is no
+pool-size setting or override.
 
 Heartbeat requests bypass the business queue through a separate queue/conn to the **same TCP
 forwarding endpoint 10801**, not xDS 9002. Replies use `tunnel.Router`'s first-writable registered data

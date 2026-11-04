@@ -20,7 +20,6 @@ const (
 // clientTransport is the spoke/endpoint half of the tun device. Outbound packets read from the
 // TUN use the data connection, or loop back through a local gvisor stack when src == dst.
 // Inbound packets from the server are delivered to tunOutbound by the connection reader.
-// Data-only test pools can additionally distribute outbound packets by five-tuple hash.
 type clientTransport struct {
 	dev     *tunDevice
 	forward *DialConfig
@@ -42,9 +41,6 @@ type clientTransport struct {
 	interClient *interClientStack
 	// stats records data-plane liveness from observed heartbeat echo replies; may be nil.
 	stats *HeartbeatStats
-	// poolSize overrides the data connection count; <=0 means use ConnPoolSize.
-	// Only data-only benchmarks/tests with nil stats override it; production uses the default.
-	poolSize int
 }
 
 func newClientTransport(dev *tunDevice, forward *DialConfig, stats *HeartbeatStats) *clientTransport {
@@ -101,21 +97,17 @@ func (t *clientTransport) routeOutbound(ctx context.Context, buf []byte, n int, 
 	}
 }
 
-// runConnPool creates the data slot (or an explicit multi-slot test pool).
-// Blocking sends provide backpressure; a full selected slot also stalls the shared dispatcher.
-// Each slot owns its reconnect lifecycle, independent of the shared inter-client stack.
+// runConnPool creates the data slot.
+// Blocking sends provide backpressure; a full slot also stalls the shared dispatcher.
+// The slot owns its reconnect lifecycle, independent of the shared inter-client stack.
 func (t *clientTransport) runConnPool(ctx context.Context) {
 	ctx, cancel := context.WithCancel(ctx)
-	n := t.poolSize
-	if n <= 0 {
-		n = ConnPoolSize
-	}
 	// Create the shared inter-client stack before the slots: their readers inject inbound
 	// inter-client packets directly into it. Its output (replies to peers) goes to tunInbound,
-	// which this function's loop below dispatches to a slot by five-tuple hash.
+	// which this function's loop below hands to the data slot.
 	t.interClient = newInterClientStack(ctx, t.dev.tunInbound, datagramHeaderLen)
 	defer func() { <-t.interClient.done; drainPacketChan(t.dev.tunInbound) }()
-	t.slots = make([]*connSlot, n)
+	t.slots = make([]*connSlot, ConnPoolSize)
 	var wg sync.WaitGroup
 	for i := range t.slots {
 		slot := &connSlot{
@@ -139,29 +131,18 @@ func (t *clientTransport) runConnPool(ctx context.Context) {
 
 	stage := diagnosticStage(ctx, "slot_enqueue", "data", 0, 0)
 	defer stage.close()
-	// Drain the shared tunInbound; only multi-slot test pools require hash dispatch.
-	// Data packets block on the slot channel to propagate backpressure to the OS TCP stack,
-	// preventing silent drops that cause catastrophic RTO stalls.
+	// Drain the shared tunInbound into the single data slot. Data packets block on the slot
+	// channel to propagate backpressure to the OS TCP stack, preventing silent drops that
+	// cause catastrophic RTO stalls.
 	for {
 		select {
 		case packet := <-t.dev.tunInbound:
 			if packet == nil {
 				return
 			}
-			if packet.dst != nil {
-				slot := 0
-				if n > 1 {
-					key := parseFiveTupleInline(packet.data[tunReserve : datagramHeaderLen+packet.length])
-					slot = flowHash(key, packet.dst, n)
-				}
-				if !diagnosticEnqueue(ctx, t.slots[slot].inbound, packet, stage) {
-					packet.release()
-					return
-				}
-			} else {
-				// Fallback broadcast for non-heartbeat control packets (currently unused;
-				// heartbeats bypass tunInbound via controlSlot).
-				broadcastToSlots(t.slots, packet)
+			if !diagnosticEnqueue(ctx, t.slots[0].inbound, packet, stage) {
+				packet.release()
+				return
 			}
 		case <-ctx.Done():
 			return

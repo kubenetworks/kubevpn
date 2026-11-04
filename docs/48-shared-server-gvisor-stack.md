@@ -50,10 +50,10 @@ Control Plane:
 | Control slot (×1) | `packetTypeControl` (0x02) | `handleControlConn` | NOT registered |
 
 Both conns use the **same TCP forwarding endpoint 10801**, not xDS 9002. SSH/port-forward
-still shares an outer TCP transport. The default uses direct slot-0 dispatch with no
-slot-selection parsing/hash; the private data-only `poolSize` override supports nil-stats
-1/2/4/8-slot comparisons, with no new CLI or environment flag. `connSlot` lifecycle, queues,
-deadlines and batching are retained, as is concurrent handling of business flows.
+still shares an outer TCP transport. Dispatch uses the single data slot with no
+slot-selection parsing/hash; there is no pool-size setting or override. `connSlot`
+lifecycle, queues, deadlines and batching are retained, as is concurrent handling of
+business flows.
 This stability increment changes neither the wire format nor the one-data/one-control
 default, and adds no CLI or protocol. Framing remains `[uint16 length][payload]` with
 0..65535 payload bytes; oversized writes are rejected before I/O, short receive buffers

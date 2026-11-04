@@ -359,38 +359,6 @@ func TestDataPath_InterClient_Bidirectional(t *testing.T) {
 }
 
 // =============================================================================
-// Scenario: Connection pool hash consistency
-// =============================================================================
-
-func TestDataPath_HashConsistency(t *testing.T) {
-	// Verify that the same dst IP always hashes to the same slot
-	dst := net.ParseIP("10.0.0.5")
-	slots := 4
-	expected := ipHash(dst, slots)
-
-	for i := 0; i < 1000; i++ {
-		got := ipHash(dst, slots)
-		if got != expected {
-			t.Fatalf("hash inconsistency: expected %d, got %d on iteration %d", expected, got, i)
-		}
-	}
-
-	// Different IPs should distribute across slots
-	distribution := make(map[int]int)
-	for i := 0; i < 256; i++ {
-		ip := net.IPv4(10, 0, 0, byte(i))
-		slot := ipHash(ip, slots)
-		distribution[slot]++
-	}
-	// Each slot should get roughly 25% (64±32)
-	for slot, count := range distribution {
-		if count < 32 || count > 96 {
-			t.Fatalf("poor distribution: slot %d got %d/256 IPs", slot, count)
-		}
-	}
-}
-
-// =============================================================================
 // Scenario: Concurrent multi-client full lifecycle
 // =============================================================================
 

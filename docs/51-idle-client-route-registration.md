@@ -179,8 +179,9 @@ the real gvisor handler and `tunnel.Router`. The original coverage used four dat
 current default expectations are **one registered data conn per client address**, plus one
 control conn excluded from `Router`. It covers automatic registration, the heartbeat round trip,
 recovery after a port-forward teardown, and a client which cannot determine its own addresses
-both failing to register **and saying so**. Multi-slot comparisons require the explicit private,
-data-only `poolSize` override with nil stats; they do not change production defaults.
+both failing to register **and saying so**. (The multi-slot `poolSize` test override referenced
+by earlier revisions was removed with the five-tuple hash; see
+[41-five-tuple-pool-dispatch.md](41-five-tuple-pool-dispatch.md).)
 
 ## 5. Verification
 

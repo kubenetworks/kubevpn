@@ -1,26 +1,21 @@
 package tunnel
 
-// Benchmark comparing tunnel throughput for different connection-pool sizes
-// (ConnPoolSize 1 vs 2/4/8) over a clean and an impaired (added-latency) link.
+// Benchmark measuring tunnel throughput of the single data slot over a clean and
+// an impaired (added-latency) link, at varying application flow counts.
 //
-// Production defaults to one data slot; this data-only, nil-stats harness retains
-// explicit pool-size overrides for comparisons. It wires the real data plane
-// end-to-end WITHOUT a TUN device (no root):
+// It wires the real data plane end-to-end WITHOUT a TUN device (no root):
 //
 //	bench app (gonet, many dst IPs) → client gvisor stack
 //	  ⇄ raw-IP packetConn (= tunDevice.tun)
-//	    → real tunDevice + clientTransport connection pool (poolSize=N)
+//	    → real tunDevice + clientTransport data slot
 //	      → loopback TCP (optionally latency-shaped) → server listener
 //	        → GvisorLocalTCPHandler (one gvisor stack per client IP) → netstack.LocalTCPForwarder
 //	          → 127.0.0.1:<sink> (drains, counts bytes)
 //
-// Multi-slot overrides partition flows by five-tuple hash; the default single slot
-// bypasses hashing. Application flow count and tunnel slot count are distinct axes.
-//
 // Run:
 //	go test ./pkg/tunnel/ -run '^$' -bench BenchmarkConnPool -benchmem -benchtime=2s -count=3
 //
-// Historical measurements, before current batching/single-slot default (arm64,
+// Historical measurements, from when multi-slot dispatch existed (arm64,
 // -benchtime=1s -count=3, MB/s averaged over the 3 runs):
 //
 //	                 pool=1  pool=2  pool=4  pool=8
@@ -272,9 +267,9 @@ type benchHarness struct {
 	device      *tunDevice
 }
 
-// newBenchHarness wires the full no-root data path with the given pool size and
-// per-conn link latency (0 = clean). Returns once the pool's N connections are up.
-func newBenchHarness(b *testing.B, poolSize int, latency time.Duration) *benchHarness {
+// newBenchHarness wires the full no-root data path with the given
+// per-conn link latency (0 = clean). Returns once the data connection is up.
+func newBenchHarness(b *testing.B, latency time.Duration) *benchHarness {
 	b.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -355,7 +350,6 @@ func newBenchHarness(b *testing.B, poolSize int, latency time.Duration) *benchHa
 		Transporter: testTCPTransport{},
 		MaxRetries:  3,
 	}).config(), nil)
-	ct.poolSize = poolSize
 	device.transport = ct
 	// Start only the data-plane routines (skip heartbeat: it needs a real TUN
 	// interface lookup; routes are registered by data packets' AddRoute anyway).
@@ -378,21 +372,21 @@ func newBenchHarness(b *testing.B, poolSize int, latency time.Duration) *benchHa
 	go bridgeEndpointToConn(ctx, appEp, appEnd)
 	go bridgeConnToEndpoint(ctx, appEnd, appEp)
 
-	// wait for the pool to establish N server connections
+	// wait for the pool to establish the data connection (plus the control conn)
 	deadline := time.Now().Add(10 * time.Second)
-	for srvConns.Load() < int32(poolSize) && time.Now().Before(deadline) {
+	for srvConns.Load() < 1 && time.Now().Before(deadline) {
 		time.Sleep(20 * time.Millisecond)
 	}
-	if got := srvConns.Load(); got < int32(poolSize) {
+	if got := srvConns.Load(); got < 1 {
 		cancel()
-		b.Fatalf("pool not established: got %d server conns, want %d", got, poolSize)
+		b.Fatalf("pool not established: got %d server conns, want >= 1", got)
 	}
 
 	return &benchHarness{clientStack: clientStack, sinkPort: sinkPort, sinkBytes: sinkBytes, cancel: cancel, device: device}
 }
 
-// dial opens one app TCP flow to a distinct dst IP (10.96.0.<idx>) so ipHash spreads
-// flows across pool slots. The server's netstack.LocalTCPForwarder routes every flow to the sink.
+// dial opens one app TCP flow to a distinct dst IP (10.96.0.<idx>). The server's
+// netstack.LocalTCPForwarder routes every flow to the sink.
 func (h *benchHarness) dial(ctx context.Context, idx int) (net.Conn, error) {
 	remote := tcpip.FullAddress{
 		NIC:  1,
@@ -421,63 +415,61 @@ func BenchmarkConnPool(b *testing.B) {
 
 	const chunkSize = 32 * 1024
 	chunk := make([]byte, chunkSize)
-	for _, pool := range []int{1, 2, 4, 8} {
-		for _, link := range []struct {
-			name    string
-			latency time.Duration
-		}{{"clean", 0}, {"lat2ms", 2 * time.Millisecond}} {
-			for _, flows := range []int{1, 16, 64} {
-				name := fmt.Sprintf("pool=%d/%s/flows=%d", pool, link.name, flows)
-				b.Run(name, func(b *testing.B) {
-					h := newBenchHarness(b, pool, link.latency)
-					defer h.close()
-					ctx := context.Background()
+	for _, link := range []struct {
+		name    string
+		latency time.Duration
+	}{{"clean", 0}, {"lat2ms", 2 * time.Millisecond}} {
+		for _, flows := range []int{1, 16, 64} {
+			name := fmt.Sprintf("%s/flows=%d", link.name, flows)
+			b.Run(name, func(b *testing.B) {
+				h := newBenchHarness(b, link.latency)
+				defer h.close()
+				ctx := context.Background()
 
-					conns := make([]net.Conn, flows)
-					for i := 0; i < flows; i++ {
-						c, err := h.dial(ctx, i+1)
-						if err != nil {
-							b.Fatalf("dial flow %d: %v", i, err)
-						}
-						conns[i] = c
-						defer c.Close()
+				conns := make([]net.Conn, flows)
+				for i := 0; i < flows; i++ {
+					c, err := h.dial(ctx, i+1)
+					if err != nil {
+						b.Fatalf("dial flow %d: %v", i, err)
 					}
+					conns[i] = c
+					defer c.Close()
+				}
 
-					startSink := h.sinkBytes.Load()
-					total := int64(b.N) * int64(chunkSize)
-					b.SetBytes(int64(chunkSize))
-					b.ResetTimer()
+				startSink := h.sinkBytes.Load()
+				total := int64(b.N) * int64(chunkSize)
+				b.SetBytes(int64(chunkSize))
+				b.ResetTimer()
 
-					var remaining atomic.Int64
-					remaining.Store(int64(b.N))
-					var wg sync.WaitGroup
-					for i := 0; i < flows; i++ {
-						wg.Add(1)
-						go func(c net.Conn) {
-							defer wg.Done()
-							for remaining.Add(-1) >= 0 {
-								if _, err := c.Write(chunk); err != nil {
-									return
-								}
+				var remaining atomic.Int64
+				remaining.Store(int64(b.N))
+				var wg sync.WaitGroup
+				for i := 0; i < flows; i++ {
+					wg.Add(1)
+					go func(c net.Conn) {
+						defer wg.Done()
+						for remaining.Add(-1) >= 0 {
+							if _, err := c.Write(chunk); err != nil {
+								return
 							}
-						}(conns[i])
-					}
-					wg.Wait()
+						}
+					}(conns[i])
+				}
+				wg.Wait()
 
-					// Time until the sink has actually received everything (so a
-					// latency-shaped link is measured end-to-end, not just the
-					// buffer-fill of the writes).
-					deadline := time.Now().Add(30 * time.Second)
-					for h.sinkBytes.Load()-startSink < total && time.Now().Before(deadline) {
-						time.Sleep(time.Millisecond)
-					}
-					b.StopTimer()
+				// Time until the sink has actually received everything (so a
+				// latency-shaped link is measured end-to-end, not just the
+				// buffer-fill of the writes).
+				deadline := time.Now().Add(30 * time.Second)
+				for h.sinkBytes.Load()-startSink < total && time.Now().Before(deadline) {
+					time.Sleep(time.Millisecond)
+				}
+				b.StopTimer()
 
-					if got := h.sinkBytes.Load() - startSink; got < total {
-						b.Fatalf("sink received %d bytes, sent %d (data lost / stalled)", got, total)
-					}
-				})
-			}
+				if got := h.sinkBytes.Load() - startSink; got < total {
+					b.Fatalf("sink received %d bytes, sent %d (data lost / stalled)", got, total)
+				}
+			})
 		}
 	}
 }

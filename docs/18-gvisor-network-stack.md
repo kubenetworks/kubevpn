@@ -114,7 +114,7 @@ tunDevice + clientTransport:
 type prefix and either forwards locally (when `src == dst`, via the gvisor handler) or pushes
 to `tunInbound` for the pool to distribute.
 
-**Connection pool**: The default is **one data slot plus one independent control slot**. Outbound data goes directly to slot 0 without parsing/hashing for slot selection. The private `poolSize` remains a data-only override for nil-stats tests/benchmarks comparing 1/2/4/8 slots; there is no CLI or environment flag. Multi-slot tests retain `flowHash` affinity, falling back to `ipHash(dst)` for packets without usable ports. The server shares one gvisor stack per client across its conns, with grace retention across reconnects independent of slot count (see [48-shared-server-gvisor-stack.md](48-shared-server-gvisor-stack.md)). One data conn multiplexes concurrent business flows; it does not limit business concurrency to one. See [41-five-tuple-pool-dispatch.md](41-five-tuple-pool-dispatch.md).
+**Connection pool**: The topology is **one data slot plus one independent control slot**. Outbound data goes directly to slot 0 without parsing/hashing for slot selection; there is no pool-size setting, flag, or override. The server shares one gvisor stack per client across its conns, with grace retention across reconnects independent of slot count (see [48-shared-server-gvisor-stack.md](48-shared-server-gvisor-stack.md)). One data conn multiplexes concurrent business flows; it does not limit business concurrency to one. The removed five-tuple multi-slot dispatch is recorded in [41-five-tuple-pool-dispatch.md](41-five-tuple-pool-dispatch.md).
 
 **`connSlot`** (`pkg/tunnel/slot.go`) retains its inbound queue and retry loop.
 Each `connAttempt` (`pkg/tunnel/attempt.go`) owns exactly one dial/handshake and the
@@ -262,7 +262,7 @@ wire frame = data[0 : datagramHeaderLen+length]
 ```
 
 Reference counting (`refs atomic.Int32`) lets one buffer be shared by N consumers **without
-copying** — e.g. explicit multi-slot test fan-out (`broadcastToSlots`) or an async
+copying** — e.g. fan-out to multiple consumers or an async
 `bufferedTCP` queue:
 
 - `refs` counts *extra* references beyond the implicit owner, so the zero value (a plain

@@ -593,7 +593,7 @@ func mustParseCIDR(s string) net.IPNet {
 //	│   → ClientDevice.readFromTun() reads raw IP packet from TUN        │
 //	│   → parses src/dst IP, prepends prefix byte (buf[2]=1)             │
 //	│   → sends packet to tunInbound channel                             │
-//	│   → runConnPool reads tunInbound, computes slot = ipHash(dst, N)   │
+//	│   → runConnPool reads tunInbound, hands to the data slot           │
 //	│   → distributes to slots[slot] channel                             │
 //	│   → writeToConn frames [2-byte len][prefix+IP] and writes to TCP   │
 //	│   → TCP connection carries framed datagram to server               │
@@ -626,7 +626,7 @@ func mustParseCIDR(s string) net.IPNet {
 //  3. Connection pool establishment (ConnPoolSize slots)
 //  4. TCP echo: single request/response through full path
 //  5. HTTP: real HTTP GET/POST through TUN → gvisor → HTTP server
-//  6. Multiple dest IPs: verify slot distribution via ipHash
+//  6. Multiple dest IPs: traffic flows to distinct destinations
 //  7. Concurrent traffic: N goroutines sending simultaneously
 //  8. Large payload: 128KB random data echo without corruption
 //  9. Multiple sequential requests on a persistent connection

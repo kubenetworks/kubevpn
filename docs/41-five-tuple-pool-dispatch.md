@@ -1,26 +1,29 @@
 # Five-Tuple Connection-Pool Dispatch
 
+> **Status: historical.** The five-tuple hash and the multi-slot `poolSize` test override
+> described below were removed from the codebase (`flow_hash.go` deleted; dispatch always
+> targets the single data slot). This document is retained as the design record of that
+> experiment; it does not describe current code.
+
 ## Overview
 
-Current implementation: `pkg/tunnel/client.go` owns dispatch, `pkg/tunnel/flow_hash.go`
-owns the optional multi-slot hash, `pkg/tunnel/slot.go` owns queue/retry lifetime and
-`pkg/tunnel/attempt.go` owns one connection's joined pumps. The return path is
-`tunnel.Router` (`pkg/tunnel/route.go`), with service-owned peers in `peers.go`.
-The historical extraction table below intentionally retains old filenames; current test
-navigation is `pkg/tunnel/flow_hash_test.go` and `go test ./pkg/tunnel/...`.
+Current implementation: `pkg/tunnel/client.go` owns dispatch, `pkg/tunnel/slot.go` owns
+queue/retry lifetime and `pkg/tunnel/attempt.go` owns one connection's joined pumps. The
+return path is `tunnel.Router` (`pkg/tunnel/route.go`), with service-owned peers in
+`peers.go`. The historical extraction table below intentionally retains old filenames.
 
-The client now defaults to **one data `connSlot` plus one independent control slot**
+The client defaults to **one data `connSlot` plus one independent control slot**
 (see [01-network-architecture.md](01-network-architecture.md) and
-[18-gvisor-network-stack.md](18-gvisor-network-stack.md)). Default data dispatch selects
+[18-gvisor-network-stack.md](18-gvisor-network-stack.md)). Data dispatch selects
 slot 0 directly, with no packet parsing or hashing for slot selection. The slot's lifecycle,
 queues, deadlines and bounded batching remain; concurrent business flows share that data conn.
 
-The private `poolSize` remains a **data-only, nil-stats test override** for 1/2/4/8-slot
-comparisons, not a CLI or environment setting. With more than one data slot, assignment still
-uses the **stateless five-tuple hash**, modeled on IPVS source-hashing (`sh`) / Maglev rather
-than iptables/nf_conntrack's stateful flow table. The rationale and multi-slot examples below
-preserve that historical design and describe this explicit test override, not the production
-default. The hash replaced the earlier dst-IP-only scheme (`ipHash(dst)`).
+Historically, the private `poolSize` was a **data-only, nil-stats test override** for
+1/2/4/8-slot comparisons, not a CLI or environment setting. With more than one data slot,
+assignment used the **stateless five-tuple hash**, modeled on IPVS source-hashing (`sh`) /
+Maglev rather than iptables/nf_conntrack's stateful flow table. The rationale and
+multi-slot examples below preserve that historical design. The hash replaced the earlier
+dst-IP-only scheme (`ipHash(dst)`).
 
 ## The Problem It Solves
 

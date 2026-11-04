@@ -134,21 +134,3 @@ func trySendToSlot(inbound chan *packet, packet *packet) bool {
 		return false
 	}
 }
-
-// broadcastToSlots delivers the packet to every slot so an idle connection still receives
-// heartbeats. The buffer is cloned per slot rather than shared: each slot's writeToConn stamps
-// the datagram length header in place and the socket write reads the buffer, all concurrently,
-// so a shared buffer would be a data race. Heartbeats are infrequent and small, so the clone is
-// negligible. Each clone (and the original handed to slot 0) is freed by its slot via release().
-func broadcastToSlots(slots []*connSlot, packet *packet) {
-	for i := 1; i < len(slots); i++ {
-		clone := config.LPool.Get().([]byte)
-		copy(clone, packet.data[:packet.length+datagramHeaderLen])
-		trySendToSlot(slots[i].inbound, newPacket(clone, packet.length, nil, nil))
-	}
-	if len(slots) == 0 {
-		packet.release()
-		return
-	}
-	trySendToSlot(slots[0].inbound, packet)
-}

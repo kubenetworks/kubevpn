@@ -62,8 +62,7 @@ type tunDevice struct {
 	// every heartbeat echo reply. Empty in tests that drive a device without a real TUN.
 	tunName string
 	// addrsFn overrides how the device's addresses are resolved. Production leaves it nil (the
-	// name-based lookup); only tests that drive a device without a real TUN set it, mirroring
-	// clientTransport.poolSize.
+	// name-based lookup); only tests that drive a device without a real TUN set it.
 	addrsFn      func() (v4, v6, dockerV4 net.IP)
 	tunInbound   chan *packet
 	tunOutbound  chan *packet

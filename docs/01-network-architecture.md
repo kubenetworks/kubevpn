@@ -142,7 +142,7 @@ per-client gvisor stack → Router → registered data conn
 ```
 
 Protocol-owned heartbeat replies are consumed by the client rather than written to TUN.
-Default outbound dispatch goes directly to slot 0, without parsing or hashing for slot
+Outbound dispatch goes directly to slot 0, without parsing or hashing for slot
 selection. `connSlot` (`pkg/tunnel/slot.go`) retains its queue and retry lifecycle;
 `connAttempt` (`pkg/tunnel/attempt.go`) owns one connection, declaration/registration,
 `readGeneration`/`writeGeneration`, deadlines and batching, and joins both pumps before retry. One tunnel data connection still multiplexes concurrent business flows;
@@ -153,42 +153,13 @@ The control slot has a separate queue and connection to the **same TCP forwardin
 registered data conn. SSH/port-forward still shares an outer TCP transport, so separation
 is not an absolute liveness guarantee.
 
-### Hash Function (Multi-Slot Test Override)
-
-The private, data-only `poolSize` override is retained for nil-stats tests and benchmarks
-comparing 1/2/4/8 data slots. Only the multi-slot path uses the following hash; production
-single-slot dispatch skips it. There is no CLI or environment flag for pool size.
-
-A stateless FNV-1a hash of the flow's **five-tuple** — `(proto, dst IP, src port, dst port)`
-— mod N. Distinct connections to the same destination IP differ in source port, so they
-spread across slots instead of collapsing onto one. Packets with no usable L4 ports (ICMP,
-IP fragments, unparsed IPv6 extension headers) fall back to hashing the destination IP only
-(`ipHash`), preserving legacy behavior and keeping all fragments of one datagram together.
-
-The source IP is omitted (a client has a single TUN IP, so it adds nothing — the IPVS
-source-hashing idea). See [41-five-tuple-pool-dispatch.md](41-five-tuple-pool-dispatch.md)
-for the full design and the rationale for stateless hashing over conntrack.
-
-```go
-func flowHash(key flowKey, dstIP net.IP, slots int) int {
-    if !key.hasPorts {
-        return ipHash(dstIP, slots)   // ICMP / fragments / unparsed → legacy dst-IP hash
-    }
-    var h uint32 = 2166136261  // FNV offset basis
-    // mix proto, dstIP bytes, srcPort, dstPort (FNV prime 16777619)
-    ...
-    return int(h % uint32(slots))
-}
-```
-
-**Properties:**
-- Deterministic: same five-tuple → same slot (per-flow consistency)
-- Well-distributed: spreads many flows to one hot dst IP evenly across slots
-- Zero-allocation: operates on the raw IP byte slice
+Earlier revisions also kept a five-tuple hash multi-slot dispatch as a test/benchmark-only
+override; it was removed as a production-dead path. The historical design is recorded in
+[41-five-tuple-pool-dispatch.md](41-five-tuple-pool-dispatch.md).
 
 ### Why This Works
 
-1. **Same-flow ordering**: Default traffic uses slot 0. With the multi-slot test override, deterministic hashing retains slot affinity to avoid reordering; it is not a stack-correctness requirement.
+1. **Same-flow ordering**: All default traffic uses slot 0, so per-flow packet ordering is trivially preserved.
 
 2. **Independent reconnect**: Data and control slots manage their own connection lifecycles. Losing the sole data conn temporarily interrupts data routing until it reconnects and registers.
 
@@ -198,8 +169,8 @@ func flowHash(key flowKey, dstIP net.IP, slots int) int {
 
 ### Configuration
 
-The default is one data slot plus one control slot. The private `poolSize` is a data-only,
-nil-stats test override, not a user-facing setting; no CLI or environment flag is added.
+One data slot plus one control slot is the only topology; there is no pool-size
+setting, flag, or test override.
 
 ### Tradeoffs
 
@@ -271,7 +242,7 @@ on the fresh conn immediately and any lingering half-open "ghost" conn sinks to
 the tail (where it is a last resort, and is evicted by the read/write deadlines —
 see [Write with Fallback](#write-with-fallback)). The current default has one registered
 data conn per client address in steady state; the control conn is excluded. Multiple entries
-can still occur during reconnect overlap or with a multi-slot test override.
+can still occur during reconnect overlap.
 Multiple clients coexist in the same table:
 
 ```
@@ -306,8 +277,8 @@ Failed-member removal checks those same identities, so an old write cannot remov
 re-added connection or a replacement list. Neither `hub.mu` nor `ConnList.mu` is held
 across socket writes, queue admission, or `Close`.
 
-The following illustrates fallback when multiple entries exist (reconnect overlap or a
-multi-slot test override), not the normal single-data-conn topology:
+The following illustrates fallback when multiple entries exist (reconnect overlap),
+not the normal single-data-conn topology:
 
 ```
 WriteToRoutePacket(ctx, dstKey, packet):
@@ -340,7 +311,7 @@ ghost is actively evicted by the deadlines below within `KeepAliveTime` (write) 
 
 ### Cross-Client Data Flow (A→B)
 
-This multi-entry fallback example applies to reconnect overlap or a multi-slot test override;
+This multi-entry fallback example applies to reconnect overlap;
 the default steady-state path has only `conn_A0` and `conn_B0`.
 
 ```
