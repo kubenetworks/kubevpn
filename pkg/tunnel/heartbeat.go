@@ -210,7 +210,10 @@ func (h *HeartbeatStats) RequestProbe() {
 	}
 }
 
-// MarkReply is retained for legacy test callers. Production must correlate replies.
+// MarkReply is a deliberate cross-package test seam for monitor fixtures that run
+// without a data plane (no tunnel handler or gateway echo backend), where real reply
+// correlation cannot occur. Production must correlate replies via observeReply; never
+// call this outside tests.
 func (h *HeartbeatStats) MarkReply() {
 	if h == nil {
 		return
