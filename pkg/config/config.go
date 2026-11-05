@@ -57,6 +57,12 @@ const (
 	TLSPrivateKeyKey = "tls_key"
 	// TLSServerName for tls config server name
 	TLSServerName = "tls_server_name"
+	// ObfuscationKey is the secret key and environment variable name that
+	// opts OUT of data-plane stream obfuscation. Obfuscation is on by
+	// default; a value of "0"/"false"/"off" on either endpoint disables it.
+	// Both endpoints read the same source (Secret key, or env via EnvFrom),
+	// so they always agree.
+	ObfuscationKey = "KUBEVPN_OBFUSCATE"
 
 	// ContainerSidecarEnvoy is the container name for the Envoy proxy sidecar.
 	ContainerSidecarEnvoy = "envoy"

@@ -31,6 +31,37 @@ func basePodTemplateSpec() *v1.PodTemplateSpec {
 	}
 }
 
+// The obfuscation opt-in rides the TLS secret into the sidecar's environment,
+// so the sidecar's tunnel server agrees with clients reading the same secret.
+func TestAddVPNAndEnvoyContainer_PropagatesObfuscationKey(t *testing.T) {
+	spec := basePodTemplateSpec()
+	secret := fakeSecret()
+	AddVPNAndEnvoyContainer(spec, "default", "node1", false, "kubevpn-system", secret, "kubevpn:test")
+
+	hasEnv := func(name string) bool {
+		for _, c := range spec.Spec.Containers {
+			if c.Name != config.ContainerSidecarVPN {
+				continue
+			}
+			for _, e := range c.Env {
+				if e.Name == name {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	if hasEnv(config.ObfuscationKey) {
+		t.Fatal("obfuscation env injected without the secret carrying the key")
+	}
+
+	secret.Data[config.ObfuscationKey] = []byte("1")
+	AddVPNAndEnvoyContainer(spec, "default", "node2", false, "kubevpn-system", secret, "kubevpn:test")
+	if !hasEnv(config.ObfuscationKey) {
+		t.Fatal("obfuscation env not propagated from secret to vpn sidecar")
+	}
+}
+
 // Req3: the injected fargate VPN sidecar (server) defaults to --debug.
 func TestAddEnvoyAndSSHContainer_DefaultDebug(t *testing.T) {
 	spec := basePodTemplateSpec()

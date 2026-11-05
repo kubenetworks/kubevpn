@@ -9,6 +9,7 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	framing "github.com/wencaiwulue/kubevpn/v2/pkg/internal/wire"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/tunnel/internal/netstack"
 	netutil "github.com/wencaiwulue/kubevpn/v2/pkg/util/netutil"
@@ -58,6 +59,12 @@ func (h *gvisorTCPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 	}
 	ctx = plog.WithField(ctx, "server_conn", localConnID)
 	connCtx, cancel := context.WithCancel(ctx)
+	if framing.ObfuscationEnabled() {
+		// Wrap below the framing/buffering layers: every byte the client's
+		// connector obfuscated (datagrams, batches, route writes, control
+		// frames) is de-obfuscated here before it reaches any reader.
+		tcpConn = framing.ObfuscateAccept(tcpConn)
+	}
 	conn := newBufferedTCP(connCtx, tcpConn, func(c *bufferedTCP) {
 		h.hub.RemoveRoutesByConn(connCtx, c)
 	})

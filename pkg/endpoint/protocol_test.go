@@ -3,7 +3,7 @@ package endpoint
 import (
 	"context"
 	"crypto/tls"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/tunnel"
+	"errors"
 	"net"
 	"strings"
 	"sync"
@@ -13,6 +13,9 @@ import (
 	"k8s.io/client-go/util/cert"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	framing "github.com/wencaiwulue/kubevpn/v2/pkg/internal/wire"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/tunnel"
+	netutil "github.com/wencaiwulue/kubevpn/v2/pkg/util/netutil"
 )
 
 // ---------------------------------------------------------------------------
@@ -219,65 +222,17 @@ func TestGenerateServersFromNodes_FactoryError(t *testing.T) {
 // TCPTransporter tests
 // ---------------------------------------------------------------------------
 
-func TestTCPTransporter_NilTLS(t *testing.T) {
-	// Start a local TCP listener to accept connections.
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("failed to start listener: %v", err)
-	}
-	defer ln.Close()
-
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		conn, err := ln.Accept()
-		if err != nil {
-			return
-		}
-		// Echo a byte back to confirm the connection works.
-		buf := make([]byte, 16)
-		n, err := conn.Read(buf)
-		if err != nil {
-			return
-		}
-		_, _ = conn.Write(buf[:n])
-		conn.Close()
-	}()
-
+func TestTCPTransporter_NilTLSRefuses(t *testing.T) {
+	// Without TLS material the transporter must refuse to dial: the data plane
+	// never falls back to raw, plaintext TCP.
 	tr := TCPTransporter(nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	conn, err := tr.Dial(ctx, ln.Addr().String())
-	if err != nil {
-		t.Fatalf("Dial error: %v", err)
+	_, err := tr.Dial(ctx, "127.0.0.1:1")
+	if !errors.Is(err, netutil.ErrNoTLSConfig) {
+		t.Fatalf("expected ErrNoTLSConfig refusal, got %v", err)
 	}
-	defer conn.Close()
-
-	// Verify the connection is a plain TCP conn (not TLS).
-	if _, ok := conn.(*tls.Conn); ok {
-		t.Fatal("expected plain TCP conn when TLS config is nil, got *tls.Conn")
-	}
-
-	// Verify data round-trip.
-	payload := []byte("ping")
-	_, err = conn.Write(payload)
-	if err != nil {
-		t.Fatalf("Write error: %v", err)
-	}
-
-	buf := make([]byte, 16)
-	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	n, err := conn.Read(buf)
-	if err != nil {
-		t.Fatalf("Read error: %v", err)
-	}
-	if string(buf[:n]) != "ping" {
-		t.Errorf("echo mismatch: got %q, want %q", buf[:n], "ping")
-	}
-
-	wg.Wait()
 }
 
 func TestTCPTransporter_WithTLS(t *testing.T) {
@@ -374,6 +329,63 @@ func TestTCPTransporter_WithTLS(t *testing.T) {
 	}
 
 	wg.Wait()
+}
+
+func TestTCPTransporter_ObfuscationFlagFromSecret(t *testing.T) {
+	// The in-cluster client path: the flag rides in the TLS secret map.
+	// Obfuscation is on by default; "0" opts out.
+	certPEM, keyPEM, err := cert.GenerateSelfSignedCertKeyWithFixtures("localhost", []net.IP{net.IPv4(127, 0, 0, 1)}, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tlsSecret := map[string][]byte{
+		config.TLSCertKey:       certPEM,
+		config.TLSPrivateKeyKey: keyPEM,
+		config.TLSServerName:    []byte("localhost"),
+	}
+	_ = TCPTransporter(tlsSecret)
+	t.Cleanup(func() { framing.SetObfuscation(false) })
+	if !framing.ObfuscationEnabled() {
+		t.Fatal("obfuscation not enabled by default")
+	}
+
+	tlsSecret[config.ObfuscationKey] = []byte("0")
+	_ = TCPTransporter(tlsSecret)
+	if framing.ObfuscationEnabled() {
+		t.Fatal("TCPTransporter did not disable obfuscation from the secret map")
+	}
+}
+
+func TestGvisorTCPListener_ObfuscationFlagFromEnv(t *testing.T) {
+	// The server path: the flag arrives as an env var (Secret EnvFrom).
+	certPEM, keyPEM, err := cert.GenerateSelfSignedCertKeyWithFixtures("localhost", []net.IP{net.IPv4(127, 0, 0, 1)}, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(config.TLSCertKey, string(certPEM))
+	t.Setenv(config.TLSPrivateKeyKey, string(keyPEM))
+	t.Setenv(config.TLSServerName, "localhost")
+	t.Setenv(config.ObfuscationKey, "0")
+	t.Cleanup(func() { framing.SetObfuscation(false) })
+
+	ln, err := GvisorTCPListener("127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("GvisorTCPListener: %v", err)
+	}
+	defer ln.Close()
+	if framing.ObfuscationEnabled() {
+		t.Fatal("GvisorTCPListener did not disable obfuscation from env")
+	}
+
+	t.Setenv(config.ObfuscationKey, "")
+	ln2, err := GvisorTCPListener("127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("GvisorTCPListener: %v", err)
+	}
+	defer ln2.Close()
+	if !framing.ObfuscationEnabled() {
+		t.Fatal("GvisorTCPListener not on by default")
+	}
 }
 
 func TestTCPTransporter_InvalidTLSSecret_RefusesConnection(t *testing.T) {

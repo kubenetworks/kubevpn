@@ -59,6 +59,31 @@ func GetTlsServerConfig(tlsInfo map[string][]byte) (*tls.Config, error) {
 
 var ErrNoTLSConfig = errors.New("no TLS configuration found")
 
+// ObfuscationWanted reports whether stream obfuscation is enabled. It is ON
+// by default: the KUBEVPN_OBFUSCATE flag is an opt-out. It reads the flag
+// from the TLS secret map first (in-cluster path: the traffic-manager Secret)
+// and falls back to the environment variable of the same name (sidecar/client
+// path). A value of "0", "false" or "off" (case insensitive, surrounding
+// spaces ignored) disables it; anything else — including absence — leaves it
+// on. Both endpoints derive the setting from the same source, so they always
+// agree. Mixed-version rollout warning: an OLD client (no obfuscation code)
+// talking to a NEW manager connects plaintext and garbles — set the flag to
+// "0" on the Secret until the fleet is upgraded (see docs/54).
+func ObfuscationWanted(tlsSecret map[string][]byte) bool {
+	v := ""
+	if b, ok := tlsSecret[config.ObfuscationKey]; ok {
+		v = string(b)
+	} else {
+		v = os.Getenv(config.ObfuscationKey)
+	}
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "0", "false", "off":
+		return false
+	default:
+		return true
+	}
+}
+
 func getTls(tlsSecret map[string][]byte) (crtBytes []byte, keyBytes []byte, serverName []byte, err error) {
 	if tlsSecret != nil {
 		crtBytes = tlsSecret[config.TLSCertKey]

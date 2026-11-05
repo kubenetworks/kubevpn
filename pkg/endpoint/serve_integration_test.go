@@ -1,17 +1,36 @@
 package endpoint_test
 
 import (
+	"bytes"
 	"context"
+	"crypto/tls"
 	"errors"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/tunnel"
 	"io"
 	"net"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/endpoint"
+	framing "github.com/wencaiwulue/kubevpn/v2/pkg/internal/wire"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/tunnel"
+	netutil "github.com/wencaiwulue/kubevpn/v2/pkg/util/netutil"
 )
+
+// setTestTLSEnv provisions the self-signed TLS material the gtcp listener and
+// transporter read from the environment: the data plane never falls back to
+// raw TCP, so tests exercising real listeners/transporters must provide it.
+func setTestTLSEnv(t *testing.T) {
+	t.Helper()
+	crt, key, host, err := netutil.GenTLSCert(context.Background(), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(config.TLSCertKey, string(crt))
+	t.Setenv(config.TLSPrivateKeyKey, string(key))
+	t.Setenv(config.TLSServerName, string(host))
+}
 
 // A packet-device surrogate with an existing loopback address exercises real
 // device discovery and tunnel.TunHandler/serve without changing any network settings.
@@ -42,6 +61,96 @@ func (l *serverShutdownListener) Accept() (net.Conn, error) {
 		return c, nil
 	}
 	return l.Listener.Accept()
+}
+
+// TestServe_ObfuscatedOverTLS exercises the full production client/server
+// layering — TCP, TLS, obfuscating stream, datagram framing — over a real
+// loopback connection. The obfuscating wrapper must sit transparently between
+// the TLS record layer and the framing layer in both directions.
+func TestServe_ObfuscatedOverTLS(t *testing.T) {
+	setTestTLSEnv(t)
+	t.Setenv(config.ObfuscationKey, "1")
+	t.Cleanup(func() { framing.SetObfuscation(false) })
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	serverTLS, err := netutil.GetTlsServerConfig(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tlsLn := tls.NewListener(ln, serverTLS)
+
+	serverDone := make(chan error, 1)
+	go func() {
+		conn, err := tlsLn.Accept()
+		if err != nil {
+			serverDone <- err
+			return
+		}
+		// Production server stack: obfuscation below framing.
+		framed, err := framing.NewConn(context.Background(), framing.ObfuscateAccept(conn))
+		if err != nil {
+			_ = conn.Close()
+			serverDone <- err
+			return
+		}
+		buf := make([]byte, 128*1024)
+		for i := 0; i < 3; i++ {
+			n, err := framed.Read(buf)
+			if err != nil {
+				serverDone <- err
+				return
+			}
+			if _, err := framed.Write(buf[:n]); err != nil {
+				serverDone <- err
+				return
+			}
+		}
+		serverDone <- framed.Close()
+	}()
+
+	// Production client stack: transporter (sets the flag from env) +
+	// connector (wraps below framing).
+	tr := endpoint.TCPTransporter(nil)
+	if !framing.ObfuscationEnabled() {
+		t.Fatal("TCPTransporter did not enable obfuscation from env")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	raw, err := tr.Dial(ctx, tlsLn.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	framed, err := endpoint.NewUDPOverTCPConnector().ConnectContext(ctx, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	msgs := [][]byte{
+		bytes.Repeat([]byte{0x11}, 32),
+		bytes.Repeat([]byte{0x22}, 2048),
+		bytes.Repeat([]byte{0x33}, 65535),
+	}
+	echo := make([]byte, 128*1024)
+	for _, m := range msgs {
+		if _, err := framed.Write(m); err != nil {
+			t.Fatalf("client Write: %v", err)
+		}
+		n, err := framed.Read(echo)
+		if err != nil {
+			t.Fatalf("client Read: %v", err)
+		}
+		if !bytes.Equal(echo[:n], m) {
+			t.Fatalf("echo mismatch at len=%d (got %d)", len(m), n)
+		}
+	}
+	if err := <-serverDone; err != nil {
+		t.Fatalf("server goroutine: %v", err)
+	}
 }
 
 func TestStage3_RunServerTUNFatal(t *testing.T) {
@@ -107,6 +216,7 @@ func (h *lifecycleHandler) Handle(ctx context.Context, c net.Conn) {
 }
 
 func TestServe_StartsAndJoinsRealTunnelService(t *testing.T) {
+	setTestTLSEnv(t)
 	servers, err := endpoint.GenerateServers([]string{"gtcp://127.0.0.1:0"}, endpoint.NewRouteHub())
 	if err != nil {
 		t.Fatal(err)

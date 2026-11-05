@@ -242,3 +242,35 @@ func TestGetTlsServerConfig_InvalidKeyPair(t *testing.T) {
 		t.Fatal("expected error for invalid cert/key pair")
 	}
 }
+
+func TestObfuscationWanted(t *testing.T) {
+	// Obfuscation is on by default; the flag opts out.
+	cases := []struct {
+		name   string
+		secret map[string][]byte
+		env    string
+		want   bool
+	}{
+		{"absent", nil, "", true},
+		{"env 1", nil, "1", true},
+		{"env true", nil, "true", true},
+		{"env TRUE", nil, "TRUE", true},
+		{"env spaced", nil, " true ", true},
+		{"env 0", nil, "0", false},
+		{"env false", nil, "false", false},
+		{"env off", nil, "OFF", false},
+		{"env garbage", nil, "yes", true},
+		{"secret 0", map[string][]byte{config.ObfuscationKey: []byte("0")}, "", false},
+		{"secret false overrides env", map[string][]byte{config.ObfuscationKey: []byte("false")}, "0", false},
+		{"secret absent env set", map[string][]byte{config.TLSServerName: []byte("x")}, "0", false},
+		{"secret absent env on", map[string][]byte{config.TLSServerName: []byte("x")}, "1", true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv(config.ObfuscationKey, c.env)
+			if got := ObfuscationWanted(c.secret); got != c.want {
+				t.Fatalf("ObfuscationWanted(%v) = %v, want %v", c.secret, got, c.want)
+			}
+		})
+	}
+}
