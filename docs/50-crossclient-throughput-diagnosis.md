@@ -362,6 +362,57 @@ performance regression. The isolated slot, route and TUN-pump fixtures retained
 their allocation counts after the ownership/package changes. No real TUN, WAN,
 SSH or Kubernetes port-forward performance conclusion follows from these runs.
 
+## 2026-11-03: ICMP intermittent 20–30 s stalls — outer-TCP RTO head-of-line blocking
+
+Field report (macOS client, root daemon, cross-client `ping` to a peer's TUN IP):
+`ping` intermittently takes 20–30+ seconds and then recovers on its own, without any
+reconnect in between. The same period shows `gvisor_stats` warnings from the
+`client_interclient` stack with `tcp_retransmits_delta=1`, occasional
+`tcp_timeouts_delta=1`, and — the decisive field — `outbound_queue_depth=0`.
+
+### Signature
+
+`outbound_queue_depth=0` says the inter-client stack's output pump is fully drained:
+the userland queues (slot inbound, `tunInbound`, gvisor endpoint) are empty. The stall
+is not in our queues. It sits in the kernel TCP of the single outer transport
+(`ConnPoolSize = 1`, `pkg/tunnel/client.go`): every IP packet — ICMP echo included — is
+framed and multiplexed over one TCP connection (kubectl port-forward / SSH channel).
+Kernel TCP delivers in order, so one lost segment anywhere on that path head-of-line
+blocks every frame behind it until an RTO retransmit succeeds, and the exponential RTO
+backoff (1→2→4→8→16→32 s) produces exactly the observed 20–30 s self-recovering stalls.
+The `tcp_retransmits_delta`/`tcp_timeouts_delta` in the warning are the *inner* gvisor
+TCP counters of one cross-client flow entering RTO — the consequence of the same outer
+loss, not an independent fault.
+
+### Rejected mitigations (and why)
+
+- **ICMP priority lane in the slot queue**: queue depth is 0; prioritizing packets that
+  are not queued does nothing. The HOL is downstream in kernel RTO.
+- **Restoring multiple data slots**: 83048c4e established that all slots dial through
+  the same outer transport (one SSH TCP connection / shared forward path), so multiple
+  slots share one loss domain and do not diversify the loss. Five-tuple dispatch
+  survives only as a nil-stats test override.
+- **Faster stall detection / shorter watchdog budget**: recovery is ultimately gated by
+  the kernel RTO on the same transport; earlier reconnects add churn (tearing down
+  in-flight cross-client TCP flows) without shortening the stall.
+
+### Follow-up directions (not implemented here)
+
+- **R2 — heartbeat echo replies on the control connection** (`docs/08-heartbeat-health.md`,
+  `docs/47-portforward-blackhole-liveness.md`): the liveness watchdog stops retiring
+  generations during self-recovering RTO stalls, so in-flight flows survive; black holes
+  are still caught because the control connection shares the outer transport.
+- **R3 — UDP/QUIC data-plane transport** (plumbing exists in
+  `pkg/endpoint/udp_reverse_bridge.go`): removes in-order TCP HOL entirely; a separate
+  effort.
+
+Related field noise: the recurring `[Gvisor-UDP] Disconnected 198.18.0.x:137 <->
+127.0.0.1:137: i/o timeout` errors are benign — a peer's NetBIOS name-service packets
+arrive for this client's TUN IP, `LocalUDPForwarder` dials `127.0.0.1:137` where
+nothing listens, and the 120 s idle deadline (`config.UDPSessionTimeout`) expires. Idle
+expiry now logs at debug level ("Idle session closed"); real relay failures keep error
+level ("Disconnected").
+
 ## Remaining work
 
 - **CI minikube e2e** (real RTT): `iperf3` A→B single-stream vs `-P 8`, and A→cluster, on both

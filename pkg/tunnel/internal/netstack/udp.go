@@ -10,6 +10,7 @@ import (
 	"gvisor.dev/gvisor/pkg/waiter"
 	"io"
 	"net"
+	"os"
 	"time"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -79,9 +80,25 @@ func relayUDP(ctx context.Context, conn *gonet.UDPConn, remote *net.UDPConn, src
 	errChan := make(chan error, 2)
 	go pipeUDPFromConn(ctx, conn, remote, src, dst, errChan)
 	go pipeUDPToConn(ctx, conn, remote, src, dst, errChan)
-	if err := <-errChan; err != nil && !errors.Is(err, io.EOF) {
-		plog.G(ctx).Errorf("[Gvisor-UDP] Disconnected %s <-> %s: %v", conn.LocalAddr(), remote.RemoteAddr(), err)
+	if err := <-errChan; err != nil {
+		if errors.Is(err, io.EOF) || isIdleTimeout(err) {
+			// An idle session expiring its read deadline is normal teardown, not a failure.
+			plog.G(ctx).Debugf("[Gvisor-UDP] Idle session closed %s <-> %s: %v", conn.LocalAddr(), remote.RemoteAddr(), err)
+		} else {
+			plog.G(ctx).Errorf("[Gvisor-UDP] Disconnected %s <-> %s: %v", conn.LocalAddr(), remote.RemoteAddr(), err)
+		}
 	}
+}
+
+// isIdleTimeout reports whether err is a read/write deadline expiry on either side of the
+// relay. The real socket wraps os.ErrDeadlineExceeded; gonet returns its private
+// timeoutError, which only satisfies net.Error, so both must be checked.
+func isIdleTimeout(err error) bool {
+	if errors.Is(err, os.ErrDeadlineExceeded) {
+		return true
+	}
+	var ne net.Error
+	return errors.As(err, &ne) && ne.Timeout()
 }
 
 func pipeUDPFromConn(ctx context.Context, conn *gonet.UDPConn, remote *net.UDPConn, src, dst *net.UDPAddr, errChan chan<- error) {
