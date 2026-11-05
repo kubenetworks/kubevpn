@@ -3,7 +3,8 @@
 ## 1. Problem
 
 Every client connection used to run its **own** pod and service informers to keep the
-local route table and `/etc/hosts` current (`AddRouteDynamic` in `pkg/handler/network.go`):
+local route table and `/etc/hosts` current (the removed `AddRouteDynamic` path;
+current push-driven routing lives in `pkg/network/routes.go`):
 
 - a **cluster-wide pod list-watch** (when the user's kubeconfig allowed it), whose only
   effect was adding per-pod `/32` routes — routes that are already covered by the cluster
@@ -47,7 +48,10 @@ rpc WatchNamespaceRoutes(NamespaceRoutesRequest) returns (stream NamespaceRoutes
 
 ### Client
 
-`NetworkManager.StartRouteWatcher` subscribes for the workload namespace and applies frames:
+`network.Runtime.StartRouteWatcher` (`pkg/network/routes.go`) subscribes for the workload
+namespace and applies frames. `pkg/network/transport.go` supplies generation-bound xDS
+dialers and fences updates after retirement; `pkg/network/dns.go` owns DNS state:
+
 
 - `AddedPodCIDRs` → `AddRouteCIDR` (whole prefixes, via the same TUN route path as the
   cluster CIDRs), on top of the cluster CIDR routes already installed at connect.
@@ -174,9 +178,11 @@ break that; so instead:
 | `pkg/daemon/rpc/daemon.proto` | `WatchNamespaceRoutes` RPC + `NamespaceRoutes*` / `ServiceRecord` messages |
 | `pkg/xds/route_discovery.go` | per-ns informers, Transform, `/24`//64 aggregation, snapshot/delta broadcaster, RPC impl |
 | `pkg/xds/server.go` | registers the gzip compressor |
-| `pkg/handler/network.go` | `StartRouteWatcher`, `AddRouteCIDR`; removed `AddRouteDynamic`/`watchAndRoute` |
+| `pkg/network/routes.go` | `Runtime.StartRouteWatcher`, `AddRouteCIDR`; no client `AddRouteDynamic`/`watchAndRoute` informer |
+| `pkg/network/transport.go` | Generation-bound xDS dialing and apply fencing |
+| `pkg/network/dns.go` | Runtime DNS state/setup |
 | `pkg/dns/*.go` | `dns.Config.UpdateServices` + `applyResolvers`; removed `SvcInformer` |
-| `pkg/handler/traffmgr_resources.go`, `traffmgr.go`, `connect.go` | `-route` Role/RoleBinding + `ensureRouteRBAC` |
+| `pkg/cluster/manager/resources.go`, `pkg/cluster/manager/manager.go` | `-route` Role/RoleBinding + `ensureRouteRBAC` |
 
 ## 5. Not done / limitations
 

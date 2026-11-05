@@ -2,8 +2,10 @@ package action
 
 import (
 	"context"
+	"errors"
 	"io"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 
 	"google.golang.org/grpc"
@@ -38,6 +40,39 @@ func (f *fakeConnectServer) Recv() (*rpc.ConnectRequest, error) {
 }
 
 func (f *fakeConnectServer) Context() context.Context { return f.ctx }
+func (f *fakeConnectServer) RecvMsg(any) error        { return io.EOF }
+func (f *fakeConnectServer) SendMsg(v any) error      { return f.Send(v.(*rpc.ConnectResponse)) }
+
+type terminalTestSession struct {
+	*handler.DataSession
+	ctx     context.Context
+	cleaned atomic.Int32
+}
+
+func (s *terminalTestSession) Context() context.Context { return s.ctx }
+func (s *terminalTestSession) Cleanup(context.Context)  { s.cleaned.Add(1) }
+
+func TestConnect_TerminalSessionDoesNotReportSuccess(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	old := &terminalTestSession{DataSession: &handler.DataSession{ConnectionID: "terminal"}, ctx: ctx}
+	other := &handler.DataSession{ConnectionID: "other"}
+	logFile := &lumberjack.Logger{Filename: filepath.Join(t.TempDir(), "daemon.log")}
+	t.Cleanup(func() { _ = logFile.Close() })
+	svr := &Server{IsSudo: true, LogFile: logFile, registry: connectionRegistry{list: []handler.Connection{old, other}}}
+	cancel()
+	// Invalid credentials make rebuilding fail before any real network operation.
+	// A terminal entry must not turn this failure into an idempotent success.
+	err := svr.Connect(&fakeConnectServer{ctx: context.Background(), req: &rpc.ConnectRequest{ConnectionID: "terminal", KubeconfigBytes: "invalid"}})
+	if err == nil || errors.Is(err, io.EOF) {
+		t.Fatalf("terminal reconnect falsely succeeded: %v", err)
+	}
+	if old.cleaned.Load() != 1 {
+		t.Fatal("terminal session cleanup was not joined")
+	}
+	if len(svr.registry.list) != 1 || svr.registry.list[0] != other {
+		t.Fatal("terminal entry retained or unrelated session removed")
+	}
+}
 
 // TestConnect_SudoIdempotentOnDuplicateConnectionID locks the B1 fix: when the root
 // daemon already holds a data-plane session for a ConnectionID, a second Connect for
@@ -51,9 +86,8 @@ func TestConnect_SudoIdempotentOnDuplicateConnectionID(t *testing.T) {
 	const cid = "abc123def456"
 	existing := &handler.DataSession{ConnectionID: cid}
 	svr := &Server{
-		IsSudo:      true,
-		LogFile:     logFile,
-		connections: []handler.Connection{existing},
+		IsSudo:  true,
+		LogFile: logFile, registry: connectionRegistry{list: []handler.Connection{existing}},
 	}
 	resp := &fakeConnectServer{
 		ctx: context.Background(),
@@ -65,10 +99,10 @@ func TestConnect_SudoIdempotentOnDuplicateConnectionID(t *testing.T) {
 	}
 
 	// No duplicate data plane: the connection slice is unchanged and still the same instance.
-	if got := len(svr.connections); got != 1 {
+	if got := len(svr.registry.list); got != 1 {
 		t.Fatalf("expected 1 connection (no duplicate created), got %d", got)
 	}
-	if svr.connections[0] != existing {
+	if svr.registry.list[0] != existing {
 		t.Fatal("existing data-plane session must be preserved, not replaced")
 	}
 

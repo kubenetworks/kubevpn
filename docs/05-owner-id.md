@@ -76,7 +76,7 @@ User Daemon:
 
 Root Daemon:
   connect.OwnerID = req.OwnerID              ← received from request
-  → NetworkManager.rentIP(OwnerID)           ← used for TunConfigService IP allocation
+  → network.Runtime.rentIP(ctx)             ← uses Config.OwnerID (pkg/network/address.go)
 ```
 
 ### 2.4 Four Write Scenarios

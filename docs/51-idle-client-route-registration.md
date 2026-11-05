@@ -2,6 +2,15 @@
 
 ## 1. Overview
 
+Current source map: `pkg/tunnel/client.go` builds registrations; `attempt.go` sends them
+before business traffic; `device.go`/`device_address.go` resolve the current TUN addresses.
+`pkg/tunnel/route.go` defines `Router`, and `server_endpoint.go` routes stack output over
+registered data conns (never directly over control). `pkg/network/transport.go` now owns
+`transportSupervisor.monitorTransport`/`superviseTransport`; `transport_policy.go` owns
+`nextPortForwardDelay`. The old `watchLiveness`/`livenessOutcome`/`portForwardOnce` chain
+and old filenames in the causal/fix history below describe the incident-era implementation,
+not current APIs. The recorded counts, timelines and logs are unchanged.
+
 A single silent `return nil` on the client took a tunnel down for 20 hours and, through four
 downstream layers, ended up corrupting a lease record in the traffic manager's ConfigMap. This
 document records the causal chain, because every link in it was individually reasonable and only the
@@ -14,6 +23,10 @@ Symptoms as first reported:
 2. `root_daemon.log` was full of errors.
 
 They were the same incident. Symptom 1 is a consequence of symptom 2.
+
+> **Historical topology:** The incident counts below were observed with four data slots plus
+> one control slot and are preserved as recorded. The current default is one data `connSlot`
+> plus one independent control slot; the missing-registration failure mechanism still applies.
 
 ## 2. The Causal Chain
 
@@ -46,7 +59,10 @@ what made the diagnosis confusing: the tunnel was demonstrably carrying client�
 
 Heartbeat ICMP goes out on the dedicated control conn, which the server deliberately does **not**
 register in `RouteHub` (`handleControlConn`): the echo must come back over a *data* conn, because
-that is what proves the data path works. See [08-heartbeat-health.md](08-heartbeat-health.md).
+that is what proves the data path works. Both conns use the same TCP forwarding endpoint
+10801, not xDS 9002. Requests bypass the business queue, but replies depend on the registered
+data conn and the outer SSH/port-forward TCP transport remains shared; this is not an absolute
+liveness guarantee. See [08-heartbeat-health.md](08-heartbeat-health.md).
 
 So the only things that can create a route for a client are a data slot's registration packet or
 real outbound user traffic. An idle client with broken registration is invisible to the server: it
@@ -158,17 +174,22 @@ Both pre-existing tests covering route registration hand-crafted the announcemen
 test has a `registerRoute()` helper). Neither ever executed `registrationPayloads()`. The mechanism
 with no test was the one that broke.
 
-`pkg/core/registration_integration_test.go` now drives the real data plane — 4 data slots plus the
-control slot, over loopback TCP, into the real gvisor handler and `RouteHub` — and asserts automatic
-registration, the heartbeat round trip, recovery after a port-forward teardown, and that a client
-which cannot determine its own addresses both fails to register **and says so**.
+`pkg/tunnel/registration_integration_test.go` drives the real data plane over loopback TCP into
+the real gvisor handler and `tunnel.Router`. The original coverage used four data slots plus control;
+current default expectations are **one registered data conn per client address**, plus one
+control conn excluded from `Router`. It covers automatic registration, the heartbeat round trip,
+recovery after a port-forward teardown, and a client which cannot determine its own addresses
+both failing to register **and saying so**. (The multi-slot `poolSize` test override referenced
+by earlier revisions was removed with the five-tuple hash; see
+[41-five-tuple-pool-dispatch.md](41-five-tuple-pool-dispatch.md).)
 
 ## 5. Verification
 
 Against a real cluster, after connecting:
 
 ```bash
-# 4 pool conns per client, not 0
+# current default: 1 registered data conn per client address, not 0; control excluded
+# reconnects add log entries, so cumulative log counts are not the live conn count
 kubectl logs deploy/kubevpn-traffic-manager | grep -E 'Add route|Add pool conn'
 # must be empty (was 731/hour)
 kubectl logs deploy/kubevpn-traffic-manager | grep 'No route for stack output'
@@ -184,6 +205,6 @@ should report `ok` rather than `unhealthy`.
 ## 6. Related Documents
 
 - [03-dhcp-ip-allocation.md](03-dhcp-ip-allocation.md) — lease mechanism and `TUN_ALLOCS` persistence
-- [08-heartbeat-health.md](08-heartbeat-health.md) — heartbeat, proactive registration, RouteHub
+- [08-heartbeat-health.md](08-heartbeat-health.md) — heartbeat, proactive registration, Router
 - [47-portforward-blackhole-liveness.md](47-portforward-blackhole-liveness.md) — the liveness watchdog
 - [09-tun-ip-hot-update.md](09-tun-ip-hot-update.md) — why addresses are re-read rather than cached

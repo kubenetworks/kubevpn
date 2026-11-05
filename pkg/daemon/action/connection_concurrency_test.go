@@ -74,10 +74,10 @@ func startDeadlockWatchdog(t *testing.T, ctx context.Context, done <-chan struct
 // connections and that panics. This helper only holds RLock and copies IDs,
 // exercising the connMu read path without triggering the nil-factory path.
 func readConnectionIDs(svr *Server) []string {
-	svr.connMu.RLock()
-	defer svr.connMu.RUnlock()
-	out := make([]string, len(svr.connections))
-	for i, c := range svr.connections {
+	svr.registry.mu.RLock()
+	defer svr.registry.mu.RUnlock()
+	out := make([]string, len(svr.registry.list))
+	for i, c := range svr.registry.list {
 		out[i] = c.GetConnectionID()
 	}
 	return out
@@ -114,9 +114,10 @@ func newConcurrentServer(n int, counter *atomic.Int64) *Server {
 		currentID = ids[0]
 	}
 	return &Server{
-		connections:         conns,
-		currentConnectionID: currentID,
-		IsSudo:              true, // skip getSudoTunIPs which needs a gRPC client
+
+		IsSudo: true, registry: // skip getSudoTunIPs which needs a gRPC client
+		connectionRegistry{list: conns,
+			currentID: currentID},
 	}
 }
 
@@ -125,11 +126,11 @@ func newConcurrentServer(n int, counter *atomic.Int64) *Server {
 // Caller must NOT hold connMu — this function acquires RLock.
 func assertSliceHealth(t *testing.T, svr *Server) map[string]int {
 	t.Helper()
-	svr.connMu.RLock()
-	defer svr.connMu.RUnlock()
+	svr.registry.mu.RLock()
+	defer svr.registry.mu.RUnlock()
 
-	seen := make(map[string]int, len(svr.connections))
-	for i, c := range svr.connections {
+	seen := make(map[string]int, len(svr.registry.list))
+	for i, c := range svr.registry.list {
 		if c == nil {
 			t.Errorf("connections[%d] is nil", i)
 			continue
@@ -150,9 +151,9 @@ func assertStateCoherence(t *testing.T, svr *Server) {
 	t.Helper()
 	seen := assertSliceHealth(t, svr)
 
-	svr.connMu.RLock()
-	cur := svr.currentConnectionID
-	svr.connMu.RUnlock()
+	svr.registry.mu.RLock()
+	cur := svr.registry.currentID
+	svr.registry.mu.RUnlock()
 
 	// currentConnectionID is either "" or present in the slice.
 	if cur != "" {
@@ -178,12 +179,12 @@ func TestConcurrency_DisconnectVsRead(t *testing.T) {
 	svr := newConcurrentServer(numConns, &cleanupCount)
 
 	// Collect all IDs before starting goroutines so writers have stable targets.
-	svr.connMu.RLock()
-	ids := make([]string, len(svr.connections))
-	for i, c := range svr.connections {
+	svr.registry.mu.RLock()
+	ids := make([]string, len(svr.registry.list))
+	for i, c := range svr.registry.list {
 		ids[i] = c.GetConnectionID()
 	}
-	svr.connMu.RUnlock()
+	svr.registry.mu.RUnlock()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -201,10 +202,7 @@ func TestConcurrency_DisconnectVsRead(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			svr.connMu.Lock()
-			removed := svr.removeConnection(id)
-			svr.resetCurrentConnection(id)
-			svr.connMu.Unlock()
+			removed := svr.registry.removeByID(id)
 			// Cleanup is intentionally outside the lock — matches production code.
 			for _, conn := range removed {
 				cleanupConnection(context.Background(), conn)
@@ -260,12 +258,12 @@ func TestConcurrency_DisconnectVsConnectionUse(t *testing.T) {
 	var cleanupCount atomic.Int64
 	svr := newConcurrentServer(numConns, &cleanupCount)
 
-	svr.connMu.RLock()
-	ids := make([]string, len(svr.connections))
-	for i, c := range svr.connections {
+	svr.registry.mu.RLock()
+	ids := make([]string, len(svr.registry.list))
+	for i, c := range svr.registry.list {
 		ids[i] = c.GetConnectionID()
 	}
-	svr.connMu.RUnlock()
+	svr.registry.mu.RUnlock()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -281,10 +279,7 @@ func TestConcurrency_DisconnectVsConnectionUse(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			svr.connMu.Lock()
-			removed := svr.removeConnection(id)
-			svr.resetCurrentConnection(id)
-			svr.connMu.Unlock()
+			removed := svr.registry.removeByID(id)
 			for _, conn := range removed {
 				cleanupConnection(context.Background(), conn)
 			}
@@ -342,9 +337,9 @@ func TestConcurrency_DoubleRemoveSameID(t *testing.T) {
 	var cleanupCount atomic.Int64
 	svr := newConcurrentServer(numConns, &cleanupCount)
 
-	svr.connMu.RLock()
-	targetID := svr.connections[targetIdx].GetConnectionID()
-	svr.connMu.RUnlock()
+	svr.registry.mu.RLock()
+	targetID := svr.registry.list[targetIdx].GetConnectionID()
+	svr.registry.mu.RUnlock()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -360,10 +355,7 @@ func TestConcurrency_DoubleRemoveSameID(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			svr.connMu.Lock()
-			removed := svr.removeConnection(targetID)
-			svr.resetCurrentConnection(targetID)
-			svr.connMu.Unlock()
+			removed := svr.registry.removeByID(targetID)
 			totalRemoved.Add(int64(len(removed)))
 			for _, conn := range removed {
 				cleanupConnection(context.Background(), conn)
@@ -382,9 +374,9 @@ func TestConcurrency_DoubleRemoveSameID(t *testing.T) {
 	}
 
 	// The target ID must no longer appear in connections.
-	svr.connMu.RLock()
-	defer svr.connMu.RUnlock()
-	for _, c := range svr.connections {
+	svr.registry.mu.RLock()
+	defer svr.registry.mu.RUnlock()
+	for _, c := range svr.registry.list {
 		if c.GetConnectionID() == targetID {
 			t.Errorf("double-remove: targetID %q still present in connections", targetID)
 		}
@@ -393,8 +385,8 @@ func TestConcurrency_DoubleRemoveSameID(t *testing.T) {
 	// Final state must be coherent.
 	// Re-use assertStateCoherence body inline (it takes RLock, we already hold RLock
 	// above — to avoid re-acquiring, duplicate the nil/dup checks manually).
-	seen := make(map[string]int, len(svr.connections))
-	for i, c := range svr.connections {
+	seen := make(map[string]int, len(svr.registry.list))
+	for i, c := range svr.registry.list {
 		if c == nil {
 			t.Errorf("double-remove: connections[%d] is nil after double-remove", i)
 		}
@@ -404,7 +396,7 @@ func TestConcurrency_DoubleRemoveSameID(t *testing.T) {
 		}
 		seen[id] = i
 	}
-	cur := svr.currentConnectionID
+	cur := svr.registry.currentID
 	if cur != "" {
 		if _, ok := seen[cur]; !ok {
 			t.Errorf("double-remove: currentConnectionID %q points to removed connection", cur)
@@ -463,11 +455,7 @@ func TestConcurrency_QuitStyleClearVsReads(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		svr.connMu.Lock()
-		connects := handler.Connects(svr.connections)
-		svr.connections = nil
-		svr.currentConnectionID = ""
-		svr.connMu.Unlock()
+		connects := svr.registry.takeAll()
 		// cleanup outside lock — matches Quit() production code
 		for _, conn := range connects.Sort() {
 			cleanupConnection(context.Background(), conn)
@@ -482,10 +470,10 @@ func TestConcurrency_QuitStyleClearVsReads(t *testing.T) {
 	_ = assertSliceHealth(t, svr)
 
 	// After Quit-style clear, both connections and currentConnectionID must be reset.
-	svr.connMu.RLock()
-	remaining := len(svr.connections)
-	current := svr.currentConnectionID
-	svr.connMu.RUnlock()
+	svr.registry.mu.RLock()
+	remaining := len(svr.registry.list)
+	current := svr.registry.currentID
+	svr.registry.mu.RUnlock()
 	if remaining != 0 {
 		t.Errorf("after quit-style clear: expected 0 connections, got %d", remaining)
 	}
@@ -524,31 +512,25 @@ func TestConcurrency_MixedHighFrequency(t *testing.T) {
 	var wg sync.WaitGroup
 
 	// Writer goroutines: repeatedly remove the first connection and re-add it.
+	var seq atomic.Int64
 	for i := 0; i < 5; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			seq := atomic.Int64{}
 			for time.Now().Before(deadline) {
 				n := seq.Add(1)
 				id := fmt.Sprintf("dyn-%012x", n)
 
-				// Remove whatever is at the head.
-				svr.connMu.Lock()
+				// Observe membership, then remove and republish through registry operations.
+				members, _ := svr.registry.snapshot()
 				var targetID string
-				if len(svr.connections) > 0 {
-					targetID = svr.connections[0].GetConnectionID()
+				if len(members) > 0 {
+					targetID = members[0].GetConnectionID()
 				}
-				removed := svr.removeConnection(targetID)
-				svr.resetCurrentConnection(targetID)
-				// Re-add a fresh connection so the pool stays non-empty.
+				removed := svr.registry.removeByID(targetID)
 				fresh := makeStubConn(id, &cleanupCount)
 				addCount.Add(1)
-				svr.connections = append(svr.connections, fresh)
-				if svr.currentConnectionID == "" && len(svr.connections) > 0 {
-					svr.currentConnectionID = svr.connections[0].GetConnectionID()
-				}
-				svr.connMu.Unlock()
+				svr.registry.add(fresh, true)
 
 				for _, conn := range removed {
 					cleanupConnection(context.Background(), conn)
@@ -575,12 +557,12 @@ func TestConcurrency_MixedHighFrequency(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for time.Now().Before(deadline) {
-				svr.connMu.RLock()
+				svr.registry.mu.RLock()
 				var id string
-				if len(svr.connections) > 0 {
-					id = svr.connections[0].GetConnectionID()
+				if len(svr.registry.list) > 0 {
+					id = svr.registry.list[0].GetConnectionID()
 				}
-				svr.connMu.RUnlock()
+				svr.registry.mu.RUnlock()
 				if id != "" {
 					_, _ = svr.ConnectionUse(context.Background(), &rpc.ConnectionUseRequest{
 						ConnectionID: id,

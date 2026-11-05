@@ -5,26 +5,20 @@ import (
 	"testing"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dns"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/network"
 )
 
 // newDataSessionWithNetwork creates a DataSession with a pre-populated NetworkManager
 // for testing sort/dependency logic via the Connection interface.
-func newDataSessionWithNetwork(ns string, extraCIDR []string, apiServerIPs []net.IP, extraHost []dns.Entry) *DataSession {
+func newDataSessionWithNetwork(ns string, extraCIDR []string, apiServerIPs []net.IP, extraHost []dns.Entry) *sortDataSession {
 	ds := &DataSession{
 		WorkloadNamespace: ns,
 		ExtraRouteInfo: ExtraRouteInfo{
 			ExtraCIDR: extraCIDR,
 		},
 	}
-	if len(apiServerIPs) > 0 || len(extraHost) > 0 {
-		ds.nm = &NetworkManager{
-			cfg: NetworkConfig{
-				APIServerIPs: apiServerIPs,
-			},
-			extraHost: extraHost,
-		}
-	}
-	return ds
+	ds.nm = network.New(network.Config{APIServerIPs: apiServerIPs, RouteConfig: &network.RouteConfig{ExtraCIDR: extraCIDR}})
+	return &sortDataSession{DataSession: ds, hosts: extraHost}
 }
 
 // --- Connects.Sort edge cases (basic dependency cases are in sort_test.go) ---
@@ -276,3 +270,11 @@ func TestProxyList_ToResources_PreservesOrder(t *testing.T) {
 		}
 	}
 }
+
+// sortDataSession supplies the dependency metadata through the public role surface.
+type sortDataSession struct {
+	*DataSession
+	hosts []dns.Entry
+}
+
+func (ds *sortDataSession) GetNetworkExtraHost() []dns.Entry { return ds.hosts }

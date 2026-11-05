@@ -3,14 +3,20 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	logrus "github.com/sirupsen/logrus"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
@@ -32,6 +38,9 @@ import (
 // func that closes it. It asserts the rollout request reaches the server (tunnel
 // still open) and that the rollback (tunnel close) happens afterwards.
 func TestSyncOptions_Cleanup_RollbackRunsAfterRolloutWait(t *testing.T) {
+	var logOutput bytes.Buffer
+	logger := plog.GetLoggerForServer(int32(logrus.DebugLevel), &logOutput)
+	logCtx := plog.WithLogger(context.Background(), logger)
 	var mu sync.Mutex
 	var events []string
 	record := func(e string) {
@@ -116,16 +125,38 @@ current-context: test-context
 		t.Fatalf("InitClient: %v", err)
 	}
 
+	workerCtx, stopWorker := context.WithCancel(context.Background())
+	defer stopWorker()
+	opts.SetContext(workerCtx)
+	// Build the runtime with a live session context; Cleanup must stop its child
+	// context without cancelling the session before the rollout requests finish.
+	r := opts.syncRuntime(workerCtx)
+
 	// Simulate the production rollback func: tearing down the SSH tunnel by
 	// closing the apiserver endpoint. This MUST run after the rollout wait.
 	opts.AddRollbackFunc(func() error {
+		if workerCtx.Err() != nil {
+			t.Error("runtime cleanup cancelled the session context")
+		}
+		if err := r.DoSync(workerCtx, nil, ""); !errors.Is(err, context.Canceled) {
+			t.Errorf("runtime must be stopped before session teardown: %v", err)
+		}
+		plog.G(logCtx).Info("rollback-close-tunnel")
 		record("rollback-close-tunnel")
 		closeSrv()
 		return nil
 	})
 
 	// No delete targets — the test is purely about the rollout-vs-rollback order.
-	_ = opts.Cleanup(context.Background())
+	_ = opts.Cleanup(logCtx)
+	lastLogIndex := -1
+	for _, message := range []string{"Stopping file sync", "rollback-close-tunnel", "Stopped file sync for 0 workloads"} {
+		index := strings.Index(logOutput.String(), message)
+		if index <= lastLogIndex {
+			t.Fatalf("missing or out-of-order cleanup log %q: %s", message, logOutput.String())
+		}
+		lastLogIndex = index
+	}
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -188,6 +219,63 @@ func TestSyncOptions_Cleanup_NilFactory_NoPanic(t *testing.T) {
 	}
 	if !rolledBack {
 		t.Fatal("rollback func was not executed on the nil-factory path (session teardown would leak)")
+	}
+}
+
+func TestSyncOptions_Cleanup_InitFailureStillRollsBack(t *testing.T) {
+	opts := &SyncOptions{Workloads: []string{"deployments/app"}}
+	rolledBack := false
+	opts.AddRollbackFunc(func() error { rolledBack = true; return nil })
+	factory := util.InitFactoryByPath(t.TempDir()+"/nonexistent-kubeconfig", "test")
+	if err := opts.InitClient(factory); err == nil {
+		t.Fatal("expected invalid kubeconfig initialization to fail")
+	}
+	if err := opts.Cleanup(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !rolledBack || opts.runtime != nil {
+		t.Fatal("failed initialization must unwind session without creating runtime")
+	}
+}
+
+func TestSyncOptions_Cleanup_PreInitLogOrder(t *testing.T) {
+	var file, stream bytes.Buffer
+	logger := plog.GetLoggerForServer(int32(logrus.DebugLevel), &file)
+	logger.AddHook(&plog.StreamHook{Writer: &stream, Level: logrus.InfoLevel})
+	ctx := plog.WithLogger(context.Background(), logger)
+	opts := &SyncOptions{}
+	calls := 0
+	opts.AddRollbackFunc(func() error {
+		calls++
+		plog.G(ctx).Info("rollback-session")
+		return nil
+	})
+	if err := opts.Cleanup(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 || opts.runtime != nil {
+		t.Fatalf("rollback calls=%d, runtime=%v", calls, opts.runtime)
+	}
+	last := -1
+	for _, message := range []string{"Stopping file sync", "Skipping workload cleanup: kubernetes client not initialized", "rollback-session", "Stopped file sync"} {
+		index := strings.Index(file.String(), message)
+		if index <= last {
+			t.Fatalf("missing or out-of-order message %q: %s", message, file.String())
+		}
+		last = index
+	}
+	lines := strings.Split(strings.TrimSpace(stream.String()), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("unexpected CLI stream: %q", stream.String())
+	}
+	if kind, text := plog.DecodeStep(lines[0]); kind != plog.StepBegin || text != "Stopping file sync" {
+		t.Fatalf("missing CLI begin step: %q", lines[0])
+	}
+	if !strings.Contains(lines[1], "rollback-session") {
+		t.Fatalf("rollback must precede CLI done: %q", stream.String())
+	}
+	if kind, text := plog.DecodeStep(lines[2]); kind != plog.StepEnd || text != "Stopped file sync" {
+		t.Fatalf("missing CLI done step: %q", lines[2])
 	}
 }
 

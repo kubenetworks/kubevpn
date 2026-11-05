@@ -17,9 +17,7 @@ func (svr *Server) Leave(resp rpc.Daemon_LeaveServer) error {
 		return resp.Send(&rpc.LeaveResponse{Message: msg})
 	})
 
-	svr.connMu.RLock()
-	conn, _ := svr.findConnection(svr.currentConnectionID)
-	svr.connMu.RUnlock()
+	conn := svr.registry.current()
 	if conn == nil {
 		logger.Infof("No connection found")
 		return config.ErrConnectionNotFound

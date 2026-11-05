@@ -97,7 +97,7 @@ This split mirrors the dual-daemon model ([02-dual-daemon.md](02-dual-daemon.md)
 | | Control plane (user daemon, `ConnectOptions`) | Data plane (root daemon, `DataSession`) |
 |---|---|---|
 | Type | `*ConnectOptions` (= `*ControlSession`) | `*DataSession` |
-| Removes | helper pod, Jobs, proxy injections, rollbacks | rollbacks, NetworkManager, context |
+| Removes | helper pod, Jobs, proxy injections, rollbacks | rollbacks, `network.Runtime` (`pkg/network/runtime.go`), context |
 | TUN IP | not its concern | **not explicitly released** — DHCP lease expiry reclaims it |
 
 The type IS the discriminant — there is no `isDataPlane` field. Both types embed `SessionBase`

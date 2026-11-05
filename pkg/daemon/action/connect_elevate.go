@@ -9,6 +9,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/cluster/manager"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
@@ -60,8 +61,9 @@ func (svr *Server) redirectConnectToSudoDaemon(req *rpc.ConnectRequest, resp rpc
 		connect.SshHosts = sshConf.Host()
 	}
 
+	retainingExisting := false
 	defer func() {
-		if err != nil {
+		if err != nil && !retainingExisting {
 			connect.Cleanup(plog.WithLogger(context.Background(), logger))
 			session.Cancel()
 		}
@@ -101,20 +103,78 @@ func (svr *Server) redirectConnectToSudoDaemon(req *rpc.ConnectRequest, resp rpc
 	// ID so concurrent connects can be told apart in the shared user daemon log file.
 	session.Ctx = plog.WithField(session.Ctx, LogFieldConnID, connect.ConnectionID)
 
-	svr.connMu.Lock()
-	existing, _ := svr.findConnection(connect.ConnectionID)
+	svr.connectMu.Lock()
+	defer svr.connectMu.Unlock()
+	existing, _ := svr.registry.find(connect.ConnectionID)
 	if existing != nil {
-		svr.currentConnectionID = connect.ConnectionID
-		svr.connMu.Unlock()
-		session.Cancel()
+		// This temporary session never owned the existing proxy/sync resources.
+		// Even on RPC failure, only retire its SSH tunnel/logger, not control state.
+		retainingExisting = true
+		defer session.Teardown()
+		if err = svr.recoverDataPlane(resp.Context(), req, existing, resp, cli, &connResp, &connRespMu); err != nil {
+			return err
+		}
+		svr.registry.use(connect.ConnectionID)
 		logger.Infof("Connected with cluster")
 		return resp.Send(&rpc.ConnectResponse{
 			ConnectionID: connect.ConnectionID,
 		})
 	}
-	svr.connMu.Unlock()
 
 	return svr.forwardConnectToSudo(session.Ctx, req, connect, resp, cli, &connResp, &connRespMu, resolvedBytes, connect.ConnectionID, logger)
+}
+
+// recoverDataPlane preserves the control session (including its SSH API tunnel)
+// while rebuilding only a missing/terminated root session. A failed probe is not
+// evidence of termination; leave all existing state untouched and return the error.
+func (svr *Server) recoverDataPlane(ctx context.Context, req *rpc.ConnectRequest, existing handler.Connection, resp rpc.Daemon_ConnectServer, cli rpc.DaemonClient, connResp *grpc.BidiStreamingClient[rpc.ConnectRequest, rpc.ConnectResponse], connRespMu *sync.Mutex) error {
+	statusCtx, cancel := context.WithTimeout(ctx, config.SudoStatusTimeout)
+	state, err := cli.Status(statusCtx, &rpc.StatusRequest{ConnectionIDs: []string{existing.GetConnectionID()}})
+	cancel()
+	if err != nil {
+		return fmt.Errorf("failed to query data-plane session: %w", err)
+	}
+	for _, entry := range state.GetList() {
+		if entry.ConnectionID == existing.GetConnectionID() && (entry.Status == StatusOk || entry.Status == StatusUnhealthy) {
+			return nil
+		}
+	}
+
+	// Replay the original options, but serialize the retained factory: RequestRaw
+	// predates SSH rewriting and the new request may use a temporary local port.
+	recovery := proto.Clone(req).(*rpc.ConnectRequest)
+	if control, ok := existing.(*handler.ConnectOptions); ok && len(control.RequestRaw) != 0 {
+		recovery = &rpc.ConnectRequest{}
+		if err := proto.Unmarshal(control.RequestRaw, recovery); err != nil {
+			return fmt.Errorf("failed to restore connection request: %w", err)
+		}
+	}
+	control, ok := existing.(*handler.ConnectOptions)
+	if !ok {
+		return fmt.Errorf("connection %s is not a control session", existing.GetConnectionID())
+	}
+	bytes, _, err := util.ConvertToKubeConfigBytes(control.GetFactory())
+	if err != nil {
+		return fmt.Errorf("failed to serialize retained kubeconfig: %w", err)
+	}
+	recovery.KubeconfigBytes = string(bytes)
+	recovery.OwnerID = existing.GetOwnerID()
+	recovery.ConnectionID = existing.GetConnectionID()
+	recovery.ManagerNamespace = existing.GetManagerNamespace()
+	recovery.Namespace = existing.GetWorkloadNamespace()
+	recovery.Level = req.Level
+	cr, err := cli.Connect(ctx)
+	if err != nil {
+		return err
+	}
+	defer cr.CloseSend()
+	connRespMu.Lock()
+	*connResp = cr
+	connRespMu.Unlock()
+	if err := cr.Send(recovery); err != nil {
+		return err
+	}
+	return grpcutil.CopyGRPCStream[rpc.ConnectResponse](cr, resp)
 }
 
 // detectAndSetManagerNamespace resolves the traffic manager namespace, falling
@@ -122,7 +182,7 @@ func (svr *Server) redirectConnectToSudoDaemon(req *rpc.ConnectRequest, resp rpc
 func (svr *Server) detectAndSetManagerNamespace(ctx context.Context, req *rpc.ConnectRequest, connect *handler.ConnectOptions, logger *log.Logger) error {
 	if req.ManagerNamespace == "" {
 		var err error
-		req.ManagerNamespace, err = util.DetectManagerNamespace(plog.WithLogger(ctx, logger), connect.GetFactory(), req.Namespace)
+		req.ManagerNamespace, err = manager.DetectManagerNamespace(plog.WithLogger(ctx, logger), connect.GetFactory(), req.Namespace)
 		if err != nil {
 			return err
 		}
@@ -196,10 +256,7 @@ func (svr *Server) forwardConnectToSudo(
 	if resp.Context().Err() != nil {
 		return resp.Context().Err()
 	}
-	svr.connMu.Lock()
-	svr.connections = append(svr.connections, connect)
-	svr.currentConnectionID = connectionID
-	svr.connMu.Unlock()
+	svr.registry.add(connect, true)
 
 	// Start the user-daemon-managed local SOCKS5 proxy (if requested) now that the
 	// connection is live. It runs in-process, bound to the connection's context, and is

@@ -52,7 +52,7 @@ The design has two layers, applied together:
   func (r *Range) Allocate(ip net.IP) error   // specific IP; errors if taken
   func (r *Range) AllocateNext() (net.IP, error)
   ```
-- The client allocation entry point `rentIP` in `pkg/handler/network.go` (runs in the **root daemon**)
+- The client allocation entry point `network.Runtime.rentIP` in `pkg/network/address.go` (runs in the **root daemon**)
   calls `GetTunIP` via `TunIPRequest{OwnerID, Namespace, ExcludeIPs}`.
 - Persistence directory `~/.kubevpn` (`homePath` in `pkg/config/const.go`); the project already depends on
   `github.com/google/uuid`.

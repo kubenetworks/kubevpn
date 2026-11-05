@@ -40,26 +40,31 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 		ctx = plog.WithField(ctx, LogFieldConnID, req.ConnectionID)
 	}
 
-	// Idempotency guard (root daemon): if a data-plane session already exists for this
-	// ConnectionID, short-circuit instead of building a second one. This is hit when the
-	// user daemon restarts and LoadFromConfig replays Connect while this (surviving) root
-	// daemon still holds the connection — without the guard we would create a duplicate
-	// DataSession, a second TUN/port-forward/route/DNS setup, and leak. Mirrors the
-	// user-side guard in redirectConnectToSudoDaemon. ConnectionID is always forwarded by
-	// the user daemon, so an empty value only happens in tests / direct callers.
+	// Serialize the decision, cleanup, allocation AND publication. Checking before
+	// taking this lock lets concurrent requests both allocate for the same ID.
+	svr.connectMu.Lock()
+	defer svr.connectMu.Unlock()
+
+	// Replays keep a live session, including one still reconnecting. A canceled
+	// context is terminal and must be retired before reusing its ConnectionID.
+	// Keep the nil-context fallback for tests / direct callers.
 	if req.ConnectionID != "" {
-		svr.connMu.RLock()
-		existing, _ := svr.findConnection(req.ConnectionID)
-		svr.connMu.RUnlock()
+		existing, _ := svr.registry.find(req.ConnectionID)
 		if existing != nil {
-			plog.G(ctx).Infof("Data plane already established for connection %s", req.ConnectionID)
-			return resp.Send(&rpc.ConnectResponse{ConnectionID: req.ConnectionID})
+			if existing.Context() == nil || existing.Context().Err() == nil {
+				plog.G(ctx).Infof("Data plane already established for connection %s", req.ConnectionID)
+				return resp.Send(&rpc.ConnectResponse{ConnectionID: req.ConnectionID})
+			}
+			svr.registry.removeInstance(existing)
+			// Cleanup is a join barrier; never wait for network/DNS teardown with
+			// the registry lock held, and never allocate the replacement before it finishes.
+			existing.Cleanup(context.WithoutCancel(ctx))
 		}
 	}
 
 	// RequestRaw / proto.Marshal(req) is intentionally NOT done here: it is a control-plane
 	// persistence field (user daemon only). The root daemon's DataSession is never persisted.
-	ds := &handler.DataSession{
+	options := &handler.DataSession{
 		ManagerNamespace:     req.ManagerNamespace,
 		ExtraRouteInfo:       *handler.ParseExtraRouteFromRPC(req.ExtraRoute),
 		OriginKubeconfigPath: req.OriginKubeconfigPath,
@@ -71,6 +76,10 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 		ConnectionID:         req.ConnectionID,
 		ReservedTunIPs:       svr.siblingTunIPs,
 		SshConf:              parseSshFromRPC(req.SshJump),
+	}
+	var ds handler.DataPlane = options
+	if svr.newDataSession != nil {
+		ds = svr.newDataSession(options)
 	}
 	session := NewSessionLifecycle(logger)
 	// Tag the data-plane session context with the connection ID up front so DoConnect and every
@@ -104,11 +113,7 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 		return err
 	}
 
-	// Serialize the allocation phase: two concurrent connects must not race their
-	// TUN IP allocation with empty sibling snapshots.
-	svr.connectMu.Lock()
 	err = ds.DoConnect(session.Ctx)
-	svr.connectMu.Unlock()
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to connect...")
 		return err
@@ -117,8 +122,6 @@ func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
 	if resp.Context().Err() != nil {
 		return resp.Context().Err()
 	}
-	svr.connMu.Lock()
-	svr.connections = append(svr.connections, ds)
-	svr.connMu.Unlock()
+	svr.registry.add(ds, false)
 	return nil
 }

@@ -19,11 +19,11 @@ func TestInteraction_SameCluster_DedupThenDisconnect(t *testing.T) {
 
 	// User A connects cluster "prod" → creates connection
 	connA := &handler.ConnectOptions{ConnectionID: "prod-ns-uid-12", OwnerID: "alice-uuid-1"}
-	svr.connections = append(svr.connections, connA)
-	svr.currentConnectionID = "prod-ns-uid-12"
+	svr.registry.list = append(svr.registry.list, connA)
+	svr.registry.currentID = "prod-ns-uid-12"
 
 	// User B tries to connect same cluster → dedup
-	existing, _ := svr.findConnection("prod-ns-uid-12")
+	existing, _ := svr.registry.find("prod-ns-uid-12")
 	if existing == nil {
 		t.Fatal("second connect should find existing")
 	}
@@ -31,14 +31,14 @@ func TestInteraction_SameCluster_DedupThenDisconnect(t *testing.T) {
 	// B gets the same connectionID.
 
 	// B disconnects (uses connectionID)
-	removed := svr.removeConnection("prod-ns-uid-12")
-	svr.resetCurrentConnection("prod-ns-uid-12")
+	removed := svr.registry.removeByID("prod-ns-uid-12")
+	svr.registry.resetCurrent("prod-ns-uid-12")
 
 	// The shared connection is removed — both users lose access
 	if len(removed) != 1 {
 		t.Fatal("should remove the shared connection")
 	}
-	if len(svr.connections) != 0 {
+	if len(svr.registry.list) != 0 {
 		t.Fatal("no connections should remain")
 	}
 }
@@ -62,48 +62,48 @@ func TestInteraction_ThreeClusters_SequentialDisconnect(t *testing.T) {
 	carol := &handler.ConnectOptions{ConnectionID: "dev-uid-123456", OwnerID: "carol-owner"}
 
 	// t0: All connect
-	svr.connections = append(svr.connections, alice, bob, carol)
-	svr.currentConnectionID = "prod-uid-12345"
+	svr.registry.list = append(svr.registry.list, alice, bob, carol)
+	svr.registry.currentID = "prod-uid-12345"
 
 	// t1: Bob adds proxy (simulated by adding to proxyManager)
 	bob.ConnectionID = "staging-uid-12" // already set
 
 	// t2: Alice disconnects
-	svr.removeConnection("prod-uid-12345")
-	svr.resetCurrentConnection("prod-uid-12345")
+	svr.registry.removeByID("prod-uid-12345")
+	svr.registry.resetCurrent("prod-uid-12345")
 
-	if len(svr.connections) != 2 {
-		t.Fatalf("expected 2 remaining, got %d", len(svr.connections))
+	if len(svr.registry.list) != 2 {
+		t.Fatalf("expected 2 remaining, got %d", len(svr.registry.list))
 	}
 	// After Alice disconnects, current should auto-select first remaining
-	if svr.currentConnectionID != "staging-uid-12" {
-		t.Fatalf("expected staging as current, got %q", svr.currentConnectionID)
+	if svr.registry.currentID != "staging-uid-12" {
+		t.Fatalf("expected staging as current, got %q", svr.registry.currentID)
 	}
 
 	// Bob and Carol should still be findable
-	if found, _ := svr.findConnection("staging-uid-12"); found == nil {
+	if found, _ := svr.registry.find("staging-uid-12"); found == nil {
 		t.Fatal("Bob's connection should exist")
 	}
-	if found, _ := svr.findConnection("dev-uid-123456"); found == nil {
+	if found, _ := svr.registry.find("dev-uid-123456"); found == nil {
 		t.Fatal("Carol's connection should exist")
 	}
 
 	// t3: Bob disconnects
-	svr.removeConnection("staging-uid-12")
-	svr.resetCurrentConnection("staging-uid-12")
+	svr.registry.removeByID("staging-uid-12")
+	svr.registry.resetCurrent("staging-uid-12")
 
-	if len(svr.connections) != 1 {
-		t.Fatalf("expected 1 remaining, got %d", len(svr.connections))
+	if len(svr.registry.list) != 1 {
+		t.Fatalf("expected 1 remaining, got %d", len(svr.registry.list))
 	}
-	if svr.currentConnectionID != "dev-uid-123456" {
-		t.Fatalf("expected dev as current, got %q", svr.currentConnectionID)
+	if svr.registry.currentID != "dev-uid-123456" {
+		t.Fatalf("expected dev as current, got %q", svr.registry.currentID)
 	}
 
 	// t4: Carol disconnects
-	svr.removeConnection("dev-uid-123456")
-	svr.resetCurrentConnection("dev-uid-123456")
+	svr.registry.removeByID("dev-uid-123456")
+	svr.registry.resetCurrent("dev-uid-123456")
 
-	if len(svr.connections) != 0 || svr.currentConnectionID != "" {
+	if len(svr.registry.list) != 0 || svr.registry.currentID != "" {
 		t.Fatal("all should be clean")
 	}
 }
@@ -126,32 +126,32 @@ func TestInteraction_SwitchAndOperate(t *testing.T) {
 	staging := &handler.ConnectOptions{ConnectionID: "staging-uid-12", OwnerID: "owner-staging"}
 	dev := &handler.ConnectOptions{ConnectionID: "dev-uid-123456", OwnerID: "owner-dev"}
 
-	svr.connections = append(svr.connections, prod, staging, dev)
-	svr.currentConnectionID = "prod-uid-12345"
+	svr.registry.list = append(svr.registry.list, prod, staging, dev)
+	svr.registry.currentID = "prod-uid-12345"
 
 	// t1: findConnection for current → returns prod
-	current, _ := svr.findConnection(svr.currentConnectionID)
+	current, _ := svr.registry.find(svr.registry.currentID)
 	if current.GetOwnerID() != "owner-prod" {
 		t.Fatal("current should be prod")
 	}
 
 	// t2: Switch to staging
-	svr.currentConnectionID = "staging-uid-12"
-	current, _ = svr.findConnection(svr.currentConnectionID)
+	svr.registry.currentID = "staging-uid-12"
+	current, _ = svr.registry.find(svr.registry.currentID)
 	if current.GetOwnerID() != "owner-staging" {
 		t.Fatal("current should be staging after switch")
 	}
 
 	// t3: Disconnect current (staging)
-	svr.removeConnection(svr.currentConnectionID)
-	svr.resetCurrentConnection("staging-uid-12")
+	svr.registry.removeByID(svr.registry.currentID)
+	svr.registry.resetCurrent("staging-uid-12")
 
 	// t4: Auto-selects first remaining (prod)
-	if svr.currentConnectionID != "prod-uid-12345" {
-		t.Fatalf("expected prod after staging removed, got %q", svr.currentConnectionID)
+	if svr.registry.currentID != "prod-uid-12345" {
+		t.Fatalf("expected prod after staging removed, got %q", svr.registry.currentID)
 	}
-	if len(svr.connections) != 2 {
-		t.Fatalf("expected 2 remaining, got %d", len(svr.connections))
+	if len(svr.registry.list) != 2 {
+		t.Fatalf("expected 2 remaining, got %d", len(svr.registry.list))
 	}
 }
 
@@ -172,25 +172,25 @@ func TestInteraction_FullLifecycle_ConnectProxyLeaveDisconnectReconnect(t *testi
 
 	// t0: Connect
 	alice1 := &handler.ConnectOptions{ConnectionID: "cluster-uid-12", OwnerID: "alice-session1"}
-	svr.connections = append(svr.connections, alice1)
-	svr.currentConnectionID = "cluster-uid-12"
+	svr.registry.list = append(svr.registry.list, alice1)
+	svr.registry.currentID = "cluster-uid-12"
 
 	// t1-t2: Proxy and leave are envoy rule operations (tested separately)
 	// Here we verify the connection state
 
 	// t3: Disconnect
-	svr.removeConnection("cluster-uid-12")
-	svr.resetCurrentConnection("cluster-uid-12")
-	if len(svr.connections) != 0 {
+	svr.registry.removeByID("cluster-uid-12")
+	svr.registry.resetCurrent("cluster-uid-12")
+	if len(svr.registry.list) != 0 {
 		t.Fatal("should be empty after disconnect")
 	}
 
 	// t4: Reconnect (same ConnectionID — deterministic)
 	alice2 := &handler.ConnectOptions{ConnectionID: "cluster-uid-12", OwnerID: "alice-session2"}
-	svr.connections = append(svr.connections, alice2)
-	svr.currentConnectionID = "cluster-uid-12"
+	svr.registry.list = append(svr.registry.list, alice2)
+	svr.registry.currentID = "cluster-uid-12"
 
-	found, _ := svr.findConnection("cluster-uid-12")
+	found, _ := svr.registry.find("cluster-uid-12")
 	if found == nil || found.GetOwnerID() != "alice-session2" {
 		t.Fatal("reconnect should create new connection with new OwnerID")
 	}
@@ -213,32 +213,32 @@ func TestInteraction_CrashAndReconnect_OthersUnaffected(t *testing.T) {
 	bob := &handler.ConnectOptions{ConnectionID: "cluster-b-5678", OwnerID: "bob-owner-01"}
 	carol := &handler.ConnectOptions{ConnectionID: "cluster-c-9012", OwnerID: "carol-owner"}
 
-	svr.connections = append(svr.connections, alice, bob, carol)
-	svr.currentConnectionID = "cluster-b-5678"
+	svr.registry.list = append(svr.registry.list, alice, bob, carol)
+	svr.registry.currentID = "cluster-b-5678"
 
 	// t1: Bob crashes — connection removed
-	svr.removeConnection("cluster-b-5678")
-	svr.resetCurrentConnection("cluster-b-5678")
+	svr.registry.removeByID("cluster-b-5678")
+	svr.registry.resetCurrent("cluster-b-5678")
 
 	// t2: Alice and Carol still exist
-	if len(svr.connections) != 2 {
-		t.Fatalf("expected 2 remaining, got %d", len(svr.connections))
+	if len(svr.registry.list) != 2 {
+		t.Fatalf("expected 2 remaining, got %d", len(svr.registry.list))
 	}
-	if f, _ := svr.findConnection("cluster-a-1234"); f == nil {
+	if f, _ := svr.registry.find("cluster-a-1234"); f == nil {
 		t.Fatal("Alice should still be connected")
 	}
-	if f, _ := svr.findConnection("cluster-c-9012"); f == nil {
+	if f, _ := svr.registry.find("cluster-c-9012"); f == nil {
 		t.Fatal("Carol should still be connected")
 	}
 
 	// t3: Bob reconnects
 	bobReconnected := &handler.ConnectOptions{ConnectionID: "cluster-b-5678", OwnerID: "bob-owner-02"}
-	svr.connections = append(svr.connections, bobReconnected)
+	svr.registry.list = append(svr.registry.list, bobReconnected)
 
-	if len(svr.connections) != 3 {
-		t.Fatalf("expected 3 after reconnect, got %d", len(svr.connections))
+	if len(svr.registry.list) != 3 {
+		t.Fatalf("expected 3 after reconnect, got %d", len(svr.registry.list))
 	}
-	found, _ := svr.findConnection("cluster-b-5678")
+	found, _ := svr.registry.find("cluster-b-5678")
 	if found.GetOwnerID() != "bob-owner-02" {
 		t.Fatalf("Bob should have new OwnerID, got %q", found.GetOwnerID())
 	}
@@ -256,23 +256,23 @@ func TestInteraction_DisconnectAll_MultipleActiveSessions(t *testing.T) {
 			ConnectionID: "conn-" + string(rune('a'+i)) + "1234567890",
 			OwnerID:      "owner-" + string(rune('a'+i)),
 		}
-		svr.connections = append(svr.connections, conn)
+		svr.registry.list = append(svr.registry.list, conn)
 	}
-	svr.currentConnectionID = "conn-c1234567890"
+	svr.registry.currentID = "conn-c1234567890"
 
 	// Simulate --all disconnect
-	all := handler.Connects(svr.connections)
-	svr.connections = nil
-	svr.currentConnectionID = ""
+	all := handler.Connects(svr.registry.list)
+	svr.registry.list = nil
+	svr.registry.currentID = ""
 
 	// All connections should be returned for cleanup
 	if len(all) != 5 {
 		t.Fatalf("expected 5 connections to clean up, got %d", len(all))
 	}
-	if svr.currentConnectionID != "" {
+	if svr.registry.currentID != "" {
 		t.Fatal("current should be empty")
 	}
-	if len(svr.connections) != 0 {
+	if len(svr.registry.list) != 0 {
 		t.Fatal("connections should be empty")
 	}
 }

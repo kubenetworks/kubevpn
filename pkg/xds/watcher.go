@@ -31,6 +31,8 @@ const cmResyncInterval = 5 * time.Second
 
 // Watch monitors the traffic-manager ConfigMap for changes and sends updates to notifyCh.
 func Watch(ctx context.Context, f cmdutil.Factory, notifyCh chan<- NotifyMessage, onDHCPChange ...OnDHCPChange) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	namespace, err := util.GetNamespace(f)
 	if err != nil {
 		return err
@@ -68,26 +70,34 @@ func Watch(ctx context.Context, f cmdutil.Factory, notifyCh chan<- NotifyMessage
 		return err
 	}
 
-	go cmInformer.Run(ctx.Done())
+	done := make(chan struct{})
+	go func() { defer close(done); cmInformer.Run(ctx.Done()) }()
+	defer func() { cancel(); <-done }()
 	defer cmTicker.Stop()
-	for ; ctx.Err() == nil; <-cmTicker.C {
+	for ctx.Err() == nil {
 		cmTicker.Reset(cmResyncInterval)
 		cmList := cmInformer.GetIndexer().List()
-		if len(cmList) == 0 {
-			continue
-		}
 		for _, cm := range cmList {
 			configMap, ok := cm.(*v1.ConfigMap)
 			if ok {
 				if configMap.Data == nil {
 					configMap.Data = make(map[string]string)
 				}
-				notifyCh <- NotifyMessage{Content: configMap.Data[config.KeyEnvoy]}
+				select {
+				case notifyCh <- NotifyMessage{Content: configMap.Data[config.KeyEnvoy]}:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
 				for _, fn := range onDHCPChange {
 					fn(ctx)
 				}
 				continue
 			}
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-cmTicker.C:
 		}
 	}
 	return ctx.Err()

@@ -6,6 +6,14 @@ The control plane (`pkg/xds`) runs inside the traffic manager pod and serves as 
 
 The same gRPC server also hosts the `TunConfigService` (documented in `03-dhcp-ip-allocation.md`) for TUN IP allocation.
 
+The RPC adapter remains in `pkg/xds`; its internal components do not depend on gRPC messages or the parent package:
+
+- `internal/leases.Manager` owns allocation, proposal confirmation, renewal, bitmap reconciliation and persistence under one transaction boundary.
+- `internal/discovery.Broadcaster` owns namespace informers, subscribers and versioned snapshot/delta frames.
+- `internal/envoy.Rules` updates owner-scoped rules through callbacks installed when the lease manager is constructed; it is separate from the Envoy snapshot processor.
+
+`Main` owns the server and ConfigMap watcher workers. Shutdown cancels their context, joins them, then closes discovery and lease components, including their owned workers. RPC field/error mapping stays at the adapter boundary.
+
 ## 2. Architecture
 
 ```

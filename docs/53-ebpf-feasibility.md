@@ -18,8 +18,8 @@ Any eBPF work inherits these, none of which are negotiable in the near term.
 | `CGO_ENABLED=0` for all 8 release targets | `Makefile` | cilium/ebpf is pure Go, so loading is fine. **Compiling** the BPF objects needs clang/LLVM + `bpf2go` — a non-Go toolchain in a project that today needs only `go build` |
 | Targets include darwin×2, windows×3, and **linux/386** | `Makefile` | eBPF is Linux-only, and 32-bit x86 effectively unsupported. Any eBPF must sit behind a build tag and can never be the only path |
 | The injected VPN sidecar is already `Privileged: true` with NET_ADMIN/NET_RAW | `pkg/inject/container.go` | Privileges are **not** a blocker in the sidecar — but eBPF buys no reduction there either |
-| The traffic manager runs `Privileged: false` with an empty capability list | `pkg/handler/traffmgr_resources.go` | eBPF here means breaking a clean security posture (PSA restricted, managed clusters) |
-| Fargate/Service mode exists precisely because some environments have no NET_ADMIN and no iptables | `pkg/core/udp_reverse_bridge.go`, [06-fargate-mode.md](06-fargate-mode.md) | eBPF can only ever be a **third** branch beside iptables and Fargate, never a replacement for both |
+| The traffic manager runs `Privileged: false` with an empty capability list | `pkg/cluster/manager/resources.go` | eBPF here means breaking a clean security posture (PSA restricted, managed clusters) |
+| Fargate/Service mode exists precisely because some environments have no NET_ADMIN and no iptables | `pkg/endpoint/udp_reverse_bridge.go`, [06-fargate-mode.md](06-fargate-mode.md) | eBPF can only ever be a **third** branch beside iptables and Fargate, never a replacement for both |
 | Batched TUN I/O already landed | `pkg/tun/batch.go` (`BatchSize`, `ReadPackets`) | The cheap datapath win is already taken |
 | `vishvananda/netlink` is already a dependency | `go.mod` | Attaching a tc program needs no new Go dependency |
 

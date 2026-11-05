@@ -14,6 +14,9 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
+var createNativeTUN = tun.CreateTUN
+var listTunInterfaces = net.Interfaces
+
 func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	if cfg.Addr == "" && cfg.Addr6 == "" {
 		err = fmt.Errorf("ipv4 address and ipv6 address cannot both be empty")
@@ -28,7 +31,7 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	}
 
 	var interfaces []net.Interface
-	interfaces, err = net.Interfaces()
+	interfaces, err = listTunInterfaces()
 	if err != nil {
 		return
 	}
@@ -41,13 +44,14 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 		}
 	}
 	var device tun.Device
-	if device, err = tun.CreateTUN(fmt.Sprintf("utun%d", maxIndex+1), mtu); err != nil {
+	if device, err = createNativeTUN(fmt.Sprintf("utun%d", maxIndex+1), mtu); err != nil {
 		return
 	}
-	// Close the device on any error after creation; on success conn owns it.
+	adapter := newBatchDevice(device)
+	// Close the adapter on any error after creation; on success conn owns it.
 	defer func() {
 		if err != nil {
-			_ = device.Close()
+			_ = adapter.Close()
 		}
 	}()
 
@@ -103,7 +107,7 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 	}
 
 	conn = &tunConn{
-		batchDevice: newBatchDevice(device),
+		batchDevice: adapter,
 		addr:        &net.IPAddr{IP: ipv4},
 		addr6:       &net.IPAddr{IP: ipv6},
 	}

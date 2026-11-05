@@ -4,15 +4,14 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"strconv"
 	"strings"
-	"text/tabwriter"
 	"time"
 
 	"github.com/moby/term"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/cluster/workload"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -25,75 +24,10 @@ import (
 	"k8s.io/client-go/util/retry"
 	"k8s.io/kubectl/pkg/cmd/exec"
 	"k8s.io/kubectl/pkg/cmd/util"
-	"k8s.io/kubectl/pkg/util/podutils"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
-
-// PrintStatus writes a tabular summary of pod container statuses or conditions to the writer.
-func PrintStatus(pod *corev1.Pod, writer io.Writer) {
-	w := tabwriter.NewWriter(writer, 1, 1, 1, ' ', 0)
-	defer w.Flush()
-	show := func(name string, v1, v2 any) {
-		_, _ = fmt.Fprintf(w, "%s\t%v\t%v\n", name, v1, v2)
-	}
-
-	if len(pod.Status.ContainerStatuses) == 0 && len(pod.Status.Conditions) != 0 {
-		show("Type", "Reason", "Message")
-		for _, condition := range pod.Status.Conditions {
-			if condition.Status != corev1.ConditionTrue {
-				show(string(condition.Type), condition.Reason, condition.Message)
-			}
-		}
-		return
-	}
-	show("Container", "Reason", "Message")
-	for _, status := range pod.Status.ContainerStatuses {
-		if status.State.Waiting != nil {
-			show(status.Name, status.State.Waiting.Reason, status.State.Waiting.Message)
-		}
-		if status.State.Running != nil {
-			show(status.Name, "ContainerRunning", "")
-		}
-		if status.State.Terminated != nil {
-			show(status.Name, status.State.Terminated.Reason, status.State.Terminated.Message)
-		}
-	}
-}
-
-// PodStatusSummary returns a single-line, human-readable reason a pod is not yet
-// ready — the waiting/terminated reason per container, or the unmet scheduling
-// condition (e.g. "PodScheduled=Unschedulable"). Suitable for a live spinner
-// line; the full detail (with messages) is available via PrintStatus.
-func PodStatusSummary(pod *corev1.Pod) string {
-	var parts []string
-	for _, s := range pod.Status.ContainerStatuses {
-		switch {
-		case s.State.Waiting != nil:
-			parts = append(parts, fmt.Sprintf("%s=%s", s.Name, s.State.Waiting.Reason))
-		case s.State.Terminated != nil:
-			parts = append(parts, fmt.Sprintf("%s=%s", s.Name, s.State.Terminated.Reason))
-		case s.State.Running != nil:
-			parts = append(parts, fmt.Sprintf("%s=Running", s.Name))
-		}
-	}
-	if len(parts) > 0 {
-		return strings.Join(parts, ", ")
-	}
-	for _, c := range pod.Status.Conditions {
-		if c.Status != corev1.ConditionTrue {
-			if c.Reason != "" {
-				return fmt.Sprintf("%s=%s", c.Type, c.Reason)
-			}
-			return string(c.Type)
-		}
-	}
-	if pod.Status.Phase != "" {
-		return string(pod.Status.Phase)
-	}
-	return "pending"
-}
 
 // GetEnv executes "env" in each container of the pod and returns a map of container names to temp file paths containing the environment output.
 func GetEnv(ctx context.Context, set kubernetes.Interface, config *rest.Config, ns, podName string) (map[string]string, error) {
@@ -165,19 +99,6 @@ func shellOnce(ctx context.Context, clientset kubernetes.Interface, config *rest
 		return "", errBuf.String(), err
 	}
 	return strings.TrimRight(buf.String(), "\n"), "", nil
-}
-
-// AllContainersRunning reports whether the pod is ready and all containers have a ready status.
-func AllContainersRunning(pod *corev1.Pod) bool {
-	if !podutils.IsPodReady(pod) {
-		return false
-	}
-	for _, status := range pod.Status.ContainerStatuses {
-		if !status.Ready {
-			return false
-		}
-	}
-	return true
 }
 
 // FindContainerEnv searches for an environment variable by key in the container spec and returns its value.
@@ -270,7 +191,7 @@ func GetRunningPodList(ctx context.Context, clientset kubernetes.Interface, ns s
 		return nil, err
 	}
 	for i := 0; i < len(list.Items); i++ {
-		if list.Items[i].GetDeletionTimestamp() != nil || !AllContainersRunning(&list.Items[i]) {
+		if list.Items[i].GetDeletionTimestamp() != nil || !workload.AllContainersRunning(&list.Items[i]) {
 			list.Items = append(list.Items[:i], list.Items[i+1:]...)
 			i--
 		}

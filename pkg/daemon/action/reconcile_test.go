@@ -61,10 +61,10 @@ func TestReconcileSudoConnections_HealthFiltered(t *testing.T) {
 
 	svr := &Server{
 		// User daemon owns "tracked-unhealthy" only.
-		connections: []handler.Connection{
+
+		GetClient: func(isSudo bool) (rpc.DaemonClient, error) { return fake, nil }, registry: connectionRegistry{list: []handler.Connection{
 			&handler.ConnectOptions{ConnectionID: "tracked-unhealthy"},
-		},
-		GetClient: func(isSudo bool) (rpc.DaemonClient, error) { return fake, nil },
+		}},
 	}
 
 	svr.ReconcileSudoConnections(context.Background())

@@ -45,6 +45,8 @@ type SyncOptions struct {
 }
 ```
 
+`SyncOptions` retains the public CLI configuration and status fields and adapts the session to `internal/syncworkload.Runtime` through an explicit `Config` conversion. The runtime owns cloned workloads, local clients, and IP trackers; handler retains the session context and rollback registry. `TargetWorkloadNames` is copied back after `DoSync`, including on failure, and `GetSyncthingGUIAddr` reads runtime status.
+
 ## 4. Clone Workload Creation (`DoSync`)
 
 ### 4.1 Workload Cloning
@@ -107,15 +109,17 @@ This keeps the sync clone consistent with the rest of the namespace model
 `TestSync_PinsManagerNamespace_WhenManagerDiffersFromWorkload`,
 `TestSync_OmitsManagerNamespace_WhenUnset`.
 
-## 5. Local Syncthing Client (`SyncDir`)
+## 5. Local Syncthing Client (`Runtime.syncDir`)
 
 After the clone pod is ready:
 
 1. Discover pod IP from running pod list
 2. Allocate a random local TCP port
-3. Start syncthing client: `syncthing.StartClient(ctx, localDir, localAddr, remoteAddr)`
+3. Start syncthing client: `syncthing.StartClient(ctx, localDir, localAddr, remoteAddr)` and retain the returned `ClientHandle` in the runtime
 4. Log the GUI URL for status monitoring
 5. Start background IP tracker goroutine
+
+The runtime uses a child of the session context. `ClientHandle.Stop()` cancels and waits for both the application and its early service supervisor; `Done()` closes after both exit, and `Err()` exposes the completed application's error. Startup failure also waits for cleanup before returning. `Runtime.Stop()` cancels its child context and joins the trackers and all client handles without cancelling the parent session.
 
 ### Pod IP Tracking
 
@@ -126,9 +130,15 @@ A background goroutine polls running pods every 2 seconds. When the pod name cha
 
 ## 6. Cleanup (`Cleanup`)
 
-1. Delete all sync clone workloads via dynamic client
-2. Wait for original workloads to finish rollout (`RolloutStatus`)
-3. Execute registered rollback functions
+Handler emits `StepStart("Stopping file sync")`, then:
+
+1. Runtime deletes all sync clone workloads via dynamic client
+2. Runtime waits for original workloads to finish rollout (`RolloutStatus`, undo-on-failure disabled)
+3. Runtime stops and joins local Syncthing applications, early services, and pod IP trackers
+4. Handler executes registered session/SSH rollback functions
+5. Handler emits `StepDone("Stopped file sync for %d workloads", count)`
+
+Before client initialization, handler creates no runtime: it emits the same start step, logs `Skipping workload cleanup: kubernetes client not initialized` at Debug, executes rollback, and finally emits `StepDone("Stopped file sync")`.
 
 **Ordering matters.** The rollback functions tear down the session — in the daemon
 the only registered one calls `session.Teardown()` → `session.Cancel()`, which
@@ -152,10 +162,11 @@ The `Sync` daemon action:
 
 | File | Purpose |
 |------|---------|
-| `pkg/handler/sync.go` | SyncOptions, DoSync, Cleanup |
-| `pkg/handler/sync_podspec.go` | `prepareSyncPodSpec` + `syncPodSpec` param object (pod template mutation) |
-| `pkg/handler/sync_containers.go` | genSyncthingContainer, genVPNContainer, SyncDir |
-| `pkg/syncthing/syncthing.go` | StartClient, StartServer |
+| `pkg/handler/sync.go` | SyncOptions, runtime adapter, session rollback and progress output |
+| `pkg/handler/internal/syncworkload/runtime.go` | Config, Runtime, clone orchestration, workload cleanup and local-client Stop/join |
+| `pkg/handler/internal/syncworkload/podspec.go` | `prepareSyncPodSpec` + `syncPodSpec` param object (pod template mutation) |
+| `pkg/handler/internal/syncworkload/containers.go` | genSyncthingContainer, genVPNContainer, private syncDir and pod IP tracker |
+| `pkg/syncthing/syncthing.go` | StartClient, ClientHandle (Stop/Done/Err), StartServer |
 | `pkg/syncthing/api.go` | REST API client for config updates |
 | `pkg/daemon/action/sync.go` | Sync daemon RPC handler |
 | `cmd/kubevpn/cmds/sync.go` | CLI command definition |

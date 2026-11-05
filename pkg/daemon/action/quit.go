@@ -6,7 +6,6 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dns"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
@@ -34,11 +33,7 @@ func (svr *Server) Quit(resp rpc.Daemon_QuitServer) error {
 	}
 	ctx = plog.WithLogger(ctx, logger)
 
-	svr.connMu.Lock()
-	connects := handler.Connects(svr.connections)
-	svr.connections = nil
-	svr.currentConnectionID = ""
-	svr.connMu.Unlock()
+	connects := svr.registry.takeAll()
 	sorted := connects.Sort()
 	// Emit the progress step only from the user daemon (the orchestrator). The sudo
 	// daemon cleans up its data-plane connections silently so the CLI renders

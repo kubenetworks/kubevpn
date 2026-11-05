@@ -1,5 +1,13 @@
 # Stale IPv4 Address After TUN IP Change Causes Outbound Failure (macOS)
 
+> **Historical incident:** The evidence below, including `current HEAD`, source line numbers
+> and log literals, refers to the 2026-07-06 investigation, not the current source tree.
+> Today the update entry point is `network.Runtime.ChangeTunIP` in
+> `pkg/network/address.go`, and server routing is `tunnel.Router` in `pkg/tunnel/route.go`.
+> Periodic control probes do not register routes; data registration/business traffic does,
+> and heartbeat replies return through registered data connections. Historical observations
+> and counts are retained unchanged.
+
 ## Symptom
 
 Two clients on the same VPN: A (local machine) cannot actively `ping` / connect to peer B's

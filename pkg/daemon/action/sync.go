@@ -126,11 +126,9 @@ func (svr *Server) Sync(resp rpc.Daemon_SyncServer) (err error) {
 	// sync options so the cloned workload's nested `kubevpn proxy` pins
 	// --manager-namespace instead of re-detecting it (which falls back to the
 	// workload namespace when manager != workload).
-	svr.connMu.RLock()
-	if conn, _ := svr.findConnection(connectionID); conn != nil {
+	if conn, _ := svr.registry.find(connectionID); conn != nil {
 		options.ManagerNamespace = conn.GetManagerNamespace()
 	}
-	svr.connMu.RUnlock()
 
 	logger.Debugf("Syncing workloads")
 	options.SetContext(session.Ctx)
@@ -144,21 +142,17 @@ func (svr *Server) Sync(resp rpc.Daemon_SyncServer) (err error) {
 		plog.G(resp.Context()).Errorf("Sync workloads failed: %v", err)
 		return err
 	}
-	svr.connMu.RLock()
-	opt, _ := svr.findConnection(connectionID)
-	svr.connMu.RUnlock()
+	opt, _ := svr.registry.find(connectionID)
 	if opt == nil {
 		return fmt.Errorf("cluster %s not found: %w", connectionID, config.ErrConnectionNotFound)
 	}
 	// The sync pod's VPN sidecar wrote envoy rules to the ConfigMap via ProxyInject.
 	// Refresh the user daemon's informer cache so the next status query sees
 	// ProxyList immediately, without waiting for the watch event to propagate.
-	if err = opt.RefreshConfigMapCache(resp.Context()); err != nil {
-		plog.G(resp.Context()).Debugf("Failed to refresh ConfigMap cache after sync: %v", err)
-	}
-	// SetSync is control-plane-only (ProxyController). Sync runs in the user
-	// daemon where opt is a *ConnectOptions satisfying ProxyController.
 	if pc, ok := opt.(handler.ProxyController); ok {
+		if err = pc.RefreshConfigMapCache(resp.Context()); err != nil {
+			plog.G(resp.Context()).Debugf("Failed to refresh ConfigMap cache after sync: %v", err)
+		}
 		pc.SetSync(options)
 	}
 	return nil

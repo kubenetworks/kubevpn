@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/netip"
+	"sync"
 
 	gossh "golang.org/x/crypto/ssh"
 
@@ -13,88 +14,119 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
-// PortMapUntil sets up local TCP port forwarding through an SSH tunnel, forwarding local connections to the remote address.
-func PortMapUntil(ctx context.Context, conf *SshConfig, remote, local netip.AddrPort) error {
-	// Listen on remote server port
+// PortMap owns a listener, its SSH pool, and all accepted forwarding workers.
+// Err is available after Done closes. Stop is idempotent and joins the workers.
+type PortMap struct {
+	listener net.Listener
+	cancel   context.CancelFunc
+	done     chan struct{}
+	err      error
+}
+
+func (p *PortMap) Addr() net.Addr        { return p.listener.Addr() }
+func (p *PortMap) Done() <-chan struct{} { return p.done }
+func (p *PortMap) Err() error            { return p.err }
+func (p *PortMap) Stop()                 { p.cancel(); <-p.done }
+
+// StartPortMap starts a lazy SSH forward. A zero local port is allocated by the OS.
+func StartPortMap(ctx context.Context, conf *SshConfig, remote, local netip.AddrPort) (*PortMap, error) {
+	ctx, cancel := context.WithCancel(ctx)
 	var lc net.ListenConfig
-	localListen, e := lc.Listen(ctx, "tcp", local.String())
-	if e != nil {
-		plog.G(ctx).Errorf("failed to listen %s: %v", local.String(), e)
-		return e
+	ln, err := lc.Listen(ctx, "tcp", local.String())
+	if err != nil {
+		cancel()
+		return nil, err
 	}
-	plog.G(ctx).Debugf("SSH listening on local %s forward to %s", local.String(), remote.String())
-
+	p := &PortMap{listener: ln, cancel: cancel, done: make(chan struct{})}
+	pool := newConnPool(conf)
 	go func() {
-		<-ctx.Done()
-		localListen.Close()
-	}()
-
-	go func() {
-		defer localListen.Close()
-
-		ctx1, cancelFunc1 := context.WithCancel(ctx)
-		defer cancelFunc1()
-		pool := newConnPool(conf)
-		defer pool.Close()
-
-		for ctx1.Err() == nil {
-			localConn, err1 := localListen.Accept()
-			if err1 != nil {
-				if errors.Is(err1, net.ErrClosed) {
-					return
-				}
-				plog.G(ctx).Debugf("failed to accept SSH conn: %v", err1)
-				continue
+		defer close(p.done)
+		var workers sync.WaitGroup
+		var mu sync.Mutex
+		active := map[net.Conn]struct{}{}
+		shutdown := make(chan struct{})
+		go func() {
+			defer close(shutdown)
+			<-ctx.Done()
+			_ = ln.Close()
+			mu.Lock()
+			for c := range active {
+				_ = c.Close()
 			}
+			mu.Unlock()
+			pool.Close()
+		}()
+		var failOnce sync.Once
+		fail := func(err error) { failOnce.Do(func() { p.err = err; cancel() }) }
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				if ctx.Err() == nil {
+					fail(err)
+				}
+				break
+			}
+			mu.Lock()
+			if ctx.Err() != nil {
+				mu.Unlock()
+				_ = c.Close()
+				break
+			}
+			active[c] = struct{}{}
+			mu.Unlock()
+			workers.Add(1)
 			go func() {
-				defer localConn.Close()
-
-				remoteConn, err := pool.dial(ctx1, remote)
+				defer workers.Done()
+				defer func() { _ = c.Close(); mu.Lock(); delete(active, c); mu.Unlock() }()
+				r, err := pool.dial(ctx, remote)
 				if err != nil {
-					var openChannelError *gossh.OpenChannelError
-					// if ssh server not permitted ssh port-forward, do nothing until exit
-					if errors.As(err, &openChannelError) && openChannelError.Reason == gossh.Prohibited {
-						plog.G(ctx).Errorf("prohibited to open SSH port-forward to %s: %v", remote.String(), err)
-						cancelFunc1()
-						return
+					var oe *gossh.OpenChannelError
+					if (errors.As(err, &oe) && oe.Reason == gossh.Prohibited) || errors.Is(err, config.ErrSSHAuth) || errors.Is(err, config.ErrGSSAPI) {
+						fail(err)
+					} else {
+						plog.G(ctx).Debugf("failed to dial SSH target %s: %v", remote, err)
 					}
-					plog.G(ctx).Debugf("failed to dial remote %s<=>%s -> %s: %v", localConn.LocalAddr().String(), localConn.RemoteAddr().String(), remote.String(), err)
 					return
 				}
-				plog.G(ctx).Debugf("opened SSH port-forward to %s<=>%s -> %s", localConn.LocalAddr().String(), localConn.RemoteAddr().String(), remote.String())
-
-				defer remoteConn.Close()
-				copyStream(ctx, localConn, remoteConn)
+				// copyStream closes and joins both directions even if cancellation raced dial.
+				copyStream(ctx, c, r)
 			}()
 		}
+		cancel()
+		<-shutdown
+		workers.Wait()
 	}()
-	return nil
+	return p, nil
+}
+
+// PortMapUntil preserves the asynchronous, context-owned API used by existing callers.
+func PortMapUntil(ctx context.Context, conf *SshConfig, remote, local netip.AddrPort) error {
+	_, err := StartPortMap(ctx, conf, remote, local)
+	return err
 }
 
 func copyStream(ctx context.Context, local net.Conn, remote net.Conn) {
 	done := make(chan struct{}, 2)
-
 	copy := func(dst, src net.Conn, direction string) {
+		defer func() { done <- struct{}{} }()
 		buf := config.LPool.Get().([]byte)[:]
 		defer config.LPool.Put(buf[:])
 		_, err := io.CopyBuffer(dst, src, buf)
 		if err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, io.EOF) {
 			plog.G(ctx).Debugf("copy %s error: %v", direction, err)
 		}
-		done <- struct{}{}
 	}
-
 	go copy(local, remote, "remote->local")
 	go copy(remote, local, "local->remote")
-
-	// Wait for either direction to finish or context cancel, then close both
-	// connections to unblock the other goroutine.
+	remaining := 2
 	select {
 	case <-done:
+		remaining--
 	case <-ctx.Done():
 	}
-	local.Close()
-	remote.Close()
-	// Wait for the second goroutine to finish
-	<-done
+	_ = local.Close()
+	_ = remote.Close()
+	for ; remaining > 0; remaining-- {
+		<-done
+	}
 }

@@ -52,12 +52,10 @@ func TestCharacterization_FindConnection_ReturnsCorrectElement(t *testing.T) {
 	connB := &handler.ConnectOptions{ConnectionID: "bbb-000000000000"}
 	connC := &handler.ConnectOptions{ConnectionID: "ccc-000000000000"}
 
-	svr := &Server{
-		connections: []handler.Connection{connA, connB, connC},
-	}
+	svr := &Server{registry: connectionRegistry{list: []handler.Connection{connA, connB, connC}}}
 
 	// --- findConnection must return the element at index 1 for "bbb..."
-	got, idx := svr.findConnection("bbb-000000000000")
+	got, idx := svr.registry.find("bbb-000000000000")
 	if got == nil {
 		t.Fatal("findConnection: expected non-nil result for existing ID")
 	}
@@ -69,19 +67,19 @@ func TestCharacterization_FindConnection_ReturnsCorrectElement(t *testing.T) {
 	}
 
 	// --- First element
-	got, idx = svr.findConnection("aaa-000000000000")
+	got, idx = svr.registry.find("aaa-000000000000")
 	if got == nil || idx != 0 {
 		t.Errorf("findConnection: first element: got=%v idx=%d", got, idx)
 	}
 
 	// --- Last element
-	got, idx = svr.findConnection("ccc-000000000000")
+	got, idx = svr.registry.find("ccc-000000000000")
 	if got == nil || idx != 2 {
 		t.Errorf("findConnection: last element: got=%v idx=%d", got, idx)
 	}
 
 	// --- Non-existent → (nil, -1)
-	got, idx = svr.findConnection("zzz-000000000000")
+	got, idx = svr.registry.find("zzz-000000000000")
 	if got != nil || idx != -1 {
 		t.Errorf("findConnection: non-existent: expected (nil, -1), got (%v, %d)", got, idx)
 	}
@@ -91,7 +89,7 @@ func TestCharacterization_FindConnection_ReturnsCorrectElement(t *testing.T) {
 // on an empty server (no connections slice at all).
 func TestCharacterization_FindConnection_EmptyServer(t *testing.T) {
 	svr := &Server{}
-	got, idx := svr.findConnection("any-id-000000000")
+	got, idx := svr.registry.find("any-id-000000000")
 	if got != nil || idx != -1 {
 		t.Errorf("empty server: expected (nil, -1), got (%v, %d)", got, idx)
 	}
@@ -102,15 +100,15 @@ func TestCharacterization_FindConnection_EmptyServer(t *testing.T) {
 func TestCharacterization_FindConnection_EmptyID(t *testing.T) {
 	// ConnectOptions with no ConnectionID set → GetConnectionID() returns ""
 	conn := &handler.ConnectOptions{}
-	svr := &Server{connections: []handler.Connection{conn}}
+	svr := &Server{registry: connectionRegistry{list: []handler.Connection{conn}}}
 
-	got, idx := svr.findConnection("")
+	got, idx := svr.registry.find("")
 	if got == nil || idx != 0 {
 		t.Errorf("empty ID match: expected (conn, 0), got (%v, %d)", got, idx)
 	}
 
 	// Non-matching non-empty ID against an empty-ConnectionID connection.
-	got, idx = svr.findConnection("not-matching-00")
+	got, idx = svr.registry.find("not-matching-00")
 	if got != nil || idx != -1 {
 		t.Errorf("non-match against empty-ID conn: expected (nil, -1), got (%v, %d)", got, idx)
 	}
@@ -128,9 +126,9 @@ func TestCharacterization_RemoveConnection_MiddleElement(t *testing.T) {
 	connB := &handler.ConnectOptions{ConnectionID: "bbb-111111111111"}
 	connC := &handler.ConnectOptions{ConnectionID: "ccc-111111111111"}
 
-	svr := &Server{connections: []handler.Connection{connA, connB, connC}}
+	svr := &Server{registry: connectionRegistry{list: []handler.Connection{connA, connB, connC}}}
 
-	removed := svr.removeConnection("bbb-111111111111")
+	removed := svr.registry.removeByID("bbb-111111111111")
 
 	// Returned slice must contain exactly connB.
 	if len(removed) != 1 {
@@ -141,14 +139,14 @@ func TestCharacterization_RemoveConnection_MiddleElement(t *testing.T) {
 	}
 
 	// Remaining connections must be [A, C] in order.
-	if len(svr.connections) != 2 {
-		t.Fatalf("remove middle: expected 2 remaining, got %d", len(svr.connections))
+	if len(svr.registry.list) != 2 {
+		t.Fatalf("remove middle: expected 2 remaining, got %d", len(svr.registry.list))
 	}
-	if svr.connections[0].GetConnectionID() != "aaa-111111111111" {
-		t.Errorf("remove middle: remaining[0] wrong: %q", svr.connections[0].GetConnectionID())
+	if svr.registry.list[0].GetConnectionID() != "aaa-111111111111" {
+		t.Errorf("remove middle: remaining[0] wrong: %q", svr.registry.list[0].GetConnectionID())
 	}
-	if svr.connections[1].GetConnectionID() != "ccc-111111111111" {
-		t.Errorf("remove middle: remaining[1] wrong: %q", svr.connections[1].GetConnectionID())
+	if svr.registry.list[1].GetConnectionID() != "ccc-111111111111" {
+		t.Errorf("remove middle: remaining[1] wrong: %q", svr.registry.list[1].GetConnectionID())
 	}
 }
 
@@ -156,14 +154,14 @@ func TestCharacterization_RemoveConnection_MiddleElement(t *testing.T) {
 // a non-existent ID leaves the slice unchanged and returns an empty Connects.
 func TestCharacterization_RemoveConnection_NonExistentID(t *testing.T) {
 	connA := &handler.ConnectOptions{ConnectionID: "aaa-222222222222"}
-	svr := &Server{connections: []handler.Connection{connA}}
+	svr := &Server{registry: connectionRegistry{list: []handler.Connection{connA}}}
 
-	removed := svr.removeConnection("zzz-000000000000")
+	removed := svr.registry.removeByID("zzz-000000000000")
 	if len(removed) != 0 {
 		t.Errorf("non-existent remove: expected 0 removed, got %d", len(removed))
 	}
-	if len(svr.connections) != 1 {
-		t.Errorf("non-existent remove: expected slice unchanged (1), got %d", len(svr.connections))
+	if len(svr.registry.list) != 1 {
+		t.Errorf("non-existent remove: expected slice unchanged (1), got %d", len(svr.registry.list))
 	}
 }
 
@@ -171,7 +169,7 @@ func TestCharacterization_RemoveConnection_NonExistentID(t *testing.T) {
 // empty result on an empty server.
 func TestCharacterization_RemoveConnection_EmptyServer(t *testing.T) {
 	svr := &Server{}
-	removed := svr.removeConnection("any-id-000000000")
+	removed := svr.registry.removeByID("any-id-000000000")
 	if len(removed) != 0 {
 		t.Errorf("empty server remove: expected 0, got %d", len(removed))
 	}
@@ -187,9 +185,9 @@ func TestCharacterization_RemoveConnection_DuplicateIDs(t *testing.T) {
 	connB2 := &handler.ConnectOptions{ConnectionID: dup}
 	connC := &handler.ConnectOptions{ConnectionID: "ccc-333333333333"}
 
-	svr := &Server{connections: []handler.Connection{connA, connB1, connB2, connC}}
+	svr := &Server{registry: connectionRegistry{list: []handler.Connection{connA, connB1, connB2, connC}}}
 
-	removed := svr.removeConnection(dup)
+	removed := svr.registry.removeByID(dup)
 	if len(removed) != 2 {
 		t.Fatalf("duplicate remove: expected 2 removed, got %d", len(removed))
 	}
@@ -200,13 +198,13 @@ func TestCharacterization_RemoveConnection_DuplicateIDs(t *testing.T) {
 		}
 	}
 	// Remaining must be [A, C].
-	if len(svr.connections) != 2 {
-		t.Fatalf("duplicate remove: expected 2 remaining, got %d", len(svr.connections))
+	if len(svr.registry.list) != 2 {
+		t.Fatalf("duplicate remove: expected 2 remaining, got %d", len(svr.registry.list))
 	}
-	if svr.connections[0].GetConnectionID() != "aaa-333333333333" ||
-		svr.connections[1].GetConnectionID() != "ccc-333333333333" {
+	if svr.registry.list[0].GetConnectionID() != "aaa-333333333333" ||
+		svr.registry.list[1].GetConnectionID() != "ccc-333333333333" {
 		t.Errorf("duplicate remove: remaining order wrong: [%q, %q]",
-			svr.connections[0].GetConnectionID(), svr.connections[1].GetConnectionID())
+			svr.registry.list[0].GetConnectionID(), svr.registry.list[1].GetConnectionID())
 	}
 }
 
@@ -214,14 +212,14 @@ func TestCharacterization_RemoveConnection_DuplicateIDs(t *testing.T) {
 // connection results in an empty slice.
 func TestCharacterization_RemoveConnection_OnlyElement(t *testing.T) {
 	conn := &handler.ConnectOptions{ConnectionID: "solo-44444444444"}
-	svr := &Server{connections: []handler.Connection{conn}}
+	svr := &Server{registry: connectionRegistry{list: []handler.Connection{conn}}}
 
-	removed := svr.removeConnection("solo-44444444444")
+	removed := svr.registry.removeByID("solo-44444444444")
 	if len(removed) != 1 {
 		t.Fatalf("solo remove: expected 1 removed, got %d", len(removed))
 	}
-	if len(svr.connections) != 0 {
-		t.Errorf("solo remove: expected empty slice, got %d", len(svr.connections))
+	if len(svr.registry.list) != 0 {
+		t.Errorf("solo remove: expected empty slice, got %d", len(svr.registry.list))
 	}
 }
 
@@ -233,19 +231,18 @@ func TestCharacterization_RemoveConnection_OnlyElement(t *testing.T) {
 // that when the removed ID does NOT match currentConnectionID, the current
 // is left unchanged.
 func TestCharacterization_ResetCurrentConnection_RemovedIsDifferent(t *testing.T) {
-	svr := &Server{
-		connections: []handler.Connection{
-			&handler.ConnectOptions{ConnectionID: "aa-555555555555"},
-			&handler.ConnectOptions{ConnectionID: "bb-555555555555"},
-		},
-		currentConnectionID: "aa-555555555555",
+	svr := &Server{registry: connectionRegistry{list: []handler.Connection{
+		&handler.ConnectOptions{ConnectionID: "aa-555555555555"},
+		&handler.ConnectOptions{ConnectionID: "bb-555555555555"},
+	},
+		currentID: "aa-555555555555"},
 	}
 
 	// Remove "bb" — current is "aa", so current must stay "aa".
-	svr.resetCurrentConnection("bb-555555555555")
-	if svr.currentConnectionID != "aa-555555555555" {
+	svr.registry.resetCurrent("bb-555555555555")
+	if svr.registry.currentID != "aa-555555555555" {
 		t.Errorf("different ID removed: expected current unchanged 'aa...', got %q",
-			svr.currentConnectionID)
+			svr.registry.currentID)
 	}
 }
 
@@ -253,19 +250,18 @@ func TestCharacterization_ResetCurrentConnection_RemovedIsDifferent(t *testing.T
 // verifies that when the removed ID matches current, the current is updated
 // to the first element of the remaining connections.
 func TestCharacterization_ResetCurrentConnection_RemovedIsCurrent_PicksFirst(t *testing.T) {
-	svr := &Server{
-		connections: []handler.Connection{
-			&handler.ConnectOptions{ConnectionID: "first-6666666666"},
-			&handler.ConnectOptions{ConnectionID: "third-6666666666"},
-		},
-		currentConnectionID: "removed-66666666",
+	svr := &Server{registry: connectionRegistry{list: []handler.Connection{
+		&handler.ConnectOptions{ConnectionID: "first-6666666666"},
+		&handler.ConnectOptions{ConnectionID: "third-6666666666"},
+	},
+		currentID: "removed-66666666"},
 	}
 	// Simulate: "removed..." was just removed, connections now hold [first, third].
-	svr.resetCurrentConnection("removed-66666666")
+	svr.registry.resetCurrent("removed-66666666")
 
-	if svr.currentConnectionID != "first-6666666666" {
+	if svr.registry.currentID != "first-6666666666" {
 		t.Errorf("should pick first remaining: expected 'first-6666666666', got %q",
-			svr.currentConnectionID)
+			svr.registry.currentID)
 	}
 }
 
@@ -273,15 +269,14 @@ func TestCharacterization_ResetCurrentConnection_RemovedIsCurrent_PicksFirst(t *
 // that when the removed ID was current and no connections remain, currentConnectionID
 // becomes the empty string.
 func TestCharacterization_ResetCurrentConnection_NoRemainingConnections(t *testing.T) {
-	svr := &Server{
-		connections:         []handler.Connection{}, // already emptied
-		currentConnectionID: "only-777777777777",
+	svr := &Server{registry: connectionRegistry{list: []handler.Connection{}, // already emptied
+		currentID: "only-777777777777"},
 	}
-	svr.resetCurrentConnection("only-777777777777")
+	svr.registry.resetCurrent("only-777777777777")
 
-	if svr.currentConnectionID != "" {
+	if svr.registry.currentID != "" {
 		t.Errorf("no remaining: expected empty currentConnectionID, got %q",
-			svr.currentConnectionID)
+			svr.registry.currentID)
 	}
 }
 
@@ -289,13 +284,12 @@ func TestCharacterization_ResetCurrentConnection_NoRemainingConnections(t *testi
 // currentConnectionID is already empty, resetCurrentConnection leaves it empty
 // regardless of the removed ID (idempotent).
 func TestCharacterization_ResetCurrentConnection_EmptyCurrent(t *testing.T) {
-	svr := &Server{
-		connections:         []handler.Connection{&handler.ConnectOptions{ConnectionID: "some-888888888888"}},
-		currentConnectionID: "",
+	svr := &Server{registry: connectionRegistry{list: []handler.Connection{&handler.ConnectOptions{ConnectionID: "some-888888888888"}},
+		currentID: ""},
 	}
-	svr.resetCurrentConnection("any-removed-id-0")
-	if svr.currentConnectionID != "" {
-		t.Errorf("empty current: should stay empty, got %q", svr.currentConnectionID)
+	svr.registry.resetCurrent("any-removed-id-0")
+	if svr.registry.currentID != "" {
+		t.Errorf("empty current: should stay empty, got %q", svr.registry.currentID)
 	}
 }
 
@@ -318,7 +312,7 @@ func TestCharacterization_SiblingTunIPs_Empty(t *testing.T) {
 func TestCharacterization_SiblingTunIPs_NoNetworkManager(t *testing.T) {
 	conn := &handler.ConnectOptions{ConnectionID: "no-tun-999999999"}
 	// GetLocalTunIP on a ConnectOptions without network returns ("", "").
-	svr := &Server{connections: []handler.Connection{conn}}
+	svr := &Server{registry: connectionRegistry{list: []handler.Connection{conn}}}
 	ips := svr.siblingTunIPs()
 	if len(ips) != 0 {
 		t.Errorf("no network manager: expected 0 IPs, got %v", ips)
@@ -484,9 +478,8 @@ func TestCharacterization_Connects_Append_MixedNilAndNonNil(t *testing.T) {
 // currentConnectionID when the requested ID exists.
 func TestCharacterization_ConnectionUse_Success(t *testing.T) {
 	conn := &handler.ConnectOptions{ConnectionID: "use-gggggggggggg"}
-	svr := &Server{
-		connections:         []handler.Connection{conn},
-		currentConnectionID: "",
+	svr := &Server{registry: connectionRegistry{list: []handler.Connection{conn},
+		currentID: ""},
 	}
 
 	resp, err := svr.ConnectionUse(context.Background(), &rpc.ConnectionUseRequest{
@@ -498,9 +491,9 @@ func TestCharacterization_ConnectionUse_Success(t *testing.T) {
 	if resp == nil {
 		t.Fatal("ConnectionUse success: expected non-nil response")
 	}
-	if svr.currentConnectionID != "use-gggggggggggg" {
+	if svr.registry.currentID != "use-gggggggggggg" {
 		t.Errorf("ConnectionUse success: currentConnectionID not updated: got %q",
-			svr.currentConnectionID)
+			svr.registry.currentID)
 	}
 }
 
@@ -510,9 +503,8 @@ func TestCharacterization_ConnectionUse_Success(t *testing.T) {
 func TestCharacterization_ConnectionUse_UpdatesCurrentFromExisting(t *testing.T) {
 	connA := &handler.ConnectOptions{ConnectionID: "use-a-hhhhhhhhhh"}
 	connB := &handler.ConnectOptions{ConnectionID: "use-b-hhhhhhhhhh"}
-	svr := &Server{
-		connections:         []handler.Connection{connA, connB},
-		currentConnectionID: "use-a-hhhhhhhhhh",
+	svr := &Server{registry: connectionRegistry{list: []handler.Connection{connA, connB},
+		currentID: "use-a-hhhhhhhhhh"},
 	}
 
 	_, err := svr.ConnectionUse(context.Background(), &rpc.ConnectionUseRequest{
@@ -521,8 +513,8 @@ func TestCharacterization_ConnectionUse_UpdatesCurrentFromExisting(t *testing.T)
 	if err != nil {
 		t.Fatalf("ConnectionUse switch: unexpected error: %v", err)
 	}
-	if svr.currentConnectionID != "use-b-hhhhhhhhhh" {
-		t.Errorf("ConnectionUse switch: expected 'use-b-...', got %q", svr.currentConnectionID)
+	if svr.registry.currentID != "use-b-hhhhhhhhhh" {
+		t.Errorf("ConnectionUse switch: expected 'use-b-...', got %q", svr.registry.currentID)
 	}
 }
 
@@ -582,8 +574,8 @@ func TestCharacterization_CleanupConnection_NilIsNoop(t *testing.T) {
 // of whether it matches any live connection.
 func TestCharacterization_ConnectionList_EchoesCurrentID(t *testing.T) {
 	svr := &Server{
-		IsSudo:              true, // skip getSudoTunIPs which needs GetClient
-		currentConnectionID: "echoed-iiiiiiiiii",
+		IsSudo: true, registry: // skip getSudoTunIPs which needs GetClient
+		connectionRegistry{currentID: "echoed-iiiiiiiiii"},
 	}
 	resp, err := svr.ConnectionList(context.Background(), &rpc.ConnectionListRequest{})
 	if err != nil {
@@ -623,8 +615,7 @@ func TestCharacterization_ConnectionList_CountMatchesConnections(t *testing.T) {
 	// covers the empty-connections invariant.
 
 	svr := &Server{
-		IsSudo:              true,
-		currentConnectionID: "current-jjjjjjjjjj",
+		IsSudo: true, registry: connectionRegistry{currentID: "current-jjjjjjjjjj"},
 	}
 	resp, err := svr.ConnectionList(context.Background(), &rpc.ConnectionListRequest{})
 	if err != nil {
@@ -655,35 +646,34 @@ func TestCharacterization_RemoveThenReset_CurrentMigratesForward(t *testing.T) {
 	connB := &handler.ConnectOptions{ConnectionID: "bbb-kkkkkkkkkkkk"}
 	connC := &handler.ConnectOptions{ConnectionID: "ccc-kkkkkkkkkkkk"}
 
-	svr := &Server{
-		connections:         []handler.Connection{connA, connB, connC},
-		currentConnectionID: "bbb-kkkkkkkkkkkk",
+	svr := &Server{registry: connectionRegistry{list: []handler.Connection{connA, connB, connC},
+		currentID: "bbb-kkkkkkkkkkkk"},
 	}
 
-	removed := svr.removeConnection("bbb-kkkkkkkkkkkk")
-	svr.resetCurrentConnection("bbb-kkkkkkkkkkkk")
+	removed := svr.registry.removeByID("bbb-kkkkkkkkkkkk")
+	svr.registry.resetCurrent("bbb-kkkkkkkkkkkk")
 
 	// Removed must contain exactly B.
 	if len(removed) != 1 || removed[0].GetConnectionID() != "bbb-kkkkkkkkkkkk" {
 		t.Fatalf("remove+reset: wrong removed: %v", removed)
 	}
 	// Remaining: [A, C].
-	if len(svr.connections) != 2 {
-		t.Fatalf("remove+reset: expected 2 remaining, got %d", len(svr.connections))
+	if len(svr.registry.list) != 2 {
+		t.Fatalf("remove+reset: expected 2 remaining, got %d", len(svr.registry.list))
 	}
 	// Current migrates to first remaining = A.
-	if svr.currentConnectionID != "aaa-kkkkkkkkkkkk" {
-		t.Errorf("remove+reset: expected current='aaa-...', got %q", svr.currentConnectionID)
+	if svr.registry.currentID != "aaa-kkkkkkkkkkkk" {
+		t.Errorf("remove+reset: expected current='aaa-...', got %q", svr.registry.currentID)
 	}
 	// A and C are still findable.
-	if f, _ := svr.findConnection("aaa-kkkkkkkkkkkk"); f == nil {
+	if f, _ := svr.registry.find("aaa-kkkkkkkkkkkk"); f == nil {
 		t.Error("remove+reset: A must still be findable")
 	}
-	if f, _ := svr.findConnection("ccc-kkkkkkkkkkkk"); f == nil {
+	if f, _ := svr.registry.find("ccc-kkkkkkkkkkkk"); f == nil {
 		t.Error("remove+reset: C must still be findable")
 	}
 	// B is gone.
-	if f, _ := svr.findConnection("bbb-kkkkkkkkkkkk"); f != nil {
+	if f, _ := svr.registry.find("bbb-kkkkkkkkkkkk"); f != nil {
 		t.Error("remove+reset: B must NOT be findable after removal")
 	}
 }
@@ -692,19 +682,18 @@ func TestCharacterization_RemoveThenReset_CurrentMigratesForward(t *testing.T) {
 // last connection results in empty state.
 func TestCharacterization_RemoveThenReset_LastConnection(t *testing.T) {
 	conn := &handler.ConnectOptions{ConnectionID: "last-llllllllllll"}
-	svr := &Server{
-		connections:         []handler.Connection{conn},
-		currentConnectionID: "last-llllllllllll",
+	svr := &Server{registry: connectionRegistry{list: []handler.Connection{conn},
+		currentID: "last-llllllllllll"},
 	}
 
-	svr.removeConnection("last-llllllllllll")
-	svr.resetCurrentConnection("last-llllllllllll")
+	svr.registry.removeByID("last-llllllllllll")
+	svr.registry.resetCurrent("last-llllllllllll")
 
-	if len(svr.connections) != 0 {
-		t.Errorf("last conn removed: expected 0, got %d", len(svr.connections))
+	if len(svr.registry.list) != 0 {
+		t.Errorf("last conn removed: expected 0, got %d", len(svr.registry.list))
 	}
-	if svr.currentConnectionID != "" {
-		t.Errorf("last conn removed: expected empty currentID, got %q", svr.currentConnectionID)
+	if svr.registry.currentID != "" {
+		t.Errorf("last conn removed: expected empty currentID, got %q", svr.registry.currentID)
 	}
 }
 
@@ -714,20 +703,19 @@ func TestCharacterization_RemoveThenReset_NonCurrentRemoved(t *testing.T) {
 	connA := &handler.ConnectOptions{ConnectionID: "cur-mmmmmmmmmmmm"}
 	connB := &handler.ConnectOptions{ConnectionID: "del-mmmmmmmmmmmm"}
 
-	svr := &Server{
-		connections:         []handler.Connection{connA, connB},
-		currentConnectionID: "cur-mmmmmmmmmmmm",
+	svr := &Server{registry: connectionRegistry{list: []handler.Connection{connA, connB},
+		currentID: "cur-mmmmmmmmmmmm"},
 	}
 
-	svr.removeConnection("del-mmmmmmmmmmmm")
-	svr.resetCurrentConnection("del-mmmmmmmmmmmm")
+	svr.registry.removeByID("del-mmmmmmmmmmmm")
+	svr.registry.resetCurrent("del-mmmmmmmmmmmm")
 
-	if svr.currentConnectionID != "cur-mmmmmmmmmmmm" {
+	if svr.registry.currentID != "cur-mmmmmmmmmmmm" {
 		t.Errorf("non-current removed: current should be unchanged, got %q",
-			svr.currentConnectionID)
+			svr.registry.currentID)
 	}
-	if len(svr.connections) != 1 {
-		t.Errorf("non-current removed: expected 1 remaining, got %d", len(svr.connections))
+	if len(svr.registry.list) != 1 {
+		t.Errorf("non-current removed: expected 1 remaining, got %d", len(svr.registry.list))
 	}
 }
 
@@ -792,7 +780,6 @@ func TestCharacterization_ParseIP_EmptyStringDropped(t *testing.T) {
 	}
 }
 
-
 // ============================================================================
 // C1 tests: Connection interface migration
 // ============================================================================
@@ -810,13 +797,13 @@ type mockConnection struct {
 	extraHost    []dns.Entry
 }
 
-func (m *mockConnection) GetOwnerID() string             { return m.ownerID }
-func (m *mockConnection) GetWorkloadNamespace() string    { return m.workloadNS }
-func (m *mockConnection) GetAPIServerIPs() []net.IP      { return m.apiServerIPs }
-func (m *mockConnection) GetExtraCIDR() []string         { return m.extraCIDR }
+func (m *mockConnection) GetOwnerID() string               { return m.ownerID }
+func (m *mockConnection) GetWorkloadNamespace() string     { return m.workloadNS }
+func (m *mockConnection) GetAPIServerIPs() []net.IP        { return m.apiServerIPs }
+func (m *mockConnection) GetExtraCIDR() []string           { return m.extraCIDR }
 func (m *mockConnection) GetNetworkExtraHost() []dns.Entry { return m.extraHost }
-func (m *mockConnection) GetSocksListenAddr() string      { return "" }
-func (m *mockConnection) GetSocksEgress() bool            { return false }
+func (m *mockConnection) GetSocksListenAddr() string       { return "" }
+func (m *mockConnection) GetSocksEgress() bool             { return false }
 
 // satisfy remaining interface methods not on *ConnectOptions embed (none needed
 // as *ConnectOptions already satisfies the full interface)
@@ -827,7 +814,7 @@ func (m *mockConnection) GetSocksEgress() bool            { return false }
 // Connection ISP split — a future signature change to any role surfaces here, not at a
 // far-away call site.
 var (
-	_ handler.Connection     = (*mockConnection)(nil)
+	_ handler.Connection      = (*mockConnection)(nil)
 	_ handler.DataPlane       = (*mockConnection)(nil)
 	_ handler.ProxyController = (*mockConnection)(nil)
 )
@@ -967,7 +954,7 @@ func TestC1_Connects_Sort_WithAPIServerIPs(t *testing.T) {
 // The following methods complete the Connection interface for mockConnection:
 // (all delegated to the embedded ConnectOptions)
 
-func (m *mockConnection) InitClient(f cmdutil.Factory) error { return nil }
+func (m *mockConnection) InitClient(f cmdutil.Factory) error  { return nil }
 func (m *mockConnection) DoConnect(ctx context.Context) error { return nil }
 func (m *mockConnection) Cleanup(ctx context.Context) {
 	if m.ConnectOptions != nil {
@@ -1031,7 +1018,7 @@ func (m *mockConnection) SetSync(s *handler.SyncOptions) {
 	}
 }
 func (m *mockConnection) GetRunningPodList(ctx context.Context) ([]v1.Pod, error) { return nil, nil }
-func (m *mockConnection) GetLastHeartbeat() time.Time                              { return time.Time{} }
-func (m *mockConnection) GetTrafficManagerConfigMap(ctx context.Context) (*v1.ConfigMap, error) {
-	return nil, nil
+func (m *mockConnection) GetLastHeartbeat() time.Time                             { return time.Time{} }
+func (m *mockConnection) StatusSnapshot(ctx context.Context) (handler.SessionStatus, error) {
+	return handler.SessionStatus{}, nil
 }

@@ -71,9 +71,8 @@ func TestQuit_StepEmittedOnlyByUserDaemon(t *testing.T) {
 		})
 
 		svr := &Server{
-			IsSudo:      isSudo,
-			LogFile:     logFile,
-			connections: []handler.Connection{conn},
+			IsSudo:  isSudo,
+			LogFile: logFile, registry: connectionRegistry{list: []handler.Connection{conn}},
 		}
 		resp := &fakeQuitServer{ctx: context.Background()}
 

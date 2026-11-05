@@ -19,6 +19,7 @@ import (
 	"k8s.io/client-go/rest"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
+	clusterworkload "github.com/wencaiwulue/kubevpn/v2/pkg/cluster/workload"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	pkgssh "github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
@@ -203,12 +204,12 @@ func (option *Options) InitClient(f cmdutil.Factory) error {
 
 // GetPodTemplateSpec resolves the workload's top-level owner and extracts its PodTemplateSpec.
 func (option *Options) GetPodTemplateSpec(ctx context.Context) (*v1.PodTemplateSpec, error) {
-	_, controller, err := util.GetTopOwnerObject(ctx, option.factory, option.Namespace, option.Workload)
+	_, controller, err := clusterworkload.GetTopOwnerObject(ctx, option.factory, option.Namespace, option.Workload)
 	if err != nil {
 		return nil, err
 	}
 	u := controller.Object.(*unstructured.Unstructured)
-	templateSpec, _, err := util.GetPodTemplateSpecPath(u)
+	templateSpec, _, err := clusterworkload.GetPodTemplateSpecPath(u)
 	return templateSpec, err
 }
 

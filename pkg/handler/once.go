@@ -11,10 +11,10 @@ import (
 	"k8s.io/kubectl/pkg/cmd/rollout"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/cluster/manager"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
-	netutil "github.com/wencaiwulue/kubevpn/v2/pkg/util/netutil"
 )
 
 func Once(ctx context.Context, f cmdutil.Factory) error {
@@ -70,26 +70,7 @@ func labelNs(ctx context.Context, namespace string, clientset kubernetes.Interfa
 
 func genTLS(ctx context.Context, namespace string, clientset kubernetes.Interface) error {
 	plog.G(ctx).Infof("Generating TLS for Namespace %s", namespace)
-	crt, key, host, err := netutil.GenTLSCert(ctx, namespace)
-	if err != nil {
-		return err
-	}
-	// reason why not use v1.SecretTypeTls is because it needs key called tls.crt and tls.key, but tls.key cannot be an env variable
-	// ➜  ~ export tls.key=a
-	//export: not valid in this context: tls.key
-	secret := genSecret(namespace, crt, key, host)
-	oldSecret, err := clientset.CoreV1().Secrets(namespace).Get(ctx, secret.Name, metav1.GetOptions{})
-	if err != nil {
-		plog.G(ctx).Errorf("Failed to get secret: %v", err)
-		return err
-	}
-	secret.ResourceVersion = oldSecret.ResourceVersion
-	_, err = clientset.CoreV1().Secrets(namespace).Update(ctx, secret, metav1.UpdateOptions{})
-	if err != nil {
-		plog.G(ctx).Errorf("Failed to update secret: %v", err)
-		return err
-	}
-	return nil
+	return manager.RotateTLS(ctx, clientset, namespace)
 }
 
 func restartDeploy(ctx context.Context, f cmdutil.Factory) error {

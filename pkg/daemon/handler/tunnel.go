@@ -13,7 +13,7 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/core"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/endpoint"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	pkgssh "github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
@@ -58,13 +58,13 @@ func (w *wsHandler) createTunnel(ctx context.Context, cli *ssh.Client) error {
 	w.log("%s", util.FormatBanner(fmt.Sprintf("You can use client: %s to communicate with server: %s", clientIP.IP.String(), ip.String())))
 	w.cidr = append(w.cidr, string(serverIP))
 
-	nodes := []*core.Node{
-		core.NewNode("tun", "").
+	nodes := []*endpoint.Node{
+		endpoint.NewNode("tun", "").
 			WithForward(fmt.Sprintf("tcp://127.0.0.1:%d", localPort)).
 			WithParam("net", clientIP.String()).
 			WithParam("route", strings.Join(w.cidr, ",")),
 	}
-	servers, err := core.GenerateServersFromNodes(nodes, core.NewRouteHub())
+	servers, err := endpoint.GenerateServersFromNodes(nodes, endpoint.NewRouteHub())
 	if err != nil {
 		w.log("Failed to parse route: %v", err)
 		return err

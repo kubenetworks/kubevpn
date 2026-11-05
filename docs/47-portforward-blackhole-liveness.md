@@ -1,5 +1,121 @@
 # Port-forward Black-hole & Data-plane Liveness Watchdog
 
+## Current recovery ownership
+
+The client defaults to **one data `connSlot` plus one independent control slot**. Default
+business dispatch goes directly to slot 0 without slot-selection parsing/hashing; lifecycle,
+batching and business concurrency are preserved. Heartbeat requests bypass the business queue
+via a separate control queue/conn to the **same TCP forwarding endpoint 10801**, not xDS 9002.
+The control conn is excluded from `tunnel.Router`, and since R2 the server answers heartbeat
+echo requests **inline on the control conn itself** (`gvisorTCPHandler.handleControlConn` →
+`synthesizeEchoReply`) instead of injecting them into the client's gvisor stack. There is one
+registered conn per current client address in steady state. The outer SSH/port-forward TCP
+transport remains shared, so the heartbeat certifies the control path end-to-end; a stall that
+black-holes only the data conn (an intact outer transport with a wedged data slot) is caught by
+the slot's own 180 s read deadline instead of the 15 s watchdog.
+
+The historical watchdog/port-forward loops described below have been replaced by
+one `transportSupervisor` in `pkg/network/transport.go`, owned by `network.Runtime`
+(`pkg/network/runtime.go`) and shared by SSH and
+Kubernetes port-forward. The 30-second unprimed and `3 * HeartbeatInterval` steady
+thresholds remain (sampled every 5 s). Health is armed after TUN startup; bootstrap uses
+10-second GetTunIP calls and waits for a **current-generation data heartbeat** within the
+60-second total startup budget. The budget cancels failed startup, not an established session.
+
+RentIP, IPWatcher and RouteWatcher all use a common context dialer with
+`passthrough:///kubevpn-manager`; each dial resolves the active generation's xDS
+endpoint. Bootstrap timeout/unavailable errors are generation-tagged recovery
+signals. Runtime watcher failures do not override healthy data-plane heartbeats.
+Generation-aware data and gRPC dials resolve ephemeral loopback endpoints, never a stale
+fixed port. Healthy current SSH/port-forward is sticky; only failure switches paths, with
+bounded backoff. Authentication/trust/configuration failures are terminal. Heartbeats carry
+nonce/generation/counter with bounded outstanding state (128 / 30 s); see docs/08.
+
+`pkg/network/monitor.go` integrates the existing vendored **netmon 1.74.1** API. Callbacks only
+coalesce wakeups; the supervisor compares current interface/route state, not callback Old/New.
+`TimeJumped` remains sticky until consumed. Sampling follows actual API/SSH/proxy egress and
+IPv4/IPv6 default-route fallbacks, excluding this connection's TUN identity. Route lookups send
+no packets to external probe targets (endpoint hostname resolution may use DNS). Relevant changes
+use `ClearPending`, not `BeginGeneration`, and request fresh evidence on the current path.
+Debouncing/offline backoff never extends the recovery budget indefinitely; monitor failure leaves
+the heartbeat watchdog active. No CLI, protobuf or dependency change is required.
+
+`Stop` rejects new workers/events, cancels the parent, retires/joins the active generation,
+waits for `startupDone` and all workers (including monitor/TUN handlers), then clears DNS/state. Terminal runtime transport
+errors cancel the manager; DataSession observes that cancellation outside the
+supervisor and performs cleanup without self-joining.
+
+Current source navigation: `pkg/network/address.go` owns rentIP/IPWatcher,
+`pkg/network/routes.go` owns RouteWatcher and route-source repair, and
+`pkg/network/transport_policy.go` holds retry/liveness constants.
+`pkg/cluster/portforward/session.go` owns joinable `PortForwardSession` handles;
+`pkg/cluster/portforward/forward.go` contains the `PortForwardPod` wrapper.
+`pkg/tunnel/attempt.go` owns each connection's declaration/registration and joined pumps;
+`pkg/tunnel/heartbeat.go` validates probe evidence. The filenames and removed helpers
+inside the historical sections below are retained only as incident provenance.
+
+### Default transport diagnostics
+
+The supervisor records preparation failures at Warn with a local attempt number, transport kind,
+preparation stage and safe error classification. Retry events report the selected next kind and
+actual scheduled delay, including the offline minimum; a network-change event may wake that wait
+early. Authentication/configuration failures report `transport stopped`, without promising a retry.
+
+Before retiring a failed generation, `transport retiring` captures its heartbeat age, probe state,
+cumulative send/reply counts and data/control slot activity. The snapshot is taken **before**
+`BeginGeneration` clears the old evidence. `location=undetermined` deliberately avoids turning a
+missing reply into an assertion about SSH, port-forward, the server, or an intermediate network hop.
+A successful local write is not delivery confirmation. Error summaries use typed classifications,
+not arbitrary upstream error text that could contain proxy credentials.
+
+After a reported failure, `transport recovered` requires a nonempty validated heartbeat timestamp
+for the current generation; preparation, publication and loopback TCP dialing are insufficient.
+Failure summaries are limited to one per 30 seconds per supervisor, phase and transport kind.
+`supervisor_failures_delta` counts all preparation/retirement failures since the supervisor's
+previous emitted failure summary, including suppressed failures of other kinds or phases. The
+adjacent kind/stage/reason describes the current event, not every occurrence in that aggregate.
+Recovery's `failures` field is the separate outage-wide total. User cancellation does not produce a
+failure/recovery event. These logs do not change watchdog thresholds or recovery decisions.
+Logging remains synchronous: a permanently blocked logging backend can delay supervisor progress;
+this is not a bounded-sink or shutdown guarantee.
+
+### Slot-local rapid-failure pacing
+
+`pkg/tunnel/slot.go` independently paces each data/control slot when dialing succeeds
+but declaration, registration, reading or writing repeatedly fails rapidly. This prevents
+a hot reconnect loop without adding another transport supervisor. Default delays are:
+
+| Consecutive rapid post-dial failure | Wait before the next dial |
+|---|---|
+| First | Immediate |
+| Second | 62.5–125 ms |
+| Third | 125–250 ms |
+| Fourth and later | 250–500 ms |
+
+The intervals use jitter with a capped exponential ceiling. **Rapid age is successful
+Dial return → first terminal failure of that connection attempt**, not dial-start →
+cleanup-complete: dial latency, logging, cancellation, native Close and consumer joins must
+not turn an immediate failure into a stable connection. A best-effort `readDL.refresh`
+error after a successful write is only logged; it does not terminate the attempt or count
+toward this timing. Reaching **2 s** before the first terminal failure resets the streak;
+a successful registration, write or probe alone does not. This is a churn metric, not a
+health verdict.
+
+A new generation resets the streak. It does not require consuming the shared heartbeat
+probe-request channel to interrupt a wait: an already-running pacing wait may add at most
+**500 ms** before the new generation's dial. Context cancellation interrupts waits promptly.
+A dial failure clears the post-dial streak and uses only the existing **2 s** dial-failure
+backoff; the two delays are never stacked.
+
+The existing supervisor still owns SSH/port-forward recovery, heartbeat health and terminal
+authentication/trust/configuration failures. Slot pacing changes none of that ownership or
+terminal-failure behavior. It bounds retry churn; it is not an end-to-end recovery-speed
+measurement.
+
+> **Historical incident and original fix:** Sections 1–5 below preserve the original
+> observations, timings and port-forward-only design. Removed helpers and timestamp-only
+> priming describe that implementation, not the current supervisor summarized above.
+
 ## 1. Symptom
 
 An idle long-lived connection tunnelled through the VPN — e.g. an SSH session to another
@@ -14,7 +130,9 @@ The entire client data plane rides on a **single** Kubernetes port-forward:
 TUN device → 127.0.0.1:<local port> → (k8s port-forward, SPDY) → traffic-manager pod
 ```
 
-All four conn-pool slots dial `127.0.0.1:<local port>`. If that one port-forward session
+In the historical topology, all four data conn-pool slots dialed `127.0.0.1:<local port>`.
+The current one-data-plus-one-control topology still shares the forwarding endpoint and outer
+transport. If that one port-forward session
 drops, the **whole tunnel** is down until it reconnects. See
 [01-network-architecture.md](01-network-architecture.md) and
 [24-traffic-manager-deployment.md](24-traffic-manager-deployment.md).
@@ -140,9 +258,14 @@ now without a producer.
 `--debug`; repeated warnings are limited to once per minute per watcher, with intervening attempts
 at Debug. Debug also includes dial readiness and elapsed time. Cancellation is a normal exit.
 
+Each watch attempt resolves the current transport generation and logs its actual xDS endpoint.
+The 30-second readiness deadline applies only to the blocking gRPC dial, not to the generation-bound
+watch stream. Retirement cancels the old stream and fences its route/IP updates. A watcher started
+between generations waits for the next endpoint rather than permanently skipping a zero local port.
+
 IPWatcher's reconnect reassertion (`GetTunIP`) has its own **10-second** call deadline. Failure is
-logged and retains the existing fallback to `WatchTunIP`. Proposal confirmation/decline/rejection
-RPCs are separate operations and are not bounded by this initial reassertion deadline.
+logged and retains the existing fallback to `WatchTunIP` unless the generation/session was canceled.
+Proposal confirmation/decline/rejection RPCs each have a separate **10-second** deadline.
 
 These deadlines do not expire the watch streams themselves or detect a black-hole that develops
 after a stream has connected. They restore control to the watcher retry loop during connection

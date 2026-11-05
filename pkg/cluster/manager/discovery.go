@@ -1,0 +1,126 @@
+package manager
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/wencaiwulue/kubevpn/v2/pkg/cluster/workload"
+	"os"
+
+	"helm.sh/helm/v4/pkg/action"
+	"helm.sh/helm/v4/pkg/release/v1"
+	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/client-go/kubernetes"
+	cmdutil "k8s.io/kubectl/pkg/cmd/util"
+
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
+)
+
+// DetectManagerNamespace finds the namespace containing a running kubevpn traffic manager, checking the given namespace, the default kubevpn namespace, and Helm releases.
+func DetectManagerNamespace(ctx context.Context, f cmdutil.Factory, namespace string) (string, error) {
+	clientSet, err := f.KubernetesClientSet()
+	if err != nil {
+		return "", err
+	}
+
+	var exists bool
+	exists, err = DetectPodExists(ctx, clientSet, namespace)
+	if err != nil && !k8serrors.IsNotFound(err) && !k8serrors.IsForbidden(err) {
+		return "", err
+	} else if err != nil {
+		plog.G(ctx).Debugf("Failed to detect if kubevpn exists in namespace %s: %v", namespace, err)
+	}
+	if exists {
+		plog.G(ctx).Debugf("Find exists kubevpn in namespace %s", namespace)
+		return namespace, nil
+	}
+
+	exists, err = DetectPodExists(ctx, clientSet, config.DefaultNamespaceKubevpn)
+	if err != nil && !k8serrors.IsNotFound(err) && !k8serrors.IsForbidden(err) {
+		return "", err
+	} else if err != nil {
+		plog.G(ctx).Debugf("Failed to detect if kubevpn exists in namespace %s: %v", config.DefaultNamespaceKubevpn, err)
+	}
+	if exists {
+		plog.G(ctx).Debugf("Find exists kubevpn in namespace %s", config.DefaultNamespaceKubevpn)
+		return config.DefaultNamespaceKubevpn, nil
+	}
+
+	return GetHelmInstalledNamespace(ctx, f)
+}
+
+// GetHelmInstalledNamespace searches Helm releases for the kubevpn app and returns its deployed namespace.
+func GetHelmInstalledNamespace(ctx context.Context, f cmdutil.Factory) (string, error) {
+	cfg := new(action.Configuration)
+	client := action.NewList(cfg)
+	err := cfg.Init(f, "", os.Getenv("HELM_DRIVER"), plog.G(ctx).Debugf)
+	if err != nil {
+		return "", err
+	}
+	client.SetStateMask()
+	releases, err := client.Run()
+	if err != nil {
+		if k8serrors.IsForbidden(err) {
+			plog.G(ctx).Debugf("Failed to list helm apps in all namespace: %v", err)
+			return "", nil
+		}
+		return "", err
+	}
+	for _, app := range releases {
+		if app.Name == config.HelmAppNameKubevpn &&
+			app.Info != nil && app.Info.Status == v1.StatusDeployed {
+			plog.G(ctx).Debugf("Find exists helm app kubevpn in namespace %s", app.Namespace)
+			return app.Namespace, nil
+		}
+	}
+	plog.G(ctx).Debugf("Not found helm apps kubevpn in all namespace")
+	return "", nil
+}
+
+// List returns non-terminating, ready traffic manager pods in namespace.
+func List(ctx context.Context, clientset kubernetes.Interface, namespace string) ([]corev1.Pod, error) {
+	label := fields.OneTermEqualSelector("app", config.ConfigMapPodTrafficManager).String()
+	list, err := clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{LabelSelector: label})
+	if err != nil {
+		return nil, err
+	}
+	pods := list.Items[:0]
+	for _, pod := range list.Items {
+		if pod.DeletionTimestamp == nil && workload.AllContainersRunning(&pod) {
+			pods = append(pods, pod)
+		}
+	}
+	if len(pods) == 0 {
+		return nil, fmt.Errorf("no running pod with label %s: %w", label, config.ErrNotFound)
+	}
+	return pods, nil
+}
+
+// DetectPodExists checks whether a running traffic manager pod exists in the specified namespace.
+// This is the first apiserver call of the connect flow, so its List is retried on transient
+// errors (EOF, TLS handshake timeout, connection reset) — an unstable/warming-up apiserver must
+// not hard-fail the whole connect on a single blip. Definitive rejections are surfaced at once.
+func DetectPodExists(ctx context.Context, clientset kubernetes.Interface, namespace string) (bool, error) {
+	label := fields.OneTermEqualSelector("app", config.ConfigMapPodTrafficManager).String()
+	var list *corev1.PodList
+	err := retryAPIRead(func() error {
+		var e error
+		list, e = clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+			LabelSelector: label,
+		})
+		return e
+	})
+	if err != nil {
+		return false, err
+	}
+	for _, pod := range list.Items {
+		if pod.GetDeletionTimestamp() == nil && workload.AllContainersRunning(&pod) {
+			return true, nil
+		}
+	}
+	return false, nil
+}

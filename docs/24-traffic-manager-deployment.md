@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-The traffic manager is a pod deployed in the cluster that provides the VPN server, envoy xDS control plane, and DNS forwarding. This document describes how `createOutboundPod` creates it programmatically and how `UpgradeDeploy` handles version upgrades.
+The traffic manager is a pod deployed in the cluster that provides the VPN server, envoy xDS control plane, and DNS forwarding. `pkg/cluster/manager` owns creation, resource generation, capability provisioning, upgrade and cleanup. The user-daemon session calls `manager.Ensure`; `ConnectOptions.UpgradeDeploy` retains the CLI version-compatibility policy and progress messages, then calls `manager.Upgrade`. Neither operation belongs to the root-daemon network runtime.
 
 ## 2. Resource Set
 
@@ -120,9 +120,12 @@ The Helm chart (`charts/kubevpn/`) creates the same resources but via templates.
 
 | File | Purpose |
 |------|---------|
-| `pkg/handler/traffmgr.go` | createOutboundPod, createTLSSecret, cleanupTrafficManagerResources |
-| `pkg/handler/traffmgr_resources.go` | genServiceAccount, genRole, genRoleBinding, genService, genSecret, genDeploySpec |
-| `pkg/handler/connect_upgrade.go` | UpgradeDeploy, upgradeSecretSpec, upgradeServiceSpec |
+| `pkg/cluster/manager/manager.go` | Ensure, createOutboundPod, TLS creation, capability provisioning and cleanup |
+| `pkg/cluster/manager/resources.go` | ServiceAccount, Role, binding, Service, Secret and Deployment generation |
+| `pkg/cluster/manager/upgrade.go` | Images, Upgrade and RotateTLS resource operations |
+| `pkg/cluster/manager/discovery.go` | Existing manager and Helm namespace discovery |
+| `pkg/cluster/workload/pod.go` | Pod readiness and status reporting |
+| `pkg/handler/connect_upgrade.go` | Session-level version checks, CLI banner and upgrade progress |
 | `pkg/handler/once.go` | Helm post-install hook entry point |
-| `pkg/util/tls.go` | GenTLSCert, GetTlsClientConfig, GetTlsServerConfig |
+| `pkg/util/netutil/tls.go` | GenTLSCert, GetTlsClientConfig, GetTlsServerConfig |
 | `charts/kubevpn/` | Helm chart equivalent |

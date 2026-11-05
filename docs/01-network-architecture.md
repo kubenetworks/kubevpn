@@ -2,6 +2,15 @@
 
 ## Overview
 
+Current source boundaries: `pkg/network/runtime.go` coordinates host networking;
+`transport.go` owns SSH/port-forward generations, `address.go` owns allocation/IP watches,
+`routes.go` owns route effects, `dns.go` owns DNS setup, `device.go` assembles the TUN,
+and `monitor.go` observes underlay changes (all under `pkg/network`). Kubernetes forwarding
+sessions live in `pkg/cluster/portforward`; CIDR detection lives in `pkg/cluster/discovery`.
+`pkg/tunnel` owns packet/device/slot/router lifecycles, `pkg/tunnel/internal/netstack`
+owns gvisor construction and forwarders, and `pkg/internal/wire` owns stream framing and
+batch writes. `pkg/endpoint` retains protocol/URI/TLS/SSH/UDP-relay assembly and `Serve`.
+
 KubeVPN creates a bidirectional network tunnel between a local machine and a Kubernetes cluster. All IP traffic (TCP, UDP, ICMP) flows through a TUN device on the client, gets encapsulated over TCP, and is forwarded via `kubectl port-forward` to a traffic manager pod running a userspace network stack (gvisor).
 
 > **Route source:** the cluster pod/service **CIDRs** are routed to the TUN device at connect
@@ -55,7 +64,7 @@ IP packets are encapsulated in a custom datagram framing protocol over TLS/TCP. 
 │ Length   │ Prefix │      IP Packet       │
 │ (2 bytes)│(1 byte)│   (variable length)  │
 ├──────────┼────────┼──────────────────────┤
-│ uint16   │ 0 or 1 │  IPv4/IPv6 packet    │
+│ uint16   │ 0/1/2  │  IPv4/IPv6 packet    │
 │ big-end  │        │                      │
 └──────────┴────────┴──────────────────────┘
 ```
@@ -64,6 +73,22 @@ IP packets are encapsulated in a custom datagram framing protocol over TLS/TCP. 
 - **Prefix** (1 byte): routing directive (see below)
 - **IP Packet**: raw IPv4 or IPv6 packet
 
+The framing layer accepts uint16 payload lengths **0..65535**; tunnel payloads include the
+prefix within that length. `readDatagramPacket` reads the two-byte header into independent
+storage, then reads the body into the caller's buffer. An undersized buffer returns
+`io.ErrShortBuffer`; the consumed header makes the stream unusable, so the framing wrapper
+closes it rather than trying to resume. Outbound payloads above 65535 are rejected before
+any write. Specifically, `UDPConnOverTCP.Write` uses standalone storage for its largest
+legal frame (65537 bytes), without returning that storage to `config.LPool`. This is the
+wrapper's allocation contract, not a guarantee for every framed-packet path. The uint16
+wire limit is unchanged; other pooled paths can reject packets when their buffer is too short.
+
+`writeFull` continues positive short writes on the **same connection**, reports actual wire
+progress, and preserves errors (zero progress without an error becomes `io.ErrShortWrite`).
+A partially written frame is never replayed on another connection. Read and Write are
+serialized separately by `UDPConnOverTCP`; context cancellation/Close closes the transport
+without waiting for an I/O mutex. These are safety contracts, not a wire-format change.
+
 ### Prefix Byte Semantics
 
 | Value | Name | Direction | Meaning |
@@ -71,16 +96,21 @@ IP packets are encapsulated in a custom datagram framing protocol over TLS/TCP. 
 | `1` | INJECT | client→server | Inject into gvisor stack for TCP/UDP processing |
 | `1` | INJECT | server→client | Inject into client gvisor stack (rare: self-to-self traffic) |
 | `0` | DIRECT | server→client | Already processed by gvisor; write directly to TUN device |
-| `0` | FORWARD | server internal | Forward to another client via RouteHub (multi-client routing) |
+| `0` | FORWARD | server internal | Forward to another client via Router (multi-client routing) |
+| `2` | CONTROL | client→server | Heartbeat control conn; handled separately, never registered in Router |
 
-**Routing decision on server (per packet):**
+**Routing decision on server (data conn, per packet; control conns use `handleControlConn`):**
 ```go
-if buf[0] == 1 {
-    // Inject into gvisor stack → TCP/UDP forwarder → dial real service
+// Simplified: registered peer destinations route directly before prefix handling.
+if hub.HasRoute(dstKey) {
+    _, err = hub.WriteToRoutePacket(ctx, dstKey, packet)
+    packet.release() // caller's reference
+} else if prefix == packetTypeToGvisor {
+    // Inject into the per-client stack → TCP/UDP forwarder → real service.
     endpoint.InjectInbound(protocol, pkt)
-} else {
-    // Forward via RouteHub TCPPacketChan → server TUN → other client
-    hub.TCPPacketChan <- packet
+} else if !hub.bridge.send(ctx, packet) {
+    // Private TUN bridge did not take ownership (canceled/stopped).
+    packet.release()
 }
 ```
 
@@ -99,80 +129,55 @@ if buf[0] == 1 {
 
 ### Design
 
-The client maintains a pool of N parallel TCP connections to reduce head-of-line blocking:
+The client defaults to **one data `connSlot` plus one independent control slot**:
 
 ```
-                        ┌── slot[0] ──▶ conn[0] ──▶ port-forward ──▶ gvisor stack[0]
-TUN read                │
-  ↓                     │
-parseFiveTuple ─────────┼── slot[1] ──▶ conn[1] ──▶ port-forward ──▶ gvisor stack[1]
-  ↓                     │
-flowHash(5-tuple) % N ──┼── slot[2] ──▶ conn[2] ──▶ port-forward ──▶ gvisor stack[2]
-                        │
-                        └── slot[3] ──▶ conn[3] ──▶ port-forward ──▶ gvisor stack[3]
+TUN read → runConnPool → slot[0] → data conn ───────┐
+                                                 ├→ SSH / port-forward → TM:10801
+heartbeats() → controlSlot → control conn ────────┘
 
-
-Response path (all slots → shared channel → single TUN device):
-
-conn[0] ──▶ readFromConn ──┐
-conn[1] ──▶ readFromConn ──┤──▶ tunOutbound ──▶ writeToTun ──▶ TUN device
-conn[2] ──▶ readFromConn ──┤
-conn[3] ──▶ readFromConn ──┘
+Response path (including heartbeat replies):
+per-client gvisor stack → Router → registered data conn
+  → readFromConn → tunOutbound → writeToTun → TUN device
 ```
 
-### Hash Function
+Protocol-owned heartbeat replies are consumed by the client rather than written to TUN.
+Outbound dispatch goes directly to slot 0, without parsing or hashing for slot
+selection. `connSlot` (`pkg/tunnel/slot.go`) retains its queue and retry lifecycle;
+`connAttempt` (`pkg/tunnel/attempt.go`) owns one connection, declaration/registration,
+`readGeneration`/`writeGeneration`, deadlines and batching, and joins both pumps before retry. One tunnel data connection still multiplexes concurrent business flows;
+it does not serialize application requests or reduce business concurrency to one.
 
-A stateless FNV-1a hash of the flow's **five-tuple** — `(proto, dst IP, src port, dst port)`
-— mod N. Distinct connections to the same destination IP differ in source port, so they
-spread across slots instead of collapsing onto one. Packets with no usable L4 ports (ICMP,
-IP fragments, unparsed IPv6 extension headers) fall back to hashing the destination IP only
-(`ipHash`), preserving legacy behavior and keeping all fragments of one datagram together.
+The control slot has a separate queue and connection to the **same TCP forwarding endpoint
+10801**, not xDS port 9002. Its requests bypass the business queue, but replies use the
+registered data conn. SSH/port-forward still shares an outer TCP transport, so separation
+is not an absolute liveness guarantee.
 
-The source IP is omitted (a client has a single TUN IP, so it adds nothing — the IPVS
-source-hashing idea). See [41-five-tuple-pool-dispatch.md](41-five-tuple-pool-dispatch.md)
-for the full design and the rationale for stateless hashing over conntrack.
-
-```go
-func flowHash(key flowKey, dstIP net.IP, slots int) int {
-    if !key.hasPorts {
-        return ipHash(dstIP, slots)   // ICMP / fragments / unparsed → legacy dst-IP hash
-    }
-    var h uint32 = 2166136261  // FNV offset basis
-    // mix proto, dstIP bytes, srcPort, dstPort (FNV prime 16777619)
-    ...
-    return int(h % uint32(slots))
-}
-```
-
-**Properties:**
-- Deterministic: same five-tuple → same slot (per-flow consistency)
-- Well-distributed: spreads many flows to one hot dst IP evenly across slots
-- Zero-allocation: operates on the raw IP byte slice
+Earlier revisions also kept a five-tuple hash multi-slot dispatch as a test/benchmark-only
+override; it was removed as a production-dead path. The historical design is recorded in
+[41-five-tuple-pool-dispatch.md](41-five-tuple-pool-dispatch.md).
 
 ### Why This Works
 
-1. **Same-flow guarantee**: All packets of one L4 flow (same five-tuple) hash to the same slot → same TCP connection → same server-side gvisor stack. This is a correctness requirement, not just ordering: the server runs an independent gvisor stack per pool connection, so splitting a flow across slots would land its SYN and data on different stacks and break the connection.
+1. **Same-flow ordering**: All default traffic uses slot 0, so per-flow packet ordering is trivially preserved.
 
-2. **Independent reconnect**: Each slot manages its own connection lifecycle. If slot[2] disconnects, only 1/4 of traffic is affected while it reconnects.
+2. **Independent reconnect**: Data and control slots manage their own connection lifecycles. Losing the sole data conn temporarily interrupts data routing until it reconnects and registers.
 
-3. **Server compatibility**: The server's accept loop (`go svr.Handler.Handle(ctx, conn)`) already handles multiple connections independently. Each connection gets its own gvisor stack — functionally correct, with acceptable memory overhead.
+3. **Session continuity**: The server shares one gvisor stack per client across that client's conns. Its grace period retains TCP state across brief transport gaps; this does not depend on four slots. See [48-shared-server-gvisor-stack.md](48-shared-server-gvisor-stack.md).
 
-4. **Shared response path**: All slots write responses to the same `tunOutbound` channel → same TUN device. Response packets arrive correctly regardless of which slot they came through.
+4. **Shared response path**: Data responses reach the same `tunOutbound` channel and TUN device. Router chooses the first writable registered conn with fallback, not per-flow load balancing.
 
 ### Configuration
 
-```go
-var ConnPoolSize = 4  // pkg/core/tun_client.go, overridable via KUBEVPN_CONN_POOL_SIZE (range 1-16)
-```
+One data slot plus one control slot is the only topology; there is no pool-size
+setting, flag, or test override.
 
 ### Tradeoffs
 
-| Benefit | Cost |
-|---------|------|
-| 4x reduction in HOL blocking | 4x gvisor stacks on server (memory) |
-| Better bandwidth utilization | 4x port-forward goroutines |
-| Fault isolation (1 slot failure = 25% impact) | Slightly more complex client code |
-| Parallelism across CPU cores | — |
+Single-slot dispatch avoids slot-selection parsing/hashing and reduces tunnel connections
+while preserving batching and concurrent business flows. It removes spare data-slot fallback
+in steady state; neither the old four-slot topology nor the new default eliminates head-of-line
+blocking in the shared outer SSH/port-forward TCP transport. No throughput gain is claimed here.
 
 ## Buffer Memory Layout
 
@@ -225,58 +230,77 @@ MaxSize = 1000  // tunInbound, tunOutbound, per-slot channels
 ## Multi-Client Routing (Server-Side)
 
 When multiple kubevpn clients connect to the same traffic manager, the server
-maintains a `RouteHub` — a thread-safe routing table that maps client TUN IPs
+maintains a `Router` — a thread-safe routing table that maps client TUN IPs
 to their connection(s).
 
-### RouteHub and ConnList
+### Router and ConnList
 
 Each client IP maps to a `ConnList` — a list of TCP connections for that client,
 ordered **newest-first**: `AddRoute` prepends, so the most recently established
 conn leads. Writes try the head first, so after a reconnect reverse traffic flows
 on the fresh conn immediately and any lingering half-open "ghost" conn sinks to
 the tail (where it is a last resort, and is evicted by the read/write deadlines —
-see [Write with Fallback](#write-with-fallback)). Because the connection pool
-creates N parallel connections per client, a single client IP has N entries (one
-per slot). Multiple clients coexist in the same table:
+see [Write with Fallback](#write-with-fallback)). The current default has one registered
+data conn per client address in steady state; the control conn is excluded. Multiple entries
+can still occur during reconnect overlap.
+Multiple clients coexist in the same table:
 
 ```
-Client A (198.18.0.2):  4 conns via connection pool
-Client B (198.18.0.3):  4 conns via connection pool
+Client A (198.18.0.2):  1 registered data conn
+Client B (198.18.0.3):  1 registered data conn
 
-RouteHub.routeMapTCP:
-  198.18.0.2 → ConnList[ conn_A0, conn_A1, conn_A2, conn_A3 ]
-  198.18.0.3 → ConnList[ conn_B0, conn_B1, conn_B2, conn_B3 ]
+Router.routes (private, guarded by hub.mu):
+  198.18.0.2 → ConnList[ conn_A0 ]
+  198.18.0.3 → ConnList[ conn_B0 ]
 ```
 
 ### Route Registration
 
 Routes are registered when the server receives a packet from a client connection:
-it calls `hub.AddRoute(srcIP, conn)`. Duplicate connections are ignored (dedup by
-pointer equality). Two things make registration prompt rather than lazy:
+it calls `hub.AddRoute(ctx, srcIP, conn)`. Duplicate connections are ignored (dedup by
+pointer equality); a closed `bufferedTCP` is rejected and its reader must exit. Control
+connections are excluded. Registration comes from:
 
 - **Proactive registration** — a freshly dialed slot writes a registration packet
   (an ICMP echo to the gateway, carrying its TUN IP) on the new conn *before* any
   data, so the server registers the route immediately. This is sent directly on the
   conn (not via the heartbeat broadcast channel), so it cannot be dropped under load.
-- **Heartbeat ICMP** — every slot then keeps sending periodic heartbeats, so a route
-  is re-asserted each cycle even for idle conns.
+- **Business traffic** — outbound packets on a data conn also register its source IP.
+  Periodic heartbeat requests use only the control conn and do not register a route;
+  their replies depend on the data conn's registration.
 
 ### Write with Fallback
 
-When the server needs to forward a packet to a client (e.g., cross-client
-traffic A→B, or proxy response), it uses `WriteToRoute` or `WriteFuncToRoute`:
+The packet path uses `WriteToRoutePacket(ctx, dstKey, packet)`. It snapshots the current
+`ConnList` and its member identities, then revalidates the list and member before I/O.
+Failed-member removal checks those same identities, so an old write cannot remove a
+re-added connection or a replacement list. Neither `hub.mu` nor `ConnList.mu` is held
+across socket writes, queue admission, or `Close`.
+
+The following illustrates fallback when multiple entries exist (reconnect overlap),
+not the normal single-data-conn topology:
 
 ```
-WriteFuncToRoute("198.18.0.3", dgram.Write):
-  try conn_B0 → write succeeds → return conn_B0, nil
-  
-WriteFuncToRoute("198.18.0.3", dgram.Write):
-  try conn_B0 → write fails (dead conn) → remove conn_B0
-  try conn_B1 → write succeeds → return conn_B1, nil
+WriteToRoutePacket(ctx, dstKey, packet):
+  try conn_B0 → enqueue/write succeeds → return conn_B0, nil
+
+  or: conn_B0 fails before any frame bytes → remove that member
+      try conn_B1 → enqueue/write succeeds → return conn_B1, nil
+
+  or: conn_B0 partially writes then fails → return error, never replay on conn_B1
 ```
 
-This eliminates packet loss during connection pool slot reconnections: when
-one slot dies and reconnects, the remaining 3 slots handle traffic seamlessly.
+Buffered enqueue cancellation returns without evicting a healthy conn or falling back.
+Raw writes use a separate context-aware serialization gate: cancellation before a write
+starts leaves the conn intact; cancellation during active socket I/O closes the selected
+conn, waits for that close callback, and removes only the selected membership. Positive
+short writes continue on the same conn through `writeFull`, not on the next route.
+Legacy `WriteFuncToRoute` callbacks do not report byte progress or promise cancellable I/O;
+they are not the framed-packet routing path.
+
+This is first-writable-conn fallback, not per-flow load balancing or a packet-loss
+guarantee. With the default single data conn there is no spare registered data slot;
+routing resumes after reconnect and registration.
 
 The fallback walk also covers the **ghost conn** hazard: a write to a half-open
 TCP succeeds into the kernel send buffer (no error) until that buffer fills, so a
@@ -287,30 +311,44 @@ ghost is actively evicted by the deadlines below within `KeepAliveTime` (write) 
 
 ### Cross-Client Data Flow (A→B)
 
+This multi-entry fallback example applies to reconnect overlap;
+the default steady-state path has only `conn_A0` and `conn_B0`.
+
 ```
 1. Client A sends packet with dst=198.18.0.3
 2. Server receives on one of A's conns
-3. Server: AddRoute("198.18.0.2", conn_A_slot)         ← register A's route
-4. Server: HasRoute("198.18.0.3")                      ← true, B is connected
-5. Server: WriteFuncToRoute("198.18.0.3", dgram.Write) ← try B's conns in order
-6. If conn_B0 dead → removed, tries conn_B1 → success
-7. Client B receives packet on conn_B1, writes to TUN
+3. Server: AddRoute(ctx, srcIP, conn_A0)                 ← register A's route
+4. Server: HasRoute(dstKey)                              ← B has a data route
+5. Server: WriteToRoutePacket(ctx, dstKey, packet)        ← validated snapshot of B's conns
+6. If conn_B0 fails with zero progress → remove member, try conn_B1
+   Partial frame failure or cancellation → stop; no fallback/resend
+7. Client B receives a successfully routed packet and writes it to TUN
 ```
 
 ### Cleanup
 
-When a connection closes, `RemoveRoutesByConn(conn)` iterates all route entries
-and removes that connection from every `ConnList` it appears in. If a `ConnList`
-becomes empty, the route entry is deleted entirely.
+When a connection closes, `RemoveRoutesByConn(ctx, conn)` removes it from every
+`ConnList` under `hub.mu`. Empty-route deletion and registration call the explicit
+`peerRegistry.onRouteEmptyLocked` / `onRouteAddedLocked` methods in the same transaction.
+Lock order is router then registry; transitions only change metadata/timers, with no I/O,
+logging, or router reentry. `endpoint.Serve` starts that registry with the service context
+before accept and closes/joins it after connection handlers finish; no connection owns peers.
 
 This cleanup is driven by the server-side conn deadlines so that even a half-open
 ghost (no FIN/RST) is reclaimed: the read loop (`readFromTCPConnWriteToEndpoint`)
 times out after `KeepAliveTime*3` of silence, and the buffered writer
 (`bufferedTCP.run`) times out a stuck write after `KeepAliveTime`; either closes the
-conn, which exits the reader and triggers `RemoveRoutesByConn`. See
-[08-heartbeat-health.md](08-heartbeat-health.md) §#3.
+conn. The buffered writer's stop callback removes its routes immediately; reader cleanup
+also removes routes idempotently. `AddRoute` refuses that stopped writer, so late reads
+cannot restore it. See [08-heartbeat-health.md](08-heartbeat-health.md) §#3.
 
-Note: there is a benign TOCTOU between `IsEmpty()` and `Delete()` in the write path — another goroutine could add a connection between the two calls. This is harmless because `sync.Map.Delete` is idempotent and the next packet will re-register the route via `AddRoute`.
+There is no separate public-map `IsEmpty`/`Delete` transaction: the private table, validated
+snapshots, and identity-safe removal prevent stale writers from deleting restored routes.
+The separate `tunBridge` (`pkg/tunnel/bridge.go`) admits packets through cancellable
+`send`; `stop` signals shutdown, joins in-flight admission, then drains without closing
+the data channel. Connection handlers also join their `bufferedTCP` writer via `waitRun`.
+Server device sends are also cancellable. See [12-session-lifecycle.md](12-session-lifecycle.md)
+for server-device failure and joined shutdown.
 
 ## MTU Calculation
 
@@ -327,7 +365,7 @@ This ensures a full-MTU TUN packet fits within a single Ethernet frame after all
 
 ## Data-Plane Package Boundaries
 
-The data-plane stack (`pkg/core`, `pkg/dns`) depends only on network primitives — it must not
+The data-plane stack (`pkg/tunnel`, its `internal/netstack`, `pkg/internal/wire`, and `pkg/dns`) depends only on network primitives — it must not
 pull in Kubernetes cluster-API, Helm, or Docker transitive dependencies. This is enforced by the
 `pkg/util/netutil` sub-package (C3 refactoring):
 
@@ -336,8 +374,7 @@ pull in Kubernetes cluster-API, Helm, or Docker transitive dependencies. This is
 | `pkg/util/netutil` | Pure transport/packet/TLS/gvisor primitives: `SafeWrite`/`SafeClose`, `HandleCrash`, `ParseIPFast`, `IsIPv6Enabled`, TUN device helpers, ICMP generation, `WriteProxyInfo`/`ParseProxyInfo`, TLS helpers | Only `pkg/config` and `pkg/log` from the kubevpn module |
 | `pkg/util` | K8s cluster-ops, Docker, Helm, file/upgrade helpers | K8s client-go, Helm, Docker, CNI libs, … |
 
-`pkg/core` and `pkg/dns` import `pkg/util/netutil` and have **no dependency on `pkg/util`**.
-This keeps the data-plane binary free of the heavy transitive closure that cluster-ops libraries
-bring. All 19 cmd/ files and all upper-layer packages (`pkg/handler`, `pkg/inject`, `pkg/run`,
-`pkg/daemon/action`) continue to import `pkg/util` directly — they were already at the top of
-the import graph and gain nothing from the split.
+Packet/stack code uses `pkg/util/netutil`, not the cluster helpers in `pkg/util`.
+`pkg/network` is the host-networking orchestrator and deliberately consumes Kubernetes
+clients plus `pkg/cluster/portforward` and `pkg/cluster/discovery`; it is not part of the
+cluster-independent packet layer. `pkg/endpoint` remains the assembly/Serve boundary.

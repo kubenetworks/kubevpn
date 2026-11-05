@@ -3,6 +3,7 @@ package xds
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/envoyproxy/go-control-plane/pkg/cache/v3"
@@ -28,6 +29,9 @@ func applyDebugLevel(logger *log.Entry) {
 
 // Main starts the envoy xDS control plane: gRPC server, ConfigMap watcher, and snapshot processor.
 func Main(ctx context.Context, factory cmdutil.Factory, port uint, logger *log.Entry) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var workers sync.WaitGroup
 	applyDebugLevel(logger)
 	snapshotCache := cache.NewSnapshotCache(false, cache.IDHash{}, logger)
 	proc := newProcessor(snapshotCache, logger)
@@ -45,6 +49,7 @@ func Main(ctx context.Context, factory cmdutil.Factory, port uint, logger *log.E
 	if err != nil {
 		return fmt.Errorf("start TunConfigServer: %w", err)
 	}
+	defer func() { cancel(); workers.Wait(); tunConfig.Close() }()
 	// Back server-side sidecar injection (ProxyInject) with the in-cluster factory.
 	tunConfig.factory = factory
 	tunConfig.StartLeaseReaper(ctx)
@@ -63,7 +68,9 @@ func Main(ctx context.Context, factory cmdutil.Factory, port uint, logger *log.E
 
 	errChan := make(chan error, 2)
 
+	workers.Add(1)
 	go func() {
+		defer workers.Done()
 		server := serverv3.NewServer(ctx, snapshotCache, nil)
 		errChan <- runServer(ctx, server, tunConfig, port)
 	}()
@@ -71,7 +78,9 @@ func Main(ctx context.Context, factory cmdutil.Factory, port uint, logger *log.E
 	notifyCh := make(chan NotifyMessage, 100)
 
 	notifyCh <- NotifyMessage{}
+	workers.Add(1)
 	go func() {
+		defer workers.Done()
 		errChan <- Watch(ctx, factory, notifyCh, tunConfig.ReconcileDHCP, tunConfig.ReconcileAllocsFromConfigMap)
 	}()
 

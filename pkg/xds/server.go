@@ -68,5 +68,14 @@ func runServer(ctx context.Context, server serverv3.Server, tunConfig *TunConfig
 	plog.G(ctx).Infof("TunConfigService registered on port %d", port)
 
 	plog.G(ctx).Infof("Management server listening on %d", port)
+	stopped := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() { grpcServer.Stop(); close(stopped) })
+	defer func() {
+		if !stop() {
+			<-stopped
+		}
+		grpcServer.Stop()
+		_ = listener.Close()
+	}()
 	return grpcServer.Serve(listener)
 }

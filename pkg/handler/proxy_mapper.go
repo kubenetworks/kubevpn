@@ -20,7 +20,7 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/core"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/endpoint"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
@@ -270,7 +270,7 @@ func exposeUDPToRemote(ctx context.Context, bridge netip.AddrPort, envoyPort, lo
 	}
 	defer conn.Close()
 	go func() { <-ctx.Done(); _ = conn.Close() }()
-	return core.DialUDPReverse(ctx, conn, int(envoyPort), int(localPort))
+	return endpoint.DialUDPReverse(ctx, conn, int(envoyPort), int(localPort))
 }
 
 func cancelAllTunnels(tunnels *sync.Map) {

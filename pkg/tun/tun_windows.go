@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/netip"
 	"reflect"
+	"sync"
 	"syscall"
 	"time"
 
@@ -55,6 +56,14 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 		err = fmt.Errorf("failed to create TUN device: %w", err)
 		return
 	}
+
+	adapter := newBatchDevice(tunDevice)
+	// Close the adapter on initialization failure; on success conn owns it.
+	defer func() {
+		if err != nil {
+			_ = adapter.Close()
+		}
+	}()
 
 	ifUID := winipcfg.LUID(tunDevice.(*wireguardtun.NativeTun).LUID())
 
@@ -133,7 +142,7 @@ func createTun(cfg Config) (conn net.Conn, itf *net.Interface, err error) {
 		}
 	}
 
-	conn = &winTunConn{batchDevice: newBatchDevice(tunDevice), addr: &net.IPAddr{IP: ipv4}, addr6: &net.IPAddr{IP: ipv6}}
+	conn = &winTunConn{batchDevice: adapter, addr: &net.IPAddr{IP: ipv4}, addr6: &net.IPAddr{IP: ipv6}}
 	return
 }
 
@@ -141,23 +150,29 @@ type winTunConn struct {
 	*batchDevice
 	addr  net.Addr
 	addr6 net.Addr
+
+	closeOnce sync.Once
+	closeErr  error
 }
 
 func (c *winTunConn) Close() error {
-	err := c.dev.Close()
-	wintun.Uninstall()
-	defer func() {
+	c.closeOnce.Do(func() {
+		c.closeErr = c.batchDevice.Close()
+		wintun.Uninstall()
 		defer func() {
-			if err := recover(); err != nil {
-				plog.G(context.Background()).Error(err)
-			}
+			defer func() {
+				if err := recover(); err != nil {
+					plog.G(context.Background()).Error(err)
+				}
+			}()
+			tun := c.dev.(*wireguardtun.NativeTun)
+			v := reflect.ValueOf(tun).Elem().FieldByName("wt")
+			vv := reflect.Indirect(v).FieldByName("handle")
+			// Preserve the native Close result, as the original deferred cleanup did.
+			_ = windows.FreeLibrary(windows.Handle(vv.Uint()))
 		}()
-		tun := c.dev.(*wireguardtun.NativeTun)
-		v := reflect.ValueOf(tun).Elem().FieldByName("wt")
-		vv := reflect.Indirect(v).FieldByName("handle")
-		err = windows.FreeLibrary(windows.Handle(vv.Uint()))
-	}()
-	return err
+	})
+	return c.closeErr
 }
 
 func (c *winTunConn) LocalAddr() net.Addr {

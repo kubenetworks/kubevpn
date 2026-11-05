@@ -4,11 +4,23 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/syncthing/syncthing/lib/protocol"
 )
+
+func TestStage4LPoolFactory(t *testing.T) {
+	b := LPool.New().([]byte)
+	want := LargeBufferSize
+	if runtime.GOOS == "linux" {
+		want += 2
+	}
+	if len(b) != LargeBufferSize || cap(b) != want {
+		t.Fatalf("factory len/cap=%d/%d want=%d/%d", len(b), cap(b), LargeBufferSize, want)
+	}
+}
 
 func TestGetSockPath_V2(t *testing.T) {
 	userPath := GetSockPath(false)

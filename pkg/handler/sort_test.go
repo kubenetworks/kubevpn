@@ -8,24 +8,18 @@ import (
 	"testing"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/dns"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/network"
 )
 
-func newConnectWithNetwork(ns string, extraCIDR []string, apiServerIPs []net.IP, extraHost []dns.Entry) *DataSession {
+func newConnectWithNetwork(ns string, extraCIDR []string, apiServerIPs []net.IP, extraHost []dns.Entry) *sortDataSession {
 	ds := &DataSession{
 		ManagerNamespace: ns,
 		ExtraRouteInfo: ExtraRouteInfo{
 			ExtraCIDR: extraCIDR,
 		},
 	}
-	if len(apiServerIPs) > 0 || len(extraHost) > 0 {
-		ds.nm = &NetworkManager{
-			cfg: NetworkConfig{
-				APIServerIPs: apiServerIPs,
-			},
-			extraHost: extraHost,
-		}
-	}
-	return ds
+	ds.nm = network.New(network.Config{APIServerIPs: apiServerIPs, RouteConfig: &network.RouteConfig{ExtraCIDR: extraCIDR}})
+	return &sortDataSession{DataSession: ds, hosts: extraHost}
 }
 
 func TestSortConnect(t *testing.T) {

@@ -5,13 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"sync"
 	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
-	"gopkg.in/natefinch/lumberjack.v2"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/yaml"
 
@@ -22,52 +20,9 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
-// Server implements the gRPC Daemon service, managing VPN connections, syncing, and lifecycle operations.
-type Server struct {
-	rpc.UnimplementedDaemonServer
-
-	Cancel func()
-	// GetClient returns a cached gRPC client for the peer daemon (isSudo selects which).
-	GetClient func(isSudo bool) (rpc.DaemonClient, error)
-	// InvalidateClient drops the cached peer-daemon client so the next GetClient redials.
-	// Called when a cross-daemon RPC fails with a connection-level error. May be nil in tests.
-	InvalidateClient func(isSudo bool)
-	IsSudo           bool
-	LogFile          *lumberjack.Logger
-	// dnsMu is the shared mutex serializing DNS setup/teardown across the data plane
-	// (it is handed by pointer to DataSession → NetworkManager → dns.Config). It is
-	// distinct from sshMu so SSH daemon state and DNS operations do not contend.
-	dnsMu sync.Mutex
-
-	// connMu protects connections and currentConnectionID from concurrent access.
-	// Use RLock for read-only access, Lock for mutations.
-	connMu              sync.RWMutex
-	currentConnectionID string
-	connections         []handler.Connection
-
-	// connectMu serializes the connect (TUN IP allocation) phase so two
-	// concurrent connects to different clusters cannot race and receive the same
-	// local TUN IP. Held in the root daemon around DoConnect.
-	connectMu sync.Mutex
-
-	// sshMu guards sshServerIP and sshCancelFunc — the SSH TUN server state owned by
-	// SshStart/SshStop. Separate from dnsMu so the two concerns stay decoupled.
-	sshMu         sync.Mutex
-	sshServerIP   string
-	sshCancelFunc context.CancelFunc
-
-	// healthMu guards sudoHealth / sudoHealthy — the user daemon's cached view of the sudo
-	// daemon's data-plane liveness, refreshed by MonitorSudoLiveness. User daemon only.
-	healthMu    sync.RWMutex
-	sudoHealth  map[string]tunIP // last probe snapshot (connectionID → state); nil until first probe
-	sudoHealthy bool             // last observed sudo reachability, for transition-only logging
-
-	ID string
-}
-
 // Config represents the persisted daemon configuration containing secondary connections to restore on startup.
 type Config struct {
-	SecondaryConnect []*handler.ConnectOptions `json:"SecondaryConnect"`
+	SecondaryConnect []*connectionRecord `json:"SecondaryConnect"`
 }
 
 // LoadFromConfig reads persisted connection state from disk and re-establishes previously active connections.
@@ -155,12 +110,11 @@ func (svr *Server) ReconcileSudoConnections(ctx context.Context) {
 		return
 	}
 
-	svr.connMu.RLock()
-	userIDs := make(map[string]struct{}, len(svr.connections))
-	for _, c := range svr.connections {
+	connections, _ := svr.registry.snapshot()
+	userIDs := make(map[string]struct{}, len(connections))
+	for _, c := range connections {
 		userIDs[c.GetConnectionID()] = struct{}{}
 	}
-	svr.connMu.RUnlock()
 
 	for _, s := range resp.GetList() {
 		id := s.GetConnectionID()
@@ -197,14 +151,16 @@ func (svr *Server) reapSudoConnection(ctx context.Context, cli rpc.DaemonClient,
 
 // OffloadToConfig persists the current connection state to disk for later restoration.
 func (svr *Server) OffloadToConfig() error {
-	svr.connMu.RLock()
-	conns := make([]*handler.ConnectOptions, 0, len(svr.connections))
-	for _, c := range svr.connections {
+	if svr.IsSudo {
+		return nil
+	}
+	connections, _ := svr.registry.snapshot()
+	conns := make([]*connectionRecord, 0, len(connections))
+	for _, c := range connections {
 		if co, ok := c.(*handler.ConnectOptions); ok {
-			conns = append(conns, co)
+			conns = append(conns, recordConnection(co))
 		}
 	}
-	svr.connMu.RUnlock()
 
 	conf := &Config{
 		SecondaryConnect: conns,

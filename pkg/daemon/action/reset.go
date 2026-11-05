@@ -1,6 +1,7 @@
 package action
 
 import (
+	"github.com/wencaiwulue/kubevpn/v2/pkg/cluster/manager"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
@@ -24,7 +25,7 @@ func (svr *Server) Reset(resp rpc.Daemon_ResetServer) error {
 	if err != nil {
 		return err
 	}
-	connect.ManagerNamespace, err = util.DetectManagerNamespace(ctx, connect.GetFactory(), req.Namespace)
+	connect.ManagerNamespace, err = manager.DetectManagerNamespace(ctx, connect.GetFactory(), req.Namespace)
 	if err != nil {
 		return err
 	}

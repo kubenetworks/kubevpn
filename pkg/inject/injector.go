@@ -19,6 +19,7 @@ import (
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/utils/ptr"
 
+	clusterworkload "github.com/wencaiwulue/kubevpn/v2/pkg/cluster/workload"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
@@ -52,7 +53,7 @@ type InjectOptions struct {
 //   - All other targets use Mesh mode (VPN + Envoy). When headers are empty,
 //     envoy matches all requests (full traffic interception, equivalent to legacy VPN-only).
 func NewInjector(opts InjectOptions) Injector {
-	if util.IsK8sService(opts.Object) {
+	if clusterworkload.IsK8sService(opts.Object) {
 		return &fargateInjector{opts: opts}
 	}
 	return &meshInjector{opts: opts}
@@ -96,7 +97,7 @@ func patchWorkload(ctx context.Context, factory cmdutil.Factory, info *resource.
 		return err
 	}
 	plog.G(ctx).Debugf("Patched workload %q", workload)
-	return util.RolloutStatus(ctx, factory, info.Namespace, workload, undoOnFailure)
+	return clusterworkload.RolloutStatus(ctx, factory, info.Namespace, workload, undoOnFailure)
 }
 
 // gatherContainerPorts collects all container ports from a pod template spec,

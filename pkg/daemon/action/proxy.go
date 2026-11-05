@@ -9,6 +9,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	v1 "k8s.io/api/core/v1"
 
+	clusterworkload "github.com/wencaiwulue/kubevpn/v2/pkg/cluster/workload"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/grpcutil"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
@@ -54,7 +55,7 @@ func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (err error) {
 	}
 
 	var workloads []string
-	workloads, _, err = util.NormalizedResource(connect.GetFactory(), req.Namespace, req.Workloads)
+	workloads, _, err = clusterworkload.NormalizedResource(connect.GetFactory(), req.Namespace, req.Workloads)
 	if err != nil {
 		return err
 	}
@@ -103,9 +104,7 @@ func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (err error) {
 	// Tag subsequent logs with the connection ID for concurrent-op isolation.
 	ctx = plog.WithField(ctx, LogFieldConnID, connectionID)
 
-	svr.connMu.RLock()
-	options, _ := svr.findConnection(connectionID)
-	svr.connMu.RUnlock()
+	options, _ := svr.registry.find(connectionID)
 	if options == nil {
 		return fmt.Errorf("failed to connect to cluster: %w", config.ErrConnectionNotFound)
 	}
@@ -118,9 +117,6 @@ func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (err error) {
 				_ = pc.LeaveAllProxyResources(cleanupCtx)
 			}
 			disconnect(cleanupCtx, svr, connectionID)
-			svr.connMu.Lock()
-			svr.resetCurrentConnection(connectionID)
-			svr.connMu.Unlock()
 		}
 	}()
 
@@ -129,26 +125,22 @@ func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (err error) {
 	if tunV4 == "" {
 		return fmt.Errorf("no TUN IP found for connection %s: %w", connectionID, config.ErrTunDeviceFailed)
 	}
-	var podList []v1.Pod
-	podList, err = options.GetRunningPodList(cancel)
-	if err != nil {
-		return err
-	}
-	image := podList[0].Spec.Containers[0].Image
-	// CreateRemoteInboundPod is control-plane-only (ProxyController). The Proxy RPC
-	// runs in the user daemon where options is a *ConnectOptions satisfying it.
 	pc, ok := options.(handler.ProxyController)
 	if !ok {
 		return fmt.Errorf("proxy injection not available for connection %s: %w", connectionID, config.ErrConnectionNotFound)
 	}
+	var podList []v1.Pod
+	podList, err = pc.GetRunningPodList(cancel)
+	if err != nil {
+		return err
+	}
+	image := podList[0].Spec.Containers[0].Image
 	err = pc.CreateRemoteInboundPod(plog.WithLogger(cancel, logger), req.Namespace, workloads, req.Headers, req.PortMap, image, tunV4, tunV6)
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to inject inbound sidecar: %v", err)
 		return err
 	}
-	svr.connMu.Lock()
-	svr.currentConnectionID = connectionID
-	svr.connMu.Unlock()
+	svr.registry.use(connectionID)
 	return nil
 }
 

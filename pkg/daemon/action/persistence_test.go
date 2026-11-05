@@ -36,21 +36,20 @@ func TestServer_OffloadToConfig(t *testing.T) {
 		}
 	})
 
-	svr := &Server{
-		connections: []handler.Connection{
-			&handler.ConnectOptions{
-				RequestRaw: mustMarshalConnectRequest(&rpc.ConnectRequest{
-					Namespace:            "default",
-					OriginKubeconfigPath: "/home/user/.kube/config",
-				}),
-			},
-			&handler.ConnectOptions{
-				RequestRaw: mustMarshalConnectRequest(&rpc.ConnectRequest{
-					Namespace: "staging",
-					Image:     "ghcr.io/kubenetworks/kubevpn:v2.0.0",
-				}),
-			},
+	svr := &Server{registry: connectionRegistry{list: []handler.Connection{
+		&handler.ConnectOptions{
+			RequestRaw: mustMarshalConnectRequest(&rpc.ConnectRequest{
+				Namespace:            "default",
+				OriginKubeconfigPath: "/home/user/.kube/config",
+			}),
 		},
+		&handler.ConnectOptions{
+			RequestRaw: mustMarshalConnectRequest(&rpc.ConnectRequest{
+				Namespace: "staging",
+				Image:     "ghcr.io/kubenetworks/kubevpn:v2.0.0",
+			}),
+		},
+	}},
 	}
 
 	err := svr.OffloadToConfig()
@@ -126,9 +125,7 @@ func TestServer_OffloadToConfig_Empty(t *testing.T) {
 		}
 	})
 
-	svr := &Server{
-		connections: nil,
-	}
+	svr := &Server{registry: connectionRegistry{list: nil}}
 
 	err := svr.OffloadToConfig()
 	if err != nil {
@@ -213,7 +210,7 @@ func TestServer_CleanupConfig_NoFile(t *testing.T) {
 func TestConfig_SerializationRoundTrip(t *testing.T) {
 
 	original := &Config{
-		SecondaryConnect: []*handler.ConnectOptions{
+		SecondaryConnect: []*connectionRecord{
 			{
 				RequestRaw: mustMarshalConnectRequest(&rpc.ConnectRequest{
 					KubeconfigBytes:      "apiVersion: v1\nclusters: []",
@@ -283,7 +280,7 @@ func TestConfig_SerializationRoundTrip(t *testing.T) {
 
 func TestConfig_SerializationRoundTrip_NilFields(t *testing.T) {
 	original := &Config{
-		SecondaryConnect: []*handler.ConnectOptions{
+		SecondaryConnect: []*connectionRecord{
 			{
 				RequestRaw: nil,
 			},
@@ -366,9 +363,8 @@ current-context: test-context
 	conn1 := handler.NewConnectOptionsForTest(factory, tmpKubeconfig, "default")
 	conn2 := handler.NewConnectOptionsForTest(factory, tmpKubeconfig, "staging")
 
-	svr := &Server{
-		currentConnectionID: "conn-abc",
-		connections:         []handler.Connection{conn1, conn2},
+	svr := &Server{registry: connectionRegistry{currentID: "conn-abc",
+		list: []handler.Connection{conn1, conn2}},
 	}
 
 	resp, err := svr.ConnectionList(context.Background(), &rpc.ConnectionListRequest{})
@@ -401,10 +397,9 @@ current-context: test-context
 }
 
 func TestServer_ConnectionUse_NotFound(t *testing.T) {
-	svr := &Server{
-		connections: []handler.Connection{
-			&handler.ConnectOptions{ManagerNamespace: "ns1"},
-		},
+	svr := &Server{registry: connectionRegistry{list: []handler.Connection{
+		&handler.ConnectOptions{ManagerNamespace: "ns1"},
+	}},
 	}
 
 	_, err := svr.ConnectionUse(context.Background(), &rpc.ConnectionUseRequest{
@@ -431,9 +426,7 @@ func TestServer_ConnectionUse_EmptyConnections(t *testing.T) {
 func TestServer_ConnectionList_CurrentConnectionID(t *testing.T) {
 	// Verify that currentConnectionID is returned in the response even when
 	// no connections exist (the field is independent of the list).
-	svr := &Server{
-		currentConnectionID: "my-conn-id-123",
-	}
+	svr := &Server{registry: connectionRegistry{currentID: "my-conn-id-123"}}
 	resp, err := svr.ConnectionList(context.Background(), &rpc.ConnectionListRequest{})
 	if err != nil {
 		t.Fatalf("ConnectionList: %v", err)
@@ -454,16 +447,15 @@ func TestServer_OffloadToConfig_RoundTrip(t *testing.T) {
 		}
 	})
 
-	svr := &Server{
-		connections: []handler.Connection{
-			&handler.ConnectOptions{
-				RequestRaw: mustMarshalConnectRequest(&rpc.ConnectRequest{
-					Namespace:            "production",
-					OriginKubeconfigPath: "/tmp/kubeconfig",
-					Image:                "ghcr.io/kubenetworks/kubevpn:test",
-				}),
-			},
+	svr := &Server{registry: connectionRegistry{list: []handler.Connection{
+		&handler.ConnectOptions{
+			RequestRaw: mustMarshalConnectRequest(&rpc.ConnectRequest{
+				Namespace:            "production",
+				OriginKubeconfigPath: "/tmp/kubeconfig",
+				Image:                "ghcr.io/kubenetworks/kubevpn:test",
+			}),
 		},
+	}},
 	}
 
 	// Offload to disk

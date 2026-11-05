@@ -1,0 +1,157 @@
+package envoy
+
+import (
+	"context"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
+	"k8s.io/client-go/kubernetes"
+	"net"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/util/retry"
+	"sigs.k8s.io/yaml"
+
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
+)
+
+// mutateEnvoyVirtuals runs a retry-on-conflict read-modify-write over the
+// ENVOY_CONFIG entry of the traffic-manager ConfigMap: Get → parse the Virtual
+// list → mutate → (only if mutate reports changed) marshal back → Update. When
+// ENVOY_CONFIG is not a valid Virtual list (empty/legacy/corrupt), onParseErr is
+// invoked (may be nil) and the write is skipped — such a parse error cannot be
+// retried into success. Shared by Sync and Remove.
+func (s *Rules) mutateEnvoyVirtuals(
+	ctx context.Context,
+	mutate func(virtuals []*controlplane.Virtual) (result []*controlplane.Virtual, changed bool),
+	onParseErr func(err error),
+) error {
+	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		cm, err := s.clientset.CoreV1().ConfigMaps(s.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		virtuals, parseErr := parseVirtuals(cm.Data[config.KeyEnvoy])
+		if parseErr != nil {
+			if onParseErr != nil {
+				onParseErr(parseErr)
+			}
+			return nil
+		}
+		result, changed := mutate(virtuals)
+		if !changed {
+			return nil
+		}
+		data, marshalErr := yaml.Marshal(result)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		if cm.Data == nil {
+			cm.Data = make(map[string]string)
+		}
+		cm.Data[config.KeyEnvoy] = string(data)
+		_, err = s.clientset.CoreV1().ConfigMaps(s.namespace).Update(ctx, cm, metav1.UpdateOptions{})
+		return err
+	})
+}
+
+// Sync updates Rule.LocalTunIPv4/v6 in ENVOY_CONFIG for all Rules matching ownerID.
+// This triggers: Watcher → Processor → xDS push → envoy hot-update.
+//
+// LocalTunIPv4/v6 are stored as BARE IPs (e.g. "198.18.0.1"), NOT CIDRs — they flow into
+// envoy's SocketAddress.Address via tunIPs→toEndPoint (cache.go), which rejects CIDR
+// notation. This deliberately differs from GetTunIP's resp.IPv4 (= IPNet.String(), CIDR):
+// the client configures a TUN device from the CIDR, while envoy needs a bare address. The
+// two formats are bridged by net.ParseCIDR on the client. Test helpers writing envoy rules
+// must use the bare-IP form (see multiuser_integration_test.go ipOnly); using GetTunIP's CIDR
+// here was a flaky-test bug (Sync rewrote the CIDR to bare IP async).
+func (s *Rules) Sync(ctx context.Context, ownerID string, newIPv4, newIPv6 *net.IPNet) {
+	newV4Str := ""
+	if newIPv4 != nil {
+		newV4Str = newIPv4.IP.String()
+	}
+	newV6Str := ""
+	if newIPv6 != nil {
+		newV6Str = newIPv6.IP.String()
+	}
+
+	skipped := false
+	err := s.mutateEnvoyVirtuals(ctx,
+		func(virtuals []*controlplane.Virtual) ([]*controlplane.Virtual, bool) {
+			changed := false
+			for _, v := range virtuals {
+				for _, rule := range v.Rules {
+					if rule.OwnerID == ownerID && rule.LocalTunIPv4 != newV4Str {
+						rule.LocalTunIPv4 = newV4Str
+						rule.LocalTunIPv6 = newV6Str
+						changed = true
+					}
+				}
+			}
+			return virtuals, changed
+		},
+		func(parseErr error) {
+			// ENVOY_CONFIG is not a valid Virtual list (empty/legacy/corrupt) — there
+			// are no rules to sync. Skip rather than error: a hard failure here cannot
+			// be retried into success and only spams the log.
+			plog.G(ctx).Warnf("[TunConfig] Sync: skip owner %s, cannot parse %s: %v", ownerID, config.KeyEnvoy, parseErr)
+			skipped = true
+		},
+	)
+	if err != nil {
+		plog.G(ctx).Errorf("[TunConfig] Sync failed for owner %s: %v", ownerID, err)
+	} else if !skipped {
+		plog.G(ctx).Infof("[TunConfig] Synced envoy rule IP for owner %s to %v", ownerID, newIPv4)
+	}
+}
+
+// Remove deletes all envoy rules owned by ownerID from ENVOY_CONFIG
+// (dropping any Virtual left with no rules). Used by the lease reaper's abandonment pass
+// to clean up a rule left behind by a client that vanished without a clean Leave (crash /
+// SIGKILL). It mirrors Sync's read-modify-write; the xDS ConfigMap watcher
+// re-pushes the envoy snapshot on the change. It does NOT unpatch the sidecar container
+// (that needs workload RBAC). Unlike Sync, a parse error is silent (nothing to remove).
+func (s *Rules) Remove(ctx context.Context, ownerID string) {
+	err := s.mutateEnvoyVirtuals(ctx,
+		func(virtuals []*controlplane.Virtual) ([]*controlplane.Virtual, bool) {
+			changed := false
+			kept := virtuals[:0]
+			for _, v := range virtuals {
+				rules := v.Rules[:0]
+				for _, rule := range v.Rules {
+					if rule.OwnerID == ownerID {
+						changed = true
+						continue
+					}
+					rules = append(rules, rule)
+				}
+				v.Rules = rules
+				if len(v.Rules) == 0 {
+					continue // drop a Virtual with no remaining rules
+				}
+				kept = append(kept, v)
+			}
+			return kept, changed
+		},
+		nil, // parse error: not a valid Virtual list — nothing to remove
+	)
+	if err != nil {
+		plog.G(ctx).Warnf("[TunConfig] failed to remove envoy rules for abandoned owner %s: %v", ownerID, err)
+	} else {
+		plog.G(ctx).Infof("[TunConfig] removed envoy rules for abandoned owner %s", ownerID)
+	}
+}
+
+type Rules struct {
+	clientset kubernetes.Interface
+	namespace string
+}
+
+func New(clientset kubernetes.Interface, namespace string) *Rules {
+	return &Rules{clientset: clientset, namespace: namespace}
+}
+
+func parseVirtuals(content string) ([]*controlplane.Virtual, error) {
+	virtuals := make([]*controlplane.Virtual, 0)
+	err := yaml.Unmarshal([]byte(content), &virtuals)
+	return virtuals, err
+}

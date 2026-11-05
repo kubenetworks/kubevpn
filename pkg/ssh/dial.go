@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spf13/pflag"
@@ -43,6 +44,11 @@ func DialSshRemote(ctx context.Context, conf *SshConfig, stopChan <-chan struct{
 
 // JumpTo dials through an existing SSH client (bastion) to establish a new SSH connection to the target host.
 func JumpTo(ctx context.Context, bClient *gossh.Client, to SshConfig, stopChan <-chan struct{}) (client *gossh.Client, err error) {
+	defer func() {
+		if err != nil {
+			_ = bClient.Close()
+		}
+	}()
 	if _, _, err = net.SplitHostPort(to.Addr); err != nil {
 		// use default ssh port 22
 		to.Addr = net.JoinHostPort(to.Addr, "22")
@@ -56,21 +62,16 @@ func JumpTo(ctx context.Context, bClient *gossh.Client, to SshConfig, stopChan <
 	}
 	// Dial a connection to the service host, from the bastion
 	var conn net.Conn
-	conn, err = bClient.DialContext(ctx, "tcp", to.Addr)
+	dialCtx, dialCancel := context.WithTimeout(ctx, sshDialTimeout)
+	conn, err = bClient.DialContext(dialCtx, "tcp", to.Addr)
+	dialCancel()
 	if err != nil {
 		err = fmt.Errorf("dial %s via bastion: %w: %w", to.Addr, err, config.ErrSSHConnect)
 		return
 	}
-	go func() {
-		if stopChan != nil {
-			<-stopChan
-			// Closing conn/bClient tears down both an in-progress handshake and an
-			// established client. Avoid reading the named return `client` here — it
-			// races with the function's return assignment.
-			_ = conn.Close()
-			_ = bClient.Close()
-		}
-	}()
+	conn = watchSSHConn(ctx, stopChan, conn, bClient.Close)
+	finishHandshake := boundSSHHandshake(conn)
+	defer finishHandshake()
 	defer func() {
 		if err != nil {
 			if client != nil {
@@ -188,15 +189,9 @@ func (conf SshConfig) Dial(ctx context.Context, stopChan <-chan struct{}) (clien
 	if err != nil {
 		return nil, fmt.Errorf("dial SSH %s: %w: %w", conf.Addr, err, config.ErrSSHConnect)
 	}
-	go func() {
-		if stopChan != nil {
-			<-stopChan
-			// Closing the underlying conn tears down both an in-progress handshake
-			// and an established client (which is layered on conn). Avoid reading
-			// the named return `client` here — it races with the function's return.
-			_ = conn.Close()
-		}
-	}()
+	conn = watchSSHConn(ctx, stopChan, conn, nil)
+	finishHandshake := boundSSHHandshake(conn)
+	defer finishHandshake()
 	defer func() {
 		if err != nil {
 			if conn != nil {
@@ -218,6 +213,70 @@ func (conf SshConfig) Dial(ctx context.Context, stopChan <-chan struct{}) (clien
 		return nil, wrapDialError(err)
 	}
 	return gossh.NewClient(c, chans, reqs), nil
+}
+
+// ownedSSHConn releases its cancellation watcher when the client is closed.
+type ownedSSHConn struct {
+	net.Conn
+	once        sync.Once
+	done        chan struct{}
+	joined      chan struct{}
+	closeParent func() error
+}
+
+func watchSSHConn(ctx context.Context, stop <-chan struct{}, conn net.Conn, closeParent func() error) net.Conn {
+	c := &ownedSSHConn{Conn: conn, done: make(chan struct{}), joined: make(chan struct{}), closeParent: closeParent}
+	go func() {
+		defer close(c.joined)
+		select {
+		case <-ctx.Done():
+		case <-stop:
+		case <-c.done:
+			return
+		}
+		_ = c.closeResources()
+	}()
+	return c
+}
+
+func (c *ownedSSHConn) Close() error {
+	err := c.closeResources()
+	<-c.joined
+	return err
+}
+
+func (c *ownedSSHConn) closeResources() error {
+	var err error
+	c.once.Do(func() {
+		close(c.done)
+		if c.closeParent != nil {
+			_ = c.closeParent()
+		}
+		err = c.Conn.Close()
+	})
+	return err
+}
+
+func (c *ownedSSHConn) Read(b []byte) (int, error) {
+	n, err := c.Conn.Read(b)
+	if err != nil {
+		_ = c.Close()
+	}
+	return n, err
+}
+
+// ClientConfig.Timeout does not bound NewClientConn. Set a real socket deadline
+// and also close on timeout for SSH channel conns, which lack deadline support.
+func boundSSHHandshake(conn net.Conn) func() {
+	_ = conn.SetDeadline(time.Now().Add(sshDialTimeout))
+	joined := make(chan struct{})
+	timer := time.AfterFunc(sshDialTimeout, func() { defer close(joined); _ = conn.Close() })
+	return func() {
+		if !timer.Stop() {
+			<-joined
+		}
+		_ = conn.SetDeadline(time.Time{})
+	}
 }
 
 // wrapDialError classifies an SSH dial/handshake error for exit-code purposes.

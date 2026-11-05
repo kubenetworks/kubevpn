@@ -21,14 +21,12 @@ func TestDisconnect_MatchingID(t *testing.T) {
 		return nil
 	})
 
-	svr := &Server{
-		connections: []handler.Connection{conn},
-	}
+	svr := &Server{registry: connectionRegistry{list: []handler.Connection{conn}}}
 
 	disconnect(context.Background(), svr, "")
 
-	if len(svr.connections) != 0 {
-		t.Fatalf("expected 0 connections after disconnect, got %d", len(svr.connections))
+	if len(svr.registry.list) != 0 {
+		t.Fatalf("expected 0 connections after disconnect, got %d", len(svr.registry.list))
 	}
 	if !cleanupRan.Load() {
 		t.Fatal("expected Cleanup to run on the removed connection")
@@ -41,14 +39,12 @@ func TestDisconnect_NonMatchingID(t *testing.T) {
 	conn := &handler.ConnectOptions{}
 	// GetConnectionID() returns "" when dhcp is nil, so "nonexistent" won't match.
 
-	svr := &Server{
-		connections: []handler.Connection{conn},
-	}
+	svr := &Server{registry: connectionRegistry{list: []handler.Connection{conn}}}
 
 	disconnect(context.Background(), svr, "nonexistent")
 
-	if len(svr.connections) != 1 {
-		t.Fatalf("expected 1 connection unchanged, got %d", len(svr.connections))
+	if len(svr.registry.list) != 1 {
+		t.Fatalf("expected 1 connection unchanged, got %d", len(svr.registry.list))
 	}
 }
 
@@ -60,8 +56,8 @@ func TestDisconnect_EmptyConnections(t *testing.T) {
 	// Should not panic.
 	disconnect(context.Background(), svr, "anything")
 
-	if len(svr.connections) != 0 {
-		t.Fatalf("expected 0 connections, got %d", len(svr.connections))
+	if len(svr.registry.list) != 0 {
+		t.Fatalf("expected 0 connections, got %d", len(svr.registry.list))
 	}
 }
 
@@ -84,15 +80,13 @@ func TestDisconnect_MultipleConnections(t *testing.T) {
 	conn2 := makeConn()
 	conn3 := makeConn()
 
-	svr := &Server{
-		connections: []handler.Connection{conn1, conn2, conn3},
-	}
+	svr := &Server{registry: connectionRegistry{list: []handler.Connection{conn1, conn2, conn3}}}
 
 	// All match "" because dhcp is nil on all of them.
 	disconnect(context.Background(), svr, "")
 
-	if len(svr.connections) != 0 {
-		t.Fatalf("expected 0 connections after disconnect, got %d", len(svr.connections))
+	if len(svr.registry.list) != 0 {
+		t.Fatalf("expected 0 connections after disconnect, got %d", len(svr.registry.list))
 	}
 	if got := cleanupCount.Load(); got != 3 {
 		t.Fatalf("expected Cleanup called 3 times, got %d", got)
@@ -105,18 +99,16 @@ func TestDisconnect_PreservesNonMatchingOrder(t *testing.T) {
 	conn1 := &handler.ConnectOptions{WorkloadNamespace: "ns1"}
 	conn2 := &handler.ConnectOptions{WorkloadNamespace: "ns2"}
 
-	svr := &Server{
-		connections: []handler.Connection{conn1, conn2},
-	}
+	svr := &Server{registry: connectionRegistry{list: []handler.Connection{conn1, conn2}}}
 
 	// "no-match" won't match any connection (all return "" from GetConnectionID).
 	disconnect(context.Background(), svr, "no-match")
 
-	if len(svr.connections) != 2 {
-		t.Fatalf("expected 2 connections, got %d", len(svr.connections))
+	if len(svr.registry.list) != 2 {
+		t.Fatalf("expected 2 connections, got %d", len(svr.registry.list))
 	}
-	if svr.connections[0].GetWorkloadNamespace() != "ns1" || svr.connections[1].GetWorkloadNamespace() != "ns2" {
+	if svr.registry.list[0].GetWorkloadNamespace() != "ns1" || svr.registry.list[1].GetWorkloadNamespace() != "ns2" {
 		t.Fatalf("connection order changed: got [%s, %s]",
-			svr.connections[0].GetWorkloadNamespace(), svr.connections[1].GetWorkloadNamespace())
+			svr.registry.list[0].GetWorkloadNamespace(), svr.registry.list[1].GetWorkloadNamespace())
 	}
 }

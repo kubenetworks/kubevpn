@@ -1,5 +1,32 @@
 # Cross-Client (A→B) Throughput Diagnosis
 
+> The original path, bottleneck measurements and direct-injection results below are
+> historical evidence. They are not benchmarks of the current batching implementation.
+> Results in the historical sections, including the batching medians, were measured
+> **before the single-data-slot default**. Their values are unchanged. The separate
+> 2026-10-30 section below records a new matched comparison on the single-slot topology.
+
+## Current source navigation
+
+Historical commands and measured tables below retain their original package paths and
+results. After extraction, the benchmark fixture is `pkg/tunnel/xclient_throughput_test.go`;
+`client.go`, `slot.go`/`attempt.go`, `client_stack.go`, `server_endpoint.go` and `route.go`
+(all under `pkg/tunnel`) implement dispatch, joined connection attempts, direct injection
+and `Router` routing. Stack construction is in `pkg/tunnel/internal/netstack/stack.go`.
+Packet batching is in `pkg/tunnel/batch.go`; shared socket batching is in
+`pkg/internal/wire/batch.go`. No performance gain or rerun is claimed for this package move.
+
+Current-package equivalents (not executed in this documentation pass):
+
+```sh
+go test ./pkg/tunnel -run '^$' -bench BenchmarkCrossClientThroughput -benchmem -benchtime=2s -count=2
+go test ./pkg/tunnel -run '^$' -bench 'Benchmark(SlotBatchActivity|RoutePacketSingleMember|PumpTunBatchReuse)$' -benchmem -benchtime=2s -count=5
+go test ./pkg/tunnel -run '^$' -bench 'BenchmarkCrossClient(Modes|MixedModes)$' -benchmem -benchtime=2s -count=5
+```
+
+The `pkg/tun` adapter benchmark command is unchanged. Current runs are not reproductions
+of the historical commits unless the same historical implementation/fixtures are checked out.
+
 ## Symptom
 
 Two kubevpn clients; client **A** accessing a service on client **B**'s machine (A → B's TUN IP)
@@ -20,7 +47,7 @@ the stage the two modes **share** — the cross-client path itself, not the tran
 
 ```
 A: app → kernel TCP → TUN → routeOutbound → tunInbound
-   → runConnPool: flowHash(5-tuple) picks ONE of A's 4 pool slots (tun_client.go)
+   → runConnPool: A's single data slot (client.go)
    → connSlot.writeToConn → transport(SPDY|SSH) → TM:10801
 TM: readFromTCPConnWriteToEndpoint → AddRoute(A); HasRoute(B)?
    → RouteHub.WriteToRoutePacket(B)  (hairpin, raw forward — NOT injected into TM's stack)
@@ -43,7 +70,7 @@ Two structural properties of B's receive side stand out:
 2. **All cross-client flows funnel through ONE shared inter-client gvisor stack** on B (a single
    `interClientInbound` channel, one `handleGvisorPacket`). Concurrency cannot widen it.
 
-## Measurement (in-process, no cluster, no TUN, no root)
+## Historical measurement (in-process, no cluster, no TUN, no root)
 
 `pkg/core/xclient_throughput_test.go` (`BenchmarkCrossClientThroughput`) wires the real data plane
 end-to-end over a clean loopback transport: originator stack A → real `tunDevice` + connection pool
@@ -86,8 +113,8 @@ Findings:
    Asymmetric with the blocking-backpressure send path. Prime suspect.
 2. **Single shared inter-client gvisor stack on B** — one stack/one channel for all cross-client
    flows; does not scale with concurrency (throughput drops as flows rise). Serialization point.
-3. **Single-flow pinned to one pool slot** (`flowHash`) — a single flow cannot use pool
-   parallelism; on port-forward all slots share one SPDY connection anyway. (Contributor, not the
+3. **Single-flow single data slot** — a single flow cannot use connection
+   parallelism; on port-forward the data and control conns share one SPDY connection anyway. (Contributor, not the
    dominant term in these clean-loopback numbers.)
 4. **gvisor userspace TCP window cap (≤4MB)** vs the multi-hop BDP of a real A↔TM↔B path — to be
    quantified in the CI e2e (real RTT), not visible on loopback.
@@ -111,12 +138,12 @@ Change (`pkg/core`):
 - The diagnostic `InterClientDrops` counter (`datapath_stats.go`) is removed — the drop path it
   measured no longer exists; flow control is now TCP's receive window.
 
-Why this is safe for liveness: `InjectInbound` delivers synchronously only up to the transport
-layer and returns promptly (the localhost `io.Copy` runs in the forwarder's own goroutines), so a
-busy stack never blocks a slot's reader. That matters because the periodic heartbeat's echo *reply*
-is routed back over a **data** conn (see `handleControlConn`), so a stalled data-slot reader would
-otherwise starve the liveness watchdog. A blocking send would have had that hazard; direct
-injection does not.
+Why this helps liveness: `InjectInbound` delivers synchronously only up to the transport
+layer (the localhost `io.Copy` runs in the forwarder's own goroutines), removing the intermediate
+blocking-send hazard from the slot's reader. That matters because the periodic heartbeat's echo
+*reply* is routed back over a **data** conn (see `handleControlConn`), so a stalled data-slot reader
+can starve the liveness watchdog. This is not an absolute guarantee against stack, data-conn or
+shared outer-transport stalls.
 
 ### Verified (same in-process benchmark, arm64, clean loopback)
 
@@ -172,6 +199,229 @@ Debug. Per-packet logging then follows naturally, per connection:
 Effect: without `--debug`, per-packet logging is fully off and the hot path pays only the
 `IsDebugEnabled` check. With `connect --debug`, that connection logs packets (file + stream); other
 concurrent non-debug connections stay silent.
+
+## Current implementation — bounded batching
+
+The default now uses **one data `connSlot` plus one independent control slot**. Data dispatch
+goes directly to slot 0 without slot-selection parsing/hashing; `connSlot` lifecycle, queues,
+deadlines and batching remain, and business flows still run concurrently. There is no
+pool-size setting or override.
+
+Heartbeat requests bypass the business queue through a separate queue/conn to the **same TCP
+forwarding endpoint 10801**, not xDS 9002. Replies use `tunnel.Router`'s first-writable registered data
+conn with fallback, not per-flow load balancing. There is one registered data conn per client
+address in steady state; control is excluded. The outer SSH/port-forward TCP transport remains
+shared, so separation is not an absolute liveness guarantee. Shared gvisor session state and
+grace retention do not depend on four slots. No new throughput claim accompanies this default.
+
+TCP writers and the TUN write path now drain only immediately available queued packets,
+without a batching timer: at most **32 frames / 64 KiB** per batch (a single legal maximum
+framed TCP packet may occupy **65,537 bytes**). `pkg/internal/wire/batch.go` uses `net.Buffers`/writev for
+raw `*net.TCPConn`; TLS/wrapped connections use a reusable bounded aggregate buffer rather
+than one TLS write per frame. Partial writes continue only on the same connection, never
+replay a partial frame after reconnect. `batchDevice.WritePackets` normalizes the platform
+contract (Linux reports bytes, other platforms packet counts) and handles device batch limits.
+Serving routines join before final queue drain, so pooled packets are not stranded by late
+producers. No wire-format, CLI, protobuf or dependency change is needed.
+
+### Historical local verification after batching (before single-slot default)
+
+Measured on Apple M4, darwin/arm64, Go 1.26.3, CGO disabled, using the same
+`BenchmarkCrossClientThroughput` command (`-benchtime=2s -count=3`) before and after
+implementation, with no concurrent test/build workload. Values below are medians of three
+runs in MB/s, not predictions for SSH, port-forward, or WAN throughput:
+
+| Path | Flows | Baseline | After |
+|---|---:|---:|---:|
+| A→B | 1 | 21.10 | 69.65 |
+| A→B | 8 | 22.74 | 49.94 |
+| A→cluster | 1 | 42.42 | 133.68 |
+| A→cluster | 8 | 36.82 | 95.34 |
+
+Single-flow post-change results varied substantially (A→B: 64.74–127.33 MB/s;
+A→cluster: 131.88–311.72 MB/s). These clean-loopback measurements support reduced
+per-packet I/O overhead, but do not isolate every change or establish a production speedup.
+Mixed interactive/bulk latency has no pre-change baseline; real RTT/loss and native TUN
+performance remain unverified.
+
+## 2026-10-30: WireGuard-inspired changes on the single-slot topology
+
+This is a new comparison, not an extension of the old four-slot numbers above. Baseline
+production tree: `801ef8f1b1c4606f069d78b428485b35b9e68cb0` (the disconnection-stability
+increment). Identical benchmark fixtures were added before implementation and frozen as
+`599b494cc3db1b809d24e42c7af748dd5543d763`. The measured final implementation is
+`f74aa892e1e5353814de21ec855ac978624b7592`; subsequent changes only finalize documentation.
+
+Environment: Apple M4, darwin/arm64, Go 1.26.3, CGO disabled. Before and after each use
+five sequential 2-second samples, without competing test/build workloads. New
+`BenchmarkCrossClientModes` / `BenchmarkCrossClientMixedModes` vary actual loopback TCP
+versus real TLS and stats off/on. They use one data slot plus the control connection;
+application flow count is separate. Fixture-owned workers and sockets are joined before
+subsequent runs. No per-read delay is interpreted as WAN RTT.
+
+Commands for the matched matrices:
+
+```sh
+go test ./pkg/core -run '^$' -bench 'Benchmark(SlotBatchActivity|RoutePacketSingleMember|PumpTunBatchReuse)$' -benchmem -benchtime=2s -count=5
+go test ./pkg/tun -run '^$' -bench '^BenchmarkBatchDeviceReadPackets$' -benchmem -benchtime=2s -count=5
+go test ./pkg/core -run '^$' -bench 'BenchmarkCrossClient(Modes|MixedModes)$' -benchmem -benchtime=2s -count=5
+```
+
+### End-to-end loopback results with stats enabled
+
+Throughput is measured until the sink receives the submitted bytes. MB/s below are
+medians; brackets show the minimum and maximum of the five samples.
+
+| Transport | Path | Flows | Before MB/s [range] | After MB/s [range] |
+|---|---|---:|---:|---:|
+| TCP | A→B | 1 | 115.35 [108.71–125.87] | 122.63 [118.53–127.54] |
+| TCP | A→B | 8 | 101.86 [97.36–105.31] | 106.12 [101.59–117.96] |
+| TCP | A→cluster | 1 | 137.23 [127.28–140.84] | 137.24 [135.57–139.42] |
+| TCP | A→cluster | 8 | 121.75 [112.59–128.62] | 126.72 [119.75–140.24] |
+| TLS | A→B | 1 | 172.45 [168.92–180.47] | 179.24 [178.06–189.02] |
+| TLS | A→B | 8 | 175.01 [170.12–184.87] | 176.86 [171.39–183.92] |
+| TLS | A→cluster | 1 | 231.94 [227.77–237.36] | 236.80 [228.86–249.13] |
+| TLS | A→cluster | 8 | 218.71 [217.83–221.80] | 225.48 [218.38–230.26] |
+
+Most ranges overlap. These samples show modest median changes, not a statistically
+established or universal throughput improvement. TCP/TLS differences include batching
+and scheduler interactions; they do not establish that encryption makes production faster.
+The harness does not use a real TUN, SSH, Kubernetes port-forward, or WAN connection.
+In particular, these results cannot measure the Linux native-read copy removal.
+
+### Mixed interactive/bulk latency
+
+Seven bulk flows compete with a serialized 64-byte request/echo flow. Bulk workers start
+at the measurement boundary; the ending receive count is captured before sample sorting.
+Values are medians of each run's measured percentile or bulk rate, not percentiles pooled
+across all runs.
+
+| Transport, stats on | Bulk MB/s before → after | Request p99 ms before → after |
+|---|---:|---:|
+| TCP | 99.35 → 106.50 | 60.544 → 53.939 |
+| TLS | 180.60 → 188.20 | 44.636 → 47.705 |
+
+TLS p99 increased in this sample; do not claim latency improved across all modes. Request
+counts and background bulk work vary with throughput, so mixed-workload allocs/op are not
+a fixed-data-volume comparison.
+
+### Mechanisms isolated from end-to-end throughput
+
+- **Single-member route:** synchronous ownership-transfer fixture median 71.24→61.64 ns/op,
+  56→48 B/op and 2→1 allocations. TCP/TLS route delivery also removes one allocation,
+  but transport overhead dominates. This is not allocation-free routing.
+- **Retained pump buffers:** fake batch-size-128 TUN producing one 64-byte packet per read
+  improves 3363→190.2 ns/op and 129→2 allocations/read. It avoids recycling 127 unused
+  buffers each iteration. Full batches and batch-size-1 do not have that benefit; this is
+  a pump model, not a 17-fold real-network throughput claim.
+- **Batch statistics:** deterministic TCP/TLS tests prove one activity clock/lock update
+  per completed batch, with unchanged complete-prefix accounting and heartbeat health.
+  The final slot microbenchmark did **not** demonstrate a speedup: stats-on modes had
+  median ns/op increases of approximately 2–9% versus the earlier baseline. Short paired
+  before/after overlay reruns did not consistently reproduce the TCP differences, while
+  TLS burst results remained variable, including one slower after sample. These checks
+  neither establish a causal regression nor justify a performance-improvement claim.
+- **Linux direct-read algorithm:** a separate fake-device scratch/direct comparison
+  (2 seconds × 5) at 128 packets × 1500 bytes measured 11981→5168 ns/op, both with zero
+  steady-state allocations. It bypasses native qualification and excludes kernel I/O;
+  removing 192000 adapter-copy bytes per operation is algorithm accounting, not an
+  instrumented copy counter. The frozen ordinary adapter benchmark remains scratch-only
+  for its nonnative fake device.
+
+Linux's extra backing capacity has a real memory cost: the host allocation model rounds
+65538 bytes to 73728, adding 8 KiB per distinct pooled allocation, while a qualified
+128-slot direct reader avoids 9 MiB of adapter scratch. Net memory can increase with many
+queued buffers; see [22-tun-device.md](22-tun-device.md#45-memory-trade-off-host-allocation-model).
+No native Linux/Windows runtime, privileged TUN, race-detector, or WAN performance result
+is claimed. Event shutdown and retry pacing are validated by deterministic lifecycle
+regressions, not by throughput numbers.
+
+## Package-refactor verification (2026-11)
+
+The package refactor compared the preserved pre-refactor working tree with the new
+`tunnel` package using the same TCP/TLS fixtures, Go 1.26.3 darwin/arm64, CGO disabled,
+and five sequential two-second samples. These are separate runs from the October
+comparison above; the original working tree already contained its optimizations.
+
+Selected stats-enabled medians:
+
+| Path | Before | After |
+|---|---:|---:|
+| TCP A→B, 1 flow (MB/s) | 81.37 | 81.77 |
+| TCP A→B, 8 flows (MB/s) | 53.67 | 52.60 |
+| TLS A→B, 1 flow (MB/s) | 173.40 | 182.14 |
+| TLS A→B, 8 flows (MB/s) | 131.53 | 131.89 |
+| TCP mixed request p99 (ms) | 85.252 | 84.427 |
+| TLS mixed request p99 (ms) | 45.130 | 43.466 |
+| TLS mixed bulk (MB/s) | 139.20 | 131.10 |
+
+The before runs encountered a separate workspace's build activity. Most sample
+ranges overlap, and the mixed TLS bulk median fell despite a lower request p99.
+These measurements do not establish a speedup or prove the absence of every
+performance regression. The isolated slot, route and TUN-pump fixtures retained
+their allocation counts after the ownership/package changes. No real TUN, WAN,
+SSH or Kubernetes port-forward performance conclusion follows from these runs.
+
+## 2026-11-03: ICMP intermittent 20–30 s stalls — outer-TCP RTO head-of-line blocking
+
+Field report (macOS client, root daemon, cross-client `ping` to a peer's TUN IP):
+`ping` intermittently takes 20–30+ seconds and then recovers on its own, without any
+reconnect in between. The same period shows `gvisor_stats` warnings from the
+`client_interclient` stack with `tcp_retransmits_delta=1`, occasional
+`tcp_timeouts_delta=1`, and — the decisive field — `outbound_queue_depth=0`.
+
+### Signature
+
+`outbound_queue_depth=0` says the inter-client stack's output pump is fully drained:
+the userland queues (slot inbound, `tunInbound`, gvisor endpoint) are empty. The stall
+is not in our queues. It sits in the kernel TCP of the single outer transport
+(`ConnPoolSize = 1`, `pkg/tunnel/client.go`): every IP packet — ICMP echo included — is
+framed and multiplexed over one TCP connection (kubectl port-forward / SSH channel).
+Kernel TCP delivers in order, so one lost segment anywhere on that path head-of-line
+blocks every frame behind it until an RTO retransmit succeeds, and the exponential RTO
+backoff (1→2→4→8→16→32 s) produces exactly the observed 20–30 s self-recovering stalls.
+The `tcp_retransmits_delta`/`tcp_timeouts_delta` in the warning are the *inner* gvisor
+TCP counters of one cross-client flow entering RTO — the consequence of the same outer
+loss, not an independent fault.
+
+### Rejected mitigations (and why)
+
+- **ICMP priority lane in the slot queue**: queue depth is 0; prioritizing packets that
+  are not queued does nothing. The HOL is downstream in kernel RTO.
+- **Restoring multiple data slots**: 83048c4e established that all slots dial through
+  the same outer transport (one SSH TCP connection / shared forward path), so multiple
+  slots share one loss domain and do not diversify the loss. Five-tuple dispatch
+  survives only as a nil-stats test override.
+- **Faster stall detection / shorter watchdog budget**: recovery is ultimately gated by
+  the kernel RTO on the same transport; earlier reconnects add churn (tearing down
+  in-flight cross-client TCP flows) without shortening the stall.
+
+### Follow-up directions
+
+- **R2 — heartbeat echo replies on the control connection: implemented.**
+  `gvisorTCPHandler.handleControlConn` now answers ICMP echo requests inline on the
+  control conn itself (`synthesizeEchoReply`: address swap + type flip + checksum
+  recompute; non-echo requests are dropped) instead of injecting them into the client's
+  gvisor stack. The reply no longer depends on the client's registered data connections,
+  so a kernel RTO stall on the single data slot can no longer make the liveness watchdog
+  retire a self-recovering generation — in-flight cross-client TCP flows survive the
+  stall. The client needed no change: the control-slot reader already correlates replies
+  (`readGeneration` → `observeReply`). Tests:
+  `pkg/tunnel/control_reply_integration_test.go` (inline v4/v6 reply, reply survives a
+  blocked data route, non-echo gets no reply). Semantics: the heartbeat now certifies the
+  **control path**; a data-only black hole with an alive control conn is caught by the
+  data slot's 180 s read deadline instead of the 15 s watchdog. Most real failures kill
+  both conns because the outer SSH/port-forward transport is shared.
+- **R3 — UDP/QUIC data-plane transport** (plumbing exists in
+  `pkg/endpoint/udp_reverse_bridge.go`): removes in-order TCP HOL entirely; a separate
+  effort, still not implemented.
+
+Related field noise: the recurring `[Gvisor-UDP] Disconnected 198.18.0.x:137 <->
+127.0.0.1:137: i/o timeout` errors are benign — a peer's NetBIOS name-service packets
+arrive for this client's TUN IP, `LocalUDPForwarder` dials `127.0.0.1:137` where
+nothing listens, and the 120 s idle deadline (`config.UDPSessionTimeout`) expires. Idle
+expiry now logs at debug level ("Idle session closed"); real relay failures keep error
+level ("Disconnected").
 
 ## Remaining work
 
