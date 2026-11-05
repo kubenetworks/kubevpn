@@ -6,10 +6,13 @@ The client defaults to **one data `connSlot` plus one independent control slot**
 business dispatch goes directly to slot 0 without slot-selection parsing/hashing; lifecycle,
 batching and business concurrency are preserved. Heartbeat requests bypass the business queue
 via a separate control queue/conn to the **same TCP forwarding endpoint 10801**, not xDS 9002.
-The control conn is excluded from `tunnel.Router`; replies use the registered data conn (first writable
-with fallback, not per-flow balancing). There is one registered conn per current client address
-in steady state. The outer SSH/port-forward TCP transport remains shared, and data-path stalls
-can delay replies: separation is not an absolute liveness guarantee.
+The control conn is excluded from `tunnel.Router`, and since R2 the server answers heartbeat
+echo requests **inline on the control conn itself** (`gvisorTCPHandler.handleControlConn` →
+`synthesizeEchoReply`) instead of injecting them into the client's gvisor stack. There is one
+registered conn per current client address in steady state. The outer SSH/port-forward TCP
+transport remains shared, so the heartbeat certifies the control path end-to-end; a stall that
+black-holes only the data conn (an intact outer transport with a wedged data slot) is caught by
+the slot's own 180 s read deadline instead of the 15 s watchdog.
 
 The historical watchdog/port-forward loops described below have been replaced by
 one `transportSupervisor` in `pkg/network/transport.go`, owned by `network.Runtime`

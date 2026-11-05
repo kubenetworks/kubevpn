@@ -26,7 +26,8 @@ type clientTransport struct {
 	// slots holds the data connection pool; built by runConnPool, read by routeOutbound.
 	slots []*connSlot
 	// controlSlot sends heartbeat requests without waiting on the business packet queue.
-	// Replies still use the data connection, and the outer SSH/PF transport may be shared.
+	// The server answers them inline on this same control connection, so liveness evidence
+	// survives a kernel-RTO stall on the data slot; the outer SSH/PF transport is shared.
 	controlSlot *connSlot
 	controlMu   sync.RWMutex
 	// gvisorInbound carries src == dst packets to the local loopback (self-to-self) gvisor stack.

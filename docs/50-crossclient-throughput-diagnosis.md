@@ -396,15 +396,25 @@ loss, not an independent fault.
   the kernel RTO on the same transport; earlier reconnects add churn (tearing down
   in-flight cross-client TCP flows) without shortening the stall.
 
-### Follow-up directions (not implemented here)
+### Follow-up directions
 
-- **R2 — heartbeat echo replies on the control connection** (`docs/08-heartbeat-health.md`,
-  `docs/47-portforward-blackhole-liveness.md`): the liveness watchdog stops retiring
-  generations during self-recovering RTO stalls, so in-flight flows survive; black holes
-  are still caught because the control connection shares the outer transport.
+- **R2 — heartbeat echo replies on the control connection: implemented.**
+  `gvisorTCPHandler.handleControlConn` now answers ICMP echo requests inline on the
+  control conn itself (`synthesizeEchoReply`: address swap + type flip + checksum
+  recompute; non-echo requests are dropped) instead of injecting them into the client's
+  gvisor stack. The reply no longer depends on the client's registered data connections,
+  so a kernel RTO stall on the single data slot can no longer make the liveness watchdog
+  retire a self-recovering generation — in-flight cross-client TCP flows survive the
+  stall. The client needed no change: the control-slot reader already correlates replies
+  (`readGeneration` → `observeReply`). Tests:
+  `pkg/tunnel/control_reply_integration_test.go` (inline v4/v6 reply, reply survives a
+  blocked data route, non-echo gets no reply). Semantics: the heartbeat now certifies the
+  **control path**; a data-only black hole with an alive control conn is caught by the
+  data slot's 180 s read deadline instead of the 15 s watchdog. Most real failures kill
+  both conns because the outer SSH/port-forward transport is shared.
 - **R3 — UDP/QUIC data-plane transport** (plumbing exists in
   `pkg/endpoint/udp_reverse_bridge.go`): removes in-order TCP HOL entirely; a separate
-  effort.
+  effort, still not implemented.
 
 Related field noise: the recurring `[Gvisor-UDP] Disconnected 198.18.0.x:137 <->
 127.0.0.1:137: i/o timeout` errors are benign — a peer's NetBIOS name-service packets
