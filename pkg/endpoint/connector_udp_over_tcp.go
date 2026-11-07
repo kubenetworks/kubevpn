@@ -34,5 +34,10 @@ func (c *UDPOverTCPConnector) ConnectContext(ctx context.Context, conn net.Conn)
 			return nil, err
 		}
 	}
+	if framing.ObfuscationEnabled() {
+		// Wrap below the framing layer: every framed byte — datagrams, batches,
+		// route writes — crosses the XOR keystream before TLS.
+		conn = framing.ObfuscateDial(conn)
+	}
 	return framing.NewConn(ctx, conn)
 }

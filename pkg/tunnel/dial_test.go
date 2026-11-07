@@ -56,6 +56,12 @@ func (testTCPTransport) Dial(ctx context.Context, addr string) (net.Conn, error)
 type testConnector struct{}
 
 func (testConnector) ConnectContext(ctx context.Context, c net.Conn) (net.Conn, error) {
+	// Mirrors the production connector: obfuscation wraps below the framing
+	// layer when enabled. The global flag is off unless a test/benchmark
+	// explicitly opts in, so ordinary fixtures are unaffected.
+	if framing.ObfuscationEnabled() {
+		c = framing.ObfuscateDial(c)
+	}
 	return framing.NewConn(ctx, c)
 }
 

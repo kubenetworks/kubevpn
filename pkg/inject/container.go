@@ -77,11 +77,18 @@ func commonEnvVars(managerNamespace string) []v1.EnvVar {
 }
 
 func tlsEnvVars(secret *v1.Secret) []v1.EnvVar {
-	return []v1.EnvVar{
+	vars := []v1.EnvVar{
 		{Name: config.TLSServerName, Value: string(secret.Data[config.TLSServerName])},
 		{Name: config.TLSCertKey, Value: string(secret.Data[config.TLSCertKey])},
 		{Name: config.TLSPrivateKeyKey, Value: string(secret.Data[config.TLSPrivateKeyKey])},
 	}
+	// Propagate the obfuscation opt-out so the sidecar's tunnel server agrees
+	// with clients that read the same secret. Absent key → env unset →
+	// default (on).
+	if v, ok := secret.Data[config.ObfuscationKey]; ok {
+		vars = append(vars, v1.EnvVar{Name: config.ObfuscationKey, Value: string(v)})
+	}
+	return vars
 }
 
 func newEnvoyContainer(ns, nodeID string, ipv6 bool, managerNamespace, image string, configIPv6, configIPv4 []byte) v1.Container {

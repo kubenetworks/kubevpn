@@ -49,6 +49,7 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	framing "github.com/wencaiwulue/kubevpn/v2/pkg/internal/wire"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
@@ -466,7 +467,23 @@ func (h *xclientHarness) runMixed(b *testing.B) {
 // BenchmarkFramedBatchWrites measures deterministic writes per frame over a real
 // wrapped TCP socket; the wrapper deliberately takes the aggregation (TLS) path.
 func BenchmarkFramedBatchWrites(b *testing.B) {
+	runFramedBatchWrites(b, nil)
+}
+
+// BenchmarkFramedBatchWritesObfuscated is the obfuscation-on variant: the
+// obfuscatedConn wrapper sits between the batch writer and the TCP socket,
+// exactly as in production when the flag is enabled.
+func BenchmarkFramedBatchWritesObfuscated(b *testing.B) {
+	framing.SetObfuscation(true)
+	b.Cleanup(func() { framing.SetObfuscation(false) })
+	runFramedBatchWrites(b, func(c net.Conn) net.Conn { return framing.ObfuscateDial(c) })
+}
+
+func runFramedBatchWrites(b *testing.B, wrap func(net.Conn) net.Conn) {
 	raw, peer := batchTCPPair(b, false)
+	if wrap != nil {
+		raw = wrap(raw)
+	}
 	conn := &batchTestConn{Conn: raw, omitSizes: true}
 	drained := make(chan struct{})
 	go func() { io.Copy(io.Discard, peer); close(drained) }()
@@ -553,11 +570,19 @@ func BenchmarkCrossClientThroughput(b *testing.B) {
 	silenceDataPlaneLogs()
 	const chunkSize = 32 * 1024
 
-	h := newXClientHarness(b, 0)
-	defer h.close()
-
-	for _, flows := range []int{1, 8} {
-		b.Run(fmt.Sprintf("crossclient/flows=%d", flows), func(b *testing.B) { h.runFlows(b, xclientBIP, chunkSize, flows) })
-		b.Run(fmt.Sprintf("cluster/flows=%d", flows), func(b *testing.B) { h.runFlows(b, xclientCIP, chunkSize, flows) })
+	for _, obf := range []bool{false, true} {
+		if obf {
+			framing.SetObfuscation(true)
+		}
+		h := newXClientHarness(b, 0)
+		prefix := ""
+		if obf {
+			prefix = "obfuscated/"
+		}
+		for _, flows := range []int{1, 8} {
+			b.Run(fmt.Sprintf("%scrossclient/flows=%d", prefix, flows), func(b *testing.B) { h.runFlows(b, xclientBIP, chunkSize, flows) })
+			b.Run(fmt.Sprintf("%scluster/flows=%d", prefix, flows), func(b *testing.B) { h.runFlows(b, xclientCIP, chunkSize, flows) })
+		}
 	}
+	framing.SetObfuscation(false)
 }

@@ -877,7 +877,7 @@ func TestTransportIntegration_GenerationRetiresAllEndpoints(t *testing.T) {
 	}
 	var active []net.Conn
 	for _, targetEndpoint := range []transportEndpoint{endpointTCP, endpointUDP, endpointXDS} {
-		c, e := nm.transport.dialTransport(nm.transport.ctx, targetEndpoint, endpoint.TCPTransporter(nil))
+		c, e := nm.transport.dialTransport(nm.transport.ctx, targetEndpoint, plainTransportDialer{})
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -1079,7 +1079,7 @@ func TestTransportDiagnostics_RecoveryNeedsValidatedHeartbeat(t *testing.T) {
 	nm.transport.heartbeatStats.MarkReply()
 	nm.transport.signalTransportFailure(first.id, context.DeadlineExceeded)
 	current := waitNextTransport(t, nm, first.id)
-	conn, err := nm.transport.dialTransport(ctx, endpointTCP, endpoint.TCPTransporter(nil))
+	conn, err := nm.transport.dialTransport(ctx, endpointTCP, plainTransportDialer{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1195,7 +1195,7 @@ func TestTransportIntegration_SupervisorBootstrapRecoverySticky(t *testing.T) {
 	for range 10 {
 		nm.transport.requestNetworkCheck()
 	}
-	c, e := nm.transport.dialTransport(ctx, endpointTCP, endpoint.TCPTransporter(nil))
+	c, e := nm.transport.dialTransport(ctx, endpointTCP, plainTransportDialer{})
 	if e != nil {
 		t.Fatal(e)
 	}
