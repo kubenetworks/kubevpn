@@ -43,6 +43,9 @@ func TestPersistence_LegacyJSONRealGRPCReplay(t *testing.T) {
 	if len(peer.requests) != 1 {
 		t.Fatalf("replayed %d requests", len(peer.requests))
 	}
+	if len(peer.restores) != 1 || !peer.restores[0] {
+		t.Fatalf("replay did not mark the internal Connect as a restore: %v", peer.restores)
+	}
 	req := peer.requests[0]
 	if req.OwnerID != "disk-owner" || req.Namespace != "work" || req.ManagerNamespace != "manager" || req.KubeconfigBytes != "original-kubeconfig" || req.Image != "image:v1" || req.OriginKubeconfigPath != "/old/config" {
 		t.Fatalf("legacy replay changed request: %v", req)

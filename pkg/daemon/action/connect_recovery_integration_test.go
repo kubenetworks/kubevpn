@@ -97,6 +97,7 @@ type recoveryPeer struct {
 	statusErr   error
 	connectErr  error
 	requests    []*rpc.ConnectRequest
+	restores    []bool
 	statusCalls int
 	bounded     bool
 }
@@ -121,6 +122,7 @@ func (p *recoveryPeer) Connect(stream rpc.Daemon_ConnectServer) error {
 	}
 	p.mu.Lock()
 	p.requests = append(p.requests, req)
+	p.restores = append(p.restores, isConnectionRestore(stream.Context()))
 	if p.connectErr != nil {
 		err := p.connectErr
 		p.mu.Unlock()

@@ -158,11 +158,19 @@ where OS routes are owned by another VPN client, or for pure host egress.
 ### 5.2 `kubevpn connect --socks` (user-daemon-managed)
 
 `connect --socks` (optionally `--egress`) sets `ConnectRequest.{EnableSocks,SocksListen,SocksEgress}`.
-The **user daemon** starts the `Server` as an in-process goroutine once the connection is live
-(`forwardConnectToSudo` → `startManagedSocksProxy`), bound to the connection's `SessionLifecycle.Ctx`
-and stopped via an `AddRollbackFunc` on disconnect/quit. Because `SocksListen`/`SocksEgress` travel in
-the persisted `ConnectRequest` (`RequestRaw`), a daemon restart replays the connection and restarts the
-proxy automatically. `kubevpn status -o wide` shows the listen address and mode (`egress`/`cluster`);
-`-o json`/`-o yaml` expose `SocksListenAddr` / `SocksEgress`.
+The **user daemon** splits managed startup into prepare/run. Before creating the traffic manager or
+root data plane, it constructs the connector and synchronously binds the TCP listener. An explicit
+connect therefore reports port conflicts before any cluster/TUN mutation. After the data plane is
+live, `localproxy.ServeSOCKS5` serves that listener in-process; the actual bound address (including
+an allocated port for `:0`) is published to status. The listener is bound to the connection's
+`SessionLifecycle.Ctx` and closed by an `AddRollbackFunc` on failure, disconnect, or quit.
+
+Because `SocksListen`/`SocksEgress` travel in the persisted `ConnectRequest` (`RequestRaw`), a daemon
+restart replays the connection and prepares the proxy again. Internal replay carries a restore
+marker: if the local port is occupied, recovery keeps the VPN control/data plane, leaves SOCKS
+unadvertised, and logs the error rather than tearing down a healthy root session. A later restart
+or explicit reconnect can retry. `kubevpn status -o wide` shows the listen address and mode
+(`egress`/`cluster`); `-o json`/`-o yaml` expose `SocksListenAddr` / `SocksEgress`. Standalone
+`proxy-out` keeps the existing `Server.ListenAndServe` behavior.
 
 (This replaces the earlier model that forked a detached `proxy-out` subprocess tracked by a PID file.)

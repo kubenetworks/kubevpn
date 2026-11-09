@@ -24,6 +24,18 @@ const (
 	socks5ReplyUnsup    = 7
 )
 
+// ServeSOCKS5 serves SOCKS5 on an already-bound listener. The caller owns the
+// listener and is responsible for closing it when ctx is canceled.
+func ServeSOCKS5(ctx context.Context, listener net.Listener, connector Connector) error {
+	if listener == nil {
+		return fmt.Errorf("listener is required")
+	}
+	if connector == nil {
+		return fmt.Errorf("connector is required")
+	}
+	return serveSOCKS5(ctx, listener, connector)
+}
+
 func serveSOCKS5(ctx context.Context, ln net.Listener, connector Connector) error {
 	for {
 		conn, err := ln.Accept()

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"k8s.io/utils/ptr"
@@ -69,7 +70,8 @@ func (svr *Server) LoadFromConfig(ctx context.Context) error {
 				continue
 			}
 			var resp rpc.Daemon_ConnectClient
-			resp, err = client.Connect(context.Background())
+			restoreCtx := metadata.NewOutgoingContext(ctx, metadata.Pairs(connectionRestoreMetadataKey, "true"))
+			resp, err = client.Connect(restoreCtx)
 			if err != nil {
 				continue
 			}

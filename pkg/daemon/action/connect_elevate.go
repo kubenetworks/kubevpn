@@ -2,11 +2,14 @@ package action
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
 	"sync"
 
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/cluster/manager"
@@ -216,6 +219,10 @@ func (svr *Server) forwardConnectToSudo(
 	connectionID string,
 	logger *log.Logger,
 ) error {
+	socksProxy, err := prepareManagedSocksProxyForConnect(ctx, connect, req, isConnectionRestore(resp.Context()))
+	if err != nil {
+		return err
+	}
 	if err := connect.CreateOutboundPod(ctx); err != nil {
 		return err
 	}
@@ -258,10 +265,9 @@ func (svr *Server) forwardConnectToSudo(
 	}
 	svr.registry.add(connect, true)
 
-	// Start the user-daemon-managed local SOCKS5 proxy (if requested) now that the
-	// connection is live. It runs in-process, bound to the connection's context, and is
-	// stopped via a rollback func on disconnect/quit.
-	startManagedSocksProxy(ctx, connect, req)
+	// The listener was bound before any cluster/TUN changes. Publish it only
+	// after the data plane is live; cleanup owns cancellation and listener close.
+	socksProxy.start(connect)
 
 	// Refresh the cached sudo-daemon health snapshot so the very next status query
 	// sees this connection as "connected" instead of hitting a stale (pre-connect) cache.
@@ -271,44 +277,45 @@ func (svr *Server) forwardConnectToSudo(
 	})
 }
 
-// startManagedSocksProxy launches a user-daemon-managed local SOCKS5 proxy for the
-// connection when req.EnableSocks is set. The proxy runs as a goroutine bound to a child of
-// the connection's context and is stopped via a rollback func (invoked on disconnect/quit).
-// With SocksEgress it dials directly from the host (host DNS + network, socks5h egress);
-// otherwise it resolves cluster Services and port-forwards via the Kubernetes API. Failures
-// (e.g. listen address in use) are logged, not fatal — they must not abort a live connect.
-func startManagedSocksProxy(ctx context.Context, connect *handler.ConnectOptions, req *rpc.ConnectRequest) {
+const connectionRestoreMetadataKey = "kubevpn-connection-restore"
+
+// preparedSocksProxy owns a synchronously bound listener. Binding happens before
+// cluster or TUN mutations so an explicit --socks failure needs no root rollback.
+type preparedSocksProxy struct {
+	ctx       context.Context
+	cancel    context.CancelFunc
+	listener  net.Listener
+	connector localproxy.Connector
+	egress    bool
+}
+
+func prepareManagedSocksProxyForConnect(ctx context.Context, connect *handler.ConnectOptions, req *rpc.ConnectRequest, restore bool) (*preparedSocksProxy, error) {
+	proxy, err := prepareManagedSocksProxy(ctx, connect, req)
+	if err != nil && restore {
+		// A local port conflict must not tear down a healthy root session while
+		// replaying persisted state. RequestRaw retains the SOCKS intent for a
+		// later explicit reconnect or daemon restart.
+		plog.G(ctx).Errorf("Local SOCKS proxy was not restored; continuing VPN recovery without it: %v", err)
+		return nil, nil
+	}
+	return proxy, err
+}
+
+func prepareManagedSocksProxy(ctx context.Context, connect *handler.ConnectOptions, req *rpc.ConnectRequest) (*preparedSocksProxy, error) {
 	if !req.GetEnableSocks() {
-		return
+		return nil, nil
 	}
-	listen := req.GetSocksListen()
-	if listen == "" {
-		listen = defaultSocksListen
-	}
-	connect.SocksListenAddr = listen
-	connect.SocksEgress = req.GetSocksEgress()
-
-	socksCtx, cancel := context.WithCancel(ctx)
-	connect.AddRollbackFunc(func() error {
-		cancel()
-		return nil
-	})
-
 	var connector localproxy.Connector
 	if req.GetSocksEgress() {
 		connector = localproxy.NewHostConnector()
 	} else {
 		restConfig, err := connect.GetFactory().ToRESTConfig()
 		if err != nil {
-			plog.G(ctx).Errorf("Local SOCKS proxy not started (rest config): %v", err)
-			cancel()
-			return
+			return nil, fmt.Errorf("build local SOCKS REST config: %w", err)
 		}
 		clusterAPI, clientset, err := localproxy.NewClusterAPI(restConfig)
 		if err != nil {
-			plog.G(ctx).Errorf("Local SOCKS proxy not started (cluster api): %v", err)
-			cancel()
-			return
+			return nil, fmt.Errorf("build local SOCKS cluster client: %w", err)
 		}
 		connector = &localproxy.ClusterConnector{
 			Client:           clusterAPI,
@@ -317,12 +324,46 @@ func startManagedSocksProxy(ctx context.Context, connect *handler.ConnectOptions
 			DefaultNamespace: connect.GetWorkloadNamespace(),
 		}
 	}
+	listen := req.GetSocksListen()
+	if listen == "" {
+		listen = defaultSocksListen
+	}
+	listener, err := net.Listen("tcp", listen)
+	if err != nil {
+		return nil, fmt.Errorf("listen for local SOCKS5 proxy on %s: %w", listen, err)
+	}
+	socksCtx, cancel := context.WithCancel(ctx)
+	proxy := &preparedSocksProxy{ctx: socksCtx, cancel: cancel, listener: listener, connector: connector, egress: req.GetSocksEgress()}
+	connect.AddRollbackFunc(func() error {
+		cancel()
+		if err := listener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+			return fmt.Errorf("close local SOCKS5 listener: %w", err)
+		}
+		return nil
+	})
+	return proxy, nil
+}
 
+func (p *preparedSocksProxy) start(connect *handler.ConnectOptions) {
+	if p == nil {
+		return
+	}
+	addr := p.listener.Addr().String()
+	connect.SocksListenAddr = addr
+	connect.SocksEgress = p.egress
 	go func() {
-		srv := &localproxy.Server{Connector: connector, SOCKSListenAddr: listen}
-		if err := srv.ListenAndServe(socksCtx); err != nil {
-			plog.G(ctx).Warnf("Local SOCKS proxy on %s stopped: %v", listen, err)
+		if err := localproxy.ServeSOCKS5(p.ctx, p.listener, p.connector); err != nil && !errors.Is(err, net.ErrClosed) {
+			plog.G(p.ctx).Warnf("Local SOCKS proxy on %s stopped: %v", addr, err)
 		}
 	}()
-	plog.G(ctx).Infof("Started managed local SOCKS5 proxy on %s (egress=%t)", listen, req.GetSocksEgress())
+	plog.G(p.ctx).Infof("Started managed local SOCKS5 proxy on %s (egress=%t)", addr, p.egress)
+}
+
+func isConnectionRestore(ctx context.Context) bool {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return false
+	}
+	values := md.Get(connectionRestoreMetadataKey)
+	return len(values) > 0 && values[0] == "true"
 }
