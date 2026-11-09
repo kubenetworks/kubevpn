@@ -41,6 +41,8 @@ blocks other OS users. Windows ACLs are separate from these POSIX modes.
 
 ```
 Start(ctx)
+  ├── acquire role instance lock       ── held until Serve exits; second process fails fast
+  ├── probe pre-existing socket        ── protects older unlocked daemons; stale sockets remain recoverable
   ├── initLogging(isSudo)              ── lumberjack rotating file; wire logrus/klog/gvisor/plog
   ├── remove stale socket; net.Listen("unix", sockPath)
   │     └── SetUnlinkOnClose(false)   ── do NOT unlink on close (stale-detection owns the file)
@@ -102,10 +104,10 @@ guarded by `clientMu`):
 1. If the socket file is missing ⇒ `ErrDaemonNotRunning`.
 2. Return the cached client if present.
 3. Otherwise `grpc.NewClient("unix:"+sock, insecure, WithNoProxy)`.
-4. **Health gate**: gRPC health `Check`; non-`SERVING` ⇒ `ErrDaemonNotRunning`.
-5. **Version negotiation**: call `Upgrade{ClientVersion}`; if `NeedUpgrade`, send `Quit` to the
-   outdated daemon, **do not cache**, and return `ErrDaemonVersionMismatch` so the caller spawns a
-   fresh daemon.
+4. **Health gate**: gRPC health `Check` with `DaemonProbeTimeout`; non-`SERVING` ⇒ `ErrDaemonNotRunning`.
+5. **Version negotiation**: call `Upgrade{ClientVersion}` with the same bounded probe policy. If
+   `NeedUpgrade`, send `Quit` with the separate, longer `DaemonQuitTimeout`; **do not cache**, and
+   return `ErrDaemonVersionMismatch` so the caller spawns a fresh daemon.
 6. Cache and return.
 
 `getClientWithoutCache` is the uncached variant used by the watchdog (it must not poison the
@@ -118,22 +120,26 @@ calling `runDaemon` for whichever is absent.
 
 `runDaemon(exe, isSudo)`:
 1. Short-circuit if `GetClient` already succeeds.
-2. Remove any stale PID file.
-3. Call the platform-specific `startDaemonProcess`, which launches via `pkg/daemon/elevate`
+2. Acquire the role's short-lived startup lock, then re-check `GetClient` because another CLI may
+   have completed startup while this process waited. This lock is separate from the daemon's
+   lifetime instance lock.
+3. Remove any stale PID file.
+4. Call the platform-specific `startDaemonProcess`, which launches via `pkg/daemon/elevate`
    (see [34-privilege-escalation.md](34-privilege-escalation.md)):
    - sudo + not admin → `RunCmdWithElevated(exe, ["daemon","--sudo"], output)` (UAC/sudo prompt)
    - sudo + admin → `RunCmd(exe, ["daemon","--sudo"], output)`
    - user → `RunCmd(exe, ["daemon"], output)`
    - Unix supplies a private regular startup-log file; Windows passes nil and keeps ShellExecute.
-4. After launch/authentication returns, wait for the PID file every **50ms**, with a **30-second**
+5. After launch/authentication returns, wait for the PID file every **50ms**, with a **30-second**
    maximum (or the caller's earlier deadline). Cancellation and filesystem errors return directly;
    a failed wait does not proceed to client acquisition. On success, re-acquire the client.
 
 Launch/readiness/client-acquisition failures include the daemon role and diagnostic log paths.
 The readiness limit starts **after** sudo authentication, not while a user enters their password.
 This is a PID-wait limit, **not** a complete `StartupDaemon` deadline: existing `GetClient`
-health/version probes still use their own background context. A readiness timeout does not kill
-an independently running daemon.
+health/version probes have their own `DaemonProbeTimeout`, and version-mismatch cleanup uses
+`DaemonQuitTimeout`. Long-lived RPC streams do not inherit these bootstrap deadlines. A readiness
+timeout does not kill an independently running daemon.
 
 ## 8. Logging & pprof
 

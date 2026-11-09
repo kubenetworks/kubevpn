@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
 	golog "log"
 	"net"
 	"net/http"
@@ -47,13 +48,21 @@ type SvrOption struct {
 
 // Start initializes logging, creates the Unix socket listener, and serves the gRPC daemon until the context is cancelled.
 func (o *SvrOption) Start(ctx context.Context) error {
-	l := initLogging(o.IsSudo)
-
-	sockPath := config.GetSockPath(o.IsSudo)
-	err := os.Remove(sockPath)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
+	instanceLock, err := acquireDaemonInstanceLock(o.IsSudo)
+	if err != nil {
 		return err
 	}
+	defer instanceLock.Close()
+
+	sockPath := config.GetSockPath(o.IsSudo)
+	if err = rejectActiveDaemonSocket(ctx, o.IsSudo); err != nil {
+		return err
+	}
+	if err = os.Remove(sockPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	l := initLogging(o.IsSudo)
+
 	o.ctx, o.cancel = context.WithCancel(ctx)
 	var lc net.ListenConfig
 	lis, err := lc.Listen(o.ctx, "unix", sockPath)
@@ -135,6 +144,29 @@ func (o *SvrOption) Stop() {
 	}
 }
 
+// rejectActiveDaemonSocket protects an older daemon that predates instance
+// locks. A failed health probe is treated as a stale socket and remains
+// recoverable; a healthy socket is never removed by a second process.
+func rejectActiveDaemonSocket(ctx context.Context, isSudo bool) error {
+	sockPath := config.GetSockPath(isSudo)
+	if _, err := os.Stat(sockPath); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, config.DaemonProbeTimeout)
+	defer cancel()
+	_, conn, err := getClientWithoutCache(probeCtx, isSudo)
+	if conn != nil {
+		_ = conn.Close()
+	}
+	if err == nil {
+		return fmt.Errorf("%w: socket %s is active", errDaemonAlreadyRunning, sockPath)
+	}
+	return nil
+}
+
 // createDowngradingHandler takes a gRPC server and a plain HTTP handler, and returns an HTTP handler that has the
 // capability of handling HTTP requests and gRPC requests that may require downgrading the response to gRPC-Web or gRPC-WebSocket.
 //
@@ -161,7 +193,9 @@ func (o *SvrOption) detectUnixSocksFile(ctx context.Context) {
 			o.Stop()
 			return
 		}
-		client, conn, err := getClientWithoutCache(ctx, o.IsSudo)
+		probeCtx, cancel := context.WithTimeout(ctx, config.DaemonProbeTimeout)
+		defer cancel()
+		client, conn, err := getClientWithoutCache(probeCtx, o.IsSudo)
 		if conn != nil {
 			defer conn.Close()
 		}
@@ -170,7 +204,7 @@ func (o *SvrOption) detectUnixSocksFile(ctx context.Context) {
 		}
 
 		var identify *rpc.IdentifyResponse
-		identify, err = client.Identify(ctx, &rpc.IdentifyRequest{})
+		identify, err = client.Identify(probeCtx, &rpc.IdentifyRequest{})
 		if err != nil {
 			return
 		}
