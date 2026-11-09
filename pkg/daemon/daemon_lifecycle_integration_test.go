@@ -173,6 +173,26 @@ func TestIntegration_DaemonFailureEvidencePreservesState(t *testing.T) {
 	}
 }
 
+func TestIntegration_VersionRetirementExitWindow(t *testing.T) {
+	home := newDaemonTestHome(t)
+	t.Cleanup(func() { _ = os.WriteFile(filepath.Join(home, "stop"), nil, 0600) })
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0])
+	cmd.Env = daemonHelperEnv(home, "upgrade-exit-window")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("upgrade exit-window helper failed: %v\n%s", err, output)
+	}
+	var result startupResult
+	if err = json.Unmarshal(output, &result); err != nil {
+		t.Fatalf("decode upgrade result %q: %v", output, err)
+	}
+	if result.Error != "" {
+		t.Fatalf("daemon was not relaunched after version retirement: %s", result.Error)
+	}
+}
+
 func TestDaemonStopBeforeStartDoesNotPanic(t *testing.T) {
 	(&SvrOption{}).Stop()
 }

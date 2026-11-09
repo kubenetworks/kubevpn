@@ -145,6 +145,36 @@ func runStartupHelper() error {
 		}
 		return nil
 	}
+	if mode == "upgrade-exit-window" && len(os.Args) <= 1 {
+		listener, err := holdUnresponsiveSocket(isSudo)
+		if err != nil {
+			return err
+		}
+		defer listener.Close()
+		if err = writePIDToFile(isSudo); err != nil {
+			return err
+		}
+		config.DaemonProbeTimeout = 50 * time.Millisecond
+		go func() {
+			// Simulate the old daemon finishing its exit after the second probe
+			// has already observed an unavailable socket.
+			time.Sleep(150 * time.Millisecond)
+			_ = listener.Close()
+			_ = os.Remove(config.GetPidPath(isSudo))
+		}()
+		exe, err := os.Executable()
+		if err != nil {
+			return err
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		err = runDaemonWithProbe(ctx, exe, isSudo, config.ErrDaemonVersionMismatch)
+		result := startupResult{}
+		if err != nil {
+			result.Error = err.Error()
+		}
+		return json.NewEncoder(os.Stdout).Encode(result)
+	}
 	if mode == "unresponsive" {
 		lis, err := holdUnresponsiveSocket(isSudo)
 		if err != nil {

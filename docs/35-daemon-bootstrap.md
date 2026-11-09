@@ -124,7 +124,8 @@ calling `runDaemon` for whichever is absent.
    is separate from the daemon's lifetime instance lock.
 2. If the probe fails but the PID is alive, preserve the PID/socket and return the probe error;
    timeout is not process-death evidence. A version-mismatched process gets `DaemonExitTimeout` to
-   finish its cleanup before relaunch.
+   finish its cleanup before relaunch. The initial version-mismatch result is retained across the
+   second probe, which may observe only `Unavailable` while the old listener is already closed.
 3. Snapshot the previous PID contents/modification time instead of deleting the file.
 4. Call the platform-specific `startDaemonProcess`, which launches via `pkg/daemon/elevate`
    (see [34-privilege-escalation.md](34-privilege-escalation.md)):

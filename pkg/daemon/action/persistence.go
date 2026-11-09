@@ -134,14 +134,25 @@ func (svr *Server) LoadFromConfig(ctx context.Context) error {
 // RestoreAndReconcile rebuilds the authoritative user registry before reaping
 // orphaned root sessions. Incomplete restores must never trigger destructive cleanup.
 func (svr *Server) RestoreAndReconcile(ctx context.Context) {
-	if err := svr.LoadFromConfig(ctx); err != nil {
-		plog.G(ctx).Errorf("Failed to restore persisted connections; skipping root reconciliation: %v", err)
+	if svr.IsSudo {
 		return
 	}
-	// Replay suppresses per-record writes so pending records cannot be dropped
-	// from the source DB. Persist the complete runtime view once instead.
-	if err := svr.OffloadToConfig(); err != nil {
-		plog.G(ctx).Errorf("Failed to persist restored connections: %v", err)
+	// Hold the persistence lock across the whole batch, not just the final
+	// write. External Connect/Disconnect persistence must not publish a partial
+	// registry while records are still being replayed.
+	svr.persistMu.Lock()
+	loadErr := svr.LoadFromConfig(ctx)
+	var persistErr error
+	if loadErr == nil {
+		persistErr = svr.offloadToConfigLocked()
+	}
+	svr.persistMu.Unlock()
+	if loadErr != nil {
+		plog.G(ctx).Errorf("Failed to restore persisted connections; skipping root reconciliation: %v", loadErr)
+		return
+	}
+	if persistErr != nil {
+		plog.G(ctx).Errorf("Failed to persist restored connections: %v", persistErr)
 	}
 	svr.ReconcileSudoConnections(ctx)
 }
@@ -230,7 +241,10 @@ func (svr *Server) OffloadToConfig() error {
 	}
 	svr.persistMu.Lock()
 	defer svr.persistMu.Unlock()
+	return svr.offloadToConfigLocked()
+}
 
+func (svr *Server) offloadToConfigLocked() error {
 	connections, _ := svr.registry.snapshot()
 	conns := make([]*connectionRecord, 0, len(connections))
 	for _, c := range connections {

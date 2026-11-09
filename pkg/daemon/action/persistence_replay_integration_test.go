@@ -8,6 +8,10 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
+
+	"google.golang.org/protobuf/proto"
+	"sigs.k8s.io/yaml"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
@@ -98,6 +102,89 @@ func TestPersistence_PartialRestoreSkipsOrphanReconcile(t *testing.T) {
 	after, err := os.ReadFile(config.GetDBPath())
 	if err != nil || !bytes.Equal(after, original) {
 		t.Fatalf("partial restore rewrote the source DB: %q, err=%v", after, err)
+	}
+}
+
+type blockingRestorePeer struct {
+	rpc.UnimplementedDaemonServer
+	svr           *Server
+	secondStarted chan struct{}
+	releaseSecond chan struct{}
+}
+
+func (p *blockingRestorePeer) Connect(stream rpc.Daemon_ConnectServer) error {
+	req, err := stream.Recv()
+	if err != nil {
+		return err
+	}
+	if req.GetConnectionID() == "b" {
+		close(p.secondStarted)
+		<-p.releaseSecond
+	}
+	raw, err := proto.Marshal(req)
+	if err != nil {
+		return err
+	}
+	p.svr.registry.add(&handler.ConnectOptions{ConnectionID: req.GetConnectionID(), RequestRaw: raw}, true)
+	return stream.Send(&rpc.ConnectResponse{ConnectionID: req.GetConnectionID()})
+}
+
+func (p *blockingRestorePeer) Status(context.Context, *rpc.StatusRequest) (*rpc.StatusResponse, error) {
+	return &rpc.StatusResponse{}, nil
+}
+
+func TestPersistence_ExternalWriteWaitsForCompleteRestore(t *testing.T) {
+	saveRestoreDB(t)
+	peer := &blockingRestorePeer{secondStarted: make(chan struct{}), releaseSecond: make(chan struct{})}
+	log := &lumberjack.Logger{Filename: filepath.Join(t.TempDir(), "restore-lock.log")}
+	defer log.Close()
+	svr := &Server{LogFile: log}
+	peer.svr = svr
+	client := recoveryGRPCClient(t, peer)
+	svr.GetClient = func(bool) (rpc.DaemonClient, error) { return client, nil }
+	conf := &Config{SchemaVersion: currentConfigSchemaVersion, SecondaryConnect: []*connectionRecord{
+		{RequestRaw: mustMarshalConnectRequest(&rpc.ConnectRequest{Namespace: "a", ConnectionID: "a"})},
+		{RequestRaw: mustMarshalConnectRequest(&rpc.ConnectRequest{Namespace: "b", ConnectionID: "b"})},
+	}}
+	encoded, err := json.Marshal(conf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeDBFile(t, encoded)
+
+	restoreDone := make(chan struct{})
+	go func() {
+		defer close(restoreDone)
+		svr.RestoreAndReconcile(context.Background())
+	}()
+	<-peer.secondStarted
+	externalDone := make(chan error, 1)
+	go func() { externalDone <- svr.OffloadToConfig() }()
+	select {
+	case err := <-externalDone:
+		t.Fatalf("external persistence published a partial registry before restore completed: %v", err)
+	case <-time.After(150 * time.Millisecond):
+	}
+	close(peer.releaseSecond)
+	<-restoreDone
+	if err := <-externalDone; err != nil {
+		t.Fatalf("external persistence after restore: %v", err)
+	}
+
+	data, err := os.ReadFile(config.GetDBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	jsonData, err := yaml.YAMLToJSON(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restored Config
+	if err = json.Unmarshal(jsonData, &restored); err != nil {
+		t.Fatal(err)
+	}
+	if len(restored.SecondaryConnect) != 2 {
+		t.Fatalf("final DB contains %d records, want both restored records", len(restored.SecondaryConnect))
 	}
 }
 

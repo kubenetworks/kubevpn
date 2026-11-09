@@ -222,15 +222,15 @@ func StartupDaemon(ctx context.Context, path ...string) error {
 	// owned by the unprivileged user. If the sudo daemon ran first it would create
 	// them as root, and the user daemon could no longer write into them (EACCES).
 	// Do NOT reorder these two blocks.
-	if cli, _ := getClientWithContext(ctx, false); cli == nil {
-		if err = runDaemon(ctx, exe, false); err != nil {
+	if cli, probeErr := getClientWithContext(ctx, false); cli == nil {
+		if err = runDaemonWithProbe(ctx, exe, false, probeErr); err != nil {
 			return err
 		}
 	}
 
 	// sudo daemon (see ordering note above)
-	if cli, _ := getClientWithContext(ctx, true); cli == nil {
-		if err = runDaemon(ctx, exe, true); err != nil {
+	if cli, probeErr := getClientWithContext(ctx, true); cli == nil {
+		if err = runDaemonWithProbe(ctx, exe, true, probeErr); err != nil {
 			return err
 		}
 	}
@@ -238,6 +238,10 @@ func StartupDaemon(ctx context.Context, path ...string) error {
 }
 
 func runDaemon(ctx context.Context, exe string, isSudo bool) error {
+	return runDaemonWithProbe(ctx, exe, isSudo, nil)
+}
+
+func runDaemonWithProbe(ctx context.Context, exe string, isSudo bool, initialProbeErr error) error {
 	lockCtx, cancelLock := context.WithTimeout(ctx, config.DaemonStartupLockTimeout)
 	startupLock, err := acquireDaemonStartupLock(lockCtx, isSudo)
 	cancelLock()
@@ -256,7 +260,10 @@ func runDaemon(ctx context.Context, exe string, isSudo bool) error {
 	role := daemonRole(isSudo)
 	pidPath := config.GetPidPath(isSudo)
 	if pidFileProcessAlive(pidPath) {
-		if !errors.Is(probeErr, config.ErrDaemonVersionMismatch) {
+		// The second probe may see only Unavailable after the first probe has
+		// already retired an outdated daemon. Preserve that initial version state.
+		retiringVersion := errors.Is(probeErr, config.ErrDaemonVersionMismatch) || errors.Is(initialProbeErr, config.ErrDaemonVersionMismatch)
+		if !retiringVersion {
 			// A timeout or transient RPC error is not evidence that the process
 			// is dead. Preserve its PID and socket instead of launching a duplicate.
 			return fmt.Errorf("%s daemon is running but client probe failed: %w", role, probeErr)
