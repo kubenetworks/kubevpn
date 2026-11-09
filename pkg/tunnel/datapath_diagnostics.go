@@ -144,7 +144,7 @@ func diagnosticStage(ctx context.Context, name, role string, slot int, generatio
 	s := &datapathStage{owner: d, ctx: ctx, name: name, role: role, slot: slot, generation: generation}
 	// Dispatcher queues outlive transport generations; do not attribute their
 	// backlog to the generation that happened to exist at routine startup.
-	if slot < 0 || name == "slot_enqueue" {
+	if slot < 0 || name == "slot_enqueue" || name == "tun_enqueue" {
 		s.scope = "scope=session"
 	} else {
 		s.scope = "generation=" + strconv.FormatUint(generation, 10)

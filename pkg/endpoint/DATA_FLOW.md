@@ -18,11 +18,13 @@ plus a separate control connection to the same forwarding endpoint.
 - Root assembly: `pkg/network/runtime.go` → `pkg/network/device.go` → tunnel handlers;
   `pkg/network/transport.go` owns SSH/port-forward generations. Transport replacement
   retains the TUN and client stacks; `address.go` applies legitimate lease changes.
-- Client: `pkg/tunnel/client.go` dispatches directly to data slot 0. `slot.go` retains
-  queues/retry state, while `attempt.go` creates a `connAttempt` per dial, owns framing
-  declaration/registration and joins both pumps before retry. `attempt_read.go` owns inbound
-  dispatch and `attempt_write.go` owns batching and socket writes. Multi-slot hashing is only
-  a private nil-stats test override.
+- Client: `pkg/tunnel/client.go` dispatches directly to data slot 0. The device
+  `tunInbound` is also the single data slot's `inbound`; there is no forwarding
+  goroutine or second queue. `slot.go` retains retry state, while `attempt.go`
+  creates a `connAttempt` per dial, owns framing declaration/registration and joins
+  both pumps before retry. `attempt_read.go` owns inbound dispatch and
+  `attempt_write.go` owns batching and socket writes. Multi-slot hashing is only a
+  private nil-stats test override.
 - Server: `pkg/tunnel/route.go` defines `Router` with private route membership,
   `peerRegistry` and `tunBridge`, not public `RouteMapTCP`/`TCPPacketChan` globals.
   `server_endpoint.go` sends per-client stack output through `readFromEndpointWriteToRoute`

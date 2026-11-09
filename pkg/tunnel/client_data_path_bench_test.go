@@ -4,12 +4,16 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"testing"
 	"time"
 
+	"github.com/sirupsen/logrus"
+
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	framing "github.com/wencaiwulue/kubevpn/v2/pkg/internal/wire"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 // BenchmarkClientDataPath covers the client forwarding hop and socket writer,
@@ -23,7 +27,9 @@ func BenchmarkClientDataPath(b *testing.B) {
 				if err != nil {
 					b.Fatal(err)
 				}
-				ctx, cancel := context.WithCancel(context.Background())
+				logger := logrus.New()
+				logger.Out = io.Discard
+				ctx, cancel := context.WithCancel(plog.WithLogger(context.Background(), logger))
 				dev := &tunDevice{
 					tunName:     "bench0",
 					tunInbound:  make(chan *packet, MaxSize),
