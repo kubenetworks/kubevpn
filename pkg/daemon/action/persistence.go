@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -154,6 +156,9 @@ func (svr *Server) OffloadToConfig() error {
 	if svr.IsSudo {
 		return nil
 	}
+	svr.persistMu.Lock()
+	defer svr.persistMu.Unlock()
+
 	connections, _ := svr.registry.snapshot()
 	conns := make([]*connectionRecord, 0, len(connections))
 	for _, c := range connections {
@@ -173,13 +178,55 @@ func (svr *Server) OffloadToConfig() error {
 	if err != nil {
 		return err
 	}
-	err = os.WriteFile(config.GetDBPath(), yamlConf, config.FileModeFile)
-	return err
+	return writeFileAtomically(config.GetDBPath(), yamlConf, config.FileModePrivateFile)
 }
 
-// CleanupConfig removes the persisted configuration file from disk.
+// CleanupConfig removes the user daemon's persisted configuration file from disk.
 func (svr *Server) CleanupConfig() error {
+	if svr.IsSudo {
+		return nil
+	}
+	svr.persistMu.Lock()
+	defer svr.persistMu.Unlock()
 	return os.Remove(config.GetDBPath())
+}
+
+var renameFile = os.Rename
+
+// writeFileAtomically replaces path only after a complete private temporary file
+// has been written and synced in the same directory.
+func writeFileAtomically(path string, data []byte, mode os.FileMode) (err error) {
+	dir := filepath.Dir(path)
+	f, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("create temporary file: %w", err)
+	}
+	tempPath := f.Name()
+	defer func() {
+		_ = f.Close()
+		if err != nil {
+			_ = os.Remove(tempPath)
+		}
+	}()
+	if err = f.Chmod(mode); err != nil {
+		return fmt.Errorf("set temporary file permissions: %w", err)
+	}
+	if _, err = f.Write(data); err != nil {
+		return fmt.Errorf("write temporary file: %w", err)
+	}
+	if err = f.Sync(); err != nil {
+		return fmt.Errorf("sync temporary file: %w", err)
+	}
+	if err = f.Close(); err != nil {
+		return fmt.Errorf("close temporary file: %w", err)
+	}
+	if err = renameFile(tempPath, path); err != nil {
+		return fmt.Errorf("replace persisted configuration: %w", err)
+	}
+	if err = syncDirectory(dir); err != nil {
+		return fmt.Errorf("sync configuration directory: %w", err)
+	}
+	return nil
 }
 
 type tunIP struct {

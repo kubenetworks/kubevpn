@@ -18,7 +18,9 @@ func (svr *Server) Disconnect(resp rpc.Daemon_DisconnectServer) (err error) {
 	if !svr.IsSudo {
 		defer func() {
 			if err == nil {
-				_ = svr.OffloadToConfig()
+				if persistErr := svr.OffloadToConfig(); persistErr != nil {
+					plog.G(resp.Context()).Errorf("Failed to persist connections: %v", persistErr)
+				}
 			}
 		}()
 	}

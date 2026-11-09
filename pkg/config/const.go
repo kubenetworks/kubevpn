@@ -34,8 +34,10 @@ const (
 	FileModeFile os.FileMode = 0644
 	// FileModeExecutable is the mode for executables and directories: rwxr-xr-x.
 	FileModeExecutable os.FileMode = 0755
-	// FileModePrivate is the mode for owner-only files/directories: rwx------.
+	// FileModePrivate is the mode for owner-only executables: rwx------.
 	FileModePrivate os.FileMode = 0700
+	// FileModePrivateFile is the mode for owner-only regular files: rw-------.
+	FileModePrivateFile os.FileMode = 0600
 	// FileModeSocket is the mode for the daemon unix socket: rw-rw-rw-.
 	FileModeSocket os.FileMode = 0666
 )

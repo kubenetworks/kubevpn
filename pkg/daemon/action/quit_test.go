@@ -2,6 +2,7 @@ package action
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -62,6 +63,11 @@ func TestQuit_StepEmittedOnlyByUserDaemon(t *testing.T) {
 
 	run := func(t *testing.T, isSudo bool) (stream string, cleanupRan bool) {
 		preserveDBFile(t)
+		dbPath := config.GetDBPath()
+		const persisted = "persisted-connections"
+		if err := os.WriteFile(dbPath, []byte(persisted), 0600); err != nil {
+			t.Fatalf("write persisted state: %v", err)
+		}
 
 		var ran atomic.Bool
 		conn := &handler.ConnectOptions{}
@@ -78,6 +84,14 @@ func TestQuit_StepEmittedOnlyByUserDaemon(t *testing.T) {
 
 		if err := svr.Quit(resp); err != nil {
 			t.Fatalf("Quit returned error: %v", err)
+		}
+		data, err := os.ReadFile(dbPath)
+		if isSudo {
+			if err != nil || string(data) != persisted {
+				t.Fatalf("root daemon must preserve user persisted state: data=%q, err=%v", data, err)
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("user daemon should remove persisted state, got err=%v", err)
 		}
 		return strings.Join(resp.sent, "\n"), ran.Load()
 	}
