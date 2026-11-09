@@ -656,3 +656,65 @@ func TestRetryPacing_JoinsOldWriterPreservesQueue(t *testing.T) {
 	}
 	checkBatchRefs(t, append([]*packet{first}, suffix...))
 }
+
+func TestRetryPacing_PartialBatchReconnectDoesNotReplay(t *testing.T) {
+	previousObfuscation := framing.ObfuscationEnabled()
+	framing.SetObfuscation(false)
+	t.Cleanup(func() { framing.SetObfuscation(previousObfuscation) })
+	h := newPacingHarness(t)
+	retryResume := make(chan struct{})
+	secondDialStarted := make(chan struct{})
+	originalDial := h.slot.forward.DialContext
+	var dialCount atomic.Int32
+	h.slot.forward.DialContext = func(ctx context.Context) (*framing.Conn, error) {
+		if dialCount.Add(1) == 2 {
+			close(secondDialStarted)
+			select {
+			case <-retryResume:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		return originalDial(ctx)
+	}
+	h.start()
+	fault := &batchTestConn{limit: 45000, failAfter: 1}
+	var packets []*packet
+	for i, size := range []int{40000, 20000, 10000, 20, 20} {
+		pkt := batchPacket(size, i)
+		packets = append(packets, pkt)
+		h.slot.inbound <- pkt
+	}
+	firstPeer := h.dial(pacingPlan{wrap: func(conn net.Conn) net.Conn {
+		fault.Conn = conn
+		return fault
+	}})
+	defer firstPeer.Close()
+
+	pacingAwait(t, secondDialStarted, "second dial gate")
+	if got := len(h.slot.inbound); got != 2 {
+		t.Fatalf("untouched suffix length = %d, want 2", got)
+	}
+	close(retryResume)
+	secondPeer := h.dial(pacingPlan{})
+	defer secondPeer.Close()
+	_ = secondPeer.SetReadDeadline(time.Now().Add(3 * time.Second))
+	for _, seq := range []int{3, 4} {
+		var header [2]byte
+		if _, err := io.ReadFull(secondPeer, header[:]); err != nil {
+			t.Fatal(err)
+		}
+		payload := make([]byte, 18)
+		if _, err := io.ReadFull(secondPeer, payload); err != nil {
+			t.Fatal(err)
+		}
+		for _, value := range payload {
+			if value != byte(seq) {
+				t.Fatalf("received replay/corrupt suffix byte = %d, want %d", value, seq)
+			}
+		}
+	}
+	h.cancel()
+	pacingAwait(t, h.done, "partial batch replacement join")
+	checkBatchRefs(t, packets)
+}

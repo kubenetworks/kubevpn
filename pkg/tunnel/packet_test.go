@@ -3,6 +3,7 @@ package tunnel
 import (
 	"bytes"
 	"encoding/binary"
+	"sync"
 	"testing"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -80,4 +81,34 @@ func TestPacketRefcountCharacterization(t *testing.T) {
 	if got := pkt.refs.Load(); got != -1 {
 		t.Fatalf("packet refs after final release = %d, want -1", got)
 	}
+}
+
+func TestPacketSharedOwnersReleaseOnce(t *testing.T) {
+	pkt := newPacket(config.LPool.Get().([]byte)[:], typePrefixLen, nil, nil)
+	const consumers = 3
+	pkt.acquire()
+	pkt.acquire()
+	var wg sync.WaitGroup
+	wg.Add(consumers)
+	for range consumers {
+		go func() {
+			defer wg.Done()
+			pkt.release()
+		}()
+	}
+	wg.Wait()
+	if got := pkt.refs.Load(); got != -1 {
+		t.Fatalf("refs after all owners released = %d, want -1", got)
+	}
+}
+
+func TestPacketImmediateDoubleReleasePanics(t *testing.T) {
+	pkt := newPacket(config.LPool.Get().([]byte)[:], typePrefixLen, nil, nil)
+	pkt.release()
+	defer func() {
+		if recover() == nil {
+			t.Fatal("double release before reuse did not panic")
+		}
+	}()
+	pkt.release()
 }
