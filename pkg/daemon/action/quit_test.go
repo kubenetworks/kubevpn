@@ -68,6 +68,13 @@ func TestQuit_StepEmittedOnlyByUserDaemon(t *testing.T) {
 		if err := os.WriteFile(dbPath, []byte(persisted), 0600); err != nil {
 			t.Fatalf("write persisted state: %v", err)
 		}
+		tempFile, err := os.CreateTemp(config.GetTempPath(), "quit-ownership-*")
+		if err != nil {
+			t.Fatalf("create temporary kubeconfig: %v", err)
+		}
+		tempPath := tempFile.Name()
+		_ = tempFile.Close()
+		t.Cleanup(func() { _ = os.Remove(tempPath) })
 
 		var ran atomic.Bool
 		conn := &handler.ConnectOptions{}
@@ -92,6 +99,13 @@ func TestQuit_StepEmittedOnlyByUserDaemon(t *testing.T) {
 			}
 		} else if !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("user daemon should remove persisted state, got err=%v", err)
+		}
+		_, tempErr := os.Stat(tempPath)
+		if isSudo && tempErr != nil {
+			t.Fatalf("root daemon removed a user-owned temporary file: %v", tempErr)
+		}
+		if !isSudo && !errors.Is(tempErr, os.ErrNotExist) {
+			t.Fatalf("user daemon should clean temporary files, got err=%v", tempErr)
 		}
 		return strings.Join(resp.sent, "\n"), ran.Load()
 	}
