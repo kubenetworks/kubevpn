@@ -145,9 +145,10 @@ timeout does not kill an independently running daemon.
 
 `initLogging` builds a **lumberjack** rotating logger (`100MB` max size, `3` backups, `3` days,
 local time, daily `Rotate()` at midnight via `rotateLog`) and redirects logrus, std `log`, klog,
-gvisor `glog`, and `plog.L` into it at Debug level; `rest` client warnings are silenced.
-`CmdDaemon` additionally starts a pprof server per side and, for the sudo daemon, dumps all pprof
-profiles to disk on exit.
+gvisor `glog`, and `plog.L` into it at Debug level; `rest` client warnings are silenced. The rotation
+goroutine exits on daemon cancellation and is joined before the log file closes. Rotation failures
+fall back to stderr/startup-log diagnostics. `CmdDaemon` additionally starts a pprof server per side
+and, for the sudo daemon, dumps all pprof profiles to disk on exit.
 
 ## 9. Related Files
 

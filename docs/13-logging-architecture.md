@@ -24,6 +24,11 @@ replaced at the next actual launch. They do not rotate, so unusually noisy raw s
 file; routine daemon logging still uses lumberjack. The CLI closes its copy of the descriptor after
 launch, but the child retains its own. See [35-daemon-bootstrap.md](35-daemon-bootstrap.md).
 
+Structured logs retain lumberjack's `100MB` size limit, three backups, three-day retention, and
+midnight rotation. The rotation timer is bound to the daemon context: shutdown cancels it and waits
+for the goroutine before closing the log file. Rotation errors are also written to stderr, so a
+failed file sink cannot hide the error; detached daemons capture that fallback in the startup log.
+
 ## Architecture
 
 ```
