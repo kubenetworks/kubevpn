@@ -169,7 +169,10 @@ Because `SocksListen`/`SocksEgress` travel in the persisted `ConnectRequest` (`R
 restart replays the connection and prepares the proxy again. Internal replay carries a restore
 marker: if the local port is occupied, recovery keeps the VPN control/data plane, leaves SOCKS
 unadvertised, and logs the error rather than tearing down a healthy root session. A later restart
-or explicit reconnect can retry. `kubevpn status -o wide` shows the listen address and mode
+or explicit reconnect can retry. If a running listener exits, its advertised address is cleared
+with generation-based state protection. The next explicit connect re-prepares SOCKS only when no
+listener is advertised; a bind error leaves the retained VPN untouched, and a healthy listener is
+never moved implicitly. `kubevpn status -o wide` shows the listen address and mode
 (`egress`/`cluster`); `-o json`/`-o yaml` expose `SocksListenAddr` / `SocksEgress`. Standalone
 `proxy-out` keeps the existing `Server.ListenAndServe` behavior.
 

@@ -56,7 +56,7 @@ func recordConnection(c *handler.ConnectOptions) *connectionRecord {
 		RequestRaw: slices.Clone(c.RequestRaw), ManagerNamespace: c.ManagerNamespace,
 		WorkloadNamespace: c.WorkloadNamespace, ExtraRouteInfo: recordRoute(c.ExtraRouteInfo),
 		OriginKubeconfigPath: c.OriginKubeconfigPath, Image: c.Image, ImagePullSecretName: c.ImagePullSecretName,
-		OwnerID: c.OwnerID, ConnectionID: c.ConnectionID, SocksListenAddr: c.SocksListenAddr, SocksEgress: c.SocksEgress,
+		OwnerID: c.OwnerID, ConnectionID: c.ConnectionID, SocksListenAddr: c.GetSocksListenAddr(), SocksEgress: c.GetSocksEgress(),
 	}
 	if s := c.GetSync(); s != nil {
 		record.Sync = &syncRecord{

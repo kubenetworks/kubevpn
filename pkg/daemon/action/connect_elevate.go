@@ -117,6 +117,12 @@ func (svr *Server) redirectConnectToSudoDaemon(req *rpc.ConnectRequest, resp rpc
 		if err = svr.recoverDataPlane(resp.Context(), req, existing, resp, cli, &connResp, &connRespMu); err != nil {
 			return err
 		}
+		// The temporary session is torn down on return, so a replacement SOCKS
+		// listener must be owned by the retained control session instead.
+		socksCtx := plog.WithLogger(context.Background(), logger)
+		if err = reconcileManagedSocksProxy(socksCtx, existing, req, isConnectionRestore(resp.Context())); err != nil {
+			return err
+		}
 		svr.registry.use(connect.ConnectionID)
 		logger.Infof("Connected with cluster")
 		return resp.Send(&rpc.ConnectResponse{
@@ -289,6 +295,26 @@ type preparedSocksProxy struct {
 	egress    bool
 }
 
+func reconcileManagedSocksProxy(ctx context.Context, existing handler.Connection, req *rpc.ConnectRequest, restore bool) error {
+	if !req.GetEnableSocks() {
+		return nil
+	}
+	control, ok := existing.(*handler.ConnectOptions)
+	if !ok {
+		return fmt.Errorf("connection %s is not a control session", existing.GetConnectionID())
+	}
+	if control.GetSocksListenAddr() != "" {
+		// Reconnect is idempotent and never moves a healthy listener implicitly.
+		return nil
+	}
+	proxy, err := prepareManagedSocksProxyForConnect(ctx, control, req, restore)
+	if err != nil {
+		return err
+	}
+	proxy.start(control)
+	return nil
+}
+
 func prepareManagedSocksProxyForConnect(ctx context.Context, connect *handler.ConnectOptions, req *rpc.ConnectRequest, restore bool) (*preparedSocksProxy, error) {
 	proxy, err := prepareManagedSocksProxy(ctx, connect, req)
 	if err != nil && restore {
@@ -349,9 +375,9 @@ func (p *preparedSocksProxy) start(connect *handler.ConnectOptions) {
 		return
 	}
 	addr := p.listener.Addr().String()
-	connect.SocksListenAddr = addr
-	connect.SocksEgress = p.egress
+	generation := connect.SetSocksState(addr, p.egress)
 	go func() {
+		defer connect.ClearSocksState(generation)
 		if err := localproxy.ServeSOCKS5(p.ctx, p.listener, p.connector); err != nil && !errors.Is(err, net.ErrClosed) {
 			plog.G(p.ctx).Warnf("Local SOCKS proxy on %s stopped: %v", addr, err)
 		}

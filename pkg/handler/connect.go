@@ -57,6 +57,8 @@ type ConnectOptions struct {
 	// ConnectRequest, so no live handle is stored here).
 	SocksListenAddr string `json:"SocksListenAddr,omitempty"`
 	SocksEgress     bool   `json:"SocksEgress,omitempty"`
+	socksMu         sync.RWMutex
+	socksGeneration uint64
 }
 
 // GetClusterName provides identity without exposing the Kubernetes factory.
@@ -79,10 +81,38 @@ func (c *ConnectOptions) StatusSnapshot(ctx context.Context) (SessionStatus, err
 }
 
 // GetSocksListenAddr returns the listen address of the managed SOCKS5 proxy, or "" if none.
-func (c *ConnectOptions) GetSocksListenAddr() string { return c.SocksListenAddr }
+func (c *ConnectOptions) GetSocksListenAddr() string {
+	c.socksMu.RLock()
+	defer c.socksMu.RUnlock()
+	return c.SocksListenAddr
+}
 
 // GetSocksEgress reports whether the managed SOCKS5 proxy runs in host-direct egress mode.
-func (c *ConnectOptions) GetSocksEgress() bool { return c.SocksEgress }
+func (c *ConnectOptions) GetSocksEgress() bool {
+	c.socksMu.RLock()
+	defer c.socksMu.RUnlock()
+	return c.SocksEgress
+}
+
+// SetSocksState publishes a running listener and returns its generation. The
+// generation prevents an old serve goroutine from clearing a replacement's state.
+func (c *ConnectOptions) SetSocksState(listen string, egress bool) uint64 {
+	c.socksMu.Lock()
+	defer c.socksMu.Unlock()
+	c.socksGeneration++
+	c.SocksListenAddr = listen
+	c.SocksEgress = egress
+	return c.socksGeneration
+}
+
+// ClearSocksState clears listen only if generation is still current.
+func (c *ConnectOptions) ClearSocksState(generation uint64) {
+	c.socksMu.Lock()
+	defer c.socksMu.Unlock()
+	if c.socksGeneration == generation {
+		c.SocksListenAddr = ""
+	}
+}
 
 // InitClient initializes the Kubernetes clientset, REST client, and config from the given factory.
 func (c *ConnectOptions) InitClient(f cmdutil.Factory) error {

@@ -208,6 +208,55 @@ func TestConnectRecovery_UserRetainsControlAndOriginalEndpoint(t *testing.T) {
 	}
 }
 
+func TestConnectRecovery_ManagedSocksReconcile(t *testing.T) {
+	t.Run("restarts a stopped listener without rebuilding root", func(t *testing.T) {
+		peer := &recoveryPeer{state: StatusOk}
+		svr, old, req := recoveryUserFixture(t, recoveryGRPCClient(t, peer))
+		req.EnableSocks = true
+		req.SocksEgress = true
+		req.SocksListen = "127.0.0.1:0"
+		if err := svr.redirectConnectToSudoDaemon(req, &fakeConnectServer{ctx: context.Background(), req: req}, logrus.New()); err != nil {
+			t.Fatal(err)
+		}
+		if addr := old.GetSocksListenAddr(); addr == "" || !portAccepting(addr) {
+			t.Fatalf("managed SOCKS was not restored on existing control session: %q", addr)
+		}
+		peer.mu.Lock()
+		rootConnects := len(peer.requests)
+		peer.mu.Unlock()
+		if rootConnects != 0 {
+			t.Fatalf("healthy root session was rebuilt %d times", rootConnects)
+		}
+		old.Cleanup(context.Background())
+	})
+
+	t.Run("bind failure retains the existing VPN", func(t *testing.T) {
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer listener.Close()
+		peer := &recoveryPeer{state: StatusOk}
+		svr, old, req := recoveryUserFixture(t, recoveryGRPCClient(t, peer))
+		req.EnableSocks = true
+		req.SocksEgress = true
+		req.SocksListen = listener.Addr().String()
+		err = svr.redirectConnectToSudoDaemon(req, &fakeConnectServer{ctx: context.Background(), req: req}, logrus.New())
+		if err == nil {
+			t.Fatal("expected SOCKS bind failure")
+		}
+		if current, _ := svr.registry.find(old.ConnectionID); current != old {
+			t.Fatal("SOCKS bind failure replaced or removed the retained control session")
+		}
+		peer.mu.Lock()
+		rootConnects := len(peer.requests)
+		peer.mu.Unlock()
+		if rootConnects != 0 {
+			t.Fatalf("healthy root session was rebuilt %d times after bind failure", rootConnects)
+		}
+	})
+}
+
 func TestConnectRecovery_StatusErrorIsNotSuccess(t *testing.T) {
 	peer := &recoveryPeer{statusErr: status.Error(codes.Unavailable, "temporary root failure")}
 	svr, old, req := recoveryUserFixture(t, recoveryGRPCClient(t, peer))
