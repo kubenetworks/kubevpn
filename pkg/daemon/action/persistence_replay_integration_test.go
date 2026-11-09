@@ -1,12 +1,15 @@
 package action
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	"gopkg.in/natefinch/lumberjack.v2"
@@ -74,7 +77,8 @@ func TestPersistence_FutureSchemaVersionFailsClosed(t *testing.T) {
 
 func TestPersistence_PartialRestoreSkipsOrphanReconcile(t *testing.T) {
 	saveRestoreDB(t)
-	writeDBFile(t, []byte(`{"SecondaryConnect":[{"RequestRaw":"/w=="},`+legacyConnectionJSON+`]}`))
+	original := []byte(`{"SecondaryConnect":[{"RequestRaw":"/w=="},` + legacyConnectionJSON + `]}`)
+	writeDBFile(t, original)
 	peer := &recoveryPeer{connectState: StatusUnhealthy}
 	client := recoveryGRPCClient(t, peer)
 	log := &lumberjack.Logger{Filename: filepath.Join(t.TempDir(), "partial-replay.log")}
@@ -90,6 +94,10 @@ func TestPersistence_PartialRestoreSkipsOrphanReconcile(t *testing.T) {
 	}
 	if peer.disconnectCalls != 0 {
 		t.Fatalf("partial restore triggered %d orphan disconnects", peer.disconnectCalls)
+	}
+	after, err := os.ReadFile(config.GetDBPath())
+	if err != nil || !bytes.Equal(after, original) {
+		t.Fatalf("partial restore rewrote the source DB: %q, err=%v", after, err)
 	}
 }
 

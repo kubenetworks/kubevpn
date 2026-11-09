@@ -23,6 +23,8 @@ import (
 
 var (
 	clientMu         sync.Mutex
+	daemonInitMu     sync.Mutex
+	sudoDaemonInitMu sync.Mutex
 	daemonClient     rpc.DaemonClient
 	daemonConn       *grpc.ClientConn
 	sudoDaemonClient rpc.DaemonClient
@@ -53,7 +55,11 @@ func InvalidateClient(isSudo bool) {
 }
 
 // GetClient returns a cached gRPC DaemonClient for the given privilege level, creating one if necessary.
-func GetClient(isSudo bool) (cli rpc.DaemonClient, err error) {
+func GetClient(isSudo bool) (rpc.DaemonClient, error) {
+	return getClientWithContext(context.Background(), isSudo)
+}
+
+func getClientWithContext(ctx context.Context, isSudo bool) (cli rpc.DaemonClient, err error) {
 	sockPath := config.GetSockPath(isSudo)
 	if _, err = os.Stat(sockPath); errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("%w: %w", err, config.ErrDaemonNotRunning)
@@ -69,6 +75,26 @@ func GetClient(isSudo bool) (cli rpc.DaemonClient, err error) {
 	}
 	clientMu.Unlock()
 
+	initMu := &daemonInitMu
+	if isSudo {
+		initMu = &sudoDaemonInitMu
+	}
+	initMu.Lock()
+	defer initMu.Unlock()
+	// Only one caller per role performs cold dial and version negotiation.
+	clientMu.Lock()
+	if isSudo && sudoDaemonClient != nil {
+		cached := sudoDaemonClient
+		clientMu.Unlock()
+		return cached, nil
+	}
+	if !isSudo && daemonClient != nil {
+		cached := daemonClient
+		clientMu.Unlock()
+		return cached, nil
+	}
+	clientMu.Unlock()
+
 	conn, err := grpc.NewClient("unix:"+sockPath, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithNoProxy())
 	if err != nil {
 		return nil, err
@@ -80,7 +106,7 @@ func GetClient(isSudo bool) (cli rpc.DaemonClient, err error) {
 	}()
 
 	healthClient := grpc_health_v1.NewHealthClient(conn)
-	healthCtx, cancelHealth := context.WithTimeout(context.Background(), config.DaemonProbeTimeout)
+	healthCtx, cancelHealth := context.WithTimeout(ctx, config.DaemonProbeTimeout)
 	var response *grpc_health_v1.HealthCheckResponse
 	response, err = healthClient.Check(healthCtx, &grpc_health_v1.HealthCheckRequest{})
 	cancelHealth()
@@ -92,7 +118,7 @@ func GetClient(isSudo bool) (cli rpc.DaemonClient, err error) {
 	}
 
 	cli = rpc.NewDaemonClient(conn)
-	upgradeCtx, cancelUpgrade := context.WithTimeout(context.Background(), config.DaemonProbeTimeout)
+	upgradeCtx, cancelUpgrade := context.WithTimeout(ctx, config.DaemonProbeTimeout)
 	var resp *rpc.UpgradeResponse
 	resp, err = cli.Upgrade(upgradeCtx, &rpc.UpgradeRequest{
 		ClientVersion: config.Version,
@@ -104,7 +130,7 @@ func GetClient(isSudo bool) (cli rpc.DaemonClient, err error) {
 	if resp.NeedUpgrade {
 		// Cleanup can tear down multiple live connections, so it gets its own
 		// longer deadline instead of the short health/version probe timeout.
-		quitCtx, cancelQuit := context.WithTimeout(context.Background(), config.DaemonQuitTimeout)
+		quitCtx, cancelQuit := context.WithTimeout(ctx, config.DaemonQuitTimeout)
 		defer cancelQuit()
 		var quitStream rpc.Daemon_QuitClient
 		quitStream, err = cli.Quit(quitCtx)
@@ -115,7 +141,9 @@ func GetClient(isSudo bool) (cli rpc.DaemonClient, err error) {
 		if err != nil {
 			return nil, err
 		}
-		_ = grpcutil.PrintGRPCStream[rpc.QuitResponse](quitCtx, quitStream, nil)
+		if err = grpcutil.PrintGRPCStream[rpc.QuitResponse](quitCtx, quitStream, nil); err != nil {
+			return nil, fmt.Errorf("failed to retire outdated daemon: %w", err)
+		}
 		// The daemon is outdated and was asked to quit; do not return or cache a
 		// client to it. Returning nil makes StartupDaemon spawn a fresh daemon.
 		return nil, fmt.Errorf("daemon version is outdated and was asked to quit: %w", config.ErrDaemonVersionMismatch)
@@ -194,14 +222,14 @@ func StartupDaemon(ctx context.Context, path ...string) error {
 	// owned by the unprivileged user. If the sudo daemon ran first it would create
 	// them as root, and the user daemon could no longer write into them (EACCES).
 	// Do NOT reorder these two blocks.
-	if cli, _ := GetClient(false); cli == nil {
+	if cli, _ := getClientWithContext(ctx, false); cli == nil {
 		if err = runDaemon(ctx, exe, false); err != nil {
 			return err
 		}
 	}
 
 	// sudo daemon (see ordering note above)
-	if cli, _ := GetClient(true); cli == nil {
+	if cli, _ := getClientWithContext(ctx, true); cli == nil {
 		if err = runDaemon(ctx, exe, true); err != nil {
 			return err
 		}
@@ -210,27 +238,39 @@ func StartupDaemon(ctx context.Context, path ...string) error {
 }
 
 func runDaemon(ctx context.Context, exe string, isSudo bool) error {
-	_, err := GetClient(isSudo)
-	if err == nil {
-		return nil
-	}
-
-	startupLock, err := acquireDaemonStartupLock(ctx, isSudo)
+	lockCtx, cancelLock := context.WithTimeout(ctx, config.DaemonStartupLockTimeout)
+	startupLock, err := acquireDaemonStartupLock(lockCtx, isSudo)
+	cancelLock()
 	if err != nil {
 		return fmt.Errorf("failed to acquire %s daemon startup lock: %w", daemonRole(isSudo), err)
 	}
 	defer startupLock.Close()
-	// Another CLI may have completed startup while this process waited.
-	if _, err = GetClient(isSudo); err == nil {
+	// Another CLI may have completed startup while this process waited. The
+	// probe is the only pre-launch request needed here; StartupDaemon already
+	// performed the fast-path check before entering runDaemon.
+	_, probeErr := getClientWithContext(ctx, isSudo)
+	if probeErr == nil {
 		return nil
 	}
 
-	pidPath := config.GetPidPath(isSudo)
-	err = os.Remove(pidPath)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
 	role := daemonRole(isSudo)
+	pidPath := config.GetPidPath(isSudo)
+	if pidFileProcessAlive(pidPath) {
+		if !errors.Is(probeErr, config.ErrDaemonVersionMismatch) {
+			// A timeout or transient RPC error is not evidence that the process
+			// is dead. Preserve its PID and socket instead of launching a duplicate.
+			return fmt.Errorf("%s daemon is running but client probe failed: %w", role, probeErr)
+		}
+		exitCtx, cancelExit := context.WithTimeout(ctx, config.DaemonExitTimeout)
+		defer cancelExit()
+		if err = waitForDaemonProcessExit(exitCtx, pidPath); err != nil {
+			return fmt.Errorf("failed to wait for outdated %s daemon to exit: %w", role, err)
+		}
+	}
+	previousPID, err := readPIDFileState(pidPath)
+	if err != nil {
+		return fmt.Errorf("read %s daemon pid state: %w", role, err)
+	}
 	startupLogPath, err := startDaemonProcess(exe, isSudo)
 	diagnostics := "log: " + config.GetDaemonLogPath(isSudo)
 	if startupLogPath != "" {
@@ -243,26 +283,62 @@ func runDaemon(ctx context.Context, exe string, isSudo bool) error {
 	// detached process lifetime and the bounded GetClient bootstrap probes.
 	pidCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	if err = waitForDaemonPID(pidCtx, pidPath); err != nil {
+	if err = waitForDaemonPID(pidCtx, pidPath, previousPID); err != nil {
 		return fmt.Errorf("failed to wait for %s daemon pid (%s): %w", role, diagnostics, err)
 	}
 
-	_, err = GetClient(isSudo)
+	_, err = getClientWithContext(ctx, isSudo)
 	if err != nil {
 		return fmt.Errorf("failed to get %s daemon server client (%s): %w", role, diagnostics, err)
 	}
 	return nil
 }
 
-func waitForDaemonPID(ctx context.Context, pidPath string) error {
+type pidFileState struct {
+	content string
+	modTime time.Time
+}
+
+func readPIDFileState(path string) (pidFileState, error) {
+	info, err := os.Stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return pidFileState{}, nil
+	}
+	if err != nil {
+		return pidFileState{}, err
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return pidFileState{}, err
+	}
+	return pidFileState{content: string(content), modTime: info.ModTime()}, nil
+}
+
+func waitForDaemonPID(ctx context.Context, pidPath string, previous pidFileState) error {
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		if err := ctx.Err(); err != nil {
+		current, err := readPIDFileState(pidPath)
+		if err != nil {
 			return err
 		}
-		if _, err := os.Stat(pidPath); !errors.Is(err, os.ErrNotExist) {
-			return err
+		if current != previous && current.content != "" {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func waitForDaemonProcessExit(ctx context.Context, pidPath string) error {
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if !pidFileProcessAlive(pidPath) {
+			return nil
 		}
 		select {
 		case <-ctx.Done():

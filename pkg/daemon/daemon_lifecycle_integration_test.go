@@ -157,6 +157,26 @@ func TestIntegration_DaemonProbeHasDeadline(t *testing.T) {
 	}
 }
 
+func TestIntegration_DaemonFailureEvidencePreservesState(t *testing.T) {
+	for _, mode := range []string{"reject-timeout", "live-probe-error", "startup-lock-timeout"} {
+		t.Run(mode, func(t *testing.T) {
+			home := newDaemonTestHome(t)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, os.Args[0])
+			cmd.Env = daemonHelperEnv(home, mode)
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("failure-evidence helper failed: %v\n%s", err, output)
+			}
+		})
+	}
+}
+
+func TestDaemonStopBeforeStartDoesNotPanic(t *testing.T) {
+	(&SvrOption{}).Stop()
+}
+
 func newDaemonTestHome(t *testing.T) string {
 	t.Helper()
 	// Unix socket paths are short on macOS/BSD; test-name-based TempDir paths

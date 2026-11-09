@@ -1,6 +1,7 @@
 package action
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -44,6 +45,9 @@ func (svr *Server) LoadFromConfig(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if bytes.Equal(bytes.TrimSpace(jsonConf), []byte("null")) {
+		return errors.New("persisted configuration is empty")
+	}
 	var conf Config
 	if err = json.Unmarshal(jsonConf, &conf); err != nil {
 		return err
@@ -53,6 +57,31 @@ func (svr *Server) LoadFromConfig(ctx context.Context) error {
 	}
 	if len(conf.SecondaryConnect) == 0 {
 		return nil
+	}
+	type restoreRequest struct {
+		index int
+		req   *rpc.ConnectRequest
+	}
+	var restoreErrors []error
+	var requests []restoreRequest
+	for i, c := range conf.SecondaryConnect {
+		if c == nil {
+			restoreErrors = append(restoreErrors, fmt.Errorf("decode connection %d: empty record", i))
+			continue
+		}
+		if len(c.RequestRaw) == 0 {
+			restoreErrors = append(restoreErrors, fmt.Errorf("decode connection %d: missing connect request", i))
+			continue
+		}
+		var req rpc.ConnectRequest
+		if err = proto.Unmarshal(c.RequestRaw, &req); err != nil {
+			restoreErrors = append(restoreErrors, fmt.Errorf("decode connection %d: %w", i, err))
+			continue
+		}
+		requests = append(requests, restoreRequest{index: i, req: &req})
+	}
+	if len(requests) == 0 {
+		return errors.Join(restoreErrors...)
 	}
 	var client rpc.DaemonClient
 	for ctx.Err() == nil {
@@ -76,16 +105,10 @@ func (svr *Server) LoadFromConfig(ctx context.Context) error {
 		return ctx.Err()
 	}
 	restoreCtx := metadata.NewOutgoingContext(ctx, metadata.Pairs(connectionRestoreMetadataKey, "true"))
-	var restoreErrors []error
-	for i, c := range conf.SecondaryConnect {
-		if c == nil || len(c.RequestRaw) == 0 {
-			continue
-		}
-		var req rpc.ConnectRequest
-		if err = proto.Unmarshal(c.RequestRaw, &req); err != nil {
-			restoreErrors = append(restoreErrors, fmt.Errorf("decode connection %d: %w", i, err))
-			continue
-		}
+	for _, request := range requests {
+		i := request.index
+		req := request.req
+		c := conf.SecondaryConnect[i]
 		var resp rpc.Daemon_ConnectClient
 		resp, err = client.Connect(restoreCtx)
 		if err != nil {
@@ -97,7 +120,7 @@ func (svr *Server) LoadFromConfig(ctx context.Context) error {
 		if c.OwnerID != "" {
 			req.OwnerID = c.OwnerID
 		}
-		if err = resp.Send(&req); err != nil {
+		if err = resp.Send(req); err != nil {
 			restoreErrors = append(restoreErrors, fmt.Errorf("send connection %d: %w", i, err))
 			continue
 		}
@@ -114,6 +137,11 @@ func (svr *Server) RestoreAndReconcile(ctx context.Context) {
 	if err := svr.LoadFromConfig(ctx); err != nil {
 		plog.G(ctx).Errorf("Failed to restore persisted connections; skipping root reconciliation: %v", err)
 		return
+	}
+	// Replay suppresses per-record writes so pending records cannot be dropped
+	// from the source DB. Persist the complete runtime view once instead.
+	if err := svr.OffloadToConfig(); err != nil {
+		plog.G(ctx).Errorf("Failed to persist restored connections: %v", err)
 	}
 	svr.ReconcileSudoConnections(ctx)
 }

@@ -227,6 +227,13 @@ func TestConnectRecovery_ManagedSocksReconcile(t *testing.T) {
 		if rootConnects != 0 {
 			t.Fatalf("healthy root session was rebuilt %d times", rootConnects)
 		}
+		var retained rpc.ConnectRequest
+		if err := proto.Unmarshal(old.RequestRaw, &retained); err != nil {
+			t.Fatal(err)
+		}
+		if !retained.GetEnableSocks() || !retained.GetSocksEgress() || retained.GetSocksListen() != req.GetSocksListen() {
+			t.Fatalf("retained replay request lost new SOCKS options: %v", &retained)
+		}
 		old.Cleanup(context.Background())
 	})
 

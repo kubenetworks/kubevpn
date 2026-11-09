@@ -42,7 +42,7 @@ blocks other OS users. Windows ACLs are separate from these POSIX modes.
 ```
 Start(ctx)
   ├── acquire role instance lock       ── held until Serve exits; second process fails fast
-  ├── probe pre-existing socket        ── protects older unlocked daemons; stale sockets remain recoverable
+  ├── probe pre-existing socket        ── reclaim only refused socket + dead PID; timeouts preserve it
   ├── initLogging(isSudo)              ── lumberjack rotating file; wire logrus/klog/gvisor/plog
   ├── remove stale socket; net.Listen("unix", sockPath)
   │     └── SetUnlinkOnClose(false)   ── do NOT unlink on close (stale-detection owns the file)
@@ -119,20 +119,24 @@ cache).
 calling `runDaemon` for whichever is absent.
 
 `runDaemon(exe, isSudo)`:
-1. Short-circuit if `GetClient` already succeeds.
-2. Acquire the role's short-lived startup lock, then re-check `GetClient` because another CLI may
-   have completed startup while this process waited. This lock is separate from the daemon's
-   lifetime instance lock.
-3. Remove any stale PID file.
+1. Acquire the role's startup lock with `DaemonStartupLockTimeout` for waiters, then re-check
+   `GetClient` because another CLI may have completed startup while this process waited. The lock
+   is separate from the daemon's lifetime instance lock.
+2. If the probe fails but the PID is alive, preserve the PID/socket and return the probe error;
+   timeout is not process-death evidence. A version-mismatched process gets `DaemonExitTimeout` to
+   finish its cleanup before relaunch.
+3. Snapshot the previous PID contents/modification time instead of deleting the file.
 4. Call the platform-specific `startDaemonProcess`, which launches via `pkg/daemon/elevate`
    (see [34-privilege-escalation.md](34-privilege-escalation.md)):
    - sudo + not admin → `RunCmdWithElevated(exe, ["daemon","--sudo"], output)` (UAC/sudo prompt)
    - sudo + admin → `RunCmd(exe, ["daemon","--sudo"], output)`
    - user → `RunCmd(exe, ["daemon"], output)`
    - Unix supplies a private regular startup-log file; Windows passes nil and keeps ShellExecute.
-5. After launch/authentication returns, wait for the PID file every **50ms**, with a **30-second**
-   maximum (or the caller's earlier deadline). Cancellation and filesystem errors return directly;
-   a failed wait does not proceed to client acquisition. On success, re-acquire the client.
+5. After launch/authentication returns, wait every **50ms** for a nonempty, changed PID file, with
+   a **30-second** maximum (or the caller's earlier deadline). Cancellation and filesystem errors
+   return directly; a failed wait does not proceed to client acquisition. On success, re-acquire
+   the client. Cold client initialization is serialized per role, and startup probes inherit the
+   caller's context.
 
 Launch/readiness/client-acquisition failures include the daemon role and diagnostic log paths.
 The readiness limit starts **after** sudo authentication, not while a user enters their password.
