@@ -122,12 +122,7 @@ func (o *SvrOption) Start(ctx context.Context) error {
 	}
 	o.svr = &action.Server{Cancel: cleanup, IsSudo: o.IsSudo, GetClient: GetClient, InvalidateClient: InvalidateClient, LogFile: l, ID: o.ID}
 	if !o.IsSudo {
-		go func() {
-			// Restore persisted connections first so the user daemon holds its authoritative
-			// set, then reap any orphaned sudo (data-plane) sessions left by daemon drift.
-			_ = o.svr.LoadFromConfig(o.ctx)
-			o.svr.ReconcileSudoConnections(o.ctx)
-		}()
+		go o.svr.RestoreAndReconcile(o.ctx)
 		// Continuously track root-daemon liveness so `kubevpn status` reflects a crashed
 		// root daemon within ~one probe interval instead of waiting on the 90s heartbeat.
 		go o.svr.MonitorSudoLiveness(o.ctx)

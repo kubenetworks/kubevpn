@@ -55,7 +55,7 @@ Start(ctx)
   ├── admin.Register + health server + reflection.Register
   ├── h2c downgrading http.Server (§4)
   ├── svr = action.Server{Cancel: cleanup, IsSudo, GetClient, LogFile, ID}
-  │     └── if !IsSudo: go svr.LoadFromConfig(ctx)   ── replay persisted connections
+  │     └── if !IsSudo: go svr.RestoreAndReconcile(ctx) ── replay fully before reaping orphans
   ├── RegisterDaemonServer(grpc, svr)
   └── downgradingServer.Serve(lis)    ── blocks until ctx cancel / Close
 ```

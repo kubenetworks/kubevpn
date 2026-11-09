@@ -78,6 +78,9 @@ func TestServer_OffloadToConfig(t *testing.T) {
 		t.Fatalf("JSON unmarshal: %v", err)
 	}
 
+	if conf.SchemaVersion != currentConfigSchemaVersion {
+		t.Fatalf("schema version = %d, want %d", conf.SchemaVersion, currentConfigSchemaVersion)
+	}
 	if len(conf.SecondaryConnect) != 2 {
 		t.Fatalf("expected 2 connections, got %d", len(conf.SecondaryConnect))
 	}

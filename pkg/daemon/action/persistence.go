@@ -23,14 +23,20 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
+const currentConfigSchemaVersion = 1
+
 // Config represents the persisted daemon configuration containing secondary connections to restore on startup.
 type Config struct {
+	SchemaVersion    int                 `json:"SchemaVersion,omitempty"`
 	SecondaryConnect []*connectionRecord `json:"SecondaryConnect"`
 }
 
 // LoadFromConfig reads persisted connection state from disk and re-establishes previously active connections.
 func (svr *Server) LoadFromConfig(ctx context.Context) error {
 	content, err := os.ReadFile(config.GetDBPath())
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -39,9 +45,11 @@ func (svr *Server) LoadFromConfig(ctx context.Context) error {
 		return err
 	}
 	var conf Config
-	err = json.Unmarshal(jsonConf, &conf)
-	if err != nil {
+	if err = json.Unmarshal(jsonConf, &conf); err != nil {
 		return err
+	}
+	if conf.SchemaVersion < 0 || conf.SchemaVersion > currentConfigSchemaVersion {
+		return fmt.Errorf("unsupported persisted schema version %d", conf.SchemaVersion)
 	}
 	if len(conf.SecondaryConnect) == 0 {
 		return nil
@@ -50,12 +58,16 @@ func (svr *Server) LoadFromConfig(ctx context.Context) error {
 	for ctx.Err() == nil {
 		_, err = svr.GetClient(true)
 		if err != nil {
-			time.Sleep(config.DaemonPollInterval)
+			if err = waitForDaemonRetry(ctx); err != nil {
+				return err
+			}
 			continue
 		}
 		client, err = svr.GetClient(false)
 		if err != nil {
-			time.Sleep(config.DaemonPollInterval)
+			if err = waitForDaemonRetry(ctx); err != nil {
+				return err
+			}
 			continue
 		}
 		break
@@ -63,28 +75,58 @@ func (svr *Server) LoadFromConfig(ctx context.Context) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	for _, c := range conf.SecondaryConnect {
-		if c != nil && len(c.RequestRaw) > 0 {
-			var req rpc.ConnectRequest
-			if err = proto.Unmarshal(c.RequestRaw, &req); err != nil {
-				continue
-			}
-			var resp rpc.Daemon_ConnectClient
-			restoreCtx := metadata.NewOutgoingContext(ctx, metadata.Pairs(connectionRestoreMetadataKey, "true"))
-			resp, err = client.Connect(restoreCtx)
-			if err != nil {
-				continue
-			}
-			// Restore OwnerID from persisted ConnectOptions so the reconnect
-			// reuses the same owner identity, preventing orphaned envoy rules.
-			if c.OwnerID != "" {
-				req.OwnerID = c.OwnerID
-			}
-			_ = resp.Send(&req)
-			_ = grpcutil.PrintGRPCStream[rpc.ConnectResponse](ctx, resp, svr.LogFile)
+	restoreCtx := metadata.NewOutgoingContext(ctx, metadata.Pairs(connectionRestoreMetadataKey, "true"))
+	var restoreErrors []error
+	for i, c := range conf.SecondaryConnect {
+		if c == nil || len(c.RequestRaw) == 0 {
+			continue
+		}
+		var req rpc.ConnectRequest
+		if err = proto.Unmarshal(c.RequestRaw, &req); err != nil {
+			restoreErrors = append(restoreErrors, fmt.Errorf("decode connection %d: %w", i, err))
+			continue
+		}
+		var resp rpc.Daemon_ConnectClient
+		resp, err = client.Connect(restoreCtx)
+		if err != nil {
+			restoreErrors = append(restoreErrors, fmt.Errorf("connect connection %d: %w", i, err))
+			continue
+		}
+		// Restore OwnerID from persisted ConnectOptions so the reconnect
+		// reuses the same owner identity, preventing orphaned envoy rules.
+		if c.OwnerID != "" {
+			req.OwnerID = c.OwnerID
+		}
+		if err = resp.Send(&req); err != nil {
+			restoreErrors = append(restoreErrors, fmt.Errorf("send connection %d: %w", i, err))
+			continue
+		}
+		if err = grpcutil.PrintGRPCStream[rpc.ConnectResponse](ctx, resp, svr.LogFile); err != nil {
+			restoreErrors = append(restoreErrors, fmt.Errorf("restore connection %d: %w", i, err))
 		}
 	}
-	return nil
+	return errors.Join(restoreErrors...)
+}
+
+// RestoreAndReconcile rebuilds the authoritative user registry before reaping
+// orphaned root sessions. Incomplete restores must never trigger destructive cleanup.
+func (svr *Server) RestoreAndReconcile(ctx context.Context) {
+	if err := svr.LoadFromConfig(ctx); err != nil {
+		plog.G(ctx).Errorf("Failed to restore persisted connections; skipping root reconciliation: %v", err)
+		return
+	}
+	svr.ReconcileSudoConnections(ctx)
+}
+
+func waitForDaemonRetry(ctx context.Context) error {
+	timer := time.NewTimer(config.DaemonPollInterval)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 // ReconcileSudoConnections reaps orphaned sudo (data-plane) DataSessions left after daemon
@@ -170,6 +212,7 @@ func (svr *Server) OffloadToConfig() error {
 	}
 
 	conf := &Config{
+		SchemaVersion:    currentConfigSchemaVersion,
 		SecondaryConnect: conns,
 	}
 	jsonConf, err := json.Marshal(conf)

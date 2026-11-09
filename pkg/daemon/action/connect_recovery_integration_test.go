@@ -92,14 +92,16 @@ users:
 
 type recoveryPeer struct {
 	rpc.UnimplementedDaemonServer
-	mu          sync.Mutex
-	state       string
-	statusErr   error
-	connectErr  error
-	requests    []*rpc.ConnectRequest
-	restores    []bool
-	statusCalls int
-	bounded     bool
+	mu              sync.Mutex
+	state           string
+	connectState    string
+	statusErr       error
+	connectErr      error
+	requests        []*rpc.ConnectRequest
+	restores        []bool
+	statusCalls     int
+	disconnectCalls int
+	bounded         bool
 }
 
 func (p *recoveryPeer) Status(ctx context.Context, req *rpc.StatusRequest) (*rpc.StatusResponse, error) {
@@ -128,9 +130,21 @@ func (p *recoveryPeer) Connect(stream rpc.Daemon_ConnectServer) error {
 		p.mu.Unlock()
 		return err
 	}
-	p.state = StatusOk
+	p.state = p.connectState
+	if p.state == "" {
+		p.state = StatusOk
+	}
 	p.mu.Unlock()
 	return stream.Send(&rpc.ConnectResponse{ConnectionID: req.ConnectionID})
+}
+func (p *recoveryPeer) Disconnect(stream rpc.Daemon_DisconnectServer) error {
+	if _, err := stream.Recv(); err != nil {
+		return err
+	}
+	p.mu.Lock()
+	p.disconnectCalls++
+	p.mu.Unlock()
+	return stream.Send(&rpc.DisconnectResponse{})
 }
 func recoveryGRPCClient(t *testing.T, server rpc.DaemonServer) rpc.DaemonClient {
 	t.Helper()

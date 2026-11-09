@@ -304,7 +304,7 @@ Ask yourself: is this field used by `DoConnect` (data plane), or by `CreateRemot
 
 ### Rule 4: Persistence only happens in the User Daemon
 
-`OffloadToConfig` maps concrete `*handler.ConnectOptions` to `connectionRecord`. `DataSession` is never persisted. New persisted fields require an explicit DTO mapping and JSON compatibility test; runtime JSON tags alone do not persist them.
+`OffloadToConfig` maps concrete `*handler.ConnectOptions` to `connectionRecord`. `DataSession` is never persisted. New persisted fields require an explicit DTO mapping and JSON compatibility test; runtime JSON tags alone do not persist them. Writes are serialized and atomically replaced with mode `0600`; root `Quit` never deletes this user-owned DB. `SchemaVersion` 0 is the legacy format and 1 is current. A missing DB is valid empty state, while malformed, future-version, or partially replayed state skips `ReconcileSudoConnections` rather than treating an incomplete registry as authoritative.
 
 ### Rule 5: Do not assume the two daemons' session instances share state
 

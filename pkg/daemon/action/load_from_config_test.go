@@ -79,21 +79,15 @@ func validConfigWithConnectionYAML(t *testing.T) []byte {
 	return y
 }
 
-// TestLoadFromConfig_FileNotExist verifies that LoadFromConfig returns an error
-// (specifically os.ErrNotExist) when the DB file does not exist.
+// TestLoadFromConfig_FileNotExist verifies that a missing DB is a valid empty
+// state, allowing startup reconciliation to proceed without a restore error.
 func TestLoadFromConfig_FileNotExist(t *testing.T) {
 	saveRestoreDB(t)
-
-	// Ensure the file does not exist.
 	_ = os.Remove(config.GetDBPath())
 
 	svr := &Server{}
-	err := svr.LoadFromConfig(context.Background())
-	if err == nil {
-		t.Fatal("expected error when DB file does not exist, got nil")
-	}
-	if !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("expected os.ErrNotExist, got: %v", err)
+	if err := svr.LoadFromConfig(context.Background()); err != nil {
+		t.Fatalf("missing DB should be an empty state, got %v", err)
 	}
 }
 

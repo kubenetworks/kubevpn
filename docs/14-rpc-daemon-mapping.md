@@ -40,8 +40,9 @@ Both user daemon and root daemon register the same `Server` struct with all RPC 
 | `resetCurrentConnection` | both | After removal, pick first remaining as current |
 | `initStreamLogger` | both | Create per-RPC logger with StreamHook |
 | `getSudoTunIPs` | user only | Query sudo daemon Status for TUN IPs + computed status verdict (data-plane liveness) |
-| `LoadFromConfig` | user only | Restore connections on restart |
-| `OffloadToConfig` | user only | Persist connections to disk |
+| `LoadFromConfig` | user only | Restore connections on restart; missing DB is empty state, errors mark recovery incomplete |
+| `RestoreAndReconcile` | user only | Replay persisted state, then reap orphans only after a complete successful restore |
+| `OffloadToConfig` | user only | Persist connections to disk with serialized, atomic replacement |
 | `CleanupConfig` | user only | Delete persisted config |
 
 ## Data flow: who calls whom
