@@ -331,6 +331,49 @@ func TestTCPTransporter_WithTLS(t *testing.T) {
 	wg.Wait()
 }
 
+func TestTCPTransporter_TLSHandshakeHonorsContext(t *testing.T) {
+	host := "localhost"
+	certPEM, keyPEM, err := cert.GenerateSelfSignedCertKeyWithFixtures(host, []net.IP{net.IPv4(127, 0, 0, 1)}, nil, "")
+	if err != nil {
+		t.Fatalf("failed to generate self-signed cert: %v", err)
+	}
+	tr := TCPTransporter(map[string][]byte{
+		config.TLSCertKey:       certPEM,
+		config.TLSPrivateKeyKey: keyPEM,
+		config.TLSServerName:    []byte(host),
+	})
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		conn, err := ln.Accept()
+		if err == nil {
+			accepted <- conn
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	conn, err := tr.Dial(ctx, ln.Addr().String())
+	if conn != nil {
+		_ = conn.Close()
+		t.Fatal("stalled TLS handshake must not return a connection")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("stalled TLS handshake error = %v, want context deadline exceeded", err)
+	}
+	select {
+	case serverConn := <-accepted:
+		_ = serverConn.Close()
+	case <-time.After(time.Second):
+		t.Fatal("TCP listener did not accept the test connection")
+	}
+}
+
 func TestTCPTransporter_ObfuscationFlagFromSecret(t *testing.T) {
 	// The in-cluster client path: the flag rides in the TLS secret map.
 	// Obfuscation is on by default; "0" opts out.
