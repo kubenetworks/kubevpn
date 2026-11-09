@@ -84,15 +84,13 @@ func (t *clientTransport) routines() []namedRoutine {
 // routeOutbound dispatches a packet read from the TUN: loop it back through the local gvisor
 // stack when src == dst, otherwise enqueue it for the connection pool (distributed by five-tuple).
 func (t *clientTransport) routeOutbound(ctx context.Context, buf []byte, n int, src, dst net.IP) {
-	// buf is canonical (pumpTun reserved buf[0:tunReserve]): set the type prefix and the
-	// IP already sits at buf[tunReserve:]. Both branches forward the same canonical buffer.
-	buf[datagramHeaderLen] = packetTypeToGvisor
-	logIPPacket(ctx, "[Client] OUTBOUND", buf[tunReserve:tunReserve+n])
+	packet := newPacket(buf, n+typePrefixLen, src, dst)
+	packet.setType(packetTypeToGvisor)
+	logIPPacket(ctx, "[Client] OUTBOUND", packet.ip())
 	out := t.dev.tunInbound
 	if src.Equal(dst) {
 		out = t.gvisorInbound
 	}
-	packet := newPacket(buf[:], n+typePrefixLen, src, dst)
 	if !diagnosticEnqueue(ctx, out, packet, t.dev.enqueueStage) {
 		packet.release()
 	}
@@ -236,8 +234,9 @@ func (t *clientTransport) heartbeats(ctx context.Context) {
 		}
 		buf := config.LPool.Get().([]byte)
 		n := copy(buf[tunReserve:], payload)
-		buf[datagramHeaderLen] = packetTypeControl
-		if !t.stats.enqueueProbe(slot.inbound, newPacket(buf, n+typePrefixLen, nil, nil)) {
+		packet := newPacket(buf, n+typePrefixLen, nil, nil)
+		packet.setType(packetTypeControl)
+		if !t.stats.enqueueProbe(slot.inbound, packet) {
 			dataPlaneWarn.Load().Warnf(ctx, "hb-slot-full", "[Client] Heartbeat dropped: control slot queue full")
 		}
 	}

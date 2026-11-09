@@ -93,7 +93,7 @@ func writeRoutePacket(ctx context.Context, conn net.Conn, pkt *packet) (int, err
 		}
 		return 0, nil
 	}
-	return framing.WriteFull(conn, pkt.data[:datagramHeaderLen+pkt.length])
+	return pkt.writeTo(conn)
 }
 
 // WriteFunc attempts to call fn on each healthy conn until one succeeds.

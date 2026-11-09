@@ -2,6 +2,8 @@ package tunnel
 
 import (
 	"context"
+	"encoding/binary"
+	"io"
 	"net"
 	"strings"
 	"sync/atomic"
@@ -13,6 +15,7 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	framing "github.com/wencaiwulue/kubevpn/v2/pkg/internal/wire"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	netutil "github.com/wencaiwulue/kubevpn/v2/pkg/util/netutil"
 )
@@ -107,6 +110,46 @@ func (d *packet) Data() []byte {
 // Length returns the number of meaningful bytes in the packet (excluding the leading headroom).
 func (d *packet) Length() int {
 	return d.length
+}
+
+// ip returns a borrowed view of the raw IP packet, valid until p is released.
+func (p *packet) ip() []byte {
+	return p.data[tunReserve : datagramHeaderLen+p.length]
+}
+
+// setIP copies a raw IP packet into the packet and updates its payload length.
+func (p *packet) setIP(ip []byte) {
+	p.length = typePrefixLen + copy(p.data[tunReserve:], ip)
+}
+
+// frame returns a borrowed view of the wire frame. Stamp its length before sharing or
+// writing it on a tunnel path; frame itself never mutates the packet.
+func (p *packet) frame() []byte {
+	return p.data[:datagramHeaderLen+p.length]
+}
+
+// frameLen returns the number of bytes in the wire frame.
+func (p *packet) frameLen() int {
+	return datagramHeaderLen + p.length
+}
+
+func (p *packet) packetType() byte {
+	return p.data[datagramHeaderLen]
+}
+
+func (p *packet) setType(packetType byte) {
+	p.data[datagramHeaderLen] = packetType
+}
+
+// stampLength writes the wire length header. It is a construction-time, single-owner operation.
+func (p *packet) stampLength() {
+	binary.BigEndian.PutUint16(p.data[:datagramHeaderLen], uint16(p.length))
+}
+
+// writeTo stamps and writes a tunnel frame without changing partial-write progress semantics.
+func (p *packet) writeTo(w io.Writer) (int, error) {
+	p.stampLength()
+	return framing.WriteFull(w, p.frame())
 }
 
 // copyPacketToPool copies a gvisor packet into a pool buffer with a 1-byte type prefix.

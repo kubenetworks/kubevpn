@@ -20,8 +20,9 @@ plus a separate control connection to the same forwarding endpoint.
   retains the TUN and client stacks; `address.go` applies legitimate lease changes.
 - Client: `pkg/tunnel/client.go` dispatches directly to data slot 0. `slot.go` retains
   queues/retry state, while `attempt.go` creates a `connAttempt` per dial, owns framing
-  declaration/registration plus `readGeneration`/`writeGeneration`, and joins both pumps
-  before retry. Multi-slot hashing is only a private nil-stats test override.
+  declaration/registration and joins both pumps before retry. `attempt_read.go` owns inbound
+  dispatch and `attempt_write.go` owns batching and socket writes. Multi-slot hashing is only
+  a private nil-stats test override.
 - Server: `pkg/tunnel/route.go` defines `Router` with private route membership,
   `peerRegistry` and `tunBridge`, not public `RouteMapTCP`/`TCPPacketChan` globals.
   `server_endpoint.go` sends per-client stack output through `readFromEndpointWriteToRoute`
@@ -31,10 +32,10 @@ plus a separate control connection to the same forwarding endpoint.
   output and destruction. `peerRegistry` never borrows the first connection's context.
   `bridge.go` separately owns queue admission/stop/drain. Connection handlers close and
   join their buffered writer through `waitRun`; cancellation alone is not a join.
-- Heartbeat: `HeartbeatInterval` (5 s) → control queue/conn → per-client stack →
-  **registered data conn** → correlated `HeartbeatStats.observeReply`. Control does not
-  register routes and receives no direct reply. Type `2` is control; only `3..255` remain
-  reserved. Data registration is sent before queued business traffic on each new data conn.
+- Heartbeat: `HeartbeatInterval` (5 s) → control queue/conn → `synthesizeEchoReply`
+  on the **same control conn** → correlated `HeartbeatStats.observeReply`. Control does not
+  register routes. Type `2` is control; only `3..255` remain reserved. Data registration is
+  sent before queued business traffic on each new data conn.
 - Shared primitives: `pkg/internal/wire/conn.go` owns `Conn`, `ReadDatagram`,
   `WriteDatagram`, `WriteFull`; `batch.go` owns `BatchWriter`. Pooled `packet` and packet
   batches remain private to tunnel. `pkg/tunnel/internal/netstack` owns stack construction
@@ -62,7 +63,10 @@ raw IP        = data[tunReserve : datagramHeaderLen+length]
 ```
 
 `pumpTun` reads the TUN into `data[3:]`, reserving the 3-byte head so the datagram
-length and type prefix can be written in place — no shifting on the way out. See
+length and type prefix can be written in place — no shifting on the way out. Production code
+uses `packet.ip()`, `frame()` and `frameLen()` for these views; `stampLength()` is a
+single-owner operation and `writeTo()` handles tunnel output without hiding partial-write
+progress. Raw slices remain at the TUN/gVisor/`net.Conn` boundaries. See
 [Batched / segment-aware TUN reads](#batched--segment-aware-tun-reads) for how one syscall
 may deliver several packets (wireguard-go Linux GSO splitting) into a batch of these buffers.
 
@@ -75,7 +79,7 @@ extensible discriminator — values `3..255` are reserved for future packet type
 |--------|----------|---------|--------------------|
 | `0` | `packetTypeToTUN` | Gvisor-processed packet (response from real network) | Write to TUN device directly |
 | `1` | `packetTypeToGvisor` | Raw IP packet (needs gvisor processing) | Inject into gvisor stack |
-| `2` | `packetTypeControl` | Control declaration / heartbeat ICMP | No route registration; replies use registered data conns |
+| `2` | `packetTypeControl` | Control declaration / heartbeat ICMP | No route registration; replies are inline on the control conn |
 
 ## Batched / segment-aware TUN reads
 
@@ -120,7 +124,7 @@ TCP is a stream protocol, so packets are framed with a 2-byte big-endian length 
 [2 bytes: payload length][N bytes: payload (type prefix + IP packet)]
 ```
 
-Read: `readDatagramPacket` reads the 2-byte length, then reads exactly N bytes.
+Read: `ReadDatagram` reads the 2-byte length, then reads exactly N bytes and returns the payload length.
 Write: `writeDatagram(w, buf, payloadLen)` stamps the length header in place in the
 buffer's reserved head and passes the contiguous frame `buf[:2+payloadLen]` to `writeFull`.
 Header stamping is idempotent; **transmission is not safe to retry across connections**.
@@ -131,7 +135,7 @@ header while batching and reports the complete-frame prefix, including before an
 
 ### Reference-counted packet buffers
 
-Pooled buffers (`config.LPool`) are wrapped in `*Packet` with an atomic reference count
+Pooled buffers (`config.LPool`) are wrapped in `*packet` with an atomic reference count
 (`packet.go`, modeled on gvisor's `buffer.View` chunk refcount). The zero value means a
 single owner; `acquire()` adds a reference and `release()` returns the buffer to the pool
 when the last reference is dropped (releasing more than acquired panics, turning a

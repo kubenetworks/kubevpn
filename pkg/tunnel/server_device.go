@@ -2,7 +2,6 @@ package tunnel
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"net"
 
@@ -33,11 +32,9 @@ func (t *serverTransport) routines() []namedRoutine {
 // routeOutbound hands a packet read from the TUN to the route goroutine. IP data sits at buf[3:]
 // (pumpTun reserved buf[0:3] for the datagram length + type prefix), so routeTun can frame in place.
 func (t *serverTransport) routeOutbound(ctx context.Context, buf []byte, n int, src, dst net.IP) {
-	// Canonical layout: set the type prefix in place; IP already sits at buf[tunReserve:].
-	// length is type+IP so routeTun can frame without further arithmetic.
-	logIPPacket(ctx, "[TUN]", buf[tunReserve:tunReserve+n])
-	buf[datagramHeaderLen] = packetTypeToGvisor
-	packet := newPacket(buf[:], n+typePrefixLen, src, dst)
+	packet := newPacket(buf, n+typePrefixLen, src, dst)
+	packet.setType(packetTypeToGvisor)
+	logIPPacket(ctx, "[TUN]", packet.ip())
 	if !diagnosticEnqueue(ctx, t.dev.tunInbound, packet, t.dev.enqueueStage) {
 		packet.release()
 	}
@@ -60,7 +57,7 @@ func (t *serverTransport) routeTun(ctx context.Context) {
 			// Frame the datagram length in place: buf[0:datagramHeaderLen]. Hand the packet to
 			// the route by reference (zero-copy); the chosen conn takes a reference and we drop
 			// ours below.
-			binary.BigEndian.PutUint16(packet.data[:datagramHeaderLen], uint16(packet.length))
+			packet.stampLength()
 			token := stage.begin()
 			conn, err := t.hub.WriteToRoutePacket(ctx, dstKey, packet)
 			stage.finish(token, 1, packet.length, err == nil && ctx.Err() == nil)

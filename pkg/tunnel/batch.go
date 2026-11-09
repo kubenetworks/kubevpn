@@ -41,14 +41,14 @@ func (b *packetBatch) next(ctx context.Context, ch <-chan *packet, limit int, st
 	}
 	b.packets[0] = first
 	b.n = 1
-	size := datagramHeaderLen + first.length
+	size := first.frameLen()
 	for b.n < limit && size < maxBatchBytes {
 		select {
 		case p := <-ch:
 			if p == nil {
 				return true
 			}
-			n := datagramHeaderLen + p.length
+			n := p.frameLen()
 			if size+n > maxBatchBytes {
 				b.pending = p
 				return true
@@ -90,13 +90,13 @@ type frameBatchWriter struct {
 // preceding an error. A partial frame is continued only on this same connection.
 func (w *frameBatchWriter) write(conn net.Conn, packets []*packet) (int, error) {
 	for i, p := range packets {
-		w.buffers[i] = p.data[:datagramHeaderLen+p.length]
+		w.buffers[i] = p.frame()
 	}
 	defer clear(w.buffers[:])
 	written, err := w.writer.Write(conn, w.buffers[:len(packets)])
 	complete := 0
 	for _, p := range packets {
-		n := datagramHeaderLen + p.length
+		n := p.frameLen()
 		if written < n {
 			break
 		}

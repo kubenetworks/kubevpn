@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/iotest"
 	"time"
 )
 
@@ -176,6 +177,46 @@ func TestFramingReadErrorsCloseStream(t *testing.T) {
 				t.Error("damaged stream reused")
 			}
 		})
+	}
+}
+
+func TestReadDatagramGolden(t *testing.T) {
+	payload := []byte("golden datagram")
+	frame := make([]byte, HeaderLen+len(payload))
+	binary.BigEndian.PutUint16(frame[:HeaderLen], uint16(len(payload)))
+	copy(frame[HeaderLen:], payload)
+	buf := make([]byte, len(payload))
+	n, err := ReadDatagram(iotest.OneByteReader(bytes.NewReader(frame)), buf)
+	if err != nil {
+		t.Fatalf("ReadDatagram with one-byte reads: %v", err)
+	}
+	if n != len(payload) || !bytes.Equal(buf[:n], payload) {
+		t.Fatalf("ReadDatagram n=%d payload=%q, want %d/%q", n, buf[:n], len(payload), payload)
+	}
+	n, err = ReadDatagram(bytes.NewReader([]byte{0, 0}), nil)
+	if err != nil || n != 0 {
+		t.Fatalf("ReadDatagram empty n=%d err=%v, want 0/nil", n, err)
+	}
+}
+
+func BenchmarkReadDatagram(b *testing.B) {
+	payload := bytes.Repeat([]byte{0x5a}, 1400)
+	frame := make([]byte, HeaderLen+len(payload))
+	binary.BigEndian.PutUint16(frame[:HeaderLen], uint16(len(payload)))
+	copy(frame[HeaderLen:], payload)
+	reader := bytes.NewReader(frame)
+	buf := make([]byte, len(payload))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		reader.Reset(frame)
+		n, err := ReadDatagram(reader, buf)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if n != len(payload) {
+			b.Fatalf("ReadDatagram length = %d, want %d", n, len(payload))
+		}
 	}
 }
 

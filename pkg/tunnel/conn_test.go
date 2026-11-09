@@ -267,7 +267,7 @@ func TestUDPConnOverTCP_ContextCancellation(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// DatagramPacket tests
+// ReadDatagram tests
 // ---------------------------------------------------------------------------
 
 func TestWriteDatagram_Format(t *testing.T) {
@@ -297,7 +297,7 @@ func TestWriteDatagram_Format(t *testing.T) {
 	}
 }
 
-func TestDatagramPacket_ReadRoundTrip(t *testing.T) {
+func TestReadDatagram_ReadRoundTrip(t *testing.T) {
 	payload := []byte("round trip datagram")
 
 	// Frame it manually
@@ -308,19 +308,19 @@ func TestDatagramPacket_ReadRoundTrip(t *testing.T) {
 	// Read it back via framing.ReadDatagram
 	reader := bytes.NewReader(frame)
 	buf := make([]byte, 65536)
-	dgram, err := framing.ReadDatagram(reader, buf)
+	n, err := framing.ReadDatagram(reader, buf)
 	if err != nil {
 		t.Fatalf("framing.ReadDatagram error: %v", err)
 	}
-	if int(dgram.DataLength) != len(payload) {
-		t.Fatalf("DataLength = %d, want %d", dgram.DataLength, len(payload))
+	if n != len(payload) {
+		t.Fatalf("payload length = %d, want %d", n, len(payload))
 	}
-	if !bytes.Equal(dgram.Data[:dgram.DataLength], payload) {
-		t.Fatalf("data mismatch: got %q, want %q", dgram.Data[:dgram.DataLength], payload)
+	if !bytes.Equal(buf[:n], payload) {
+		t.Fatalf("data mismatch: got %q, want %q", buf[:n], payload)
 	}
 }
 
-func TestDatagramPacket_ReadShortHeaderReturnsError(t *testing.T) {
+func TestReadDatagram_ReadShortHeaderReturnsError(t *testing.T) {
 	// Only 1 byte — cannot read 2-byte length header
 	reader := bytes.NewReader([]byte{0x00})
 	buf := make([]byte, 65536)
@@ -330,7 +330,7 @@ func TestDatagramPacket_ReadShortHeaderReturnsError(t *testing.T) {
 	}
 }
 
-func TestDatagramPacket_ReadTruncatedBodyReturnsError(t *testing.T) {
+func TestReadDatagram_ReadTruncatedBodyReturnsError(t *testing.T) {
 	// Header says 10 bytes but only 3 bytes of body follow
 	frame := make([]byte, 5)
 	binary.BigEndian.PutUint16(frame[:2], 10)

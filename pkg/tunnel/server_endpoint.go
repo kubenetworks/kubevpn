@@ -2,7 +2,6 @@ package tunnel
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"io"
 	"net"
@@ -56,10 +55,9 @@ func (h *peerRegistry) readFromEndpointWriteToRoute(ctx context.Context, endpoin
 		}
 
 		payloadLen := ipLen + typePrefixLen
-		binary.BigEndian.PutUint16(buf[:datagramHeaderLen], uint16(payloadLen))
-		buf[datagramHeaderLen] = packetTypeToTUN
-
 		p := newPacket(buf, payloadLen, nil, dstIP)
+		p.setType(packetTypeToTUN)
+		p.stampLength()
 		token := stage.begin()
 		usedConn, err := h.hub.WriteToRoutePacket(ctx, string(dstIP), p)
 		stage.finish(token, 1, payloadLen, err == nil && ctx.Err() == nil)
@@ -154,7 +152,7 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 		dstKey := string(dst)
 		if h.hub.HasRoute(dstKey) {
 			pkt := newPacket(buf, read, src, dst)
-			binary.BigEndian.PutUint16(buf[:datagramHeaderLen], uint16(read))
+			pkt.stampLength()
 			token := dispatch.begin()
 			usedConn, writeErr := h.hub.WriteToRoutePacket(ctx, dstKey, pkt)
 			dispatch.finish(token, 1, read, writeErr == nil && ctx.Err() == nil)

@@ -52,7 +52,7 @@ func readFromGvisorInboundWriteToEndpoint(ctx context.Context, in <-chan *packet
 				return
 			}
 			var protocol tcpip.NetworkProtocolNumber
-			ip := packet.data[tunReserve : datagramHeaderLen+packet.length]
+			ip := packet.ip()
 			if netutil.IsIPv4(ip) {
 				protocol = header.IPv4ProtocolNumber
 			} else if netutil.IsIPv6(ip) {

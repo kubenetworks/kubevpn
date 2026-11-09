@@ -270,7 +270,7 @@ func (d *tunDevice) writeToTun(ctx context.Context) {
 	}
 	for batch.next(ctx, d.tunOutbound, limit, nil) {
 		for i, p := range batch.packets[:batch.n] {
-			bufs[i] = p.data[tunReserve : datagramHeaderLen+p.length]
+			bufs[i] = p.ip()
 		}
 		token := stage.begin(batch.n, batchDiagnosticBytes(batch.packets[:batch.n])-batch.n*typePrefixLen)
 		var err error

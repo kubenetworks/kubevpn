@@ -62,7 +62,7 @@ func (c *Conn) Read(b []byte) (int, error) {
 	if err := c.operationError(); err != nil {
 		return 0, err
 	}
-	datagram, err := ReadDatagram(c.Conn, b)
+	n, err := ReadDatagram(c.Conn, b)
 	if err != nil {
 		// The header may already be consumed. Never reuse a damaged stream.
 		if c.fault != nil {
@@ -71,7 +71,7 @@ func (c *Conn) Read(b []byte) (int, error) {
 		_ = c.Close()
 		return 0, err
 	}
-	return int(datagram.DataLength), nil
+	return n, nil
 }
 
 func (c *Conn) Write(b []byte) (int, error) {
@@ -123,28 +123,22 @@ func (c *Conn) Close() error {
 	return c.closeTransport()
 }
 
-// DatagramPacket represents a length-prefixed datagram read off a stream connection
-// (see ReadDatagram). Its payload sits at Data[0:DataLength].
-type DatagramPacket struct {
-	DataLength uint16 // [2]byte
-	Data       []byte // []byte
-}
-
-// ReadDatagram uses caller-owned payload storage. On error the caller must
-// terminate the stream, since a header or partial body may already be consumed.
-func ReadDatagram(r io.Reader, b []byte) (*DatagramPacket, error) {
+// ReadDatagram uses caller-owned payload storage and returns the payload length.
+// On error the caller must terminate the stream, since a header or partial body
+// may already be consumed.
+func ReadDatagram(r io.Reader, b []byte) (int, error) {
 	var header [HeaderLen]byte
 	if _, err := io.ReadFull(r, header[:]); err != nil {
-		return nil, err
+		return 0, err
 	}
-	dataLength := binary.BigEndian.Uint16(header[:])
-	if int(dataLength) > len(b) {
-		return nil, io.ErrShortBuffer
+	dataLength := int(binary.BigEndian.Uint16(header[:]))
+	if dataLength > len(b) {
+		return 0, io.ErrShortBuffer
 	}
 	if _, err := io.ReadFull(r, b[:dataLength]); err != nil {
-		return nil, err
+		return 0, err
 	}
-	return &DatagramPacket{DataLength: dataLength, Data: b}, nil
+	return dataLength, nil
 }
 
 // WriteDatagram stamps the length in the reserved headroom before the payload.
