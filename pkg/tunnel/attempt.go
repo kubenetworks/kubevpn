@@ -96,7 +96,7 @@ func (a *connAttempt) run(ctx context.Context, generation uint64) {
 				a.postDialFailure = true
 				// Not cosmetic: without this announcement the server keeps no route for us
 				// and silently drops everything addressed to us, heartbeat replies included.
-				dataPlaneWarn.Warnf(ctx, "reg-write",
+				dataPlaneWarn.Load().Warnf(ctx, "reg-write",
 					"[Client-%d] Failed to announce our route on connect: %v; the server will drop "+
 						"inbound traffic for us until a later attempt succeeds", a.id, err)
 				a.stats.slotTransition(a.id, generation, false, "registration: "+err.Error())

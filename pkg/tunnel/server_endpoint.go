@@ -179,14 +179,19 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 				ReserveHeaderBytes: 0,
 				Payload:            buffer.MakeWithData(ip),
 			})
+			var logSrc, logDst net.IP
+			if plog.IsDebugEnabled(ctx) {
+				// src/dst alias buf; retain independent addresses for logging after the pool return.
+				logSrc, logDst = append(net.IP(nil), src...), append(net.IP(nil), dst...)
+			}
 			config.LPool.Put(buf[:])
 			logStackPacket(ctx, "[gVISOR] ", sniffer.DirectionRecv, protocol, pkt)
 			token := inject.begin()
 			cs.endpoint.InjectInbound(protocol, pkt)
 			inject.finish(token, 1, read, ctx.Err() == nil)
 			pkt.DecRef()
-			if plog.IsDebugEnabled(ctx) {
-				plog.G(ctx).Debugf("[Gvisor-TCP] Injected to stack: %s -> %s, protocol=%s, length=%d", src, dst, layers.IPProtocol(ipProtocol).String(), read)
+			if logSrc != nil {
+				plog.G(ctx).Debugf("[Gvisor-TCP] Injected to stack: %s -> %s, protocol=%s, length=%d", logSrc, logDst, layers.IPProtocol(ipProtocol).String(), read)
 			}
 		} else {
 			pkt := newPacket(buf[:], read, src, dst)

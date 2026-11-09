@@ -192,21 +192,21 @@ func (t *clientTransport) registrationPayloads(ctx context.Context) [][]byte {
 		if icmp, e := netutil.GenICMPPacket(srcIPv4, config.RouterIP); e == nil {
 			appendPayload(icmp)
 		} else {
-			dataPlaneWarn.Warnf(ctx, "reg-gen-v4", "[Client] Failed to build IPv4 route announcement: %v", e)
+			dataPlaneWarn.Load().Warnf(ctx, "reg-gen-v4", "[Client] Failed to build IPv4 route announcement: %v", e)
 		}
 	}
 	if srcIPv6 != nil {
 		if icmp, e := netutil.GenICMPPacketIPv6(srcIPv6, config.RouterIP6); e == nil {
 			appendPayload(icmp)
 		} else {
-			dataPlaneWarn.Warnf(ctx, "reg-gen-v6", "[Client] Failed to build IPv6 route announcement: %v", e)
+			dataPlaneWarn.Load().Warnf(ctx, "reg-gen-v6", "[Client] Failed to build IPv6 route announcement: %v", e)
 		}
 	}
 	if len(payloads) == 0 {
 		// Announcing nothing is not a benign no-op: the server keeps no route for us, so every
 		// heartbeat echo reply it generates is dropped and the tunnel is dead for an idle client
 		// even though all its connections look healthy. Never let this be silent again.
-		dataPlaneWarn.Warnf(ctx, "reg-empty",
+		dataPlaneWarn.Load().Warnf(ctx, "reg-empty",
 			"[Client] Cannot announce our route: no TUN address available on %q. Inbound traffic and "+
 				"heartbeat replies will be dropped by the server until this resolves", t.dev.tunName)
 	}
@@ -231,14 +231,14 @@ func (t *clientTransport) heartbeats(ctx context.Context) {
 		slot := t.controlSlot
 		t.controlMu.RUnlock()
 		if slot == nil {
-			dataPlaneWarn.Warnf(ctx, "hb-no-control-slot", "[Client] Heartbeat skipped: control slot not up yet")
+			dataPlaneWarn.Load().Warnf(ctx, "hb-no-control-slot", "[Client] Heartbeat skipped: control slot not up yet")
 			return
 		}
 		buf := config.LPool.Get().([]byte)
 		n := copy(buf[tunReserve:], payload)
 		buf[datagramHeaderLen] = packetTypeControl
 		if !t.stats.enqueueProbe(slot.inbound, newPacket(buf, n+typePrefixLen, nil, nil)) {
-			dataPlaneWarn.Warnf(ctx, "hb-slot-full", "[Client] Heartbeat dropped: control slot queue full")
+			dataPlaneWarn.Load().Warnf(ctx, "hb-slot-full", "[Client] Heartbeat dropped: control slot queue full")
 		}
 	}
 
@@ -246,7 +246,7 @@ func (t *clientTransport) heartbeats(ctx context.Context) {
 		srcIPv4, srcIPv6, dockerSrcIPv4 := t.dev.addrs()
 		plog.G(ctx).Debugf("[Client] Sending heartbeat (%s)", reason)
 		if srcIPv4 == nil && srcIPv6 == nil {
-			dataPlaneWarn.Warnf(ctx, "hb-no-addr",
+			dataPlaneWarn.Load().Warnf(ctx, "hb-no-addr",
 				"[Client] Heartbeat not sent: no TUN address available on %q; the data plane will be "+
 					"reported unhealthy until this resolves", t.dev.tunName)
 		}

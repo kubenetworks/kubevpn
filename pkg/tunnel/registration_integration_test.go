@@ -180,9 +180,8 @@ func (b *syncBuffer) String() string {
 // it also runs on cleanup in case the test fails first.
 func unthrottleDataPlaneWarnings(t *testing.T) func() {
 	t.Helper()
-	orig := dataPlaneWarn
-	dataPlaneWarn = plog.NewThrottle(0)
-	restore := func() { dataPlaneWarn = orig }
+	orig := dataPlaneWarn.Swap(plog.NewThrottle(0))
+	restore := func() { dataPlaneWarn.Store(orig) }
 	t.Cleanup(restore)
 	return restore
 }

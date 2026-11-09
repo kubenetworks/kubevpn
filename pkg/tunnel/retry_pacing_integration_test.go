@@ -618,9 +618,11 @@ func TestRetryPacing_JoinsOldWriterPreservesQueue(t *testing.T) {
 	h.slot.inbound <- first
 	pacingAwait(t, held.entered, "old writer")
 	var suffix []*packet
+	expected := make([][]byte, 0, 5)
 	for i := 1; i <= 5; i++ {
 		p := batchPacket(20, i)
 		suffix = append(suffix, p)
+		expected = append(expected, append([]byte(nil), p.data[:20]...))
 		h.slot.inbound <- p
 	}
 	peer.Close()
@@ -635,12 +637,12 @@ func TestRetryPacing_JoinsOldWriterPreservesQueue(t *testing.T) {
 	close(h.wait(125 * time.Millisecond).resume)
 	peer = h.dial(pacingPlan{})
 	peer.SetReadDeadline(time.Now().Add(3 * time.Second))
-	for i, p := range suffix {
+	for i := range suffix {
 		buf := make([]byte, 20)
 		if _, err := io.ReadFull(peer, buf); err != nil {
 			t.Fatal(err)
 		}
-		for j, b := range p.data[:20] {
+		for j, b := range expected[i] {
 			if buf[j] != b {
 				t.Fatalf("suffix %d corrupt/replayed at byte %d", i, j)
 			}
