@@ -30,13 +30,14 @@ func GetClientID() string {
 		path := filepath.Join(homePath, ClientIDFile)
 		if data, err := os.ReadFile(path); err == nil {
 			if s := strings.TrimSpace(string(data)); len(s) >= 12 {
+				_ = migratePrivatePath(path, FileModePrivateFile)
 				clientID = s[:12]
 				return
 			}
 		}
 		id := uuid.New().String()
 		// Best-effort persist; on failure still return a usable (non-persisted) ID.
-		_ = os.WriteFile(path, []byte(id), FileModeFile)
+		_ = os.WriteFile(path, []byte(id), FileModePrivateFile)
 		clientID = id[:12]
 	})
 	return clientID

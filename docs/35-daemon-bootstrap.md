@@ -30,6 +30,13 @@ Each daemon owns a fixed triple of files under the kubevpn config dir, keyed by 
 Resolved via `config.GetSockPath/GetPidPath/GetDaemonLogPath(isSudo)`. The `--sudo` flag on
 `kubevpn daemon` selects which side this process is.
 
+The user-owned `~/.kubevpn` directory tree is created and migrated to `0700`; sensitive files
+(the persisted DB, client ID, config, and temporary kubeconfigs) use `0600`. Only the
+unprivileged startup path performs permission migration — the root daemon shares these paths
+but never recursively changes their ownership or permissions. Socket files remain `0666` so the
+unprivileged user daemon can connect to the root-owned socket, while the `0700` parent directory
+blocks other OS users. Windows ACLs are separate from these POSIX modes.
+
 ## 3. Server Startup (`SvrOption.Start`)
 
 ```
@@ -38,7 +45,7 @@ Start(ctx)
   ├── remove stale socket; net.Listen("unix", sockPath)
   │     └── SetUnlinkOnClose(false)   ── do NOT unlink on close (stale-detection owns the file)
   ├── go detectUnixSocksFile(ctx)     ── self-staleness watchdog (§5)
-  ├── chmod socket 0666 (FileModeSocket)   ── any local user can reach the user daemon
+  ├── chmod socket 0666 (FileModeSocket)   ── user→root IPC; private parent blocks other UIDs
   ├── writePIDToFile(isSudo)          ── os.Getpid() → pid file (FileModeFile 0644)
   ├── grpc.NewServer(
   │       ChainUnary : UnaryPanicHandler → UnaryClassifyInterceptor
