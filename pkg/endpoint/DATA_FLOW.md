@@ -39,9 +39,10 @@ plus a separate control connection to the same forwarding endpoint.
   register routes. Type `2` is control; only `3..255` remain reserved. Data registration is
   sent before queued business traffic on each new data conn.
 - Shared primitives: `pkg/internal/wire/conn.go` owns `Conn`, `ReadDatagram`,
-  `WriteDatagram`, `WriteFull`; `batch.go` owns `BatchWriter`. Pooled `packet` and packet
-  batches remain private to tunnel. `pkg/tunnel/internal/netstack` owns stack construction
-  and TCP/UDP/ICMP forwarders.
+  `WriteDatagram`, `WriteFull`; `batch.go` owns `BatchWriter`. Packet objects and their
+  data buffers are recycled independently, with metadata cleared at final release;
+  packet batches remain private to tunnel. `pkg/tunnel/internal/netstack` owns stack
+  construction and TCP/UDP/ICMP forwarders.
 
 The legacy diagrams, pseudocode and bug-fix/performance history below preserve earlier
 names/topologies (public RouteHub maps, four slots, broadcast heartbeats, old wrapper APIs).

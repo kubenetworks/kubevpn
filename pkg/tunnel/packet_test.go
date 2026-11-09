@@ -3,6 +3,8 @@ package tunnel
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
+	"net"
 	"sync"
 	"testing"
 
@@ -111,4 +113,29 @@ func TestPacketImmediateDoubleReleasePanics(t *testing.T) {
 		}
 	}()
 	pkt.release()
+}
+
+func TestPacketPoolResetsMetadata(t *testing.T) {
+	src, dst := net.IPv4(198, 18, 0, 2), net.IPv4(10, 0, 0, 1)
+	pkt := newPacket(config.LPool.Get().([]byte)[:], 4, src, dst)
+	pkt.probeEpoch = 9
+	pkt.probeQueued = true
+	pkt.release()
+	if err := func() (err error) {
+		defer func() {
+			if recover() != nil {
+				err = fmt.Errorf("acquire after final release panicked")
+			}
+		}()
+		pkt.acquire()
+		return nil
+	}(); err == nil {
+		t.Fatal("acquire after final release did not panic")
+	}
+
+	recycled := newPacket(config.LPool.Get().([]byte)[:], 0, nil, nil)
+	if recycled.refs.Load() != 0 || recycled.data == nil || recycled.length != 0 || recycled.src != nil || recycled.dst != nil || recycled.probeEpoch != 0 || recycled.probeQueued {
+		t.Fatalf("recycled packet retained metadata: %+v", recycled)
+	}
+	recycled.release()
 }
