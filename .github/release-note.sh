@@ -13,62 +13,25 @@ KubeVPN ${RELEASE} is available now ! 🎉
 
 ## Download KubeVPN for your platform
 
-**Mac** (x86-64/Intel)
+| OS      | Architecture        | Download |
+|---------|---------------------|----------|
+| macOS   | Apple Silicon (M1+) | [kubevpn_${RELEASE}_darwin_arm64.zip](https://github.com/kubenetworks/kubevpn/releases/download/${RELEASE}/kubevpn_${RELEASE}_darwin_arm64.zip) |
+| macOS   | Intel (x86_64)      | [kubevpn_${RELEASE}_darwin_amd64.zip](https://github.com/kubenetworks/kubevpn/releases/download/${RELEASE}/kubevpn_${RELEASE}_darwin_amd64.zip) |
+| Linux   | amd64               | [kubevpn_${RELEASE}_linux_amd64.zip](https://github.com/kubenetworks/kubevpn/releases/download/${RELEASE}/kubevpn_${RELEASE}_linux_amd64.zip) |
+| Linux   | arm64               | [kubevpn_${RELEASE}_linux_arm64.zip](https://github.com/kubenetworks/kubevpn/releases/download/${RELEASE}/kubevpn_${RELEASE}_linux_arm64.zip) |
+| Linux   | 386                 | [kubevpn_${RELEASE}_linux_386.zip](https://github.com/kubenetworks/kubevpn/releases/download/${RELEASE}/kubevpn_${RELEASE}_linux_386.zip) |
+| Windows | amd64               | [kubevpn_${RELEASE}_windows_amd64.zip](https://github.com/kubenetworks/kubevpn/releases/download/${RELEASE}/kubevpn_${RELEASE}_windows_amd64.zip) |
+| Windows | arm64               | [kubevpn_${RELEASE}_windows_arm64.zip](https://github.com/kubenetworks/kubevpn/releases/download/${RELEASE}/kubevpn_${RELEASE}_windows_arm64.zip) |
+| Windows | 386                 | [kubevpn_${RELEASE}_windows_386.zip](https://github.com/kubenetworks/kubevpn/releases/download/${RELEASE}/kubevpn_${RELEASE}_windows_386.zip) |
 
-\`\`\`
-curl -Lo kubevpn.zip https://github.com/kubenetworks/kubevpn/releases/download/${RELEASE}/kubevpn_${RELEASE}_darwin_amd64.zip && unzip -d kubevpn kubevpn.zip
-\`\`\`
+Download the zip for your platform, unzip, and move \`kubevpn\`/\`kubevpn.exe\` to your PATH.
 
-**Mac** (AArch64/Apple M1 silicon)
-
-\`\`\`
-curl -Lo kubevpn.zip https://github.com/kubenetworks/kubevpn/releases/download/${RELEASE}/kubevpn_${RELEASE}_darwin_arm64.zip && unzip -d kubevpn kubevpn.zip
-\`\`\`
-
-**Linux** (x86-64)
-
-\`\`\`
-curl -Lo kubevpn.zip https://github.com/kubenetworks/kubevpn/releases/download/${RELEASE}/kubevpn_${RELEASE}_linux_amd64.zip && unzip -d kubevpn kubevpn.zip
-\`\`\`
-
-**Linux** (AArch64)
-
-\`\`\`
-curl -Lo kubevpn.zip https://github.com/kubenetworks/kubevpn/releases/download/${RELEASE}/kubevpn_${RELEASE}_linux_arm64.zip && unzip -d kubevpn kubevpn.zip
-\`\`\`
-
-**Linux** (i386)
-
-\`\`\`
-curl -Lo kubevpn.zip https://github.com/kubenetworks/kubevpn/releases/download/${RELEASE}/kubevpn_${RELEASE}_linux_386.zip && unzip -d kubevpn kubevpn.zip
-\`\`\`
-
-**Windows** (x86-64)
-
-\`\`\`
-curl -LO https://github.com/kubenetworks/kubevpn/releases/download/${RELEASE}/kubevpn_${RELEASE}_windows_amd64.zip
-\`\`\`
-
-**Windows** (AArch64)
-
-\`\`\`
-curl -LO https://github.com/kubenetworks/kubevpn/releases/download/${RELEASE}/kubevpn_${RELEASE}_windows_arm64.zip
-\`\`\`
-
-**Windows** (i386)
-
-\`\`\`
-curl -LO https://github.com/kubenetworks/kubevpn/releases/download/${RELEASE}/kubevpn_${RELEASE}_windows_386.zip
-\`\`\`
+> Or run \`kubevpn upgrade\` to upgrade from a previous version.
 
 ## Checksums
 
 SHA256 checksums available for compiled binaries.
 Run \`shasum -a 256 -c checksums.txt\` to verify.
-
-## Upgrading
-
-Run \`kubevpn upgrade\` to upgrade from a previous version.
 
 ## Changelog
 
