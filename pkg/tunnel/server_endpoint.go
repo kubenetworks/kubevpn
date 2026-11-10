@@ -91,40 +91,39 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 	dl := &periodicDeadline{timeout: config.KeepAliveTime * 3, set: tcpConn.SetReadDeadline}
 
 	for ctx.Err() == nil {
-		buf := config.LPool.Get().([]byte)[:]
 		if err := dl.refresh(); err != nil {
-			config.LPool.Put(buf[:])
 			plog.G(ctx).Errorf("[Gvisor-TCP] Failed to set read deadline: %v", err)
 			return
 		}
-		read, err := tcpConn.Read(buf[datagramHeaderLen:])
+		view, err := tcpConn.(*framing.Conn).ReadView()
 		if err != nil {
 			if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) {
 				plog.G(ctx).Debugf("[Gvisor-TCP] Connection closed: %v", err)
 			} else {
 				plog.G(ctx).Errorf("[Gvisor-TCP] Failed to read from tcp conn: %v", err)
 			}
-			config.LPool.Put(buf[:])
 			return
 		}
+		read := view.Size()
 		readStage.progress(1, read)
 		if read == 0 {
 			plog.G(ctx).Warnf("[Gvisor-TCP] Read empty packet from conn (length=%d)", read)
-			config.LPool.Put(buf[:])
+			view.Release()
 			continue
 		}
+		frame := view.AsSlice()
 		// First datagram declares conn type: control conns are handled separately.
 		if firstPacket {
 			firstPacket = false
-			if buf[datagramHeaderLen] == packetTypeControl {
-				config.LPool.Put(buf[:])
+			if frame[0] == packetTypeControl {
+				view.Release()
 				plog.G(ctx).Debugf("[Gvisor-TCP] Control conn detected: %s", conn.RemoteAddr())
 				h.handleControlConn(ctx, tcpConn)
 				return
 			}
 		}
 
-		ip := buf[tunReserve : datagramHeaderLen+read]
+		ip := frame[typePrefixLen:]
 		var protocol tcpip.NetworkProtocolNumber
 		if netutil.IsIPv4(ip) {
 			protocol = header.IPv4ProtocolNumber
@@ -132,25 +131,32 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 			protocol = header.IPv6ProtocolNumber
 		} else {
 			h.drops.report(ctx, dropInvalid, nil)
-			config.LPool.Put(buf[:])
+			view.Release()
 			continue
 		}
 
 		src, dst, ipProtocol, parseErr := netutil.ParseIPFast(ip)
 		if parseErr != nil {
 			h.drops.report(ctx, dropInvalid, nil)
-			config.LPool.Put(buf[:])
+			view.Release()
 			continue
 		}
 
 		inject.setPeer(src)
 		dispatch.setPeer(src)
-		if !h.hub.AddRoute(ctx, src, conn) {
-			config.LPool.Put(buf[:])
+		added := h.hub.AddRoute(ctx, src, conn)
+		if !added {
+			view.Release()
 			return
 		}
 		dstKey := string(dst)
 		if h.hub.HasRoute(dstKey) {
+			buf, src, dst, copyErr := copyViewToPool(view)
+			view.Release()
+			if copyErr != nil {
+				h.drops.report(ctx, dropInvalid, nil)
+				continue
+			}
 			pkt := newPacket(buf, read, src, dst)
 			pkt.stampLength()
 			token := dispatch.begin()
@@ -165,24 +171,24 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 		} else if (config.CIDR.Contains(dst) || config.CIDR6.Contains(dst)) &&
 			ipProtocol != 1 && ipProtocol != 58 {
 			h.drops.report(ctx, dropRouteMissing, dst)
-			config.LPool.Put(buf[:])
+			view.Release()
 			continue
-		} else if buf[datagramHeaderLen] == packetTypeToGvisor {
+		} else if frame[0] == packetTypeToGvisor {
 			cs := h.getOrCreateClientStack(string(src))
 			if cs == nil {
-				config.LPool.Put(buf[:])
+				view.Release()
 				return
 			}
+			view.TrimFront(typePrefixLen)
 			pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
 				ReserveHeaderBytes: 0,
-				Payload:            buffer.MakeWithData(ip),
+				Payload:            buffer.MakeWithView(view),
 			})
 			var logSrc, logDst net.IP
 			if plog.IsDebugEnabled(ctx) {
 				// src/dst alias buf; retain independent addresses for logging after the pool return.
 				logSrc, logDst = append(net.IP(nil), src...), append(net.IP(nil), dst...)
 			}
-			config.LPool.Put(buf[:])
 			logStackPacket(ctx, "[gVISOR] ", sniffer.DirectionRecv, protocol, pkt)
 			token := inject.begin()
 			cs.endpoint.InjectInbound(protocol, pkt)
@@ -192,11 +198,32 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 				plog.G(ctx).Debugf("[Gvisor-TCP] Injected to stack: %s -> %s, protocol=%s, length=%d", logSrc, logDst, layers.IPProtocol(ipProtocol).String(), read)
 			}
 		} else {
-			pkt := newPacket(buf[:], read, src, dst)
+			buf, src, dst, copyErr := copyViewToPool(view)
+			view.Release()
+			if copyErr != nil {
+				h.drops.report(ctx, dropInvalid, nil)
+				continue
+			}
+			pkt := newPacket(buf, read, src, dst)
 			if !h.hub.bridge.sendObserved(ctx, pkt, tunEnqueue) {
 				pkt.release()
 				return
 			}
 		}
 	}
+}
+
+// copyViewToPool copies a framed payload into an LPool buffer and reparses
+// addresses from that buffer. The returned src/dst never alias the input View,
+// so the caller can release the View before asynchronous delivery.
+func copyViewToPool(view *buffer.View) (buf []byte, src, dst net.IP, err error) {
+	buf = config.LPool.Get().([]byte)
+	frame := view.AsSlice()
+	copy(buf[datagramHeaderLen:], frame)
+	src, dst, _, err = netutil.ParseIPFast(buf[tunReserve:])
+	if err != nil {
+		config.LPool.Put(buf)
+		return nil, nil, nil, err
+	}
+	return buf, src, dst, nil
 }

@@ -153,11 +153,12 @@ func readDatagramView(r io.Reader) (*buffer.View, error) {
 		return nil, err
 	}
 	dataLength := int(binary.BigEndian.Uint16(header[:]))
-	v := buffer.NewViewSize(dataLength)
-	if _, err := io.ReadFull(r, v.AsSlice()); err != nil {
+	v := buffer.NewViewSize(HeaderLen + dataLength)
+	if _, err := io.ReadFull(r, v.AsSlice()[HeaderLen:]); err != nil {
 		v.Release()
 		return nil, err
 	}
+	v.TrimFront(HeaderLen)
 	return v, nil
 }
 
