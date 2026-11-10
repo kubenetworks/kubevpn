@@ -7,7 +7,6 @@ import (
 	"errors"
 	"io"
 	"net"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -430,13 +429,7 @@ func (nm *transportSupervisor) launchTransportSupervisor() {
 	nm.startWorker(func() { nm.superviseTransport(nm.ctx) })
 }
 func (nm *transportSupervisor) superviseTransport(ctx context.Context) {
-	kinds := []transportKind{transportPF}
-	if nm.cfg.SshConf != nil && !nm.cfg.SshConf.IsEmpty() {
-		kinds = []transportKind{transportSSH, transportPF}
-	}
-	index, failed := 0, 0
-	delay := portForwardReconnectDelay
-	consecutiveDead := 0
+	retry := newTransportRetryPolicy(nm.cfg)
 	diagnostic := &transportDiagnostics{warnings: plog.NewThrottle(30 * time.Second)}
 	for ctx.Err() == nil {
 		if nm.terminalCause() != nil {
@@ -446,7 +439,7 @@ func (nm *transportSupervisor) superviseTransport(ctx context.Context) {
 		hadSession := false
 		diagnostic.attempt++
 		prepareStarted := time.Now()
-		g, err := nm.prepareTransport(ctx, kinds[index])
+		g, err := nm.prepareTransport(ctx, retry.currentKind())
 		if err == nil {
 			diagnostic.baseline = nm.heartbeatStats.Snapshot()
 			g.diagnostic = diagnostic
@@ -467,18 +460,10 @@ func (nm *transportSupervisor) superviseTransport(ctx context.Context) {
 			if ctx.Err() != nil {
 				return
 			}
-			delay = nextPortForwardDelay(delay, time.Since(started), primed)
+			retry.recordSession(time.Since(started), primed)
 			hadSession = true
-			if primed {
-				consecutiveDead = 0
-			} else {
-				consecutiveDead++
-			}
-			if consecutiveDead >= portForwardBlackHoleThreshold {
-				blackHoleWarn.Warnf(ctx, "transport-black-hole", "Data plane has not come up across %d transport generations; retrying with bounded backoff", consecutiveDead)
-			}
-			if primed {
-				failed = 0
+			if retry.consecutiveDead >= portForwardBlackHoleThreshold {
+				blackHoleWarn.Warnf(ctx, "transport-black-hole", "Data plane has not come up across %d transport generations; retrying with bounded backoff", retry.consecutiveDead)
 			}
 		} else if ctx.Err() == nil {
 			diagnostic.failed(time.Now())
@@ -508,136 +493,23 @@ func (nm *transportSupervisor) superviseTransport(ctx context.Context) {
 			nm.cancel()
 			return
 		}
-		failed++
-		index = (index + 1) % len(kinds)
 		// Try the other configured path immediately. Once all paths have failed,
 		// apply the existing bounded backoff, including never-primed black holes.
-		if failed >= len(kinds) {
+		if retry.advanceAfterFailure() {
 			retryCtx := plog.WithFields(ctx, map[string]any{
-				"next_kind": transportKindName(kinds[index]), "attempt": diagnostic.attempt,
+				"next_kind": transportKindName(retry.currentKind()), "attempt": diagnostic.attempt,
 			})
-			if !nm.waitNetworkRetry(retryCtx, delay, diagnostic.warnings) {
+			if !nm.waitNetworkRetry(retryCtx, retry.delay, diagnostic.warnings) {
 				return
 			}
-			if !hadSession {
-				delay = nextPortForwardDelay(delay, 0, true)
-			}
-			failed = 0
-		} else if diagnostic.warnings.Allow("switch:" + transportKindName(kinds[index])) {
+			retry.finishRound(hadSession)
+		} else if diagnostic.warnings.Allow("switch:" + transportKindName(retry.currentKind())) {
 			plog.G(ctx).WithFields(map[string]any{
-				"next_kind": transportKindName(kinds[index]), "attempt": diagnostic.attempt, "retry_in": time.Duration(0),
+				"next_kind": transportKindName(retry.currentKind()), "attempt": diagnostic.attempt, "retry_in": time.Duration(0),
 			}).Info("transport retry")
 		}
 	}
 }
-func (nm *transportSupervisor) monitorTransport(ctx context.Context, g *transportGeneration) (bool, error) {
-	ticker := time.NewTicker(livenessCheckInterval)
-	defer ticker.Stop()
-	var armedAt, probeRequested time.Time
-	var probeDeadline <-chan time.Time
-	var networkDebounce <-chan time.Time
-	primed := false
-	requestFreshProbe := func() {
-		// Repeated notifications cannot extend the recovery budget forever.
-		// Only a new path event clears evidence; ordinary ticks never do.
-		if !armedAt.IsZero() && probeRequested.IsZero() {
-			probeRequested = time.Now()
-			probeDeadline = time.After(livenessSteadyThreshold)
-		}
-		nm.heartbeatStats.ClearPending()
-		nm.heartbeatStats.RequestProbe()
-	}
-	var done [3]<-chan struct{}
-	for i, h := range g.handles {
-		done[i] = h.Done()
-	}
-	for {
-		if terminal := nm.terminalCause(); terminal != nil {
-			return primed, terminal
-		}
-		for _, h := range g.handles {
-			select {
-			case <-h.Done():
-				return primed, h.Err()
-			default:
-			}
-		}
-		nm.mu.Lock()
-		armed, terminal := nm.armed, nm.err
-		nm.mu.Unlock()
-		if terminal != nil {
-			return primed, terminal
-		}
-		if armed && armedAt.IsZero() {
-			armedAt = time.Now()
-			nm.heartbeatStats.RequestProbe()
-		}
-		if !armedAt.IsZero() {
-			last := nm.heartbeatStats.LastReply()
-			if nm.lastReply != nil {
-				last = nm.lastReply()
-			}
-			if last.After(armedAt) {
-				if !primed && ctx.Err() == nil {
-					g.diagnostic.recovered(ctx, g, nm.heartbeatStats.Snapshot())
-				}
-				primed = true
-			}
-			if !probeRequested.IsZero() && last.After(probeRequested) {
-				probeRequested = time.Time{}
-				probeDeadline = nil
-			}
-			probeExpired := !probeRequested.IsZero() && time.Since(probeRequested) >= livenessSteadyThreshold
-			if probeExpired || (probeRequested.IsZero() && ((!primed && time.Since(armedAt) >= livenessStartupDeadline) || (primed && time.Since(last) >= livenessSteadyThreshold))) {
-				// A queued resume/path change gets a fresh-evidence budget before
-				// pre-sleep health can retire this generation. An already-expired
-				// probe budget remains bounded even during notification storms.
-				if !probeExpired && nm.consumeNetworkChange() {
-					requestFreshProbe()
-					continue
-				}
-				if runtime.GOOS == "darwin" {
-					nm.repairRoutes(ctx)
-				}
-				return primed, errTransportHeartbeatExpired
-			}
-		}
-		select {
-		case <-ctx.Done():
-			return primed, ctx.Err()
-		case <-ticker.C:
-			if nm.consumeNetworkChange() {
-				requestFreshProbe()
-			}
-		case <-nm.monitorChanges:
-			if networkDebounce == nil {
-				networkDebounce = time.After(50 * time.Millisecond)
-			}
-		case <-networkDebounce:
-			networkDebounce = nil
-			if nm.consumeNetworkChange() {
-				requestFreshProbe()
-			}
-		case <-probeDeadline:
-		case <-done[0]:
-		case <-done[1]:
-		case <-done[2]:
-		case id := <-nm.checks:
-			if id == g.id {
-				nm.heartbeatStats.RequestProbe()
-				if primed && probeRequested.IsZero() {
-					probeRequested = time.Now()
-					probeDeadline = time.After(livenessSteadyThreshold)
-				}
-			}
-		case event := <-nm.failures:
-			if event.generation == g.id {
-				return primed, event.err
-			}
-		}
-	}
-}
-
 func (nm *transportSupervisor) startWatchWorker(ctx context.Context, fn func(context.Context)) {
 	nm.startWorker(func() {
 		watchCtx, cancel := context.WithCancel(ctx)

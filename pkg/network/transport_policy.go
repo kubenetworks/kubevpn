@@ -95,3 +95,50 @@ func nextPortForwardDelay(cur, sessionDuration time.Duration, primed bool) time.
 	}
 	return next
 }
+
+// transportRetryPolicy is the concrete retry state for one supervisor. It
+// makes no I/O or publication decisions; the serial supervisor executes them.
+type transportRetryPolicy struct {
+	kinds           []transportKind
+	index           int
+	failed          int
+	delay           time.Duration
+	consecutiveDead int
+}
+
+func newTransportRetryPolicy(cfg *Config) *transportRetryPolicy {
+	kinds := []transportKind{transportPF}
+	if cfg.SshConf != nil && !cfg.SshConf.IsEmpty() {
+		kinds = []transportKind{transportSSH, transportPF}
+	}
+	return &transportRetryPolicy{kinds: kinds, delay: portForwardReconnectDelay}
+}
+
+func (p *transportRetryPolicy) currentKind() transportKind {
+	return p.kinds[p.index]
+}
+
+func (p *transportRetryPolicy) recordSession(sessionDuration time.Duration, primed bool) {
+	p.delay = nextPortForwardDelay(p.delay, sessionDuration, primed)
+	if primed {
+		p.consecutiveDead = 0
+		p.failed = 0
+	} else {
+		p.consecutiveDead++
+	}
+}
+
+// advanceAfterFailure selects the next kind and reports whether every
+// configured path has now failed and a bounded wait is required.
+func (p *transportRetryPolicy) advanceAfterFailure() bool {
+	p.failed++
+	p.index = (p.index + 1) % len(p.kinds)
+	return p.failed >= len(p.kinds)
+}
+
+func (p *transportRetryPolicy) finishRound(hadSession bool) {
+	if !hadSession {
+		p.delay = nextPortForwardDelay(p.delay, 0, true)
+	}
+	p.failed = 0
+}
