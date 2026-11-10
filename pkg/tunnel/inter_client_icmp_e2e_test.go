@@ -144,17 +144,39 @@ func newInterClientServer(ctx context.Context, t testing.TB) interClientServer {
 	return interClientServer{hub: hub, port: ln.Addr().(*net.TCPAddr).Port}
 }
 
+type pipeClient struct {
+	os      net.Conn
+	replies <-chan []byte
+	packets <-chan []byte
+}
+
+type pipeClientOptions struct {
+	transporter interface {
+		Dial(context.Context, string) (net.Conn, error)
+	}
+	announce bool
+}
+
 // startPipeClient builds a clientTransport whose TUN is a net.Pipe. It returns the "OS side" of
 // the pipe (write to it = the OS sending a packet out the TUN; read from it = the OS receiving a
 // packet) and a channel of ICMP/ICMPv6 echo replies addressed to this client's TUN IP.
 func startPipeClient(ctx context.Context, t testing.TB, serverPort int, tunIP string) (net.Conn, <-chan []byte) {
 	t.Helper()
-	osSide, tunSide := net.Pipe()
+	client := startPipeClientWithOptions(ctx, t, serverPort, tunIP, pipeClientOptions{})
+	return client.os, client.replies
+}
 
+func startPipeClientWithOptions(ctx context.Context, t testing.TB, serverPort int, tunIP string, opts pipeClientOptions) pipeClient {
+	t.Helper()
+	osSide, tunSide := net.Pipe()
+	transporter := opts.transporter
+	if transporter == nil {
+		transporter = testTCPTransport{}
+	}
 	forwarder := (testDialer{
 		Addr:        fmt.Sprintf("127.0.0.1:%d", serverPort),
 		Connector:   testConnector{},
-		Transporter: testTCPTransport{},
+		Transporter: transporter,
 		MaxRetries:  3,
 	}).config()
 
@@ -164,6 +186,15 @@ func startPipeClient(ctx context.Context, t testing.TB, serverPort int, tunIP st
 		tunOutbound: make(chan *packet, MaxSize),
 		errChan:     make(chan error, 1),
 	}
+	if opts.announce {
+		device.addrsFn = func() (net.IP, net.IP, net.IP) {
+			ip := net.ParseIP(tunIP)
+			if ip.To4() != nil {
+				return ip.To4(), nil, nil
+			}
+			return nil, ip.To16(), nil
+		}
+	}
 	// Non-nil stats matches production correlation. Manually emitted registration
 	// pings are application traffic, so their replies must be observed at the TUN.
 	device.transport = newClientTransport(device, forwarder, &HeartbeatStats{})
@@ -172,9 +203,10 @@ func startPipeClient(ctx context.Context, t testing.TB, serverPort int, tunIP st
 	}
 	t.Cleanup(func() { device.Close() })
 
-	// Drain the OS side of the pipe continuously (writeToTun blocks on an unbuffered net.Pipe
-	// until the OS reads), surfacing echo replies addressed to this client.
+	// Drain the OS side continuously. packets retains every delivered IP packet so
+	// reconnect tests can detect traffic accidentally routed to the wrong client.
 	replies := make(chan []byte, 16)
+	packets := make(chan []byte, 64)
 	go func() {
 		self := net.ParseIP(tunIP)
 		buf := make([]byte, config.LargeBufferSize)
@@ -183,8 +215,11 @@ func startPipeClient(ctx context.Context, t testing.TB, serverPort int, tunIP st
 			if err != nil {
 				return
 			}
-			ipData := make([]byte, n)
-			copy(ipData, buf[:n])
+			ipData := append([]byte(nil), buf[:n]...)
+			select {
+			case packets <- ipData:
+			default:
+			}
 			_, dst, _, perr := netutil.ParseIPFast(ipData)
 			if perr != nil || !dst.Equal(self) {
 				continue
@@ -197,7 +232,7 @@ func startPipeClient(ctx context.Context, t testing.TB, serverPort int, tunIP st
 			}
 		}
 	}()
-	return osSide, replies
+	return pipeClient{os: osSide, replies: replies, packets: packets}
 }
 
 // registerRoute makes the server learn this client's route by emitting a heartbeat-style ICMP
