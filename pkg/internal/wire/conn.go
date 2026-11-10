@@ -9,6 +9,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"gvisor.dev/gvisor/pkg/buffer"
+
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
@@ -121,6 +123,42 @@ func (c *Conn) Close() error {
 		c.stopCancel()
 	}
 	return c.closeTransport()
+}
+
+// ReadView reads one datagram into an exactly sized gVisor View. The caller
+// owns the returned View and must Release it or transfer it via MakeWithView.
+func (c *Conn) ReadView() (*buffer.View, error) {
+	if err := c.operationError(); err != nil {
+		return nil, err
+	}
+	c.readMu.Lock()
+	defer c.readMu.Unlock()
+	if err := c.operationError(); err != nil {
+		return nil, err
+	}
+	v, err := readDatagramView(c.Conn)
+	if err != nil {
+		if c.fault != nil {
+			c.fault()
+		}
+		_ = c.Close()
+		return nil, err
+	}
+	return v, nil
+}
+
+func readDatagramView(r io.Reader) (*buffer.View, error) {
+	var header [HeaderLen]byte
+	if _, err := io.ReadFull(r, header[:]); err != nil {
+		return nil, err
+	}
+	dataLength := int(binary.BigEndian.Uint16(header[:]))
+	v := buffer.NewViewSize(dataLength)
+	if _, err := io.ReadFull(r, v.AsSlice()); err != nil {
+		v.Release()
+		return nil, err
+	}
+	return v, nil
 }
 
 // ReadDatagram uses caller-owned payload storage and returns the payload length.
