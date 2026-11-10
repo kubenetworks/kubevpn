@@ -5,10 +5,8 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
-	"fmt"
 	"io"
 	"net"
-	"net/netip"
 	"runtime"
 	"strings"
 	"sync"
@@ -16,20 +14,16 @@ import (
 
 	"tailscale.com/types/logger"
 
-	"github.com/wencaiwulue/kubevpn/v2/pkg/cluster/portforward"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/endpoint"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/tunnel"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 	gossh "golang.org/x/crypto/ssh"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // transportSupervisor owns transport publication, health policy, monitor lifetime and
@@ -81,55 +75,6 @@ type transportHandle interface {
 	Err() error
 }
 
-// All publication, retirement and returned-connection registration use mu.
-// No network operation or blocking Close/Stop runs while that mutex is held.
-type transportGeneration struct {
-	id         uint64
-	kind       transportKind
-	stage      string // preparation stage, read only after prepareTransport returns
-	diagnostic *transportDiagnostics
-	ctx        context.Context
-	cancel     context.CancelFunc
-	endpoints  transportEndpoints
-	handles    []transportHandle
-	retired    bool
-	retireOnce sync.Once
-	conns      map[*generationConn]struct{}
-	dials      sync.WaitGroup
-	applyMu    sync.Mutex // serializes watcher effects with retirement, never mu
-}
-type transportEvent struct {
-	generation uint64
-	err        error
-}
-type generationConn struct {
-	net.Conn
-	nm         *transportSupervisor
-	generation *transportGeneration
-	once       sync.Once
-	err        error
-}
-
-func (c *generationConn) Close() error {
-	c.once.Do(func() {
-		c.err = c.Conn.Close()
-		c.nm.mu.Lock()
-		delete(c.generation.conns, c)
-		c.nm.mu.Unlock()
-	})
-	return c.err
-}
-
-type generationTransporter struct {
-	nm       *transportSupervisor
-	base     endpoint.Transporter
-	endpoint transportEndpoint
-}
-
-func (t *generationTransporter) Dial(ctx context.Context, _ string) (net.Conn, error) {
-	return t.nm.dialTransport(ctx, t.endpoint, t.base)
-}
-
 func (nm *transportSupervisor) waitTransport(ctx context.Context) (*transportGeneration, error) {
 	for {
 		nm.mu.Lock()
@@ -158,6 +103,8 @@ func (nm *transportSupervisor) notifyTransportLocked() {
 func (nm *transportSupervisor) publishTransport(g *transportGeneration) bool {
 	nm.mu.Lock()
 	defer nm.mu.Unlock()
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	if nm.err != nil || nm.stopped || nm.active != nil || g.retired || g.ctx.Err() != nil {
 		return false
 	}
@@ -167,31 +114,7 @@ func (nm *transportSupervisor) publishTransport(g *transportGeneration) bool {
 	return true
 }
 func (nm *transportSupervisor) retireTransport(g *transportGeneration) {
-	g.retireOnce.Do(func() {
-		// Interrupt in-flight watcher RPCs before waiting for their apply ownership.
-		g.cancel()
-		g.applyMu.Lock()
-		nm.mu.Lock()
-		g.retired = true
-		if nm.active == g {
-			nm.active = nil
-			nm.heartbeatStats.BeginGeneration()
-			nm.notifyTransportLocked()
-		}
-		conns := make([]*generationConn, 0, len(g.conns))
-		for c := range g.conns {
-			conns = append(conns, c)
-		}
-		nm.mu.Unlock()
-		g.applyMu.Unlock()
-		for _, c := range conns {
-			c.Close()
-		}
-		for _, h := range g.handles {
-			h.Stop()
-		}
-		g.dials.Wait()
-	})
+	g.retireResources(nm)
 }
 
 func (nm *transportSupervisor) dialTransport(ctx context.Context, endpoint transportEndpoint, base endpoint.Transporter) (net.Conn, error) {
@@ -203,13 +126,9 @@ func (nm *transportSupervisor) dialTransport(ctx context.Context, endpoint trans
 }
 
 func (nm *transportSupervisor) dialGeneration(ctx context.Context, g *transportGeneration, endpoint transportEndpoint, base endpoint.Transporter) (net.Conn, error) {
-	nm.mu.Lock()
-	if g.retired || g.ctx.Err() != nil || nm.active != g {
-		nm.mu.Unlock()
+	if !g.beginDial(nm) {
 		return nil, net.ErrClosed
 	}
-	g.dials.Add(1)
-	nm.mu.Unlock()
 	defer g.dials.Done()
 	dialCtx, cancel := context.WithTimeout(ctx, rentIPCallTimeout)
 	stop := context.AfterFunc(g.ctx, cancel)
@@ -229,17 +148,12 @@ func (nm *transportSupervisor) dialGeneration(ctx context.Context, g *transportG
 			err = tlsConn.HandshakeContext(dialCtx)
 		}
 	}
-	nm.mu.Lock()
-	stale := g.retired || nm.active != g
-	if err == nil && !stale && dialCtx.Err() == nil {
-		c := &generationConn{Conn: conn, nm: nm, generation: g}
-		g.conns[c] = struct{}{}
-		nm.mu.Unlock()
+	c, stale := g.publishDial(nm, conn, err == nil && dialCtx.Err() == nil)
+	if c != nil {
 		return c, nil
 	}
-	nm.mu.Unlock()
 	if conn != nil {
-		conn.Close()
+		_ = conn.Close()
 	}
 	if stale {
 		return nil, net.ErrClosed
@@ -266,7 +180,9 @@ func (nm *transportSupervisor) applyGeneration(ctx context.Context, g *transport
 	g.applyMu.Lock()
 	defer g.applyMu.Unlock()
 	nm.mu.Lock()
+	g.mu.Lock()
 	active := nm.active == g && !g.retired && !nm.stopped && g.ctx.Err() == nil && ctx.Err() == nil
+	g.mu.Unlock()
 	nm.mu.Unlock()
 	if !active {
 		return net.ErrClosed
@@ -364,95 +280,6 @@ func terminalTransportError(err error) bool {
 	return false
 }
 
-func (nm *transportSupervisor) prepareTransport(ctx context.Context, kind transportKind) (g *transportGeneration, err error) {
-	gctx, cancel := context.WithCancel(ctx)
-	g = &transportGeneration{kind: kind, stage: "configuration", ctx: gctx, cancel: cancel, conns: make(map[*generationConn]struct{})}
-	defer func() {
-		if err != nil {
-			cancel()
-			for _, h := range g.handles {
-				h.Stop()
-			}
-		}
-	}()
-	ports := []int{config.PortTCP, config.PortUDP, config.PortXDS}
-	addresses := make([]string, 0, 3)
-	if kind == transportSSH {
-		if nm.cfg.SshConf == nil || nm.cfg.SshConf.IsEmpty() || nm.cfg.Clientset == nil {
-			return g, fmt.Errorf("invalid transport configuration: SSH requires config and client")
-		}
-		probeCtx, probeCancel := context.WithTimeout(gctx, 3*time.Second)
-		defer probeCancel()
-		g.stage = "service_lookup"
-		svc, e := nm.cfg.Clientset.CoreV1().Services(nm.cfg.ManagerNamespace).Get(probeCtx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
-		if e != nil {
-			return g, e
-		}
-		ip, e := netip.ParseAddr(svc.Spec.ClusterIP)
-		if e != nil {
-			return g, fmt.Errorf("SSH service has no reachable ClusterIP: %w", e)
-		}
-		g.stage = "ssh_handshake"
-		client, e := ssh.DialSshRemote(probeCtx, nm.cfg.SshConf, probeCtx.Done())
-		if e != nil {
-			return g, e
-		}
-		// PortMap's listeners are lazy. Check actual SSH channels before publication,
-		// without sending any fake VPN packets to the manager.
-		g.stage = "ssh_channel"
-		for _, port := range ports {
-			c, e := client.DialContext(probeCtx, "tcp", netip.AddrPortFrom(ip, uint16(port)).String())
-			if e != nil {
-				client.Close()
-				return g, e
-			}
-			c.Close()
-		}
-		client.Close()
-		g.stage = "ssh_portmap"
-		for _, port := range ports {
-			h, e := ssh.StartPortMap(gctx, nm.cfg.SshConf, netip.AddrPortFrom(ip, uint16(port)), netip.MustParseAddrPort("127.0.0.1:0"))
-			if e != nil {
-				return g, e
-			}
-			g.handles = append(g.handles, h)
-			addresses = append(addresses, h.Addr().String())
-		}
-	} else {
-		if nm.cfg.Config == nil || nm.cfg.RESTClient == nil || nm.cfg.GetRunningPodList == nil {
-			return g, fmt.Errorf("invalid transport configuration: port-forward requires Kubernetes client")
-		}
-		g.stage = "pod_list"
-		listCtx, listCancel := context.WithTimeout(gctx, portForwardPodListTimeout)
-		pods, e := nm.cfg.GetRunningPodList(listCtx)
-		listCancel()
-		if e != nil {
-			return g, e
-		}
-		if len(pods) == 0 {
-			return g, fmt.Errorf("no running traffic manager pod")
-		}
-		_ = nm.addRoute(util.GetPodIP(pods[0])...)
-		g.stage = "port_forward"
-		h, e := portforward.StartPortForwardSession(gctx, nm.cfg.Config, nm.cfg.RESTClient, pods[0].Name, nm.cfg.ManagerNamespace, ports)
-		if e != nil {
-			return g, e
-		}
-		g.handles = append(g.handles, h)
-		for _, port := range ports {
-			addresses = append(addresses, h.Ports()[port])
-		}
-	}
-	g.stage = "endpoints"
-	for _, addr := range addresses {
-		if addr == "" {
-			return g, fmt.Errorf("transport endpoint missing")
-		}
-	}
-	g.endpoints = transportEndpoints{addresses[0], addresses[1], addresses[2]}
-	return g, nil
-}
-
 func (nm *transportSupervisor) terminalCause() error {
 	nm.mu.Lock()
 	defer nm.mu.Unlock()
@@ -465,7 +292,13 @@ func (nm *transportSupervisor) waitTransportHealthy(ctx context.Context) error {
 		nm.mu.Lock()
 		err := nm.err
 		g := nm.active
-		ready := g != nil && !g.retired && g.ctx.Err() == nil && nm.heartbeatStats.Snapshot().Generation == g.id && !nm.heartbeatStats.LastReply().IsZero()
+		retired := false
+		if g != nil {
+			g.mu.Lock()
+			retired = g.retired
+			g.mu.Unlock()
+		}
+		ready := g != nil && !retired && g.ctx.Err() == nil && nm.heartbeatStats.Snapshot().Generation == g.id && !nm.heartbeatStats.LastReply().IsZero()
 		nm.mu.Unlock()
 		if err != nil {
 			return err
