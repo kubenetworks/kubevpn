@@ -69,7 +69,6 @@ const (
 //	raw IP               = data[tunReserve : datagramHeaderLen+length]
 type packet struct {
 	data   []byte
-	view   *buffer.View
 	length int
 	src    net.IP
 	dst    net.IP
@@ -106,9 +105,7 @@ func (p *packet) release() {
 	switch n := p.refs.Add(-1); {
 	case n == -1:
 		data := p.data
-		view := p.view
 		p.data = nil
-		p.view = nil
 		p.length = 0
 		p.src = nil
 		p.dst = nil
@@ -116,9 +113,6 @@ func (p *packet) release() {
 		p.probeQueued = false
 		if data != nil {
 			config.LPool.Put(data[:])
-		}
-		if view != nil {
-			view.Release()
 		}
 		packetPool.Put(p)
 	case n < -1:
@@ -131,7 +125,6 @@ func (p *packet) release() {
 func newPacket(data []byte, length int, src net.IP, dst net.IP) *packet {
 	p := packetPool.Get().(*packet)
 	p.data = data
-	p.view = nil
 	p.length = length
 	p.src = src
 	p.dst = dst
@@ -154,61 +147,8 @@ func packetBufferFromPool() []byte {
 	return config.LPool.Get().([]byte)[:]
 }
 
-// newViewPacket wraps an exactly sized ingress View. The packet owns the View
-// until it is released, materialized for wire output, or transferred to gVisor.
-func newViewPacket(view *buffer.View) *packet {
-	p := newPacket(nil, view.Size(), nil, nil)
-	p.view = view
-	return p
-}
-
-// materialize converts an ingress View into the canonical pooled layout used by
-// asynchronous routing and TUN delivery. Addresses are reparsed from the new
-// storage so they never alias a recycled View.
-func (p *packet) materialize() error {
-	if p.view == nil {
-		return nil
-	}
-	data, src, dst, err := copyViewToPool(p.view)
-	p.view.Release()
-	p.view = nil
-	if err != nil {
-		return err
-	}
-	p.data = data
-	p.src, p.dst = src, dst
-	return nil
-}
-
-// copyViewToPool copies a framed payload into an LPool buffer and reparses
-// addresses from that buffer. The returned src/dst never alias the input View.
-func copyViewToPool(view *buffer.View) (buf []byte, src, dst net.IP, err error) {
-	buf = packetBufferFromPool()
-	frame := view.AsSlice()
-	copy(buf[datagramHeaderLen:], frame)
-	src, dst, _, err = netutil.ParseIPFast(buf[tunReserve:])
-	if err != nil {
-		config.LPool.Put(buf)
-		return nil, nil, nil, err
-	}
-	return buf, src, dst, nil
-}
-
-// gvisorPayload transfers an ingress View without copying when possible. The
-// caller still owns the packet metadata and must release it independently.
-func (p *packet) gvisorPayload() buffer.Buffer {
-	if p.view != nil {
-		p.view.TrimFront(typePrefixLen)
-		view := p.view
-		p.view = nil
-		return buffer.MakeWithView(view)
-	}
-	return buffer.MakeWithData(p.ip())
-}
-
 // Data returns the raw packet buffer (includes framing headers and payload).
 func (d *packet) Data() []byte {
-	_ = d.materialize()
 	return d.data
 }
 
@@ -217,29 +157,19 @@ func (d *packet) Length() int {
 	return d.length
 }
 
-// ip returns a borrowed view of the raw IP packet, valid until p is released
-// or materialized into a different representation.
+// ip returns a borrowed view of the raw IP packet, valid until p is released.
 func (p *packet) ip() []byte {
-	if p.view != nil {
-		return p.view.AsSlice()[typePrefixLen:]
-	}
 	return p.data[tunReserve : datagramHeaderLen+p.length]
 }
 
 // setIP copies a raw IP packet into the packet and updates its payload length.
 func (p *packet) setIP(ip []byte) {
-	if p.materialize() != nil {
-		return
-	}
 	p.length = typePrefixLen + copy(p.data[tunReserve:], ip)
 }
 
 // frame returns a borrowed view of the wire frame. The wire writer stamps its
-// length immediately before I/O; an ingress View is materialized on first use.
+// length immediately before I/O.
 func (p *packet) frame() []byte {
-	if p.materialize() != nil {
-		return nil
-	}
 	return p.data[:datagramHeaderLen+p.length]
 }
 
@@ -249,9 +179,6 @@ func (p *packet) frameLen() int {
 }
 
 func (p *packet) kind() packetKind {
-	if p.view != nil {
-		return p.view.AsSlice()[0]
-	}
 	return p.data[datagramHeaderLen]
 }
 
@@ -260,18 +187,11 @@ func (p *packet) packetType() byte {
 }
 
 func (p *packet) setType(packetType packetKind) {
-	if p.view != nil {
-		p.view.AsSlice()[0] = packetType
-		return
-	}
 	p.data[datagramHeaderLen] = packetType
 }
 
 // writeTo stamps and writes a tunnel frame without changing partial-write progress semantics.
 func (p *packet) writeTo(w io.Writer) (int, error) {
-	if err := p.materialize(); err != nil {
-		return 0, err
-	}
 	return framing.WriteDatagramProgress(w, p.data, p.length)
 }
 

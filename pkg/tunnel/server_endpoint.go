@@ -7,6 +7,7 @@ import (
 	"net"
 
 	"github.com/google/gopacket/layers"
+	"gvisor.dev/gvisor/pkg/buffer"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/header"
 	"gvisor.dev/gvisor/pkg/tcpip/link/channel"
@@ -176,7 +177,7 @@ func (h *gvisorTCPHandler) dispatchServerDataPacket(ctx context.Context, conn ne
 		}
 		pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
 			ReserveHeaderBytes: 0,
-			Payload:            packet.gvisorPayload(),
+			Payload:            buffer.MakeWithData(packet.ip()),
 		})
 		var logSrc, logDst net.IP
 		if plog.IsDebugEnabled(ctx) {
