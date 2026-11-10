@@ -301,18 +301,6 @@ type routeWriter struct {
 	table *routeTable
 }
 
-func (w *routeWriter) writeToRoute(dstKey string, data []byte) (net.Conn, error) {
-	return w.write(context.Background(), dstKey, func(conn net.Conn) (int, error) {
-		return framing.WriteFull(conn, data)
-	}, routeWriteBytes)
-}
-
-func (w *routeWriter) writeFuncToRoute(dstKey string, fn func(conn net.Conn) error) (net.Conn, error) {
-	return w.write(context.Background(), dstKey, func(conn net.Conn) (int, error) {
-		return 0, fn(conn)
-	}, routeWriteCallback)
-}
-
 func (w *routeWriter) writeToRoutePacket(ctx context.Context, dstKey string, pkt *packet) (net.Conn, error) {
 	return w.write(ctx, dstKey, func(conn net.Conn) (int, error) {
 		return writeRoutePacket(ctx, conn, pkt)
