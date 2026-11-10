@@ -46,7 +46,6 @@ func (h *peerRegistry) readFromEndpointWriteToRoute(ctx context.Context, endpoin
 			continue
 		}
 		p.dst = dstIP
-		p.stampLength()
 		token := stage.begin()
 		usedConn, err := h.hub.WriteToRoutePacket(ctx, string(dstIP), p)
 		stage.finish(token, 1, p.length, err == nil && ctx.Err() == nil)
@@ -141,7 +140,6 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 		dstKey := string(dst)
 		if h.hub.HasRoute(dstKey) {
 			pkt := newPacket(buf, read, src, dst)
-			pkt.stampLength()
 			token := dispatch.begin()
 			usedConn, writeErr := h.hub.WriteToRoutePacket(ctx, dstKey, pkt)
 			dispatch.finish(token, 1, read, writeErr == nil && ctx.Err() == nil)

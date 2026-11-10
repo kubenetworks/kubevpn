@@ -58,9 +58,6 @@ func (s *connAttempt) writeGeneration(ctx context.Context, rawConn net.Conn, err
 			probeID = id
 			packet.setIP(ip)
 		}
-		for _, p := range batch.packets[:batch.n] {
-			p.stampLength()
-		}
 		token := stage.begin(batch.n, batchDiagnosticBytes(batch.packets[:batch.n]))
 		complete, err := writer.write(rawConn, batch.packets[:batch.n])
 		if err != nil && s.now != nil {

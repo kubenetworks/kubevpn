@@ -52,10 +52,8 @@ func (t *serverTransport) routeTun(ctx context.Context) {
 			}
 			dstKey := string(packet.dst)
 			// Canonical layout: type prefix already set by routeOutbound, length is type+IP.
-			// Frame the datagram length in place: buf[0:datagramHeaderLen]. Hand the packet to
-			// the route by reference (zero-copy); the chosen conn takes a reference and we drop
-			// ours below.
-			packet.stampLength()
+			// Hand the packet to the route by reference (zero-copy); the wire writer stamps
+			// the datagram length, the chosen conn takes a reference and we drop ours below.
 			token := stage.begin()
 			conn, err := t.hub.WriteToRoutePacket(ctx, dstKey, packet)
 			stage.finish(token, 1, packet.length, err == nil && ctx.Err() == nil)

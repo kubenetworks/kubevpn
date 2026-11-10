@@ -96,8 +96,7 @@ func (c *Conn) Write(b []byte) (int, error) {
 		defer config.LPool.Put(buf)
 	}
 	copy(buf[HeaderLen:], b)
-	binary.BigEndian.PutUint16(buf[:HeaderLen], uint16(len(b)))
-	n, err := WriteFull(c.Conn, buf[:HeaderLen+len(b)])
+	n, err := WriteDatagramProgress(c.Conn, buf, len(b))
 	if err != nil {
 		if c.fault != nil {
 			c.fault()
@@ -145,15 +144,21 @@ func ReadDatagram(r io.Reader, b []byte) (int, error) {
 // Stamping is idempotent, but a failed write must terminate this stream; a partly
 // transmitted frame must not be replayed on another connection.
 func WriteDatagram(w io.Writer, buf []byte, payloadLen int) error {
+	_, err := WriteDatagramProgress(w, buf, payloadLen)
+	return err
+}
+
+// WriteDatagramProgress is WriteDatagram with wire-byte progress for routing
+// fallback decisions. Positive progress means the frame must not be replayed.
+func WriteDatagramProgress(w io.Writer, buf []byte, payloadLen int) (int, error) {
 	if payloadLen < 0 || payloadLen > maxDatagramPayload {
-		return errDatagramPayloadSize
+		return 0, errDatagramPayloadSize
 	}
 	if len(buf) < HeaderLen || payloadLen > len(buf)-HeaderLen {
-		return io.ErrShortBuffer
+		return 0, io.ErrShortBuffer
 	}
 	binary.BigEndian.PutUint16(buf[:HeaderLen], uint16(payloadLen))
-	_, err := WriteFull(w, buf[:HeaderLen+payloadLen])
-	return err
+	return WriteFull(w, buf[:HeaderLen+payloadLen])
 }
 
 // WriteFull continues positive short writes only on the same writer. The wire

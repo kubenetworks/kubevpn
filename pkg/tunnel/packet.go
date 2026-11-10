@@ -2,7 +2,6 @@ package tunnel
 
 import (
 	"context"
-	"encoding/binary"
 	"io"
 	"net"
 	"strings"
@@ -131,8 +130,8 @@ func (p *packet) setIP(ip []byte) {
 	p.length = typePrefixLen + copy(p.data[tunReserve:], ip)
 }
 
-// frame returns a borrowed view of the wire frame. Stamp its length before sharing or
-// writing it on a tunnel path; frame itself never mutates the packet.
+// frame returns a borrowed view of the wire frame. The wire writer stamps its
+// length immediately before I/O; frame itself never mutates the packet.
 func (p *packet) frame() []byte {
 	return p.data[:datagramHeaderLen+p.length]
 }
@@ -150,15 +149,9 @@ func (p *packet) setType(packetType byte) {
 	p.data[datagramHeaderLen] = packetType
 }
 
-// stampLength writes the wire length header. It is a construction-time, single-owner operation.
-func (p *packet) stampLength() {
-	binary.BigEndian.PutUint16(p.data[:datagramHeaderLen], uint16(p.length))
-}
-
 // writeTo stamps and writes a tunnel frame without changing partial-write progress semantics.
 func (p *packet) writeTo(w io.Writer) (int, error) {
-	p.stampLength()
-	return framing.WriteFull(w, p.frame())
+	return framing.WriteDatagramProgress(w, p.data, p.length)
 }
 
 // copyPacketToPool copies a gvisor packet into an owning packet with a 1-byte type prefix.

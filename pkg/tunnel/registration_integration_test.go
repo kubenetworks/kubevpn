@@ -423,6 +423,75 @@ func TestIntegration_SingleDataSlot_ControlBypassesFullQueue(t *testing.T) {
 	}
 }
 
+func TestIntegration_DataRegistrationPrecedesQueuedTraffic(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stats := &HeartbeatStats{}
+	v4 := net.ParseIP(regTestTunIPv4).To4()
+	icmp, err := netutil.GenICMPPacket(v4, config.RouterIP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registration := append([]byte{packetTypeToGvisor}, icmp...)
+	servers := make(chan net.Conn, 1)
+	slot := &connSlot{
+		inbound:     make(chan *packet, 1),
+		tunOutbound: make(chan *packet, 1),
+		stats:       stats,
+		registrations: func(context.Context) [][]byte {
+			return [][]byte{registration}
+		},
+		forward: (testDialer{
+			Addr: "pipe", MaxRetries: 1, Connector: testConnector{},
+			Transporter: &mockTransporter{dialFn: func(context.Context, string) (net.Conn, error) {
+				client, server := net.Pipe()
+				servers <- server
+				return client, nil
+			}},
+		}).config(),
+	}
+	businessIP := buildIPv4PacketWithPorts(v4, net.IPv4(10, 0, 0, 5), 6, 20000, 80)
+	slot.inbound <- makePoolPacket(businessIP)
+	done := make(chan struct{})
+	go func() { defer close(done); slot.run(ctx) }()
+
+	var server net.Conn
+	select {
+	case server = <-servers:
+	case <-time.After(3 * time.Second):
+		t.Fatal("data slot did not dial")
+	}
+	defer server.Close()
+	framed, _ := framing.NewConn(ctx, server)
+	defer framed.Close()
+	buf := make([]byte, config.LargeBufferSize)
+	n, err := framed.Read(buf)
+	if err != nil {
+		t.Fatalf("read registration: %v", err)
+	}
+	if n == 0 || buf[0] != packetTypeToGvisor {
+		t.Fatalf("first frame is not a data registration: %x", buf[:n])
+	}
+	src, dst, _, err := netutil.ParseIPFast(buf[typePrefixLen:n])
+	if err != nil || !src.Equal(v4) || !dst.Equal(config.RouterIP) {
+		t.Fatalf("first frame registration = %s -> %s, err=%v", src, dst, err)
+	}
+	n, err = framed.Read(buf)
+	if err != nil {
+		t.Fatalf("read queued business packet: %v", err)
+	}
+	want := append([]byte{packetTypeToGvisor}, businessIP...)
+	if !bytes.Equal(buf[:n], want) {
+		t.Fatal("queued business packet arrived before or differs from registration payload")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("data slot did not stop")
+	}
+}
+
 // TestRegistrationPayloadsUseInjectedAddresses pins the contract that registration payloads are
 // built from the device's addresses (whatever their source) and are well-formed ICMP echoes to the
 // gateway — the packets the server turns into a route.

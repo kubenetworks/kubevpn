@@ -26,12 +26,15 @@ func TestBufferedTCP_WriteQueuesData(t *testing.T) {
 	buffered := newBufferedTCP(ctx, client, nil)
 
 	payload := []byte("hello buffered tcp")
-	n, err := buffered.Write(payload)
+	framed := make([]byte, datagramHeaderLen+len(payload))
+	binary.BigEndian.PutUint16(framed[:datagramHeaderLen], uint16(len(payload)))
+	copy(framed[datagramHeaderLen:], payload)
+	n, err := buffered.Write(framed)
 	if err != nil {
 		t.Fatalf("Write returned error: %v", err)
 	}
-	if n != len(payload) {
-		t.Fatalf("Write returned n=%d, want %d", n, len(payload))
+	if n != len(framed) {
+		t.Fatalf("Write returned n=%d, want %d", n, len(framed))
 	}
 
 	// Read from the server side — the background goroutine should have forwarded the data
@@ -41,8 +44,8 @@ func TestBufferedTCP_WriteQueuesData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("server Read error: %v", err)
 	}
-	if !bytes.Equal(buf[:rn], payload) {
-		t.Fatalf("got %q, want %q", buf[:rn], payload)
+	if !bytes.Equal(buf[:rn], framed) {
+		t.Fatalf("got %q, want %q", buf[:rn], framed)
 	}
 }
 

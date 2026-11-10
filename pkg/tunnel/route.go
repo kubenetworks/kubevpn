@@ -74,8 +74,8 @@ type packetWriter interface {
 	writePacket(ctx context.Context, pkt *packet) error
 }
 
-// WritePacket writes an already-framed packet (length header stamped in pkt.data[:2]) to
-// the first healthy conn. For conns that implement packetWriter it transfers one reference
+// WritePacket writes a packet with reserved length headroom to the first healthy
+// conn. For conns that implement packetWriter it transfers one reference
 // (zero-copy); otherwise it falls back to net.Conn.Write (which copies). Dead conns are
 // removed. The caller retains its own reference and must release it after this returns.
 func (cl *ConnList) WritePacket(ctx context.Context, pkt *packet) (net.Conn, error) {
@@ -426,8 +426,9 @@ func (hub *Router) writeToRoute(ctx context.Context, dstKey string, fn func(net.
 	})
 }
 
-// WriteToRoutePacket writes an already-framed packet to the conn(s) registered for dstKey,
-// transferring ownership of one reference to the chosen conn (zero-copy via packetWriter).
+// WriteToRoutePacket writes a packet with reserved length headroom to the conn(s)
+// registered for dstKey, transferring ownership of one reference to the chosen conn
+// (zero-copy via packetWriter).
 // The caller retains its own reference and must release it afterward.
 func (hub *Router) WriteToRoutePacket(ctx context.Context, dstKey string, pkt *packet) (net.Conn, error) {
 	return hub.writeToRoute(ctx, dstKey, func(conn net.Conn) (int, error) {
