@@ -227,9 +227,13 @@ func (cl *ConnList) writeMembers(ctx context.Context, members routeMembersSnapsh
 			}
 			return nil, err
 		}
-		// Capture membership identities before I/O, but reconcile only after
-		// the final outcome includes a cancellation callback that won the race.
-		failed := prepareFailure(m)
+		// Raw writes must capture failure cleanup before I/O. Buffered packet
+		// writers create and run their finalizer only on failure, avoiding one
+		// closure per successful write while preserving empty-route cleanup.
+		var failed func()
+		if !buffered {
+			failed = prepareFailure(m)
+		}
 		var stop func() bool
 		var closed chan struct{}
 		if mode == routeWritePacket && !buffered {
@@ -262,7 +266,11 @@ func (cl *ConnList) writeMembers(ctx context.Context, members routeMembersSnapsh
 		// failures are reconciled before another waiter can acquire this gate.
 		admissionCanceled := mode == routeWritePacket && buffered && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded))
 		if err != nil && !admissionCanceled {
-			failed()
+			if buffered {
+				prepareFailure(m)()
+			} else {
+				failed()
+			}
 		}
 		if !buffered {
 			cl.unlockWrite()
