@@ -70,46 +70,60 @@ func (h *tunHandler) Handle(ctx context.Context, tun net.Conn) {
 	serve(ctx, dev)
 }
 
-// serve starts every device routine under a WaitGroup, waits for the first fatal error or
-// context cancellation, then cancels, closes the TUN, and drains all routines. This gives a
-// deterministic shutdown (WireGuard's peer.stopping pattern): each routine returns on ctx
-// cancel, a closed TUN (unblocks pumpTun's read), or closed conns, so wg.Wait always completes.
+// deviceSession owns the device context, diagnostics and every routine. Its
+// shutdown order is cancel -> close device -> join routines -> transport/device drain.
+type deviceSession struct {
+	dev         *tunDevice
+	diagnostics *datapathDiagnostics
+	workers     sync.WaitGroup
+}
+
 func serve(ctx context.Context, dev *tunDevice) {
+	session := &deviceSession{dev: dev, diagnostics: newDatapathDiagnostics()}
+	session.diagnostics.drops = &dev.drops
+	session.run(ctx)
+}
+
+func (s *deviceSession) run(ctx context.Context) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-
-	diagnostics := newDatapathDiagnostics()
-	diagnostics.drops = &dev.drops
-	ctx = withDatapathDiagnostics(ctx, diagnostics)
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() { defer wg.Done(); diagnostics.run(ctx) }()
-	for _, r := range dev.routines() {
-		wg.Add(1)
-		go func(r namedRoutine) {
-			defer wg.Done()
-			defer netutil.HandleCrash()
-			plog.G(ctx).Debugf("[TUN] routine %q started", r.name)
-			r.fn(ctx)
-			plog.G(ctx).Debugf("[TUN] routine %q stopped", r.name)
-		}(r)
-	}
+	ctx = withDatapathDiagnostics(ctx, s.diagnostics)
+	s.start(ctx)
 
 	select {
-	case err := <-dev.errChan:
+	case err := <-s.dev.errChan:
 		if err != nil {
 			plog.G(ctx).Errorf("[TUN] device exited: %v", err)
 		}
 	case <-ctx.Done():
 	}
 	cancel()
-	dev.Close()
-	wg.Wait()
+	s.closeAndJoin()
+}
+
+func (s *deviceSession) start(ctx context.Context) {
+	s.workers.Add(1)
+	go func() { defer s.workers.Done(); s.diagnostics.run(ctx) }()
+	for _, r := range s.dev.routines() {
+		s.workers.Add(1)
+		go func(r namedRoutine) {
+			defer s.workers.Done()
+			defer netutil.HandleCrash()
+			plog.G(ctx).Debugf("[TUN] routine %q started", r.name)
+			r.fn(ctx)
+			plog.G(ctx).Debugf("[TUN] routine %q stopped", r.name)
+		}(r)
+	}
+}
+
+func (s *deviceSession) closeAndJoin() {
+	s.dev.Close()
+	s.workers.Wait()
 	// A canceled select can still enqueue into a ready channel after its
 	// consumer's deferred drain. Only now have all device producers joined.
-	if closer, ok := dev.transport.(interface{ close() }); ok {
+	if closer, ok := s.dev.transport.(interface{ close() }); ok {
 		closer.close()
 	}
-	drainPacketChan(dev.tunInbound)
-	drainPacketChan(dev.tunOutbound)
+	drainPacketChan(s.dev.tunInbound)
+	drainPacketChan(s.dev.tunOutbound)
 }

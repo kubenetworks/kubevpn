@@ -101,23 +101,8 @@ func (a *connAttempt) run(ctx context.Context, generation uint64) {
 	}
 
 	errChan := make(chan error, 2)
-	loops := &a.loops
-	loops.Add(2)
-	go func() {
-		defer loops.Done()
-		a.readGeneration(subCtx, udpConn, errChan, generation)
-	}()
-	go func() {
-		defer loops.Done()
-		a.writeGeneration(subCtx, rawConn, errChan, generation)
-	}()
-	defer func() {
-		// Unblock socket I/O and join both consumers before another dial
-		// iteration can start a writer on this slot's shared inbound queue.
-		cancel()
-		_ = conn.Close()
-		loops.Wait()
-	}()
+	a.startPumps(subCtx, udpConn, rawConn, errChan, generation)
+	defer a.closeAndJoinPumps(cancel)
 
 	select {
 	case err = <-errChan:
@@ -128,6 +113,26 @@ func (a *connAttempt) run(ctx context.Context, generation uint64) {
 	case <-ctx.Done():
 		return
 	}
+}
+
+func (a *connAttempt) startPumps(ctx context.Context, udpConn, rawConn net.Conn, errChan chan error, generation uint64) {
+	a.loops.Add(2)
+	go func() {
+		defer a.loops.Done()
+		a.readGeneration(ctx, udpConn, errChan, generation)
+	}()
+	go func() {
+		defer a.loops.Done()
+		a.writeGeneration(ctx, rawConn, errChan, generation)
+	}()
+}
+
+// closeAndJoinPumps unblocks both socket loops and joins them before the slot
+// may start another writer on its shared inbound queue.
+func (a *connAttempt) closeAndJoinPumps(cancel context.CancelFunc) {
+	cancel()
+	_ = a.conn.Close()
+	a.loops.Wait()
 }
 
 // slotFailureConn timestamps framing faults before framing.Conn closes the
