@@ -767,7 +767,7 @@ func TestHeartbeatIntegration_QueuedOwnership(t *testing.T) {
 			done := make(chan struct{})
 			go func() {
 				defer close(done)
-				(&connAttempt{connSlot: &connSlot{id: ConnPoolSize, isControl: true, stats: stats, inbound: q}}).writeGeneration(context.Background(), a, errChanOf(), generation)
+				(&connAttempt{connSlot: &connSlot{id: ConnPoolSize, role: slotRoleControl, stats: stats, inbound: q}}).writeGeneration(context.Background(), a, errChanOf(), generation)
 			}()
 			if mode == "invalid_probe" {
 				peer, _ := framing.NewConn(context.Background(), b)
@@ -828,7 +828,7 @@ func TestHeartbeatIntegration_ProbeState(t *testing.T) {
 	writerDone := make(chan struct{})
 	go func() {
 		defer close(writerDone)
-		(&connAttempt{connSlot: &connSlot{id: ConnPoolSize, isControl: true, stats: stats, inbound: ct.controlSlot.inbound}}).writeGeneration(context.Background(), a, errChanOf(), 0)
+		(&connAttempt{connSlot: &connSlot{id: ConnPoolSize, role: slotRoleControl, stats: stats, inbound: ct.controlSlot.inbound}}).writeGeneration(context.Background(), a, errChanOf(), 0)
 	}()
 	peer, _ := framing.NewConn(context.Background(), b)
 	b.SetReadDeadline(time.Now().Add(time.Second))

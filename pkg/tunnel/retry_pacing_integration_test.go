@@ -345,7 +345,7 @@ func TestRetryPacing_RapidPostDialFailures(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			h := newPacingHarness(t)
 			if mode == "declaration" {
-				h.slot.isControl = true
+				h.slot.role = slotRoleControl
 			}
 			if mode == "registration" {
 				h.slot.registrations = func(context.Context) [][]byte { return [][]byte{{packetTypeToGvisor}} }
@@ -488,7 +488,9 @@ func TestRetryPacing_SuccessfulTrafficDoesNotReset(t *testing.T) {
 			payload := (&clientTransport{dev: &tunDevice{addrsFn: func() (net.IP, net.IP, net.IP) {
 				return net.ParseIP(regTestTunIPv4), nil, nil
 			}}}).registrationPayloads(h.ctx)[0]
-			h.slot.isControl = control
+			if control {
+				h.slot.role = slotRoleControl
+			}
 			if !control {
 				h.slot.registrations = func(context.Context) [][]byte { return [][]byte{payload} }
 			}

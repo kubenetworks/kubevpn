@@ -40,10 +40,7 @@ func (a *connAttempt) run(ctx context.Context, generation uint64) {
 
 	// Fence each underlying connection, not this long-lived slot. A
 	// generation change during Dial discards that connection and retries.
-	role := "data"
-	if a.isControl {
-		role = "control"
-	}
+	role := a.role.String()
 	a.directWriteStage = diagnosticStage(subCtx, "socket_write", role, a.id, generation)
 	defer a.directWriteStage.close()
 	conn, err := a.forward.DialContext(subCtx)
@@ -75,7 +72,7 @@ func (a *connAttempt) run(ctx context.Context, generation uint64) {
 	rawConn := owner.Conn
 	udpConn := framing.NewView(subCtx, &slotFailureConn{Conn: rawConn, close: owner.Close}, a.observeFailure)
 
-	if a.isControl {
+	if a.role.isControl() {
 		// Control conn: send a packetTypeControl declaration so the server enters
 		// the control loop (no AddRoute, no Router registration).
 		controlDecl := []byte{packetTypeControl}

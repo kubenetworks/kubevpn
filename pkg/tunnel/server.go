@@ -94,40 +94,38 @@ func (h *gvisorTCPHandler) handleControlConn(ctx context.Context, tcpConn net.Co
 	defer write.close()
 	dl := &periodicDeadline{timeout: config.KeepAliveTime * 3, set: tcpConn.SetReadDeadline}
 	writeDL := &periodicDeadline{timeout: config.KeepAliveTime, set: tcpConn.SetWriteDeadline}
+	reader := packetReader{conn: tcpConn}
 
 	for ctx.Err() == nil {
-		buf := config.LPool.Get().([]byte)[:]
 		if err := dl.refresh(); err != nil {
-			config.LPool.Put(buf[:])
 			return
 		}
-		read, err := tcpConn.Read(buf[datagramHeaderLen:])
+		packet, err := reader.read()
 		if err != nil {
-			config.LPool.Put(buf[:])
 			return
 		}
-		if read == 0 {
-			config.LPool.Put(buf[:])
+		if packet.length == 0 {
+			packet.release()
 			continue
 		}
-		ip := buf[tunReserve : datagramHeaderLen+read]
+		ip := packet.ip()
 		src, _, _, parseErr := netutil.ParseIPFast(ip)
 		if parseErr != nil {
-			config.LPool.Put(buf[:])
+			packet.release()
 			continue
 		}
 
 		inject.setPeer(src)
 		cs := h.getOrCreateClientStack(string(src))
 		if cs == nil {
-			config.LPool.Put(buf[:])
+			packet.release()
 			return
 		}
 		// The ICMP body (ident/seq plus the heartbeat correlation payload) is echoed
 		// verbatim; only addresses, type and checksums change. Non-echo requests are
 		// dropped: control conns carry only heartbeats.
 		reply := synthesizeEchoReply(ip)
-		config.LPool.Put(buf[:])
+		packet.release()
 		if reply == nil {
 			continue
 		}

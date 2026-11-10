@@ -157,7 +157,7 @@ func (t *clientTransport) runControlSlot(ctx context.Context) {
 		tunOutbound: t.dev.tunOutbound,
 		forward:     t.forward,
 		stats:       t.stats,
-		isControl:   true,
+		role:        slotRoleControl,
 	}
 	t.controlMu.Lock()
 	t.controlSlot = slot

@@ -14,7 +14,7 @@ import (
 // framing, and records probe and activity evidence.
 func (s *connAttempt) writeGeneration(ctx context.Context, rawConn net.Conn, errChan chan error, generation uint64) {
 	role := "data"
-	if s.isControl {
+	if s.role.isControl() {
 		role = "control"
 	}
 	stage := diagnosticStage(ctx, "socket_write", role, s.id, generation)
@@ -31,7 +31,7 @@ func (s *connAttempt) writeGeneration(ctx context.Context, rawConn net.Conn, err
 	var writer frameBatchWriter
 	defer batch.close()
 	limit := maxBatchFrames
-	if s.isControl {
+	if s.role.isControl() {
 		// Stamp correlated probes immediately before their own write, never while
 		// collecting a batch that could delay the probe's actual send time.
 		limit = 1
@@ -49,7 +49,7 @@ func (s *connAttempt) writeGeneration(ctx context.Context, rawConn net.Conn, err
 		}
 		var probeID uint64
 		packet := batch.packets[0]
-		if s.isControl && packet.packetType() == packetTypeControl {
+		if s.role.isControl() && packet.packetType() == packetTypeControl {
 			ip, id := s.stats.prepareProbe(packet.ip(), generation, s.id)
 			if ip == nil {
 				batch.release()

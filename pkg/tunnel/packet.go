@@ -32,18 +32,26 @@ const (
 	tunReserve = datagramHeaderLen + typePrefixLen // 3
 )
 
+type packetKind = byte
+
+const (
+	packetKindToTUN packetKind = iota
+	packetKindToGvisor
+	packetKindControl
+)
+
 // Type prefix values carried in data[2] (1 byte, typePrefixLen). It is a small extensible
 // discriminator: values 3..255 are reserved for future packet types.
 const (
 	// packetTypeToTUN marks a gvisor-processed packet (e.g. a response from the real
 	// network) to be written straight to the TUN device.
-	packetTypeToTUN byte = 0
+	packetTypeToTUN = packetKindToTUN
 	// packetTypeToGvisor marks a raw IP packet to be injected into the local gvisor stack.
-	packetTypeToGvisor byte = 1
+	packetTypeToGvisor = packetKindToGvisor
 	// packetTypeControl marks a control-plane frame (heartbeat ICMP). A conn whose first
 	// datagram carries this type is a control conn: the server does NOT register it in
 	// Router and handles it in a dedicated control loop.
-	packetTypeControl byte = 2
+	packetTypeControl = packetKindControl
 )
 
 // packet represents a network packet with source and destination addresses.
@@ -107,7 +115,25 @@ func newPacketFromPool(size int) *packet {
 	if size > config.LargeBufferSize {
 		return newPacket(make([]byte, size), 0, nil, nil)
 	}
-	return newPacket(config.LPool.Get().([]byte)[:], 0, nil, nil)
+	return newPacket(packetBufferFromPool(), 0, nil, nil)
+}
+
+func packetBufferFromPool() []byte {
+	return config.LPool.Get().([]byte)[:]
+}
+
+// detach moves an owning reference into an independent packet for asynchronous
+// queue handoff. The original must be a reader-owned value with no extra refs;
+// its storage becomes empty and must not be released.
+func (p *packet) detach() *packet {
+	detached := newPacket(p.data, p.length, p.src, p.dst)
+	detached.probeEpoch = p.probeEpoch
+	detached.probeQueued = p.probeQueued
+	p.data = nil
+	p.length = 0
+	p.src, p.dst = nil, nil
+	p.probeEpoch, p.probeQueued = 0, false
+	return detached
 }
 
 // Data returns the raw packet buffer (includes framing headers and payload).
@@ -141,11 +167,15 @@ func (p *packet) frameLen() int {
 	return datagramHeaderLen + p.length
 }
 
-func (p *packet) packetType() byte {
+func (p *packet) kind() packetKind {
 	return p.data[datagramHeaderLen]
 }
 
-func (p *packet) setType(packetType byte) {
+func (p *packet) packetType() byte {
+	return p.kind()
+}
+
+func (p *packet) setType(packetType packetKind) {
 	p.data[datagramHeaderLen] = packetType
 }
 

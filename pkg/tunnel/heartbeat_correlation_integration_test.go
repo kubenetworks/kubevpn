@@ -108,7 +108,7 @@ func newProbeWire(t *testing.T, stats *HeartbeatStats) *probeWire {
 	s := netstack.NewStack(ctx, ep)
 	w := &probeWire{t: t, ctx: ctx, stats: stats, in: make(chan *packet, 256), requests: make(chan []byte), server: framedServer, out: make(chan *packet, 4), ep: ep, generation: stats.Generation()}
 	w.writeCount = stats.Snapshot().Slots[ConnPoolSize].WritePackets
-	w.writer = &connSlot{id: ConnPoolSize, isControl: true, stats: stats, inbound: w.in}
+	w.writer = &connSlot{id: ConnPoolSize, role: slotRoleControl, stats: stats, inbound: w.in}
 	reader := &connSlot{id: 0, stats: stats, tunOutbound: w.out}
 	var wg sync.WaitGroup
 	wg.Add(3)
@@ -464,7 +464,7 @@ func TestHeartbeatIntegration_ControlWriteErrorAfterFullFrame(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		(&connSlot{id: ConnPoolSize, stats: stats, isControl: true, inbound: q}).writeToConn(wire.ctx, raw, errs)
+		(&connSlot{id: ConnPoolSize, stats: stats, role: slotRoleControl, inbound: q}).writeToConn(wire.ctx, raw, errs)
 	}()
 	peer.SetReadDeadline(time.Now().Add(2 * time.Second))
 	buf := make([]byte, 256)
