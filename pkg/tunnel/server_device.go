@@ -3,7 +3,6 @@ package tunnel
 import (
 	"context"
 	"errors"
-	"net"
 
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
@@ -31,8 +30,7 @@ func (t *serverTransport) routines() []namedRoutine {
 
 // routeOutbound hands a packet read from the TUN to the route goroutine. IP data sits at buf[3:]
 // (pumpTun reserved buf[0:3] for the datagram length + type prefix), so routeTun can frame in place.
-func (t *serverTransport) routeOutbound(ctx context.Context, buf []byte, n int, src, dst net.IP) {
-	packet := newPacket(buf, n+typePrefixLen, src, dst)
+func (t *serverTransport) routeOutbound(ctx context.Context, packet *packet) {
 	packet.setType(packetTypeToGvisor)
 	logIPPacket(ctx, "[TUN]", packet.ip())
 	if !diagnosticEnqueue(ctx, t.dev.tunInbound, packet, t.dev.enqueueStage) {

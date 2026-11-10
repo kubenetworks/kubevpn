@@ -119,8 +119,8 @@ func (d *tunDevice) routines() []namedRoutine {
 func (d *tunDevice) readFromTun(ctx context.Context) {
 	d.enqueueStage = diagnosticStage(ctx, "tun_enqueue", "tun", -1, 0)
 	defer d.enqueueStage.close()
-	d.pumpTun(ctx, d.transport.label(), func(buf []byte, n int, src, dst net.IP) {
-		d.transport.routeOutbound(ctx, buf, n, src, dst)
+	d.pumpTun(ctx, d.transport.label(), func(packet *packet) {
+		d.transport.routeOutbound(ctx, packet)
 	})
 }
 
@@ -130,11 +130,11 @@ func (d *tunDevice) readFromTun(ctx context.Context) {
 // continues. A read error is tolerated: transient/one-off errors are logged and retried (e.g. the
 // macOS wireguard route listener surfaces ENOBUFS once but the fd stays usable); only after
 // maxConsecutiveTunReadErrors back-to-back failures is the device declared dead (reported via
-// errChan, stopping the loop). On a delivered packet the dispatch callback owns buf and must
-// return it to config.LPool (directly, or by handing it to a channel whose drainer frees it).
+// errChan, stopping the loop). On a delivered packet the dispatch callback consumes its owning
+// reference, either releasing it or transferring it to a channel whose drainer releases it.
 // Both transports share this loop via tunDevice.readFromTun; only their routeOutbound dispatch
 // (debug label, framing, routing) differs.
-func (d *tunDevice) pumpTun(ctx context.Context, errLabel string, dispatch func(buf []byte, n int, src, dst net.IP)) {
+func (d *tunDevice) pumpTun(ctx context.Context, errLabel string, dispatch func(*packet)) {
 	if bt, ok := d.tun.(batchTUN); ok {
 		d.pumpTunBatch(ctx, errLabel, bt, dispatch)
 		return
@@ -144,14 +144,14 @@ func (d *tunDevice) pumpTun(ctx context.Context, errLabel string, dispatch func(
 
 // pumpTunSingle is the single-packet read loop used for plain net.Conn TUN devices (e.g.
 // net.Pipe in tests). Real TUN devices take the batched pumpTunBatch path.
-func (d *tunDevice) pumpTunSingle(ctx context.Context, errLabel string, dispatch func(buf []byte, n int, src, dst net.IP)) {
+func (d *tunDevice) pumpTunSingle(ctx context.Context, errLabel string, dispatch func(*packet)) {
 	defer netutil.HandleCrash()
 	consecutiveErrors := 0
 	for ctx.Err() == nil {
-		buf := config.LPool.Get().([]byte)[:]
-		n, err := d.tun.Read(buf[tunReserve:])
+		packet := newPacketFromPool(config.LargeBufferSize)
+		n, err := d.tun.Read(packet.data[tunReserve:])
 		if err != nil {
-			config.LPool.Put(buf[:])
+			packet.release()
 			if ctx.Err() != nil {
 				return // shutting down: the read error is expected, stay quiet
 			}
@@ -168,13 +168,15 @@ func (d *tunDevice) pumpTunSingle(ctx context.Context, errLabel string, dispatch
 			continue
 		}
 		consecutiveErrors = 0
-		src, dst, _, parseErr := netutil.ParseIPFast(buf[tunReserve : tunReserve+n])
+		src, dst, _, parseErr := netutil.ParseIPFast(packet.data[tunReserve : tunReserve+n])
 		if parseErr != nil {
 			d.drops.report(ctx, dropInvalid, nil)
-			config.LPool.Put(buf[:])
+			packet.release()
 			continue
 		}
-		dispatch(buf, n, src, dst)
+		packet.length = n + typePrefixLen
+		packet.src, packet.dst = src, dst
+		dispatch(packet)
 	}
 }
 
@@ -183,11 +185,11 @@ func (d *tunDevice) pumpTunSingle(ctx context.Context, errLabel string, dispatch
 // IP packets, each parsed and dispatched individually into the
 // canonical [2 len][1 type][IP] layout (IP at buf[tunReserve:]). Buffers handed to dispatch
 // are owned by the consumer; unused and malformed slots stay with the pump until exit.
-func (d *tunDevice) pumpTunBatch(ctx context.Context, errLabel string, bt batchTUN, dispatch func(buf []byte, n int, src, dst net.IP)) {
+func (d *tunDevice) pumpTunBatch(ctx context.Context, errLabel string, bt batchTUN, dispatch func(*packet)) {
 	d.pumpTunBatchWithPool(ctx, errLabel, bt, dispatch, &config.LPool)
 }
 
-func (d *tunDevice) pumpTunBatchWithPool(ctx context.Context, errLabel string, bt batchTUN, dispatch func([]byte, int, net.IP, net.IP), pool interface {
+func (d *tunDevice) pumpTunBatchWithPool(ctx context.Context, errLabel string, bt batchTUN, dispatch func(*packet), pool interface {
 	Get() any
 	Put(any)
 }) {
@@ -228,7 +230,8 @@ func (d *tunDevice) pumpTunBatchWithPool(ctx context.Context, errLabel string, b
 				continue
 			}
 			bufs[i] = nil // transfer ownership before a consumer can retain or release it
-			dispatch(buf, size, src, dst)
+			packet := newPacket(buf, size+typePrefixLen, src, dst)
+			dispatch(packet)
 		}
 		if ctx.Err() != nil {
 			return

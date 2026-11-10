@@ -82,13 +82,9 @@ func (c *bufferedTCP) Write(b []byte) (int, error) {
 	if len(b) > 65535+datagramHeaderLen {
 		return 0, errors.New("tcp frame too large")
 	}
-	buf := config.LPool.Get().([]byte)
-	if len(b) > len(buf) {
-		config.LPool.Put(buf)
-		buf = make([]byte, len(b))
-	}
-	n := copy(buf, b)
-	pkt := newPacket(buf, n-datagramHeaderLen, nil, nil)
+	pkt := newPacketFromPool(len(b))
+	n := copy(pkt.data, b)
+	pkt.length = n - datagramHeaderLen
 	if err := c.writePacket(context.Background(), pkt); err != nil {
 		pkt.release()
 		return 0, err

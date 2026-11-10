@@ -2,7 +2,6 @@ package tunnel
 
 import (
 	"context"
-	"net"
 	"sync"
 	"time"
 
@@ -83,12 +82,11 @@ func (t *clientTransport) routines() []namedRoutine {
 
 // routeOutbound dispatches a packet read from the TUN: loop it back through the local gvisor
 // stack when src == dst, otherwise enqueue it for the connection pool (distributed by five-tuple).
-func (t *clientTransport) routeOutbound(ctx context.Context, buf []byte, n int, src, dst net.IP) {
-	packet := newPacket(buf, n+typePrefixLen, src, dst)
+func (t *clientTransport) routeOutbound(ctx context.Context, packet *packet) {
 	packet.setType(packetTypeToGvisor)
 	logIPPacket(ctx, "[Client] OUTBOUND", packet.ip())
 	out := t.dev.tunInbound
-	if src.Equal(dst) {
+	if packet.src.Equal(packet.dst) {
 		out = t.gvisorInbound
 	}
 	if !diagnosticEnqueue(ctx, out, packet, t.dev.enqueueStage) {
@@ -232,9 +230,9 @@ func (t *clientTransport) heartbeats(ctx context.Context) {
 			dataPlaneWarn.Load().Warnf(ctx, "hb-no-control-slot", "[Client] Heartbeat skipped: control slot not up yet")
 			return
 		}
-		buf := config.LPool.Get().([]byte)
-		n := copy(buf[tunReserve:], payload)
-		packet := newPacket(buf, n+typePrefixLen, nil, nil)
+		packet := newPacketFromPool(config.LargeBufferSize)
+		n := copy(packet.data[tunReserve:], payload)
+		packet.length = n + typePrefixLen
 		packet.setType(packetTypeControl)
 		if !t.stats.enqueueProbe(slot.inbound, packet) {
 			dataPlaneWarn.Load().Warnf(ctx, "hb-slot-full", "[Client] Heartbeat dropped: control slot queue full")

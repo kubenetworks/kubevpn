@@ -16,9 +16,8 @@ import (
 type transport interface {
 	// label prefixes the device's read-tun logs, e.g. "[Client]" or "[TUN]".
 	label() string
-	// routeOutbound handles one IP packet read from the TUN (framing headroom at buf[0:3],
-	// IP data at buf[3:3+n]). The transport takes ownership of buf.
-	routeOutbound(ctx context.Context, buf []byte, n int, src, dst net.IP)
+	// routeOutbound consumes one owning packet read from the TUN.
+	routeOutbound(ctx context.Context, packet *packet)
 	// routines returns the transport's role-specific goroutines.
 	routines() []namedRoutine
 }

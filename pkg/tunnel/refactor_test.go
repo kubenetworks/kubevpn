@@ -23,19 +23,19 @@ func TestCopyPacketToPool_ReleasesResources(t *testing.T) {
 	})
 	// pkt starts with refcount=1. After copyPacketToPool, it should be 0 (destroyed).
 
-	buf, length := copyPacketToPool(pkt, 0, 0)
-	defer config.LPool.Put(buf[:])
+	packet := copyPacketToPool(pkt, 0, 0)
+	defer packet.release()
 
-	if length != len(payload)+1 {
-		t.Fatalf("expected length %d, got %d", len(payload)+1, length)
+	if packet.length != len(payload)+1 {
+		t.Fatalf("expected length %d, got %d", len(payload)+1, packet.length)
 	}
-	if buf[0] != 0 {
-		t.Fatalf("expected prefix=0, got %d", buf[0])
+	if packet.data[0] != 0 {
+		t.Fatalf("expected prefix=0, got %d", packet.data[0])
 	}
 	// Verify the payload was copied correctly
 	for i, b := range payload {
-		if buf[1+i] != b {
-			t.Fatalf("payload mismatch at offset %d: expected %d, got %d", i, b, buf[1+i])
+		if packet.data[1+i] != b {
+			t.Fatalf("payload mismatch at offset %d: expected %d, got %d", i, b, packet.data[1+i])
 		}
 	}
 }
@@ -47,19 +47,19 @@ func TestCopyPacketToPool_WithHeadroom(t *testing.T) {
 	})
 
 	headroom := 2
-	buf, length := copyPacketToPool(pkt, 1, headroom)
-	defer config.LPool.Put(buf[:])
+	packet := copyPacketToPool(pkt, 1, headroom)
+	defer packet.release()
 
-	if length != len(payload)+1 {
-		t.Fatalf("expected length %d, got %d", len(payload)+1, length)
+	if packet.length != len(payload)+1 {
+		t.Fatalf("expected length %d, got %d", len(payload)+1, packet.length)
 	}
 	// prefix at buf[headroom]
-	if buf[headroom] != 1 {
-		t.Fatalf("expected prefix=1 at offset %d, got %d", headroom, buf[headroom])
+	if packet.data[headroom] != 1 {
+		t.Fatalf("expected prefix=1 at offset %d, got %d", headroom, packet.data[headroom])
 	}
 	// payload starts at buf[headroom+1]
 	for i, b := range payload {
-		if buf[headroom+1+i] != b {
+		if packet.data[headroom+1+i] != b {
 			t.Fatalf("payload mismatch at offset %d", i)
 		}
 	}

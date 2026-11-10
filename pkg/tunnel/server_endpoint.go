@@ -33,34 +33,23 @@ func (h *peerRegistry) readFromEndpointWriteToRoute(ctx context.Context, endpoin
 		}
 		logStackPacket(ctx, "[gVISOR] ", sniffer.DirectionSend, pkt.NetworkProtocolNumber, pkt)
 
-		buf := config.LPool.Get().([]byte)
 		if tunReserve+pkt.Size() > config.LargeBufferSize {
 			h.drops.report(ctx, dropOversized, nil)
-			config.LPool.Put(buf)
 			pkt.DecRef()
 			continue
 		}
-		dst := buf[tunReserve:]
-		ipLen := 0
-		for _, s := range pkt.AsSlices() {
-			ipLen += copy(dst[ipLen:], s)
-		}
-		pkt.DecRef()
-
-		_, dstIP, _, parseErr := netutil.ParseIPFast(buf[tunReserve : tunReserve+ipLen])
+		p := copyPacketToPool(pkt, packetTypeToTUN, datagramHeaderLen)
+		_, dstIP, _, parseErr := netutil.ParseIPFast(p.ip())
 		if parseErr != nil {
 			h.drops.report(ctx, dropInvalid, nil)
-			config.LPool.Put(buf)
+			p.release()
 			continue
 		}
-
-		payloadLen := ipLen + typePrefixLen
-		p := newPacket(buf, payloadLen, nil, dstIP)
-		p.setType(packetTypeToTUN)
+		p.dst = dstIP
 		p.stampLength()
 		token := stage.begin()
 		usedConn, err := h.hub.WriteToRoutePacket(ctx, string(dstIP), p)
-		stage.finish(token, 1, payloadLen, err == nil && ctx.Err() == nil)
+		stage.finish(token, 1, p.length, err == nil && ctx.Err() == nil)
 		if err != nil {
 			h.reportRouteDrop(ctx, err, dstIP)
 		} else if plog.IsDebugEnabled(ctx) {

@@ -102,6 +102,15 @@ func newPacket(data []byte, length int, src net.IP, dst net.IP) *packet {
 	}
 }
 
+// newPacketFromPool allocates a packet buffer with room for size bytes. Buffers
+// returned to the pool retain the existing LPool ownership policy.
+func newPacketFromPool(size int) *packet {
+	if size > config.LargeBufferSize {
+		return newPacket(make([]byte, size), 0, nil, nil)
+	}
+	return newPacket(config.LPool.Get().([]byte)[:], 0, nil, nil)
+}
+
 // Data returns the raw packet buffer (includes framing headers and payload).
 func (d *packet) Data() []byte {
 	return d.data
@@ -152,13 +161,13 @@ func (p *packet) writeTo(w io.Writer) (int, error) {
 	return framing.WriteFull(w, p.frame())
 }
 
-// copyPacketToPool copies a gvisor packet into a pool buffer with a 1-byte type prefix.
+// copyPacketToPool copies a gvisor packet into an owning packet with a 1-byte type prefix.
 // headroom reserves extra bytes before the prefix for framing headers (e.g. 2-byte datagram length).
-// Returns the buffer and payload length (prefix + IP data, NOT including headroom).
-// Caller must return buf to config.LPool.
-// The PacketBuffer's ref count is decremented before returning.
-func copyPacketToPool(pkt *stack.PacketBuffer, prefix byte, headroom int) (buf []byte, length int) {
-	buf = config.LPool.Get().([]byte)[:]
+// The returned length is prefix + IP data, NOT including headroom. The PacketBuffer's
+// ref count is decremented before returning; the caller owns the returned packet.
+func copyPacketToPool(pkt *stack.PacketBuffer, prefix byte, headroom int) *packet {
+	packet := newPacketFromPool(config.LargeBufferSize)
+	buf := packet.data
 	// Copy straight from gvisor's section views into the pooled buffer. AsSlices aliases
 	// the views (no copy), so this is a single copy out; ToView().AsSlice() would first
 	// flatten the views into a throwaway buffer (a second copy).
@@ -169,7 +178,8 @@ func copyPacketToPool(pkt *stack.PacketBuffer, prefix byte, headroom int) (buf [
 	}
 	buf[headroom] = prefix
 	pkt.DecRef()
-	return buf, n + typePrefixLen
+	packet.length = n + typePrefixLen
+	return packet
 }
 
 // logIPPacket logs one bare IP packet (no framing prefix) via gvisor's sniffer, which renders
