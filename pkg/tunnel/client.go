@@ -81,7 +81,7 @@ func (t *clientTransport) routines() []namedRoutine {
 }
 
 // routeOutbound dispatches a packet read from the TUN: loop it back through the local gvisor
-// stack when src == dst, otherwise enqueue it for the connection pool (distributed by five-tuple).
+// stack when src == dst, otherwise enqueue it directly for the single data slot.
 func (t *clientTransport) routeOutbound(ctx context.Context, packet *packet) {
 	packet.setType(packetTypeToGvisor)
 	logIPPacket(ctx, "[Client] OUTBOUND", packet.ip())
@@ -94,14 +94,13 @@ func (t *clientTransport) routeOutbound(ctx context.Context, packet *packet) {
 	}
 }
 
-// runConnPool creates the data slot.
-// Blocking sends provide backpressure; a full slot also stalls the shared dispatcher.
-// The slot owns its reconnect lifecycle, independent of the shared inter-client stack.
+// runConnPool creates the data slot and its shared inter-client stack. The
+// device queue is also the slot queue: there is no forwarding goroutine or
+// second queue. Producers stop through context cancellation, never close/nil.
 func (t *clientTransport) runConnPool(ctx context.Context) {
 	ctx, cancel := context.WithCancel(ctx)
 	// Create the shared inter-client stack before the slots: their readers inject inbound
-	// inter-client packets directly into it. Its output (replies to peers) goes to tunInbound,
-	// which this function's loop below hands to the data slot.
+	// inter-client packets directly into it. Its replies share the same data-slot queue.
 	t.interClient = newInterClientStack(ctx, t.dev.tunInbound, datagramHeaderLen)
 	defer func() { <-t.interClient.done; drainPacketChan(t.dev.tunInbound) }()
 	t.slots = make([]*connSlot, ConnPoolSize)
@@ -109,7 +108,7 @@ func (t *clientTransport) runConnPool(ctx context.Context) {
 	for i := range t.slots {
 		slot := &connSlot{
 			id:            i,
-			inbound:       make(chan *packet, MaxSize),
+			inbound:       t.dev.tunInbound,
 			tunOutbound:   t.dev.tunOutbound,
 			forward:       t.forward,
 			stats:         t.stats,
@@ -125,26 +124,7 @@ func (t *clientTransport) runConnPool(ctx context.Context) {
 		}(slot)
 	}
 	defer func() { cancel(); wg.Wait() }()
-
-	stage := diagnosticStage(ctx, "slot_enqueue", "data", 0, 0)
-	defer stage.close()
-	// Drain the shared tunInbound into the single data slot. Data packets block on the slot
-	// channel to propagate backpressure to the OS TCP stack, preventing silent drops that
-	// cause catastrophic RTO stalls.
-	for {
-		select {
-		case packet := <-t.dev.tunInbound:
-			if packet == nil {
-				return
-			}
-			if !diagnosticEnqueue(ctx, t.slots[0].inbound, packet, stage) {
-				packet.release()
-				return
-			}
-		case <-ctx.Done():
-			return
-		}
-	}
+	<-ctx.Done()
 }
 
 // runControlSlot manages the dedicated heartbeat connection. Requests bypass a full data

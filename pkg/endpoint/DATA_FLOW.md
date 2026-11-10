@@ -19,11 +19,13 @@ plus a separate control connection to the same forwarding endpoint.
 - Root assembly: `pkg/network/runtime.go` → `pkg/network/device.go` → tunnel handlers;
   `pkg/network/transport.go` owns SSH/port-forward generations. Transport replacement
   retains the TUN and client stacks; `address.go` applies legitimate lease changes.
-- Client: `pkg/tunnel/client.go` dispatches directly to data slot 0. `slot.go` retains
-  queues/retry state, while `attempt.go` creates a `connAttempt` per dial, owns framing
-  declaration/registration and joins both pumps before retry. `attempt_read.go` owns inbound
-  dispatch and `attempt_write.go` owns batching and socket writes. Multi-slot hashing is only
-  a private nil-stats test override.
+- Client: `pkg/tunnel/client.go` dispatches directly to data slot 0. The device
+  `tunInbound` is also the single data slot's `inbound`; there is no forwarding
+  goroutine or second queue. `slot.go` retains retry state, while `attempt.go`
+  creates a `connAttempt` per dial, owns framing declaration/registration and joins
+  both pumps before retry. `attempt_read.go` owns inbound dispatch and
+  `attempt_write.go` owns batching and socket writes. Multi-slot hashing is only a
+  private nil-stats test override.
 - Server: `server_runtime.go` composes `routeTable`, `routeWriter`, `peerRegistry` and
   `tunBridge`; `Router` remains the public facade. `server_endpoint.go` sends per-client
   stack output through `readFromEndpointWriteToRoute` → routeWriter → registered data conn.
@@ -39,9 +41,11 @@ plus a separate control connection to the same forwarding endpoint.
   sent before queued business traffic on each new data conn.
 - Shared primitives: `pkg/internal/wire/conn.go` owns `Conn`, `ReadDatagram`,
   `WriteDatagram`, `WriteDatagramProgress`, `WriteFull`; `batch.go` owns `BatchWriter`.
-  `pkg/tunnel/packet_io.go` owns framed reads and reusable packet owners; asynchronous
-  queues receive detached owners. Pooled `packet` and packet batches remain private to
-  tunnel. `pkg/tunnel/internal/netstack` owns stack construction and TCP/UDP/ICMP forwarders.
+  `pkg/tunnel/packet_io.go` owns framed reads and exact ingress Views. gVisor injection
+  transfers Views without copying; asynchronous routing and TUN output materialize them
+  into canonical buffers. Packet objects and their data buffers are recycled independently,
+  with metadata cleared at final release; packet batches remain private to tunnel.
+  `pkg/tunnel/internal/netstack` owns stack construction and TCP/UDP/ICMP forwarders.
 
 The legacy diagrams, pseudocode and bug-fix/performance history below preserve earlier
 names/topologies (public RouteHub maps, four slots, broadcast heartbeats, old wrapper APIs).

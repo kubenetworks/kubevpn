@@ -3,6 +3,9 @@ package tunnel
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
+	"net"
+	"sync"
 	"testing"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -80,4 +83,59 @@ func TestPacketRefcountCharacterization(t *testing.T) {
 	if got := pkt.refs.Load(); got != -1 {
 		t.Fatalf("packet refs after final release = %d, want -1", got)
 	}
+}
+
+func TestPacketSharedOwnersReleaseOnce(t *testing.T) {
+	pkt := newPacket(config.LPool.Get().([]byte)[:], typePrefixLen, nil, nil)
+	const consumers = 3
+	pkt.acquire()
+	pkt.acquire()
+	var wg sync.WaitGroup
+	wg.Add(consumers)
+	for range consumers {
+		go func() {
+			defer wg.Done()
+			pkt.release()
+		}()
+	}
+	wg.Wait()
+	if got := pkt.refs.Load(); got != -1 {
+		t.Fatalf("refs after all owners released = %d, want -1", got)
+	}
+}
+
+func TestPacketImmediateDoubleReleasePanics(t *testing.T) {
+	pkt := newPacket(config.LPool.Get().([]byte)[:], typePrefixLen, nil, nil)
+	pkt.release()
+	defer func() {
+		if recover() == nil {
+			t.Fatal("double release before reuse did not panic")
+		}
+	}()
+	pkt.release()
+}
+
+func TestPacketPoolResetsMetadata(t *testing.T) {
+	src, dst := net.IPv4(198, 18, 0, 2), net.IPv4(10, 0, 0, 1)
+	pkt := newPacket(config.LPool.Get().([]byte)[:], 4, src, dst)
+	pkt.probeEpoch = 9
+	pkt.probeQueued = true
+	pkt.release()
+	if err := func() (err error) {
+		defer func() {
+			if recover() != nil {
+				err = fmt.Errorf("acquire after final release panicked")
+			}
+		}()
+		pkt.acquire()
+		return nil
+	}(); err == nil {
+		t.Fatal("acquire after final release did not panic")
+	}
+
+	recycled := newPacket(config.LPool.Get().([]byte)[:], 0, nil, nil)
+	if recycled.refs.Load() != 0 || recycled.data == nil || recycled.length != 0 || recycled.src != nil || recycled.dst != nil || recycled.probeEpoch != 0 || recycled.probeQueued {
+		t.Fatalf("recycled packet retained metadata: %+v", recycled)
+	}
+	recycled.release()
 }

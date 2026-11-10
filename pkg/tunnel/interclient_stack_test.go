@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	netutil "github.com/wencaiwulue/kubevpn/v2/pkg/util/netutil"
 )
 
@@ -53,7 +52,7 @@ func TestReadFromConn_InjectsInterClientToSharedStack(t *testing.T) {
 		if pkt == nil {
 			t.Fatal("got nil packet")
 		}
-		reply := pkt.data[tunReserve : datagramHeaderLen+pkt.length]
+		reply := pkt.ip()
 		src, dst, _, err := netutil.ParseIPFast(reply)
 		if err != nil {
 			t.Fatalf("parse reply: %v", err)
@@ -61,7 +60,7 @@ func TestReadFromConn_InjectsInterClientToSharedStack(t *testing.T) {
 		if !src.Equal(net.ParseIP("198.18.0.2")) || !dst.Equal(net.ParseIP("10.0.0.5")) {
 			t.Fatalf("echo reply addressing = %s->%s, want 198.18.0.2->10.0.0.5", src, dst)
 		}
-		config.LPool.Put(pkt.data[:])
+		pkt.release()
 	case <-tunOutbound:
 		t.Fatal("inter-client packet must not be forwarded to tunOutbound")
 	case <-time.After(3 * time.Second):

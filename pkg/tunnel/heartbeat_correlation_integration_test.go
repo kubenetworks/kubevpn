@@ -204,7 +204,7 @@ func (w *probeWire) deliver(reply []byte) {
 	select {
 	case pkt := <-w.out:
 		defer pkt.release()
-		if !bytes.Equal(pkt.data[tunReserve:datagramHeaderLen+pkt.length], marker) {
+		if !bytes.Equal(pkt.ip(), marker) {
 			w.t.Fatal("protocol echo leaked to business TUN")
 		}
 	case <-time.After(2 * time.Second):
@@ -675,7 +675,7 @@ func (w *probeWire) deliverBusiness(reply []byte) {
 	select {
 	case pkt := <-w.out:
 		defer pkt.release()
-		if !bytes.Equal(pkt.data[tunReserve:datagramHeaderLen+pkt.length], reply) {
+		if !bytes.Equal(pkt.ip(), reply) {
 			w.t.Fatal("business echo changed")
 		}
 	case <-time.After(time.Second):

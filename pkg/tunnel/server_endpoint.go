@@ -7,7 +7,6 @@ import (
 	"net"
 
 	"github.com/google/gopacket/layers"
-	"gvisor.dev/gvisor/pkg/buffer"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/header"
 	"gvisor.dev/gvisor/pkg/tcpip/link/channel"
@@ -153,7 +152,6 @@ func (h *gvisorTCPHandler) dispatchServerDataPacket(ctx context.Context, conn ne
 	}
 	dstKey := string(dst)
 	if h.table.hasRoute(dstKey) {
-		packet = packet.detach()
 		token := routeStage.begin()
 		usedConn, writeErr := h.writer.writeToRoutePacket(ctx, dstKey, packet)
 		routeStage.finish(token, 1, read, writeErr == nil && ctx.Err() == nil)
@@ -178,11 +176,11 @@ func (h *gvisorTCPHandler) dispatchServerDataPacket(ctx context.Context, conn ne
 		}
 		pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
 			ReserveHeaderBytes: 0,
-			Payload:            buffer.MakeWithData(ip),
+			Payload:            packet.gvisorPayload(),
 		})
 		var logSrc, logDst net.IP
 		if plog.IsDebugEnabled(ctx) {
-			// src/dst alias packet storage; retain independent addresses after release.
+			// src/dst alias ingress storage; retain independent addresses after release.
 			logSrc, logDst = append(net.IP(nil), src...), append(net.IP(nil), dst...)
 		}
 		packet.release()
@@ -196,7 +194,6 @@ func (h *gvisorTCPHandler) dispatchServerDataPacket(ctx context.Context, conn ne
 		}
 		return true
 	}
-	packet = packet.detach()
 	if !h.runtime.bridge.sendObserved(ctx, packet, tunEnqueue) {
 		packet.release()
 		return false
