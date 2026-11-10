@@ -152,7 +152,7 @@ func TestTunHandler_CustomHub(t *testing.T) {
 func TestGvisorTCPHandler_NilHub_OwnsRegistry(t *testing.T) {
 	handler := GvisorTCPHandler(nil)
 	gh := handler.(*gvisorTCPHandler)
-	if gh.hub == nil || gh.hub.peers != gh.peerRegistry {
+	if gh.runtime == nil || gh.runtime.peers != gh.peerRegistry {
 		t.Fatal("default router must own the handler's peer registry")
 	}
 	gh.Start(context.Background())
@@ -165,7 +165,7 @@ func TestGvisorTCPHandler_CustomHub(t *testing.T) {
 	hub := NewRouter()
 	handler := GvisorTCPHandler(hub)
 	gh := handler.(*gvisorTCPHandler)
-	if gh.hub != hub {
+	if gh.runtime != hub.serverRuntime {
 		t.Fatal("handler should use the provided hub")
 	}
 }

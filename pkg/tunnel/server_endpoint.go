@@ -47,7 +47,7 @@ func (h *peerRegistry) readFromEndpointWriteToRoute(ctx context.Context, endpoin
 		}
 		p.dst = dstIP
 		token := stage.begin()
-		usedConn, err := h.hub.WriteToRoutePacket(ctx, string(dstIP), p)
+		usedConn, err := h.writer.writeToRoutePacket(ctx, string(dstIP), p)
 		stage.finish(token, 1, p.length, err == nil && ctx.Err() == nil)
 		if err != nil {
 			h.reportRouteDrop(ctx, err, dstIP)
@@ -80,7 +80,7 @@ func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, c
 	defer tunEnqueue.close()
 	tcpConn, _ := framing.NewConn(ctx, conn)
 	defer tcpConn.Close()
-	defer h.hub.RemoveRoutesByConn(ctx, conn)
+	defer h.table.removeRoutesByConn(ctx, conn)
 	role := serverConnRoleUnknown
 
 	dl := &periodicDeadline{timeout: config.KeepAliveTime * 3, set: tcpConn.SetReadDeadline}
@@ -147,15 +147,15 @@ func (h *gvisorTCPHandler) dispatchServerDataPacket(ctx context.Context, conn ne
 	packet.src, packet.dst = src, dst
 	inject.setPeer(src)
 	routeStage.setPeer(src)
-	if !h.hub.AddRoute(ctx, src, conn) {
+	if !h.table.addRoute(ctx, src, conn) {
 		packet.release()
 		return false
 	}
 	dstKey := string(dst)
-	if h.hub.HasRoute(dstKey) {
+	if h.table.hasRoute(dstKey) {
 		packet = packet.detach()
 		token := routeStage.begin()
-		usedConn, writeErr := h.hub.WriteToRoutePacket(ctx, dstKey, packet)
+		usedConn, writeErr := h.writer.writeToRoutePacket(ctx, dstKey, packet)
 		routeStage.finish(token, 1, read, writeErr == nil && ctx.Err() == nil)
 		if writeErr != nil {
 			h.reportRouteDrop(ctx, writeErr, dst)
@@ -197,7 +197,7 @@ func (h *gvisorTCPHandler) dispatchServerDataPacket(ctx context.Context, conn ne
 		return true
 	}
 	packet = packet.detach()
-	if !h.hub.bridge.sendObserved(ctx, packet, tunEnqueue) {
+	if !h.runtime.bridge.sendObserved(ctx, packet, tunEnqueue) {
 		packet.release()
 		return false
 	}

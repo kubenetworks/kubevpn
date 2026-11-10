@@ -30,8 +30,11 @@ import (
 // getOrCreateClientStack is the only consumer).
 type stackConstructor func(ctx context.Context, tun stack.LinkEndpoint) *stack.Stack
 
-// gvisorTCPHandler only consumes connections; its registry belongs to the router service.
-type gvisorTCPHandler struct{ *peerRegistry }
+// gvisorTCPHandler only consumes connections; its runtime belongs to the router service.
+type gvisorTCPHandler struct {
+	*peerRegistry
+	runtime *serverRuntime
+}
 
 func GvisorTCPHandler(hub *Router) Handler      { return newTCPHandler(hub, netstack.NewStack) }
 func GvisorLocalTCPHandler(hub *Router) Handler { return newTCPHandler(hub, netstack.NewLocalStack) }
@@ -45,7 +48,7 @@ func newTCPHandler(hub *Router, constructor stackConstructor) *gvisorTCPHandler 
 		hub.peers.newStack = constructor
 	}
 	hub.mu.Unlock()
-	return &gvisorTCPHandler{peerRegistry: hub.peers}
+	return &gvisorTCPHandler{peerRegistry: hub.peers, runtime: hub.serverRuntime}
 }
 
 func (h *gvisorTCPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
@@ -66,7 +69,7 @@ func (h *gvisorTCPHandler) Handle(ctx context.Context, tcpConn net.Conn) {
 		tcpConn = framing.ObfuscateAccept(tcpConn)
 	}
 	conn := newBufferedTCP(connCtx, tcpConn, func(c *bufferedTCP) {
-		h.hub.RemoveRoutesByConn(connCtx, c)
+		h.table.removeRoutesByConn(connCtx, c)
 	})
 	defer func() {
 		cancel()

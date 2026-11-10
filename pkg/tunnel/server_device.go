@@ -55,7 +55,7 @@ func (t *serverTransport) routeTun(ctx context.Context) {
 			// Hand the packet to the route by reference (zero-copy); the wire writer stamps
 			// the datagram length, the chosen conn takes a reference and we drop ours below.
 			token := stage.begin()
-			conn, err := t.hub.WriteToRoutePacket(ctx, dstKey, packet)
+			conn, err := t.hub.writer.writeToRoutePacket(ctx, dstKey, packet)
 			stage.finish(token, 1, packet.length, err == nil && ctx.Err() == nil)
 			if err != nil {
 				if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {

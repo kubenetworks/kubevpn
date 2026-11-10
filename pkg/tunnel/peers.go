@@ -32,9 +32,10 @@ type clientStack struct {
 
 type graceTimer interface{ Stop() bool }
 
-// peerRegistry owns per-IP stacks and grace timers under hub.mu -> mu.
+// peerRegistry owns per-IP stacks and grace timers under routeTable.mu -> mu.
 type peerRegistry struct {
-	hub            *Router
+	table          *routeTable
+	writer         *routeWriter
 	newStack       stackConstructor
 	ctx            context.Context
 	cancel         context.CancelFunc
@@ -51,7 +52,7 @@ type peerRegistry struct {
 
 // Start binds peers to the service, never to its first accepted connection.
 func (h *peerRegistry) Start(ctx context.Context) {
-	h.hub.mu.Lock()
+	h.table.mu.Lock()
 	h.mu.Lock()
 	if h.ctx == nil && !h.stopped {
 		h.diagnostics = newDatapathDiagnostics()
@@ -66,17 +67,17 @@ func (h *peerRegistry) Start(ctx context.Context) {
 		}()
 	}
 	h.mu.Unlock()
-	h.hub.mu.Unlock()
+	h.table.mu.Unlock()
 }
 
 // Close is terminal and joins construction, output and stack destruction.
 func (h *peerRegistry) Close() error {
-	h.hub.mu.Lock()
+	h.table.mu.Lock()
 	h.mu.Lock()
 	h.stopped = true
 	cancel := h.cancel
 	h.mu.Unlock()
-	h.hub.mu.Unlock()
+	h.table.mu.Unlock()
 	if cancel != nil {
 		cancel()
 	}
@@ -87,20 +88,20 @@ func (h *peerRegistry) Close() error {
 // getOrCreateClientStack returns the gvisor stack for the given client IP, creating one
 // if it doesn't exist yet.
 func (h *peerRegistry) getOrCreateClientStack(srcKey string) *clientStack {
-	h.hub.mu.Lock()
+	h.table.mu.Lock()
 	h.mu.Lock()
 	parent := h.ctx
 	cs := h.clients[srcKey]
 	if h.stopped || parent == nil || parent.Err() != nil {
 		h.mu.Unlock()
-		h.hub.mu.Unlock()
+		h.table.mu.Unlock()
 		return nil
 	}
 	if cs == nil {
 		h.workers.Add(1)
 	}
 	h.mu.Unlock()
-	h.hub.mu.Unlock()
+	h.table.mu.Unlock()
 	if cs != nil {
 		return cs
 	}
@@ -119,18 +120,18 @@ func (h *peerRegistry) getOrCreateClientStack(srcKey string) *clientStack {
 		cancel:   stackCancel,
 		done:     make(chan struct{}),
 	}
-	h.hub.mu.Lock()
+	h.table.mu.Lock()
 	h.mu.Lock()
 	existing := h.clients[srcKey]
 	publish := !h.stopped && parent.Err() == nil && existing == nil
 	if publish {
 		h.clients[srcKey] = cs
-		if h.hub.routes[srcKey] == nil {
+		if h.table.routes[srcKey] == nil {
 			h.armGraceLocked(srcKey, cs)
 		}
 	}
 	h.mu.Unlock()
-	h.hub.mu.Unlock()
+	h.table.mu.Unlock()
 	if !publish {
 		stackCancel()
 		s.Destroy()
@@ -153,14 +154,14 @@ func (h *peerRegistry) getOrCreateClientStack(srcKey string) *clientStack {
 		defer h.workers.Done()
 		<-stackCtx.Done()
 		native.close()
-		h.hub.mu.Lock()
+		h.table.mu.Lock()
 		h.mu.Lock()
 		if h.clients[srcKey] == cs {
 			delete(h.clients, srcKey)
 		}
 		h.invalidateGraceLocked(cs)
 		h.mu.Unlock()
-		h.hub.mu.Unlock()
+		h.table.mu.Unlock()
 		s.Destroy()
 		<-outputDone
 		close(cs.done)
@@ -213,16 +214,16 @@ func (h *peerRegistry) armGraceLocked(ipKey string, cs *clientStack) {
 }
 
 func (h *peerRegistry) expireGrace(ipKey string, expected *clientStack, epoch uint64) {
-	h.hub.mu.Lock()
+	h.table.mu.Lock()
 	h.mu.Lock()
 	valid := h.clients[ipKey] == expected && expected.graceArmed &&
-		expected.graceEpoch == epoch && h.hub.routes[ipKey] == nil
+		expected.graceEpoch == epoch && h.table.routes[ipKey] == nil
 	if valid {
 		delete(h.clients, ipKey)
 		h.invalidateGraceLocked(expected)
 	}
 	h.mu.Unlock()
-	h.hub.mu.Unlock()
+	h.table.mu.Unlock()
 	if valid {
 		expected.cancel()
 	}
