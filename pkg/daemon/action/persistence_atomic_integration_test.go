@@ -39,7 +39,9 @@ func TestIntegration_PersistedConfigAtomicLifecycle(t *testing.T) {
 			default:
 			}
 			data, err := os.ReadFile(config.GetDBPath())
-			if errors.Is(err, os.ErrNotExist) {
+			if isTransientDBReadError(err) {
+				// Missing before the first write; on Windows also a sharing
+				// violation while the atomic write's rename is in flight.
 				continue
 			}
 			if err != nil {

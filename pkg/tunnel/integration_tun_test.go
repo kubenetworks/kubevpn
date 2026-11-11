@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strconv"
 	"net/http"
 	"runtime"
 	"strings"
@@ -43,7 +44,7 @@ func tunTestContext(t *testing.T) context.Context {
 	// tripped a key inside the 30s window would otherwise silently swallow this test's own
 	// warning for the same key — which once hid the "Cannot announce our route" line that
 	// pinpointed a real regression.
-	dataPlaneWarn.Reset()
+	dataPlaneWarn.Load().Reset()
 	base := runtime.NumGoroutine()
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	t.Cleanup(func() {
@@ -907,7 +908,7 @@ func TestTUN_ClientDevice_FullPipeline(t *testing.T) {
 		"10.96.1.1", "10.96.1.2", "10.96.2.1", "10.96.3.1"}
 
 	for i, destIP := range destIPs {
-		addr := fmt.Sprintf("%s:%d", destIP, echoPort)
+		addr := net.JoinHostPort(destIP, strconv.Itoa(echoPort))
 		conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
 		if err != nil {
 			t.Fatalf("[Phase 8] dial %s: %v", addr, err)
@@ -946,7 +947,7 @@ func TestTUN_ClientDevice_FullPipeline(t *testing.T) {
 			defer wg.Done()
 			// Each goroutine dials a different destination over the shared data connection
 			destIP := fmt.Sprintf("10.96.%d.%d", id/256, id%256)
-			addr := fmt.Sprintf("%s:%d", destIP, echoPort)
+			addr := net.JoinHostPort(destIP, strconv.Itoa(echoPort))
 
 			conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
 			if err != nil {
