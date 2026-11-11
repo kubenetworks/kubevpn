@@ -126,27 +126,6 @@ func TestLoadFromConfig_TypeMismatch(t *testing.T) {
 // TestLoadFromConfig_EmptySecondaryConnect verifies the early-exit path:
 // when SecondaryConnect is empty LoadFromConfig returns nil immediately without
 // touching svr.connections or calling GetClient.
-func TestLoadFromConfig_InvalidDocumentsFailClosed(t *testing.T) {
-	for name, content := range map[string]string{
-		"empty file":          "",
-		"null document":       "null\n",
-		"null record":         `{"SecondaryConnect":[null]}`,
-		"missing request raw": `{"SecondaryConnect":[{"ConnectionID":"missing"}]}`,
-	} {
-		t.Run(name, func(t *testing.T) {
-			saveRestoreDB(t)
-			writeDBFile(t, []byte(content))
-			svr := &Server{GetClient: func(bool) (rpc.DaemonClient, error) {
-				t.Fatal("invalid persisted records must fail before any daemon RPC")
-				return nil, nil
-			}}
-			if err := svr.LoadFromConfig(context.Background()); err == nil {
-				t.Fatal("expected invalid persisted state to fail closed")
-			}
-		})
-	}
-}
-
 func TestLoadFromConfig_EmptySecondaryConnect(t *testing.T) {
 	saveRestoreDB(t)
 	writeDBFile(t, validEmptyConfigYAML(t))

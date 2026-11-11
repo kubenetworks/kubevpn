@@ -3,7 +3,6 @@
 package daemon
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -58,23 +57,6 @@ func (startupServer) Upgrade(context.Context, *rpc.UpgradeRequest) (*rpc.Upgrade
 	return &rpc.UpgradeResponse{}, nil
 }
 
-func holdUnresponsiveSocket(isSudo bool) (net.Listener, error) {
-	listener, err := net.Listen("unix", config.GetSockPath(isSudo))
-	if err != nil {
-		return nil, err
-	}
-	go func() {
-		for {
-			conn, acceptErr := listener.Accept()
-			if acceptErr != nil {
-				return
-			}
-			defer conn.Close()
-		}
-	}()
-	return listener, nil
-}
-
 func runStartupHelper() error {
 	time.AfterFunc(45*time.Second, func() { os.Exit(2) })
 	isSudo := os.Getenv("KUBEVPN_DAEMON_START_SUDO") == "1"
@@ -87,100 +69,21 @@ func runStartupHelper() error {
 		}
 		return err
 	}
-	if mode == "reject-timeout" || mode == "live-probe-error" {
-		listener, err := holdUnresponsiveSocket(isSudo)
-		if err != nil {
-			return err
-		}
-		defer listener.Close()
-		if err = writePIDToFile(isSudo); err != nil {
-			return err
-		}
-		config.DaemonProbeTimeout = 100 * time.Millisecond
-		if mode == "reject-timeout" {
-			if err = rejectActiveDaemonSocket(context.Background(), isSudo); err == nil {
-				return fmt.Errorf("timeout incorrectly authorized stale socket removal")
-			}
-			_, err = os.Stat(config.GetSockPath(isSudo))
-			return err
-		}
-		before, err := os.ReadFile(config.GetPidPath(isSudo))
-		if err != nil {
-			return err
-		}
-		exe, err := os.Executable()
-		if err != nil {
-			return err
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-		if err = runDaemon(ctx, exe, isSudo); err == nil {
-			return fmt.Errorf("live probe failure unexpectedly launched a replacement")
-		}
-		after, readErr := os.ReadFile(config.GetPidPath(isSudo))
-		if readErr != nil || !bytes.Equal(before, after) {
-			return fmt.Errorf("live daemon PID changed: before=%q after=%q err=%v", before, after, readErr)
-		}
-		if _, statErr := os.Stat(filepath.Join(os.Getenv("HOME"), "started")); !errors.Is(statErr, os.ErrNotExist) {
-			return fmt.Errorf("replacement process was launched: %v", statErr)
-		}
-		return nil
-	}
-	if mode == "startup-lock-timeout" {
-		lock, err := acquireDaemonStartupLock(context.Background(), isSudo)
-		if err != nil {
-			return err
-		}
-		defer lock.Close()
-		config.DaemonStartupLockTimeout = 100 * time.Millisecond
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-		exe, err := os.Executable()
-		if err != nil {
-			return err
-		}
-		err = runDaemon(ctx, exe, isSudo)
-		if !errors.Is(err, context.DeadlineExceeded) {
-			return fmt.Errorf("startup lock wait did not time out: %v", err)
-		}
-		return nil
-	}
-	if mode == "upgrade-exit-window" && len(os.Args) <= 1 {
-		listener, err := holdUnresponsiveSocket(isSudo)
-		if err != nil {
-			return err
-		}
-		defer listener.Close()
-		if err = writePIDToFile(isSudo); err != nil {
-			return err
-		}
-		config.DaemonProbeTimeout = 50 * time.Millisecond
-		go func() {
-			// Simulate the old daemon finishing its exit after the second probe
-			// has already observed an unavailable socket.
-			time.Sleep(150 * time.Millisecond)
-			_ = listener.Close()
-			_ = os.Remove(config.GetPidPath(isSudo))
-		}()
-		exe, err := os.Executable()
-		if err != nil {
-			return err
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		err = runDaemonWithProbe(ctx, exe, isSudo, config.ErrDaemonVersionMismatch)
-		result := startupResult{}
-		if err != nil {
-			result.Error = err.Error()
-		}
-		return json.NewEncoder(os.Stdout).Encode(result)
-	}
 	if mode == "unresponsive" {
-		lis, err := holdUnresponsiveSocket(isSudo)
+		lis, err := net.Listen("unix", config.GetSockPath(isSudo))
 		if err != nil {
 			return err
 		}
 		defer lis.Close()
+		go func() {
+			for {
+				conn, acceptErr := lis.Accept()
+				if acceptErr != nil {
+					return
+				}
+				defer conn.Close()
+			}
+		}()
 		config.DaemonProbeTimeout = 100 * time.Millisecond
 		_, err = GetClient(isSudo)
 		result := startupResult{Deadline: errors.Is(err, context.DeadlineExceeded) || status.Code(err) == codes.DeadlineExceeded}

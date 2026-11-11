@@ -30,7 +30,7 @@ func GetClientID() string {
 		path := filepath.Join(homePath, ClientIDFile)
 		if data, err := os.ReadFile(path); err == nil {
 			if s := strings.TrimSpace(string(data)); len(s) >= 12 {
-				_ = ensurePrivateFileMode(path)
+				_ = migratePrivatePath(path, FileModePrivateFile)
 				clientID = s[:12]
 				return
 			}

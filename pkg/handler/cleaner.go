@@ -31,7 +31,6 @@ func (c *ConnectOptions) cleanupControlPlane(logCtx context.Context, ctx context
 	// "Cleaning up connections"/"Disconnecting" step, so keep it out of the CLI
 	// stream while preserving it in the daemon log file for diagnostics.
 	plog.G(logCtx).Debug("Performing cleanup operations")
-	c.stopSocks()
 	if c.clientset != nil {
 		// Bound this best-effort delete: without a deadline it inherits client-go's ~30s dial
 		// timeout, adding a full stall to teardown when the cluster is already unreachable.

@@ -172,10 +172,7 @@ unadvertised, and logs the error rather than tearing down a healthy root session
 or explicit reconnect can retry. If a running listener exits, its advertised address is cleared
 with generation-based state protection. The next explicit connect re-prepares SOCKS only when no
 listener is advertised; a bind error leaves the retained VPN untouched, and a healthy listener is
-never moved implicitly. Accepted option changes update the retained `RequestRaw` used by the next
-replay. One replaceable cleanup owner retires the previous listener instead of accumulating
-rollback closures, and every Serve exit closes its listener before advertising it as stopped.
-`kubevpn status -o wide` shows the listen address and mode
+never moved implicitly. `kubevpn status -o wide` shows the listen address and mode
 (`egress`/`cluster`); `-o json`/`-o yaml` expose `SocksListenAddr` / `SocksEgress`. Standalone
 `proxy-out` keeps the existing `Server.ListenAndServe` behavior.
 
