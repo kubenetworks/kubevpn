@@ -117,6 +117,12 @@ func (svr *Server) redirectConnectToSudoDaemon(req *rpc.ConnectRequest, resp rpc
 		if err = svr.recoverDataPlane(resp.Context(), req, existing, resp, cli, &connResp, &connRespMu); err != nil {
 			return err
 		}
+		// The temporary session is torn down on return, so a replacement SOCKS
+		// listener must be owned by the retained control session instead.
+		socksCtx := plog.WithLogger(context.Background(), logger)
+		if err = reconcileManagedSocksProxy(socksCtx, existing, req, isConnectionRestore(resp.Context())); err != nil {
+			return err
+		}
 		svr.registry.use(connect.ConnectionID)
 		logger.Infof("Connected with cluster")
 		return resp.Send(&rpc.ConnectResponse{
@@ -146,9 +152,9 @@ func (svr *Server) recoverDataPlane(ctx context.Context, req *rpc.ConnectRequest
 	// Replay the original options, but serialize the retained factory: RequestRaw
 	// predates SSH rewriting and the new request may use a temporary local port.
 	recovery := proto.Clone(req).(*rpc.ConnectRequest)
-	if control, ok := existing.(*handler.ConnectOptions); ok && len(control.RequestRaw) != 0 {
+	if control, ok := existing.(*handler.ConnectOptions); ok && len(control.GetRequestRaw()) != 0 {
 		recovery = &rpc.ConnectRequest{}
-		if err := proto.Unmarshal(control.RequestRaw, recovery); err != nil {
+		if err := proto.Unmarshal(control.GetRequestRaw(), recovery); err != nil {
 			return fmt.Errorf("failed to restore connection request: %w", err)
 		}
 	}
@@ -289,6 +295,52 @@ type preparedSocksProxy struct {
 	egress    bool
 }
 
+func reconcileManagedSocksProxy(ctx context.Context, existing handler.Connection, req *rpc.ConnectRequest, restore bool) error {
+	if !req.GetEnableSocks() {
+		return nil
+	}
+	control, ok := existing.(*handler.ConnectOptions)
+	if !ok {
+		return fmt.Errorf("connection %s is not a control session", existing.GetConnectionID())
+	}
+	if control.GetSocksListenAddr() != "" {
+		// Reconnect is idempotent and never moves a healthy listener implicitly.
+		return nil
+	}
+	proxy, err := prepareManagedSocksProxyForConnect(ctx, control, req, restore)
+	if err != nil {
+		return err
+	}
+	if proxy != nil {
+		if err = updateManagedSocksRequest(control, req); err != nil {
+			control.ReplaceSocksStop(nil)
+			return err
+		}
+	}
+	proxy.start(control)
+	return nil
+}
+
+func updateManagedSocksRequest(control *handler.ConnectOptions, req *rpc.ConnectRequest) error {
+	persisted := &rpc.ConnectRequest{}
+	if len(control.GetRequestRaw()) != 0 {
+		if err := proto.Unmarshal(control.GetRequestRaw(), persisted); err != nil {
+			return fmt.Errorf("decode retained connect request: %w", err)
+		}
+	} else {
+		persisted = proto.Clone(req).(*rpc.ConnectRequest)
+	}
+	persisted.EnableSocks = req.GetEnableSocks()
+	persisted.SocksListen = req.GetSocksListen()
+	persisted.SocksEgress = req.GetSocksEgress()
+	raw, err := proto.Marshal(persisted)
+	if err != nil {
+		return fmt.Errorf("persist managed SOCKS options: %w", err)
+	}
+	control.SetRequestRaw(raw)
+	return nil
+}
+
 func prepareManagedSocksProxyForConnect(ctx context.Context, connect *handler.ConnectOptions, req *rpc.ConnectRequest, restore bool) (*preparedSocksProxy, error) {
 	proxy, err := prepareManagedSocksProxy(ctx, connect, req)
 	if err != nil && restore {
@@ -301,28 +353,9 @@ func prepareManagedSocksProxyForConnect(ctx context.Context, connect *handler.Co
 	return proxy, err
 }
 
-func prepareManagedSocksProxy(ctx context.Context, connect *handler.ConnectOptions, req *rpc.ConnectRequest) (*preparedSocksProxy, error) {
+func prepareManagedSocksProxy(ctx context.Context, connect *handler.ConnectOptions, req *rpc.ConnectRequest) (proxy *preparedSocksProxy, err error) {
 	if !req.GetEnableSocks() {
 		return nil, nil
-	}
-	var connector localproxy.Connector
-	if req.GetSocksEgress() {
-		connector = localproxy.NewHostConnector()
-	} else {
-		restConfig, err := connect.GetFactory().ToRESTConfig()
-		if err != nil {
-			return nil, fmt.Errorf("build local SOCKS REST config: %w", err)
-		}
-		clusterAPI, clientset, err := localproxy.NewClusterAPI(restConfig)
-		if err != nil {
-			return nil, fmt.Errorf("build local SOCKS cluster client: %w", err)
-		}
-		connector = &localproxy.ClusterConnector{
-			Client:           clusterAPI,
-			Forwarder:        localproxy.NewPodDialer(restConfig, clientset),
-			RESTConfig:       restConfig,
-			DefaultNamespace: connect.GetWorkloadNamespace(),
-		}
 	}
 	listen := req.GetSocksListen()
 	if listen == "" {
@@ -332,14 +365,36 @@ func prepareManagedSocksProxy(ctx context.Context, connect *handler.ConnectOptio
 	if err != nil {
 		return nil, fmt.Errorf("listen for local SOCKS5 proxy on %s: %w", listen, err)
 	}
-	socksCtx, cancel := context.WithCancel(ctx)
-	proxy := &preparedSocksProxy{ctx: socksCtx, cancel: cancel, listener: listener, connector: connector, egress: req.GetSocksEgress()}
-	connect.AddRollbackFunc(func() error {
-		cancel()
-		if err := listener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
-			return fmt.Errorf("close local SOCKS5 listener: %w", err)
+	defer func() {
+		if err != nil {
+			_ = listener.Close()
 		}
-		return nil
+	}()
+
+	var connector localproxy.Connector
+	if req.GetSocksEgress() {
+		connector = localproxy.NewHostConnector()
+	} else {
+		restConfig, configErr := connect.GetFactory().ToRESTConfig()
+		if configErr != nil {
+			return nil, fmt.Errorf("build local SOCKS REST config: %w", configErr)
+		}
+		clusterAPI, clientset, clientErr := localproxy.NewClusterAPI(restConfig)
+		if clientErr != nil {
+			return nil, fmt.Errorf("build local SOCKS cluster client: %w", clientErr)
+		}
+		connector = &localproxy.ClusterConnector{
+			Client:           clusterAPI,
+			Forwarder:        localproxy.NewPodDialer(restConfig, clientset),
+			RESTConfig:       restConfig,
+			DefaultNamespace: connect.GetWorkloadNamespace(),
+		}
+	}
+	socksCtx, cancel := context.WithCancel(ctx)
+	proxy = &preparedSocksProxy{ctx: socksCtx, cancel: cancel, listener: listener, connector: connector, egress: req.GetSocksEgress()}
+	connect.ReplaceSocksStop(func() {
+		cancel()
+		_ = listener.Close()
 	})
 	return proxy, nil
 }
@@ -349,9 +404,13 @@ func (p *preparedSocksProxy) start(connect *handler.ConnectOptions) {
 		return
 	}
 	addr := p.listener.Addr().String()
-	connect.SocksListenAddr = addr
-	connect.SocksEgress = p.egress
+	generation := connect.SetSocksState(addr, p.egress)
 	go func() {
+		defer connect.ClearSocksState(generation)
+		defer func() {
+			p.cancel()
+			_ = p.listener.Close()
+		}()
 		if err := localproxy.ServeSOCKS5(p.ctx, p.listener, p.connector); err != nil && !errors.Is(err, net.ErrClosed) {
 			plog.G(p.ctx).Warnf("Local SOCKS proxy on %s stopped: %v", addr, err)
 		}

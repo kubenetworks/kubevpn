@@ -79,7 +79,7 @@ func init() {
 	if errors.Is(err, os.ErrNotExist) {
 		err = os.WriteFile(path, config, FileModePrivateFile)
 	} else if err == nil {
-		err = migratePrivatePath(path, FileModePrivateFile)
+		err = ensurePrivateFileMode(path)
 	}
 	if err != nil {
 		panic(err)
@@ -92,15 +92,32 @@ func ensurePrivateDir(path string) error {
 		if err = os.MkdirAll(path, FileModePrivateDir); err != nil {
 			return fmt.Errorf("create private directory %s: %w", path, err)
 		}
+		if info, err = os.Stat(path); err != nil {
+			return fmt.Errorf("stat private directory %s: %w", path, err)
+		}
 	} else if err != nil {
 		return fmt.Errorf("stat private directory %s: %w", path, err)
 	} else if !info.IsDir() {
 		return fmt.Errorf("local state path is not a directory: %s", path)
 	}
+	if info.Mode().Perm() == FileModePrivateDir {
+		return nil
+	}
 	if err = migratePrivatePath(path, FileModePrivateDir); err != nil {
 		return fmt.Errorf("secure private directory %s: %w", path, err)
 	}
 	return nil
+}
+
+func ensurePrivateFileMode(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if info.Mode().Perm() == FileModePrivateFile {
+		return nil
+	}
+	return migratePrivatePath(path, FileModePrivateFile)
 }
 
 // GetSockPath returns the Unix domain socket path for the user or root daemon.

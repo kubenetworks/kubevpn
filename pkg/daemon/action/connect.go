@@ -12,7 +12,7 @@ import (
 
 // Connect handles the Connect RPC, establishing a VPN tunnel to the cluster.
 func (svr *Server) Connect(resp rpc.Daemon_ConnectServer) (err error) {
-	if !svr.IsSudo {
+	if !svr.IsSudo && !isConnectionRestore(resp.Context()) {
 		defer func() {
 			if err == nil {
 				if persistErr := svr.OffloadToConfig(); persistErr != nil {

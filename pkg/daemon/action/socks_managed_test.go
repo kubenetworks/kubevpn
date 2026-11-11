@@ -135,6 +135,31 @@ func TestManagedSocksProxy_OccupiedPortFailsBeforeRootConnect(t *testing.T) {
 	}
 }
 
+func TestManagedSocksProxy_ListenerExitClearsStateAndReconnects(t *testing.T) {
+	connect := &handler.ConnectOptions{ConnectionID: "restart-socks"}
+	req := &rpc.ConnectRequest{EnableSocks: true, SocksEgress: true, SocksListen: "127.0.0.1:0"}
+	proxy, err := prepareManagedSocksProxy(context.Background(), connect, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy.start(connect)
+	if err = proxy.listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if !waitFor(func() bool { return connect.GetSocksListenAddr() == "" }, 3*time.Second) {
+		t.Fatal("listener exit left a stale SOCKS address in status")
+	}
+
+	if err = reconcileManagedSocksProxy(context.Background(), connect, req, false); err != nil {
+		t.Fatalf("restart SOCKS on explicit reconnect: %v", err)
+	}
+	addr := connect.GetSocksListenAddr()
+	if addr == "" || !waitFor(func() bool { return portAccepting(addr) }, 3*time.Second) {
+		t.Fatalf("replacement SOCKS listener is not serving: %q", addr)
+	}
+	connect.Cleanup(context.Background())
+}
+
 func TestManagedSocksProxy_RestorePortConflictKeepsVPNRecovery(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
