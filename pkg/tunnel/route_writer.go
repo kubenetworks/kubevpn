@@ -226,9 +226,13 @@ func (cl *ConnList) writeMembers(ctx context.Context, members routeMembersSnapsh
 			}
 			return nil, err
 		}
-		// Capture membership identities before I/O, but reconcile only after
-		// the final outcome includes a cancellation callback that won the race.
-		failed := prepareFailure(m)
+		// Raw writes must capture failure cleanup before I/O. Buffered packet
+		// writers create and run their finalizer only on failure, avoiding one
+		// closure per successful write while preserving empty-route cleanup.
+		var failed func()
+		if !buffered {
+			failed = prepareFailure(m)
+		}
 		var stop func() bool
 		var closed chan struct{}
 		if mode == routeWritePacket && !buffered {
@@ -261,7 +265,11 @@ func (cl *ConnList) writeMembers(ctx context.Context, members routeMembersSnapsh
 		// failures are reconciled before another waiter can acquire this gate.
 		admissionCanceled := mode == routeWritePacket && buffered && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded))
 		if err != nil && !admissionCanceled {
-			failed()
+			if buffered {
+				prepareFailure(m)()
+			} else {
+				failed()
+			}
 		}
 		if !buffered {
 			cl.unlockWrite()
@@ -299,18 +307,6 @@ func (cl *ConnList) IsEmpty() bool {
 // reconciliation. It never performs socket I/O while holding routeTable.mu.
 type routeWriter struct {
 	table *routeTable
-}
-
-func (w *routeWriter) writeToRoute(dstKey string, data []byte) (net.Conn, error) {
-	return w.write(context.Background(), dstKey, func(conn net.Conn) (int, error) {
-		return framing.WriteFull(conn, data)
-	}, routeWriteBytes)
-}
-
-func (w *routeWriter) writeFuncToRoute(dstKey string, fn func(conn net.Conn) error) (net.Conn, error) {
-	return w.write(context.Background(), dstKey, func(conn net.Conn) (int, error) {
-		return 0, fn(conn)
-	}, routeWriteCallback)
 }
 
 func (w *routeWriter) writeToRoutePacket(ctx context.Context, dstKey string, pkt *packet) (net.Conn, error) {

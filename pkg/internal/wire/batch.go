@@ -10,7 +10,10 @@ import (
 // not need to be pre-stamped. It borrows the slices (writev may mutate their
 // entries) but never retains frame data. The reusable scratch buffer coalesces
 // writes through TLS and other wrappers.
-type BatchWriter struct{ scratch []byte }
+type BatchWriter struct {
+	scratch    []byte
+	writeToTCP func(*net.TCPConn, net.Buffers) (int64, error)
+}
 
 // Write validates and stamps the whole batch before its first socket write,
 // then returns wire-byte progress, including progress accompanying an error.
@@ -32,8 +35,14 @@ func (w *BatchWriter) Write(conn net.Conn, frames [][]byte) (int, error) {
 	written := 0
 	if tcp, ok := conn.(*net.TCPConn); ok {
 		bufs := net.Buffers(frames)
+		writev := w.writeToTCP
+		if writev == nil {
+			writev = func(conn *net.TCPConn, buffers net.Buffers) (int64, error) {
+				return buffers.WriteTo(conn)
+			}
+		}
 		for written < total {
-			n, err := bufs.WriteTo(tcp)
+			n, err := writev(tcp, bufs)
 			written += int(n)
 			if err != nil {
 				return written, err

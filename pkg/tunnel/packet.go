@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"gvisor.dev/gvisor/pkg/buffer"
@@ -55,6 +56,8 @@ const (
 )
 
 // packet represents a network packet with source and destination addresses.
+// Do not copy a packet after construction. Every view is borrowed and becomes
+// invalid at final release; a recycled object must never be accessed via an old pointer.
 //
 // Canonical buffer layout (single, system-wide):
 //
@@ -82,17 +85,34 @@ type packet struct {
 	probeQueued bool
 }
 
-// acquire adds a reference to the packet's buffer. Pair every acquire with a release.
-func (p *packet) acquire() { p.refs.Add(1) }
+var packetPool = sync.Pool{New: func() any { return new(packet) }}
 
-// release drops a reference; the pooled buffer is returned to config.LPool when the
+// acquire adds a reference to the packet's buffer. Pair every acquire with a release.
+// The caller must already hold a live reference; an object must never be acquired
+// again after its final release or after it has been recycled.
+func (p *packet) acquire() {
+	if p.refs.Load() < 0 {
+		panic("core: packet acquired after final release")
+	}
+	p.refs.Add(1)
+}
+
+// release drops a reference; the data buffer and packet object are recycled when the
 // implicit owner's reference is dropped (refs goes to -1). Releasing again is a
 // lifecycle bug that would otherwise surface as a hard-to-debug use-after-free, so
 // fail loudly instead.
 func (p *packet) release() {
 	switch n := p.refs.Add(-1); {
 	case n == -1:
-		config.LPool.Put(p.data[:])
+		data := p.data
+		p.data = nil
+		p.length = 0
+		p.src = nil
+		p.dst = nil
+		p.probeEpoch = 0
+		p.probeQueued = false
+		config.LPool.Put(data[:])
+		packetPool.Put(p)
 	case n < -1:
 		panic("core: packet released more times than acquired")
 	}
@@ -101,12 +121,15 @@ func (p *packet) release() {
 // newPacket creates a packet with the given buffer, length, and parsed IP addresses.
 // The returned packet has a single (implicit) reference to data; see packet.refs.
 func newPacket(data []byte, length int, src net.IP, dst net.IP) *packet {
-	return &packet{
-		data:   data,
-		length: length,
-		src:    src,
-		dst:    dst,
-	}
+	p := packetPool.Get().(*packet)
+	p.data = data
+	p.length = length
+	p.src = src
+	p.dst = dst
+	p.probeEpoch = 0
+	p.probeQueued = false
+	p.refs.Store(0)
+	return p
 }
 
 // newPacketFromPool allocates a packet buffer with room for size bytes. Buffers
