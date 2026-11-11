@@ -76,6 +76,7 @@ func (s *connAttempt) dispatchReadPacket(ctx context.Context, packet *packet, ge
 		packet.release()
 		return true
 	}
+	packet = packet.detach()
 	if !diagnosticEnqueue(ctx, s.tunOutbound, packet, enqueue) {
 		packet.release()
 		return false

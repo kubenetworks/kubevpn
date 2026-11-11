@@ -1,24 +1,23 @@
 package tunnel
 
-import (
-	"net"
+import "net"
 
-	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-)
-
-// packetReader converts framed datagrams into independently owned canonical
-// packets. Deadline, diagnostics and role-specific policy remain with the caller.
+// packetReader converts framed datagrams into canonical packets. Its reusable
+// owner avoids a per-packet struct allocation on synchronous dispatch paths;
+// dispatch must detach the owner before transferring it to an asynchronous queue.
+// Deadline, diagnostics and role-specific policy remain with the caller.
 type packetReader struct {
-	conn net.Conn
+	conn   net.Conn
+	packet packet
 }
 
 func (r *packetReader) read() (*packet, error) {
-	packet := newPacketFromPool(config.LargeBufferSize)
-	n, err := r.conn.Read(packet.data[datagramHeaderLen:])
+	r.packet = packet{data: packetBufferFromPool()}
+	n, err := r.conn.Read(r.packet.data[datagramHeaderLen:])
 	if err != nil {
-		packet.release()
+		r.packet.release()
 		return nil, err
 	}
-	packet.length = n
-	return packet, nil
+	r.packet.length = n
+	return &r.packet, nil
 }

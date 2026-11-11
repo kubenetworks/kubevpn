@@ -75,14 +75,14 @@ The **first datagram** on a conn declares its type:
 
 - Does **NOT** call `AddRoute` (conn never appears in Router)
 - Does **NOT** participate in data routing
-- Reads heartbeat ICMP echo and creates/retains the per-client stack for lifecycle compatibility
-- Synthesizes the echo reply directly and writes it inline on the SAME control conn; no gvisor
-  injection, route lookup or registered data conn is used for the heartbeat reply
+- Reads heartbeat ICMP echo → injects into per-client gvisor stack → stack generates reply
+- Reply routes back via registered data conns (through Router): first writable with fallback,
+  not per-flow load balancing; the default has one registered conn per client address in steady state
 - Read deadline: KeepAliveTime×3 (5 s heartbeats normally keep it active; stalls can still time out)
 
 ### Client `controlSlot`
 
-- `role: slotRoleControl` → sends `packetTypeControl` declaration on connect
+- `isControl: true` → sends `packetTypeControl` declaration on connect
 - No `registrations` (no route announcement needed)
 - No `interClientInbound` (pure control, no data)
 - `heartbeats()` writes ONLY to controlSlot
@@ -151,8 +151,8 @@ registration cancels it. `clientStack.done` tracks completion of its owned outpu
 
 ### Data slot timeout and session retention
 
-1. The watchdog requires a correlated reply, normally over the dedicated control conn;
-   registration still creates the independent route required for reverse data traffic.
+1. The watchdog requires a correlated reply over a registered data conn; control requests alone
+   do not prove liveness.
 2. With the single-data-slot default, losing that conn temporarily removes the return route;
    there are no other active data slots to guarantee uninterrupted routing.
 3. The slot auto-reconnects (`connSlot.run` loop) and registers its route immediately.
@@ -193,9 +193,9 @@ ordinary TCP EOF is not fatal. Root-client completion remains owned by `network.
 
 `controlSlot` has its own queue and TCP conn, so heartbeat requests bypass the business queue.
 It uses the same forwarding endpoint (10801), not xDS (9002), and the outer SSH/port-forward
-TCP transport is still shared. Replies return inline on the control conn and must pass
-`HeartbeatStats.observeReply` correlation checks. An outer-transport stall can therefore still
-delay replies and trigger recovery; there is no absolute liveness guarantee.
+TCP transport is still shared. Replies return through the registered data conn and must pass
+`HeartbeatStats.observeReply` correlation checks. Data congestion or an outer-transport stall
+can therefore still delay replies and trigger recovery; there is no absolute liveness guarantee.
 
 ## 7. Implementation
 
@@ -213,8 +213,7 @@ type clientStack struct {
 }
 
 type peerRegistry struct {
-    table   *routeTable
-    writer  *routeWriter
+    hub      *Router
     newStack stackConstructor
     ctx      context.Context // explicit service parent
     mu       sync.Mutex
@@ -222,14 +221,11 @@ type peerRegistry struct {
     workers  sync.WaitGroup // construction + output + destruction
 }
 
-type gvisorTCPHandler struct {
-    *peerRegistry
-    runtime *serverRuntime
-}
+type gvisorTCPHandler struct { *peerRegistry }
 
 type connSlot struct {
     ...
-    role slotRole // slotRoleControl = heartbeat only, no Router
+    isControl bool  // true = control conn (heartbeat only, no Router)
 }
 ```
 
@@ -242,7 +238,7 @@ type connSlot struct {
 | `pkg/tunnel/server_endpoint.go` | First-packet detection, routing and endpoint injection |
 | `pkg/tunnel/client.go` | controlSlot, blocking runConnPool, heartbeats via controlSlot |
 | `pkg/tunnel/slot.go`, `attempt.go` | Long-lived queue/retry loop; single-dial handshake, failure timestamp and joined pumps |
-| `pkg/tunnel/server_runtime.go`, `route_table.go`, `route_writer.go`, `bridge.go` | Runtime composition, route/member identity transactions and separately owned TUN bridge |
+| `pkg/tunnel/route.go`, `bridge.go` | Route/member identity transactions; separately owned cancellable TUN bridge |
 | `pkg/internal/wire` | Framing, uint16 limits, damaged-stream closure and reusable batch socket writer |
 | `pkg/tunnel/internal/netstack` | Stateless stack construction and TCP/UDP/ICMP forwarders |
 

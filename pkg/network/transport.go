@@ -5,24 +5,31 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"fmt"
 	"io"
 	"net"
+	"net/netip"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
 
 	"tailscale.com/types/logger"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/cluster/portforward"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/endpoint"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/ssh"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/tunnel"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 	gossh "golang.org/x/crypto/ssh"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // transportSupervisor owns transport publication, health policy, monitor lifetime and
@@ -74,6 +81,55 @@ type transportHandle interface {
 	Err() error
 }
 
+// All publication, retirement and returned-connection registration use mu.
+// No network operation or blocking Close/Stop runs while that mutex is held.
+type transportGeneration struct {
+	id         uint64
+	kind       transportKind
+	stage      string // preparation stage, read only after prepareTransport returns
+	diagnostic *transportDiagnostics
+	ctx        context.Context
+	cancel     context.CancelFunc
+	endpoints  transportEndpoints
+	handles    []transportHandle
+	retired    bool
+	retireOnce sync.Once
+	conns      map[*generationConn]struct{}
+	dials      sync.WaitGroup
+	applyMu    sync.Mutex // serializes watcher effects with retirement, never mu
+}
+type transportEvent struct {
+	generation uint64
+	err        error
+}
+type generationConn struct {
+	net.Conn
+	nm         *transportSupervisor
+	generation *transportGeneration
+	once       sync.Once
+	err        error
+}
+
+func (c *generationConn) Close() error {
+	c.once.Do(func() {
+		c.err = c.Conn.Close()
+		c.nm.mu.Lock()
+		delete(c.generation.conns, c)
+		c.nm.mu.Unlock()
+	})
+	return c.err
+}
+
+type generationTransporter struct {
+	nm       *transportSupervisor
+	base     endpoint.Transporter
+	endpoint transportEndpoint
+}
+
+func (t *generationTransporter) Dial(ctx context.Context, _ string) (net.Conn, error) {
+	return t.nm.dialTransport(ctx, t.endpoint, t.base)
+}
+
 func (nm *transportSupervisor) waitTransport(ctx context.Context) (*transportGeneration, error) {
 	for {
 		nm.mu.Lock()
@@ -102,8 +158,6 @@ func (nm *transportSupervisor) notifyTransportLocked() {
 func (nm *transportSupervisor) publishTransport(g *transportGeneration) bool {
 	nm.mu.Lock()
 	defer nm.mu.Unlock()
-	g.mu.Lock()
-	defer g.mu.Unlock()
 	if nm.err != nil || nm.stopped || nm.active != nil || g.retired || g.ctx.Err() != nil {
 		return false
 	}
@@ -113,7 +167,31 @@ func (nm *transportSupervisor) publishTransport(g *transportGeneration) bool {
 	return true
 }
 func (nm *transportSupervisor) retireTransport(g *transportGeneration) {
-	g.retireResources(nm)
+	g.retireOnce.Do(func() {
+		// Interrupt in-flight watcher RPCs before waiting for their apply ownership.
+		g.cancel()
+		g.applyMu.Lock()
+		nm.mu.Lock()
+		g.retired = true
+		if nm.active == g {
+			nm.active = nil
+			nm.heartbeatStats.BeginGeneration()
+			nm.notifyTransportLocked()
+		}
+		conns := make([]*generationConn, 0, len(g.conns))
+		for c := range g.conns {
+			conns = append(conns, c)
+		}
+		nm.mu.Unlock()
+		g.applyMu.Unlock()
+		for _, c := range conns {
+			c.Close()
+		}
+		for _, h := range g.handles {
+			h.Stop()
+		}
+		g.dials.Wait()
+	})
 }
 
 func (nm *transportSupervisor) dialTransport(ctx context.Context, endpoint transportEndpoint, base endpoint.Transporter) (net.Conn, error) {
@@ -125,9 +203,13 @@ func (nm *transportSupervisor) dialTransport(ctx context.Context, endpoint trans
 }
 
 func (nm *transportSupervisor) dialGeneration(ctx context.Context, g *transportGeneration, endpoint transportEndpoint, base endpoint.Transporter) (net.Conn, error) {
-	if !g.beginDial(nm) {
+	nm.mu.Lock()
+	if g.retired || g.ctx.Err() != nil || nm.active != g {
+		nm.mu.Unlock()
 		return nil, net.ErrClosed
 	}
+	g.dials.Add(1)
+	nm.mu.Unlock()
 	defer g.dials.Done()
 	dialCtx, cancel := context.WithTimeout(ctx, rentIPCallTimeout)
 	stop := context.AfterFunc(g.ctx, cancel)
@@ -147,12 +229,17 @@ func (nm *transportSupervisor) dialGeneration(ctx context.Context, g *transportG
 			err = tlsConn.HandshakeContext(dialCtx)
 		}
 	}
-	c, stale := g.publishDial(nm, conn, err == nil && dialCtx.Err() == nil)
-	if c != nil {
+	nm.mu.Lock()
+	stale := g.retired || nm.active != g
+	if err == nil && !stale && dialCtx.Err() == nil {
+		c := &generationConn{Conn: conn, nm: nm, generation: g}
+		g.conns[c] = struct{}{}
+		nm.mu.Unlock()
 		return c, nil
 	}
+	nm.mu.Unlock()
 	if conn != nil {
-		_ = conn.Close()
+		conn.Close()
 	}
 	if stale {
 		return nil, net.ErrClosed
@@ -179,9 +266,7 @@ func (nm *transportSupervisor) applyGeneration(ctx context.Context, g *transport
 	g.applyMu.Lock()
 	defer g.applyMu.Unlock()
 	nm.mu.Lock()
-	g.mu.Lock()
 	active := nm.active == g && !g.retired && !nm.stopped && g.ctx.Err() == nil && ctx.Err() == nil
-	g.mu.Unlock()
 	nm.mu.Unlock()
 	if !active {
 		return net.ErrClosed
@@ -279,6 +364,95 @@ func terminalTransportError(err error) bool {
 	return false
 }
 
+func (nm *transportSupervisor) prepareTransport(ctx context.Context, kind transportKind) (g *transportGeneration, err error) {
+	gctx, cancel := context.WithCancel(ctx)
+	g = &transportGeneration{kind: kind, stage: "configuration", ctx: gctx, cancel: cancel, conns: make(map[*generationConn]struct{})}
+	defer func() {
+		if err != nil {
+			cancel()
+			for _, h := range g.handles {
+				h.Stop()
+			}
+		}
+	}()
+	ports := []int{config.PortTCP, config.PortUDP, config.PortXDS}
+	addresses := make([]string, 0, 3)
+	if kind == transportSSH {
+		if nm.cfg.SshConf == nil || nm.cfg.SshConf.IsEmpty() || nm.cfg.Clientset == nil {
+			return g, fmt.Errorf("invalid transport configuration: SSH requires config and client")
+		}
+		probeCtx, probeCancel := context.WithTimeout(gctx, 3*time.Second)
+		defer probeCancel()
+		g.stage = "service_lookup"
+		svc, e := nm.cfg.Clientset.CoreV1().Services(nm.cfg.ManagerNamespace).Get(probeCtx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+		if e != nil {
+			return g, e
+		}
+		ip, e := netip.ParseAddr(svc.Spec.ClusterIP)
+		if e != nil {
+			return g, fmt.Errorf("SSH service has no reachable ClusterIP: %w", e)
+		}
+		g.stage = "ssh_handshake"
+		client, e := ssh.DialSshRemote(probeCtx, nm.cfg.SshConf, probeCtx.Done())
+		if e != nil {
+			return g, e
+		}
+		// PortMap's listeners are lazy. Check actual SSH channels before publication,
+		// without sending any fake VPN packets to the manager.
+		g.stage = "ssh_channel"
+		for _, port := range ports {
+			c, e := client.DialContext(probeCtx, "tcp", netip.AddrPortFrom(ip, uint16(port)).String())
+			if e != nil {
+				client.Close()
+				return g, e
+			}
+			c.Close()
+		}
+		client.Close()
+		g.stage = "ssh_portmap"
+		for _, port := range ports {
+			h, e := ssh.StartPortMap(gctx, nm.cfg.SshConf, netip.AddrPortFrom(ip, uint16(port)), netip.MustParseAddrPort("127.0.0.1:0"))
+			if e != nil {
+				return g, e
+			}
+			g.handles = append(g.handles, h)
+			addresses = append(addresses, h.Addr().String())
+		}
+	} else {
+		if nm.cfg.Config == nil || nm.cfg.RESTClient == nil || nm.cfg.GetRunningPodList == nil {
+			return g, fmt.Errorf("invalid transport configuration: port-forward requires Kubernetes client")
+		}
+		g.stage = "pod_list"
+		listCtx, listCancel := context.WithTimeout(gctx, portForwardPodListTimeout)
+		pods, e := nm.cfg.GetRunningPodList(listCtx)
+		listCancel()
+		if e != nil {
+			return g, e
+		}
+		if len(pods) == 0 {
+			return g, fmt.Errorf("no running traffic manager pod")
+		}
+		_ = nm.addRoute(util.GetPodIP(pods[0])...)
+		g.stage = "port_forward"
+		h, e := portforward.StartPortForwardSession(gctx, nm.cfg.Config, nm.cfg.RESTClient, pods[0].Name, nm.cfg.ManagerNamespace, ports)
+		if e != nil {
+			return g, e
+		}
+		g.handles = append(g.handles, h)
+		for _, port := range ports {
+			addresses = append(addresses, h.Ports()[port])
+		}
+	}
+	g.stage = "endpoints"
+	for _, addr := range addresses {
+		if addr == "" {
+			return g, fmt.Errorf("transport endpoint missing")
+		}
+	}
+	g.endpoints = transportEndpoints{addresses[0], addresses[1], addresses[2]}
+	return g, nil
+}
+
 func (nm *transportSupervisor) terminalCause() error {
 	nm.mu.Lock()
 	defer nm.mu.Unlock()
@@ -291,13 +465,7 @@ func (nm *transportSupervisor) waitTransportHealthy(ctx context.Context) error {
 		nm.mu.Lock()
 		err := nm.err
 		g := nm.active
-		retired := false
-		if g != nil {
-			g.mu.Lock()
-			retired = g.retired
-			g.mu.Unlock()
-		}
-		ready := g != nil && !retired && g.ctx.Err() == nil && nm.heartbeatStats.Snapshot().Generation == g.id && !nm.heartbeatStats.LastReply().IsZero()
+		ready := g != nil && !g.retired && g.ctx.Err() == nil && nm.heartbeatStats.Snapshot().Generation == g.id && !nm.heartbeatStats.LastReply().IsZero()
 		nm.mu.Unlock()
 		if err != nil {
 			return err
@@ -429,7 +597,13 @@ func (nm *transportSupervisor) launchTransportSupervisor() {
 	nm.startWorker(func() { nm.superviseTransport(nm.ctx) })
 }
 func (nm *transportSupervisor) superviseTransport(ctx context.Context) {
-	retry := newTransportRetryPolicy(nm.cfg)
+	kinds := []transportKind{transportPF}
+	if nm.cfg.SshConf != nil && !nm.cfg.SshConf.IsEmpty() {
+		kinds = []transportKind{transportSSH, transportPF}
+	}
+	index, failed := 0, 0
+	delay := portForwardReconnectDelay
+	consecutiveDead := 0
 	diagnostic := &transportDiagnostics{warnings: plog.NewThrottle(30 * time.Second)}
 	for ctx.Err() == nil {
 		if nm.terminalCause() != nil {
@@ -439,7 +613,7 @@ func (nm *transportSupervisor) superviseTransport(ctx context.Context) {
 		hadSession := false
 		diagnostic.attempt++
 		prepareStarted := time.Now()
-		g, err := nm.prepareTransport(ctx, retry.currentKind())
+		g, err := nm.prepareTransport(ctx, kinds[index])
 		if err == nil {
 			diagnostic.baseline = nm.heartbeatStats.Snapshot()
 			g.diagnostic = diagnostic
@@ -460,10 +634,18 @@ func (nm *transportSupervisor) superviseTransport(ctx context.Context) {
 			if ctx.Err() != nil {
 				return
 			}
-			retry.recordSession(time.Since(started), primed)
+			delay = nextPortForwardDelay(delay, time.Since(started), primed)
 			hadSession = true
-			if retry.consecutiveDead >= portForwardBlackHoleThreshold {
-				blackHoleWarn.Warnf(ctx, "transport-black-hole", "Data plane has not come up across %d transport generations; retrying with bounded backoff", retry.consecutiveDead)
+			if primed {
+				consecutiveDead = 0
+			} else {
+				consecutiveDead++
+			}
+			if consecutiveDead >= portForwardBlackHoleThreshold {
+				blackHoleWarn.Warnf(ctx, "transport-black-hole", "Data plane has not come up across %d transport generations; retrying with bounded backoff", consecutiveDead)
+			}
+			if primed {
+				failed = 0
 			}
 		} else if ctx.Err() == nil {
 			diagnostic.failed(time.Now())
@@ -493,23 +675,136 @@ func (nm *transportSupervisor) superviseTransport(ctx context.Context) {
 			nm.cancel()
 			return
 		}
+		failed++
+		index = (index + 1) % len(kinds)
 		// Try the other configured path immediately. Once all paths have failed,
 		// apply the existing bounded backoff, including never-primed black holes.
-		if retry.advanceAfterFailure() {
+		if failed >= len(kinds) {
 			retryCtx := plog.WithFields(ctx, map[string]any{
-				"next_kind": transportKindName(retry.currentKind()), "attempt": diagnostic.attempt,
+				"next_kind": transportKindName(kinds[index]), "attempt": diagnostic.attempt,
 			})
-			if !nm.waitNetworkRetry(retryCtx, retry.delay, diagnostic.warnings) {
+			if !nm.waitNetworkRetry(retryCtx, delay, diagnostic.warnings) {
 				return
 			}
-			retry.finishRound(hadSession)
-		} else if diagnostic.warnings.Allow("switch:" + transportKindName(retry.currentKind())) {
+			if !hadSession {
+				delay = nextPortForwardDelay(delay, 0, true)
+			}
+			failed = 0
+		} else if diagnostic.warnings.Allow("switch:" + transportKindName(kinds[index])) {
 			plog.G(ctx).WithFields(map[string]any{
-				"next_kind": transportKindName(retry.currentKind()), "attempt": diagnostic.attempt, "retry_in": time.Duration(0),
+				"next_kind": transportKindName(kinds[index]), "attempt": diagnostic.attempt, "retry_in": time.Duration(0),
 			}).Info("transport retry")
 		}
 	}
 }
+func (nm *transportSupervisor) monitorTransport(ctx context.Context, g *transportGeneration) (bool, error) {
+	ticker := time.NewTicker(livenessCheckInterval)
+	defer ticker.Stop()
+	var armedAt, probeRequested time.Time
+	var probeDeadline <-chan time.Time
+	var networkDebounce <-chan time.Time
+	primed := false
+	requestFreshProbe := func() {
+		// Repeated notifications cannot extend the recovery budget forever.
+		// Only a new path event clears evidence; ordinary ticks never do.
+		if !armedAt.IsZero() && probeRequested.IsZero() {
+			probeRequested = time.Now()
+			probeDeadline = time.After(livenessSteadyThreshold)
+		}
+		nm.heartbeatStats.ClearPending()
+		nm.heartbeatStats.RequestProbe()
+	}
+	var done [3]<-chan struct{}
+	for i, h := range g.handles {
+		done[i] = h.Done()
+	}
+	for {
+		if terminal := nm.terminalCause(); terminal != nil {
+			return primed, terminal
+		}
+		for _, h := range g.handles {
+			select {
+			case <-h.Done():
+				return primed, h.Err()
+			default:
+			}
+		}
+		nm.mu.Lock()
+		armed, terminal := nm.armed, nm.err
+		nm.mu.Unlock()
+		if terminal != nil {
+			return primed, terminal
+		}
+		if armed && armedAt.IsZero() {
+			armedAt = time.Now()
+			nm.heartbeatStats.RequestProbe()
+		}
+		if !armedAt.IsZero() {
+			last := nm.heartbeatStats.LastReply()
+			if nm.lastReply != nil {
+				last = nm.lastReply()
+			}
+			if last.After(armedAt) {
+				if !primed && ctx.Err() == nil {
+					g.diagnostic.recovered(ctx, g, nm.heartbeatStats.Snapshot())
+				}
+				primed = true
+			}
+			if !probeRequested.IsZero() && last.After(probeRequested) {
+				probeRequested = time.Time{}
+				probeDeadline = nil
+			}
+			probeExpired := !probeRequested.IsZero() && time.Since(probeRequested) >= livenessSteadyThreshold
+			if probeExpired || (probeRequested.IsZero() && ((!primed && time.Since(armedAt) >= livenessStartupDeadline) || (primed && time.Since(last) >= livenessSteadyThreshold))) {
+				// A queued resume/path change gets a fresh-evidence budget before
+				// pre-sleep health can retire this generation. An already-expired
+				// probe budget remains bounded even during notification storms.
+				if !probeExpired && nm.consumeNetworkChange() {
+					requestFreshProbe()
+					continue
+				}
+				if runtime.GOOS == "darwin" {
+					nm.repairRoutes(ctx)
+				}
+				return primed, errTransportHeartbeatExpired
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return primed, ctx.Err()
+		case <-ticker.C:
+			if nm.consumeNetworkChange() {
+				requestFreshProbe()
+			}
+		case <-nm.monitorChanges:
+			if networkDebounce == nil {
+				networkDebounce = time.After(50 * time.Millisecond)
+			}
+		case <-networkDebounce:
+			networkDebounce = nil
+			if nm.consumeNetworkChange() {
+				requestFreshProbe()
+			}
+		case <-probeDeadline:
+		case <-done[0]:
+		case <-done[1]:
+		case <-done[2]:
+		case id := <-nm.checks:
+			if id == g.id {
+				nm.heartbeatStats.RequestProbe()
+				if primed && probeRequested.IsZero() {
+					probeRequested = time.Now()
+					probeDeadline = time.After(livenessSteadyThreshold)
+				}
+			}
+		case event := <-nm.failures:
+			if event.generation == g.id {
+				return primed, event.err
+			}
+		}
+	}
+}
+
 func (nm *transportSupervisor) startWatchWorker(ctx context.Context, fn func(context.Context)) {
 	nm.startWorker(func() {
 		watchCtx, cancel := context.WithCancel(ctx)

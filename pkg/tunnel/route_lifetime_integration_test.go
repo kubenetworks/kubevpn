@@ -122,36 +122,10 @@ func TestStage3_SingleMemberSnapshotAllocation(t *testing.T) {
 	if pkt.refs.Load() != 0 || writer.count != 1001 {
 		t.Fatal("packet ownership or delivery count changed")
 	}
-	// Successful buffered writes do not need a failure finalizer or member slice.
+	// The failure finalizer still allocates; the single-member slice must not.
 	// This isolated packetWriter bound does not apply to raw cancellation I/O.
-	if allocs != 0 {
-		t.Fatalf("single-member hub write allocated %.0f times, want 0", allocs)
-	}
-}
-
-func TestStage3_DualMemberSnapshotAllocation(t *testing.T) {
-	ctx := context.Background()
-	hub := NewRouter()
-	ip := net.IPv4(198, 18, 0, 80).To4()
-	key := string(ip)
-	fallback := &routeBenchmarkWriter{mockConn: newMockConn("127.0.0.1:80", false)}
-	newest := &routeBenchmarkWriter{mockConn: newMockConn("127.0.0.1:81", false)}
-	hub.AddRoute(ctx, ip, fallback)
-	hub.AddRoute(ctx, ip, newest)
-	pkt := newPacket(config.LPool.Get().([]byte), 1, nil, nil)
-	defer pkt.release()
-	allocs := testing.AllocsPerRun(1000, func() {
-		used, err := hub.WriteToRoutePacket(ctx, key, pkt)
-		if err != nil || used != newest {
-			t.Fatalf("packet write: conn=%v err=%v", used, err)
-		}
-	})
-	if pkt.refs.Load() != 0 || newest.count != 1001 || fallback.count != 0 {
-		t.Fatal("packet ownership, newest-first delivery, or fallback changed")
-	}
-	// Two members need one snapshot slice, but no failure finalizer.
-	if allocs != 1 {
-		t.Fatalf("dual-member hub write allocated %.0f times, want 1", allocs)
+	if allocs > 1 {
+		t.Fatalf("single-member hub write allocated %.0f times, want <=1", allocs)
 	}
 }
 

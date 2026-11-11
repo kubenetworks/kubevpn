@@ -3,9 +3,7 @@
 ## Overview
 
 Current source boundaries: `pkg/network/runtime.go` coordinates host networking;
-`transport.go` owns serial recovery, `transport_generation.go` owns per-generation resources,
-`transport_prepare.go` builds SSH/port-forward endpoints, `transport_health.go` evaluates
-current-generation liveness, and `transport_policy.go` owns retry state; `address.go` owns allocation/IP watches,
+`transport.go` owns SSH/port-forward generations, `address.go` owns allocation/IP watches,
 `routes.go` owns route effects, `dns.go` owns DNS setup, `device.go` assembles the TUN,
 and `monitor.go` observes underlay changes (all under `pkg/network`). Kubernetes forwarding
 sessions live in `pkg/cluster/portforward`; CIDR detection lives in `pkg/cluster/discovery`.
@@ -76,19 +74,19 @@ IP packets are encapsulated in a custom datagram framing protocol over TLS/TCP. 
 - **IP Packet**: raw IPv4 or IPv6 packet
 
 The framing layer accepts uint16 payload lengths **0..65535**; tunnel payloads include the
-prefix within that length. `wire.ReadDatagram` reads the two-byte header into independent
+prefix within that length. `readDatagramPacket` reads the two-byte header into independent
 storage, then reads the body into the caller's buffer. An undersized buffer returns
 `io.ErrShortBuffer`; the consumed header makes the stream unusable, so the framing wrapper
 closes it rather than trying to resume. Outbound payloads above 65535 are rejected before
-any write. Specifically, `wire.Conn.Write` uses standalone storage for its largest
+any write. Specifically, `UDPConnOverTCP.Write` uses standalone storage for its largest
 legal frame (65537 bytes), without returning that storage to `config.LPool`. This is the
 wrapper's allocation contract, not a guarantee for every framed-packet path. The uint16
 wire limit is unchanged; other pooled paths can reject packets when their buffer is too short.
 
-`WriteFull` continues positive short writes on the **same connection**, reports actual wire
+`writeFull` continues positive short writes on the **same connection**, reports actual wire
 progress, and preserves errors (zero progress without an error becomes `io.ErrShortWrite`).
 A partially written frame is never replayed on another connection. Read and Write are
-serialized separately by `wire.Conn`; context cancellation/Close closes the transport
+serialized separately by `UDPConnOverTCP`; context cancellation/Close closes the transport
 without waiting for an I/O mutex. These are safety contracts, not a wire-format change.
 
 ### Prefix Byte Semantics
@@ -138,13 +136,9 @@ TUN read → runConnPool → slot[0] → data conn ───────┐
                                                  ├→ SSH / port-forward → TM:10801
 heartbeats() → controlSlot → control conn ────────┘
 
-Data response path:
-per-client gvisor stack → routeWriter → registered data conn
-  → packetReader → dispatchReadPacket → tunOutbound → writeToTun → TUN device
-
-Heartbeat reply path:
-handleControlConn → synthesizeEchoReply on the SAME control conn
-  → packetReader → HeartbeatStats.observeReply (consumed, not written to TUN)
+Response path (including heartbeat replies):
+per-client gvisor stack → Router → registered data conn
+  → readFromConn → tunOutbound → writeToTun → TUN device
 ```
 
 Protocol-owned heartbeat replies are consumed by the client rather than written to TUN.
@@ -155,9 +149,9 @@ selection. `connSlot` (`pkg/tunnel/slot.go`) retains its queue and retry lifecyc
 it does not serialize application requests or reduce business concurrency to one.
 
 The control slot has a separate queue and connection to the **same TCP forwarding endpoint
-10801**, not xDS port 9002. Its requests bypass the business queue, and the server answers
-them inline on that same control conn. SSH/port-forward still shares an outer TCP transport,
-so separation is not an absolute liveness guarantee.
+10801**, not xDS port 9002. Its requests bypass the business queue, but replies use the
+registered data conn. SSH/port-forward still shares an outer TCP transport, so separation
+is not an absolute liveness guarantee.
 
 Earlier revisions also kept a five-tuple hash multi-slot dispatch as a test/benchmark-only
 override; it was removed as a production-dead path. The historical design is recorded in
@@ -199,13 +193,13 @@ Offset:  0    1    2    3                    3+n
          └────┴────┴────┴─────────────────────┘
               ▲         ▲
               │         └── TUN reads IP packet here (offset 3)
-              └──────────── wire.BatchWriter stamps length here (in-place, no copy)
+              └──────────── writeToConn writes length header here (in-place, no copy)
 
 LH  = Length Header (2 bytes, big-endian)
 PFX = Prefix byte (1=inject, 0=direct)
 ```
 
-**Zero-copy optimization**: TUN reads at offset 3, leaving room for the 2-byte datagram header + 1-byte prefix. The shared `wire.BatchWriter` validates and stamps the header in place immediately before socket I/O — no buffer reallocation or `copy()` needed.
+**Zero-copy optimization**: TUN reads at offset 3, leaving room for the 2-byte datagram header + 1-byte prefix. When writing to TCP, the header is filled in-place at offset 0 — no buffer reallocation or `copy()` needed.
 
 ## Performance Optimizations
 
@@ -221,15 +215,14 @@ PFX = Prefix byte (1=inject, 0=direct)
 ### Channel Buffer Sizes
 
 ```go
-MaxSize = 256  // tunInbound, tunOutbound, per-slot channels
+MaxSize = 1000  // tunInbound, tunOutbound, per-slot channels
 ```
 
 ### Keepalive & Timeouts
 
 | Parameter | Value | Purpose |
 |---|---|---|
-| `HeartbeatInterval` | 5s | Correlated control-heartbeat interval |
-| `KeepAliveTime` | 60s | Write deadline and peer grace base |
+| `KeepAliveTime` | 60s | Heartbeat interval |
 | Read deadline | 180s (3x keepalive) | Detect dead connections |
 | Write deadline | 60s | Detect blocked writes |
 | Reconnect backoff | 2s | Avoid thundering herd on failure |
@@ -237,9 +230,8 @@ MaxSize = 256  // tunInbound, tunOutbound, per-slot channels
 ## Multi-Client Routing (Server-Side)
 
 When multiple kubevpn clients connect to the same traffic manager, the server
-maintains a `Router` facade over one `serverRuntime`. Its `routeTable` maps client
-TUN IPs to connection lists, `routeWriter` owns fallback and failure reconciliation,
-and the same runtime explicitly shares `peerRegistry` and `tunBridge`.
+maintains a `Router` — a thread-safe routing table that maps client TUN IPs
+to their connection(s).
 
 ### Router and ConnList
 
@@ -257,7 +249,7 @@ Multiple clients coexist in the same table:
 Client A (198.18.0.2):  1 registered data conn
 Client B (198.18.0.3):  1 registered data conn
 
-Router.routeTable.routes (private, guarded by routeTable.mu):
+Router.routes (private, guarded by hub.mu):
   198.18.0.2 → ConnList[ conn_A0 ]
   198.18.0.3 → ConnList[ conn_B0 ]
 ```
@@ -275,16 +267,14 @@ connections are excluded. Registration comes from:
   conn (not via the heartbeat broadcast channel), so it cannot be dropped under load.
 - **Business traffic** — outbound packets on a data conn also register its source IP.
   Periodic heartbeat requests use only the control conn and do not register a route;
-  their replies return inline on that conn. Registration is still required for reverse
-  data traffic and inter-client responses.
+  their replies depend on the data conn's registration.
 
 ### Write with Fallback
 
-The packet path uses `routeWriter.writeToRoutePacket` through the public
-`Router.WriteToRoutePacket` facade. It snapshots the current
+The packet path uses `WriteToRoutePacket(ctx, dstKey, packet)`. It snapshots the current
 `ConnList` and its member identities, then revalidates the list and member before I/O.
 Failed-member removal checks those same identities, so an old write cannot remove a
-re-added connection or a replacement list. Neither `routeTable.mu` nor `ConnList.mu` is held
+re-added connection or a replacement list. Neither `hub.mu` nor `ConnList.mu` is held
 across socket writes, queue admission, or `Close`.
 
 The following illustrates fallback when multiple entries exist (reconnect overlap),
@@ -304,7 +294,7 @@ Buffered enqueue cancellation returns without evicting a healthy conn or falling
 Raw writes use a separate context-aware serialization gate: cancellation before a write
 starts leaves the conn intact; cancellation during active socket I/O closes the selected
 conn, waits for that close callback, and removes only the selected membership. Positive
-short writes continue on the same conn through `WriteFull`, not on the next route.
+short writes continue on the same conn through `writeFull`, not on the next route.
 Legacy `WriteFuncToRoute` callbacks do not report byte progress or promise cancellable I/O;
 they are not the framed-packet routing path.
 
@@ -338,7 +328,7 @@ the default steady-state path has only `conn_A0` and `conn_B0`.
 ### Cleanup
 
 When a connection closes, `RemoveRoutesByConn(ctx, conn)` removes it from every
-`ConnList` under `routeTable.mu`. Empty-route deletion and registration call the explicit
+`ConnList` under `hub.mu`. Empty-route deletion and registration call the explicit
 `peerRegistry.onRouteEmptyLocked` / `onRouteAddedLocked` methods in the same transaction.
 Lock order is router then registry; transitions only change metadata/timers, with no I/O,
 logging, or router reentry. `endpoint.Serve` starts that registry with the service context

@@ -710,34 +710,32 @@ func TestDatapathDiagnosticsIntegration_DispatchSessionScope(t *testing.T) {
 	done := make(chan struct{})
 	go func() { defer close(done); ct.runConnPool(ctx) }()
 	defer func() { cancel(); <-done; <-stopped; ct.close() }()
-	dev.enqueueStage = diagnosticStage(ctx, "tun_enqueue", "data", 0, 0)
-	defer dev.enqueueStage.close()
+	waitFor(t, time.Second, func() bool {
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		for _, s := range d.stages {
+			if s.name == "slot_enqueue" {
+				return true
+			}
+		}
+		return false
+	}, "dispatcher registered")
 	stats.BeginGeneration()
 	var packets []*packet
-	for i := 0; i < MaxSize+3; i++ {
+	for i := 0; i < MaxSize+1; i++ {
 		p := batchPacket(32, i)
 		p.dst = net.IPv4(10, 0, 0, 1)
 		packets = append(packets, p)
+		dev.tunInbound <- p
 	}
-	producerDone := make(chan struct{})
-	go func() {
-		defer close(producerDone)
-		for _, p := range packets {
-			if !diagnosticEnqueue(ctx, dev.tunInbound, p, dev.enqueueStage) {
-				p.release()
-				return
-			}
-		}
-	}()
-	waitFor(t, time.Second, func() bool { return strings.Contains(logs.String(), "datapath_stall stage=tun_enqueue") }, "shared queue blocked after generation change")
+	waitFor(t, time.Second, func() bool { return strings.Contains(logs.String(), "datapath_stall stage=slot_enqueue") }, "dispatcher blocked after generation change")
 	for _, line := range strings.Split(logs.String(), "\n") {
-		if strings.Contains(line, "datapath_stall stage=tun_enqueue") && (!strings.Contains(line, "scope=session") || strings.Contains(line, "generation=1")) {
-			t.Error("TUN producer falsely attributed to transport generation: ", line)
+		if strings.Contains(line, "datapath_stall stage=slot_enqueue") && (!strings.Contains(line, "scope=session") || strings.Contains(line, "generation=")) {
+			t.Error("dispatcher falsely attributed to transport generation: ", line)
 		}
 	}
 	cancel()
 	<-done
-	<-producerDone
 	ct.close()
 	checkBatchRefs(t, packets)
 }

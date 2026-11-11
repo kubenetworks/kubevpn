@@ -314,17 +314,13 @@ func (nm *transportSupervisor) networkOffline() bool {
 	if m == nil {
 		return false
 	}
-	m.mu.Lock()
-	routes := slices.Clone(m.routes)
-	snapshot := m.snapshot
-	m.mu.Unlock()
-	for _, route := range routes {
+	for _, route := range m.routes {
 		if route.available {
 			return false
 		}
 	}
-	name := snapshot.defaultInterface
-	iface, ok := snapshot.interfaces[name]
+	name := m.snapshot.defaultInterface
+	iface, ok := m.snapshot.interfaces[name]
 	return name == "" || !ok || !iface.up
 }
 

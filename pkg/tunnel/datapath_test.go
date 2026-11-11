@@ -911,8 +911,8 @@ func TestPipeline_ReadFromTun_ParseAndDispatch(t *testing.T) {
 			t.Fatalf("expected length %d, got %d", len(ipPkt)+1, pkt.length)
 		}
 		// prefix byte should be 1
-		if pkt.kind() != packetTypeToGvisor {
-			t.Fatalf("expected prefix=1, got %d", pkt.kind())
+		if pkt.data[2] != 1 {
+			t.Fatalf("expected prefix=1, got %d", pkt.data[2])
 		}
 		// Verify parsed src/dst
 		if !pkt.src.Equal(srcIP.To4()) {
@@ -921,7 +921,7 @@ func TestPipeline_ReadFromTun_ParseAndDispatch(t *testing.T) {
 		if !pkt.dst.Equal(dstIP.To4()) {
 			t.Fatalf("expected dst %s, got %s", dstIP, pkt.dst)
 		}
-		pkt.release()
+		config.LPool.Put(pkt.data[:])
 	case <-time.After(time.Second):
 		t.Fatal("timeout waiting for packet")
 	}
@@ -1052,10 +1052,10 @@ func TestPipeline_ReadFromConn_PrefixZeroToTunOutbound(t *testing.T) {
 		if pkt == nil {
 			t.Fatal("got nil")
 		}
-		if pkt.kind() != packetTypeToTUN {
-			t.Fatalf("expected prefix=0 in tunOutbound, got %d", pkt.kind())
+		if pkt.data[datagramHeaderLen] != 0 {
+			t.Fatalf("expected prefix=0 in tunOutbound, got %d", pkt.data[datagramHeaderLen])
 		}
-		pkt.release()
+		config.LPool.Put(pkt.data[:])
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout: prefix=0 packet should go to tunOutbound")
 	}

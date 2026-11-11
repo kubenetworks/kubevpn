@@ -109,7 +109,7 @@ func TestDrainPacketChan_NilPacketStops(t *testing.T) {
 	}
 	// Clean up
 	pkt := <-ch
-	pkt.release()
+	config.LPool.Put(pkt.data[:])
 }
 
 // --- writeToTun: verify tunOutbound is drained on context cancel ---

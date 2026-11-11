@@ -5,7 +5,6 @@ import (
 	"net"
 	"sync"
 
-	framing "github.com/wencaiwulue/kubevpn/v2/pkg/internal/wire"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
@@ -98,22 +97,16 @@ func (hub *Router) RemoveRoutesByConn(ctx context.Context, conn net.Conn) {
 
 // WriteToRoute writes already-framed raw bytes with zero-progress fallback.
 func (hub *Router) WriteToRoute(dstKey string, data []byte) (net.Conn, error) {
-	return hub.writer.write(context.Background(), dstKey, func(conn net.Conn) (int, error) {
-		return framing.WriteFull(conn, data)
-	}, routeWriteBytes)
+	return hub.writer.writeToRoute(dstKey, data)
 }
 
 // WriteFuncToRoute calls fn on available conns until one succeeds.
 func (hub *Router) WriteFuncToRoute(dstKey string, fn func(conn net.Conn) error) (net.Conn, error) {
-	return hub.writer.write(context.Background(), dstKey, func(conn net.Conn) (int, error) {
-		return 0, fn(conn)
-	}, routeWriteCallback)
+	return hub.writer.writeFuncToRoute(dstKey, fn)
 }
 
 // WriteToRoutePacket borrows the caller's packet and transfers one acquired
 // reference to an asynchronous packet writer when one is selected.
 func (hub *Router) WriteToRoutePacket(ctx context.Context, dstKey string, pkt *packet) (net.Conn, error) {
-	return hub.writer.write(ctx, dstKey, func(conn net.Conn) (int, error) {
-		return writeRoutePacket(ctx, conn, pkt)
-	}, routeWritePacket)
+	return hub.writer.writeToRoutePacket(ctx, dstKey, pkt)
 }

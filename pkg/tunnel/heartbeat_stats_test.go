@@ -103,7 +103,7 @@ func TestReadFromConn_HeartbeatReplyMarksAndDrops(t *testing.T) {
 		if pkt == nil {
 			t.Fatal("got nil packet")
 		}
-		pkt.release()
+		config.LPool.Put(pkt.data[:])
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout: normal packet should be forwarded to tunOutbound")
 	}

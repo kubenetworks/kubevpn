@@ -15,12 +15,9 @@ black-holes only the data conn (an intact outer transport with a wedged data slo
 the slot's own 180 s read deadline instead of the 15 s watchdog.
 
 The historical watchdog/port-forward loops described below have been replaced by
-one serial `transportSupervisor` in `pkg/network/transport.go`, owned by `network.Runtime`
-(`pkg/network/runtime.go`) and shared by SSH and Kubernetes port-forward. Per-generation
-resources live in `transport_generation.go`, endpoint construction in `transport_prepare.go`,
-evidence evaluation in `transport_health.go`, and concrete kind/backoff state in
-`transport_policy.go`. The health evaluator never publishes or retires a generation itself.
-The 30-second unprimed and `3 * HeartbeatInterval` steady
+one `transportSupervisor` in `pkg/network/transport.go`, owned by `network.Runtime`
+(`pkg/network/runtime.go`) and shared by SSH and
+Kubernetes port-forward. The 30-second unprimed and `3 * HeartbeatInterval` steady
 thresholds remain (sampled every 5 s). Health is armed after TUN startup; bootstrap uses
 10-second GetTunIP calls and waits for a **current-generation data heartbeat** within the
 60-second total startup budget. The budget cancels failed startup, not an established session.
@@ -41,14 +38,10 @@ IPv4/IPv6 default-route fallbacks, excluding this connection's TUN identity. Rou
 no packets to external probe targets (endpoint hostname resolution may use DNS). Relevant changes
 use `ClearPending`, not `BeginGeneration`, and request fresh evidence on the current path.
 Debouncing/offline backoff never extends the recovery budget indefinitely; monitor failure leaves
-the heartbeat watchdog active. Offline checks read routes and interface state from one locked
-monitor snapshot rather than racing callback/publication writes. No CLI, protobuf or dependency
-change is required.
+the heartbeat watchdog active. No CLI, protobuf or dependency change is required.
 
 `Stop` rejects new workers/events, cancels the parent, retires/joins the active generation,
-waits for `startupDone` and all workers (including monitor/TUN handlers), then clears DNS/state.
-`generation.mu` fences dial admission/publication against retirement, and Stop joins both
-watcher apply ownership and delayed dials before returning. Terminal runtime transport
+waits for `startupDone` and all workers (including monitor/TUN handlers), then clears DNS/state. Terminal runtime transport
 errors cancel the manager; DataSession observes that cancellation outside the
 supervisor and performs cleanup without self-joining.
 

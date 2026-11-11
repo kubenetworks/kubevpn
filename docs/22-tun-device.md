@@ -134,11 +134,9 @@ device. See §5.2 for the macOS case that motivated it.
 
 The batched pump dispatches a valid reported prefix **before** handling an accompanying
 read error. Unused, invalid and malformed buffer slots stay pump-owned for the next read;
-only buffers transferred to dispatch are replaced from the pool. A valid slot is wrapped in
-an owning `packet` and cleared before `routeOutbound(ctx, packet)` consumes it; successful
-queue admission transfers that reference, while failure releases it. Cancellation takes
+only buffers transferred to dispatch are replaced from the pool. Cancellation takes
 precedence over further dispatch, interrupts the batch retry wait, and returns every
-remaining pump-owned buffer exactly once. The single-packet pump follows the same contract.
+remaining pump-owned buffer exactly once. Dispatched buffers remain consumer-owned.
 
 ### 4.5 Memory trade-off (host allocation model)
 

@@ -386,8 +386,8 @@ func TestIntegration_SingleDataSlot_ControlBypassesFullQueue(t *testing.T) {
 		}
 	}()
 	waitFor(t, 5*time.Second, func() bool {
-		return len(dev.tunInbound) == MaxSize
-	}, "blocked data writer filled the shared data queue")
+		return len(ct.slots[0].inbound) == MaxSize && len(dev.tunInbound) == MaxSize
+	}, "blocked data writer filled both queues")
 	// Consume the initial probe, then demand another while data remains blocked.
 	select {
 	case <-controlFrames:
