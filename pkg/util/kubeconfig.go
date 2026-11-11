@@ -137,7 +137,7 @@ func ConvertToTempKubeconfigFile(kubeconfigBytes []byte, path string) (string, e
 	if err != nil {
 		return "", err
 	}
-	err = f.Chmod(config.FileModeFile)
+	err = f.Chmod(config.FileModePrivateFile)
 	if err != nil {
 		return "", err
 	}

@@ -35,13 +35,16 @@ func TestPersistence_LegacyJSONRealGRPCReplay(t *testing.T) {
 	log := &lumberjack.Logger{Filename: filepath.Join(t.TempDir(), "replay.log")}
 	defer log.Close()
 	svr := &Server{LogFile: log, GetClient: func(bool) (rpc.DaemonClient, error) { return client, nil }}
-	if err := svr.LoadFromConfig(context.Background()); err != nil {
-		t.Fatal(err)
+	if err := svr.LoadFromConfig(context.Background()); err == nil {
+		t.Fatal("expected the malformed record to be reported while the valid record replays")
 	}
 	peer.mu.Lock()
 	defer peer.mu.Unlock()
 	if len(peer.requests) != 1 {
 		t.Fatalf("replayed %d requests", len(peer.requests))
+	}
+	if len(peer.restores) != 1 || !peer.restores[0] {
+		t.Fatalf("replay did not mark the internal Connect as a restore: %v", peer.restores)
 	}
 	req := peer.requests[0]
 	if req.OwnerID != "disk-owner" || req.Namespace != "work" || req.ManagerNamespace != "manager" || req.KubeconfigBytes != "original-kubeconfig" || req.Image != "image:v1" || req.OriginKubeconfigPath != "/old/config" {
@@ -50,6 +53,43 @@ func TestPersistence_LegacyJSONRealGRPCReplay(t *testing.T) {
 	// Existing replay only restores Connect, not sync resources or DTO-only options.
 	if req.EnableSocks || req.ConnectionID != "" {
 		t.Fatal("replay synthesized fields absent from RequestRaw")
+	}
+}
+
+func TestPersistence_FutureSchemaVersionFailsClosed(t *testing.T) {
+	saveRestoreDB(t)
+	writeDBFile(t, []byte(`{"SchemaVersion":2,"SecondaryConnect":[]}`))
+	called := false
+	svr := &Server{GetClient: func(bool) (rpc.DaemonClient, error) {
+		called = true
+		return nil, nil
+	}}
+	if err := svr.LoadFromConfig(context.Background()); err == nil {
+		t.Fatal("expected unsupported future schema version to fail")
+	}
+	if called {
+		t.Fatal("future schema version must not replay connections")
+	}
+}
+
+func TestPersistence_PartialRestoreSkipsOrphanReconcile(t *testing.T) {
+	saveRestoreDB(t)
+	writeDBFile(t, []byte(`{"SecondaryConnect":[{"RequestRaw":"/w=="},`+legacyConnectionJSON+`]}`))
+	peer := &recoveryPeer{connectState: StatusUnhealthy}
+	client := recoveryGRPCClient(t, peer)
+	log := &lumberjack.Logger{Filename: filepath.Join(t.TempDir(), "partial-replay.log")}
+	defer log.Close()
+	svr := &Server{LogFile: log, GetClient: func(bool) (rpc.DaemonClient, error) { return client, nil }}
+
+	svr.RestoreAndReconcile(context.Background())
+
+	peer.mu.Lock()
+	defer peer.mu.Unlock()
+	if len(peer.requests) != 1 {
+		t.Fatalf("valid record should still replay, got %d requests", len(peer.requests))
+	}
+	if peer.disconnectCalls != 0 {
+		t.Fatalf("partial restore triggered %d orphan disconnects", peer.disconnectCalls)
 	}
 }
 

@@ -59,6 +59,10 @@ func (svr *Server) Quit(resp rpc.Daemon_QuitServer) error {
 		svr.Cancel = nil
 	}
 
-	_ = util.CleanupTempKubeConfigFile()
+	// Root can exit independently while user-daemon sessions remain alive.
+	// Only the user daemon may purge the shared temporary kubeconfig directory.
+	if !svr.IsSudo {
+		_ = util.CleanupTempKubeConfigFile()
+	}
 	return nil
 }

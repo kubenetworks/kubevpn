@@ -3,12 +3,14 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
 	golog "log"
 	"net"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -47,14 +49,31 @@ type SvrOption struct {
 
 // Start initializes logging, creates the Unix socket listener, and serves the gRPC daemon until the context is cancelled.
 func (o *SvrOption) Start(ctx context.Context) error {
-	l := initLogging(o.IsSudo)
+	instanceLock, err := acquireDaemonInstanceLock(o.IsSudo)
+	if err != nil {
+		return err
+	}
+	defer instanceLock.Close()
 
 	sockPath := config.GetSockPath(o.IsSudo)
-	err := os.Remove(sockPath)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err = rejectActiveDaemonSocket(ctx, o.IsSudo); err != nil {
+		return err
+	}
+	if err = os.Remove(sockPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	o.ctx, o.cancel = context.WithCancel(ctx)
+	l, rotationDone := initLogging(o.ctx, o.IsSudo)
+	var closeLoggingOnce sync.Once
+	closeLogging := func() {
+		closeLoggingOnce.Do(func() {
+			o.cancel()
+			<-rotationDone
+			_ = l.Close()
+		})
+	}
+	defer closeLogging()
+
 	var lc net.ListenConfig
 	lis, err := lc.Listen(o.ctx, "unix", sockPath)
 	if err != nil {
@@ -109,16 +128,11 @@ func (o *SvrOption) Start(ctx context.Context) error {
 		o.svr.Cancel = nil
 		_ = o.svr.Quit(nil)
 		_ = downgradingServer.Close()
-		_ = l.Close()
+		closeLogging()
 	}
 	o.svr = &action.Server{Cancel: cleanup, IsSudo: o.IsSudo, GetClient: GetClient, InvalidateClient: InvalidateClient, LogFile: l, ID: o.ID}
 	if !o.IsSudo {
-		go func() {
-			// Restore persisted connections first so the user daemon holds its authoritative
-			// set, then reap any orphaned sudo (data-plane) sessions left by daemon drift.
-			_ = o.svr.LoadFromConfig(o.ctx)
-			o.svr.ReconcileSudoConnections(o.ctx)
-		}()
+		go o.svr.RestoreAndReconcile(o.ctx)
 		// Continuously track root-daemon liveness so `kubevpn status` reflects a crashed
 		// root daemon within ~one probe interval instead of waiting on the 90s heartbeat.
 		go o.svr.MonitorSudoLiveness(o.ctx)
@@ -133,6 +147,29 @@ func (o *SvrOption) Stop() {
 	if o.svr != nil && o.svr.Cancel != nil {
 		o.svr.Cancel()
 	}
+}
+
+// rejectActiveDaemonSocket protects an older daemon that predates instance
+// locks. A failed health probe is treated as a stale socket and remains
+// recoverable; a healthy socket is never removed by a second process.
+func rejectActiveDaemonSocket(ctx context.Context, isSudo bool) error {
+	sockPath := config.GetSockPath(isSudo)
+	if _, err := os.Stat(sockPath); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, config.DaemonProbeTimeout)
+	defer cancel()
+	_, conn, err := getClientWithoutCache(probeCtx, isSudo)
+	if conn != nil {
+		_ = conn.Close()
+	}
+	if err == nil {
+		return fmt.Errorf("%w: socket %s is active", errDaemonAlreadyRunning, sockPath)
+	}
+	return nil
 }
 
 // createDowngradingHandler takes a gRPC server and a plain HTTP handler, and returns an HTTP handler that has the
@@ -161,7 +198,9 @@ func (o *SvrOption) detectUnixSocksFile(ctx context.Context) {
 			o.Stop()
 			return
 		}
-		client, conn, err := getClientWithoutCache(ctx, o.IsSudo)
+		probeCtx, cancel := context.WithTimeout(ctx, config.DaemonProbeTimeout)
+		defer cancel()
+		client, conn, err := getClientWithoutCache(probeCtx, o.IsSudo)
 		if conn != nil {
 			defer conn.Close()
 		}
@@ -170,7 +209,7 @@ func (o *SvrOption) detectUnixSocksFile(ctx context.Context) {
 		}
 
 		var identify *rpc.IdentifyResponse
-		identify, err = client.Identify(ctx, &rpc.IdentifyRequest{})
+		identify, err = client.Identify(probeCtx, &rpc.IdentifyRequest{})
 		if err != nil {
 			return
 		}
@@ -212,8 +251,8 @@ func writePIDToFile(isSudo bool) error {
 }
 
 // initLogging creates a rotating log file and wires all loggers (logrus, klog, gvisor, plog)
-// to write to it. It also suppresses Kubernetes client warnings and starts the daily log rotation goroutine.
-func initLogging(isSudo bool) *lumberjack.Logger {
+// to write to it. The returned channel closes after the rotation goroutine exits.
+func initLogging(ctx context.Context, isSudo bool) (*lumberjack.Logger, <-chan struct{}) {
 	l := &lumberjack.Logger{
 		Filename:   config.GetDaemonLogPath(isSudo),
 		MaxSize:    100,
@@ -231,19 +270,30 @@ func initLogging(isSudo bool) *lumberjack.Logger {
 	plog.L.SetLevel(log.DebugLevel)
 	glog.SetTarget(plog.ServerEmitter{Writer: &glog.Writer{Next: l}})
 	rest.SetDefaultWarningHandler(rest.NoWarnings{})
-	go rotateLog(l)
-	return l
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		rotateLog(ctx, l)
+	}()
+	return l, done
 }
 
-// rotateLog rotates the log file daily at midnight.
-func rotateLog(l *lumberjack.Logger) {
+// rotateLog rotates the log file daily at midnight and exits with the daemon.
+func rotateLog(ctx context.Context, l *lumberjack.Logger) {
 	for {
-		nowTime := time.Now()
-		nowTimeStr := nowTime.Format("2006-01-02")
-		t2, _ := time.ParseInLocation("2006-01-02", nowTimeStr, time.Local)
-		next := t2.AddDate(0, 0, 1)
-		after := next.UnixNano() - nowTime.UnixNano()
-		<-time.After(time.Duration(after) * time.Nanosecond)
-		_ = l.Rotate()
+		now := time.Now()
+		next := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, time.Local)
+		timer := time.NewTimer(time.Until(next))
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+			if err := l.Rotate(); err != nil {
+				// The file sink itself may be broken. Stderr reaches the detached
+				// daemon's startup log instead of disappearing into that same sink.
+				_, _ = fmt.Fprintf(os.Stderr, "kubevpn: failed to rotate daemon log %s: %v\n", l.Filename, err)
+			}
+		}
 	}
 }

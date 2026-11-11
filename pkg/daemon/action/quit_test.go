@@ -2,6 +2,7 @@ package action
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -62,6 +63,18 @@ func TestQuit_StepEmittedOnlyByUserDaemon(t *testing.T) {
 
 	run := func(t *testing.T, isSudo bool) (stream string, cleanupRan bool) {
 		preserveDBFile(t)
+		dbPath := config.GetDBPath()
+		const persisted = "persisted-connections"
+		if err := os.WriteFile(dbPath, []byte(persisted), 0600); err != nil {
+			t.Fatalf("write persisted state: %v", err)
+		}
+		tempFile, err := os.CreateTemp(config.GetTempPath(), "quit-ownership-*")
+		if err != nil {
+			t.Fatalf("create temporary kubeconfig: %v", err)
+		}
+		tempPath := tempFile.Name()
+		_ = tempFile.Close()
+		t.Cleanup(func() { _ = os.Remove(tempPath) })
 
 		var ran atomic.Bool
 		conn := &handler.ConnectOptions{}
@@ -78,6 +91,21 @@ func TestQuit_StepEmittedOnlyByUserDaemon(t *testing.T) {
 
 		if err := svr.Quit(resp); err != nil {
 			t.Fatalf("Quit returned error: %v", err)
+		}
+		data, err := os.ReadFile(dbPath)
+		if isSudo {
+			if err != nil || string(data) != persisted {
+				t.Fatalf("root daemon must preserve user persisted state: data=%q, err=%v", data, err)
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("user daemon should remove persisted state, got err=%v", err)
+		}
+		_, tempErr := os.Stat(tempPath)
+		if isSudo && tempErr != nil {
+			t.Fatalf("root daemon removed a user-owned temporary file: %v", tempErr)
+		}
+		if !isSudo && !errors.Is(tempErr, os.ErrNotExist) {
+			t.Fatalf("user daemon should clean temporary files, got err=%v", tempErr)
 		}
 		return strings.Join(resp.sent, "\n"), ran.Load()
 	}

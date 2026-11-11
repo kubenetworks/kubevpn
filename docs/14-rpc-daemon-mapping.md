@@ -18,7 +18,7 @@ Both user daemon and root daemon register the same `Server` struct with all RPC 
 | `Uninstall` | user daemon | **user only** | ❌ | — | Deletes traffic manager deployment |
 | `Status` | user daemon | **both** | ✅ line 27 | user queries sudo for TUN IPs + status verdict | User: enriches with TUN IPs from sudo and reuses sudo's computed `Status` string (data-plane verdict). Sudo: computes `Status` from local TUN + heartbeat |
 | `Route` | user daemon | **both** | ✅ line 17 | user→sudo (resolves TUN device, forwards) | User: finds TUN IP + device name. Sudo: executes `tun.AddRoutes` |
-| `Quit` | user daemon | **both** | ✅ line 42 | — | User: cleans up connections. Sudo: cleans up DNS/hosts |
+| `Quit` | user daemon | **both** | ✅ line 42 | — | User: cleans up connections, persisted DB, and shared temp files. Sudo: cleans up only data plane/DNS/hosts; preserves user DB and temp files |
 | `ConnectionList` | user daemon | **both** | ✅ line 27 | user queries sudo for TUN IPs | Same pattern as Status |
 | `ConnectionUse` | user daemon | **user only** | ❌ | — | Sets `currentConnectionID` |
 | `Logs` | **sudo daemon** | **sudo only** | ❌ | — | Reads both daemon log files |
@@ -40,8 +40,9 @@ Both user daemon and root daemon register the same `Server` struct with all RPC 
 | `resetCurrentConnection` | both | After removal, pick first remaining as current |
 | `initStreamLogger` | both | Create per-RPC logger with StreamHook |
 | `getSudoTunIPs` | user only | Query sudo daemon Status for TUN IPs + computed status verdict (data-plane liveness) |
-| `LoadFromConfig` | user only | Restore connections on restart |
-| `OffloadToConfig` | user only | Persist connections to disk |
+| `LoadFromConfig` | user only | Restore connections on restart; missing DB is empty state, errors mark recovery incomplete |
+| `RestoreAndReconcile` | user only | Replay persisted state, then reap orphans only after a complete successful restore |
+| `OffloadToConfig` | user only | Persist connections to disk with serialized, atomic replacement |
 | `CleanupConfig` | user only | Delete persisted config |
 
 ## Data flow: who calls whom

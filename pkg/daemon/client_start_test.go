@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,9 +18,11 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/status"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
@@ -58,9 +61,48 @@ func runStartupHelper() error {
 	time.AfterFunc(45*time.Second, func() { os.Exit(2) })
 	isSudo := os.Getenv("KUBEVPN_DAEMON_START_SUDO") == "1"
 	mode := os.Getenv(startupTestEnv)
+	if mode == "instance" {
+		opt := &SvrOption{IsSudo: isSudo, ID: os.Getenv("KUBEVPN_DAEMON_INSTANCE_ID")}
+		err := opt.Start(context.Background())
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return err
+	}
+	if mode == "unresponsive" {
+		lis, err := net.Listen("unix", config.GetSockPath(isSudo))
+		if err != nil {
+			return err
+		}
+		defer lis.Close()
+		go func() {
+			for {
+				conn, acceptErr := lis.Accept()
+				if acceptErr != nil {
+					return
+				}
+				defer conn.Close()
+			}
+		}()
+		config.DaemonProbeTimeout = 100 * time.Millisecond
+		_, err = GetClient(isSudo)
+		result := startupResult{Deadline: errors.Is(err, context.DeadlineExceeded) || status.Code(err) == codes.DeadlineExceeded}
+		if err != nil {
+			result.Error = err.Error()
+		}
+		return json.NewEncoder(os.Stdout).Encode(result)
+	}
 	if len(os.Args) > 1 && os.Args[1] == "daemon" {
 		home := os.Getenv("HOME")
-		if err := os.WriteFile(filepath.Join(home, "started"), nil, 0600); err != nil {
+		started, err := os.OpenFile(filepath.Join(home, "started"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprintf(started, "%d\n", os.Getpid())
+		if closeErr := started.Close(); err == nil {
+			err = closeErr
+		}
+		if err != nil {
 			return err
 		}
 		defer func() { _ = os.WriteFile(filepath.Join(home, "exited"), nil, 0600) }()
@@ -198,7 +240,7 @@ func testDaemonStartup(t *testing.T, mode string, isSudo bool) {
 		t.Fatal(err)
 	}
 	cmd := exec.Command(exe)
-	cmd.Env = append(os.Environ(), startupTestEnv+"="+mode, "HOME="+home, "KUBECONFIG="+filepath.Join(home, "no-kubeconfig"))
+	cmd.Env = append(os.Environ(), startupTestEnv+"="+mode, "HOME="+home, "KUBECONFIG="+filepath.Join(home, "no-kubeconfig"), "ALL_PROXY=", "all_proxy=")
 	role := "user"
 	if isSudo {
 		role = "root"

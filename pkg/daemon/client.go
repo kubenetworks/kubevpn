@@ -69,7 +69,6 @@ func GetClient(isSudo bool) (cli rpc.DaemonClient, err error) {
 	}
 	clientMu.Unlock()
 
-	ctx := context.Background()
 	conn, err := grpc.NewClient("unix:"+sockPath, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithNoProxy())
 	if err != nil {
 		return nil, err
@@ -81,8 +80,10 @@ func GetClient(isSudo bool) (cli rpc.DaemonClient, err error) {
 	}()
 
 	healthClient := grpc_health_v1.NewHealthClient(conn)
+	healthCtx, cancelHealth := context.WithTimeout(context.Background(), config.DaemonProbeTimeout)
 	var response *grpc_health_v1.HealthCheckResponse
-	response, err = healthClient.Check(ctx, &grpc_health_v1.HealthCheckRequest{})
+	response, err = healthClient.Check(healthCtx, &grpc_health_v1.HealthCheckRequest{})
+	cancelHealth()
 	if err != nil {
 		return nil, err
 	}
@@ -91,14 +92,22 @@ func GetClient(isSudo bool) (cli rpc.DaemonClient, err error) {
 	}
 
 	cli = rpc.NewDaemonClient(conn)
+	upgradeCtx, cancelUpgrade := context.WithTimeout(context.Background(), config.DaemonProbeTimeout)
 	var resp *rpc.UpgradeResponse
-	resp, err = cli.Upgrade(ctx, &rpc.UpgradeRequest{
+	resp, err = cli.Upgrade(upgradeCtx, &rpc.UpgradeRequest{
 		ClientVersion: config.Version,
 	})
-	if err == nil && resp.NeedUpgrade {
-		// quit daemon
+	cancelUpgrade()
+	if err != nil {
+		return nil, err
+	}
+	if resp.NeedUpgrade {
+		// Cleanup can tear down multiple live connections, so it gets its own
+		// longer deadline instead of the short health/version probe timeout.
+		quitCtx, cancelQuit := context.WithTimeout(context.Background(), config.DaemonQuitTimeout)
+		defer cancelQuit()
 		var quitStream rpc.Daemon_QuitClient
-		quitStream, err = cli.Quit(ctx)
+		quitStream, err = cli.Quit(quitCtx)
 		if err != nil {
 			return nil, err
 		}
@@ -106,13 +115,25 @@ func GetClient(isSudo bool) (cli rpc.DaemonClient, err error) {
 		if err != nil {
 			return nil, err
 		}
-		_ = grpcutil.PrintGRPCStream[rpc.QuitResponse](ctx, quitStream, nil)
+		_ = grpcutil.PrintGRPCStream[rpc.QuitResponse](quitCtx, quitStream, nil)
 		// The daemon is outdated and was asked to quit; do not return or cache a
 		// client to it. Returning nil makes StartupDaemon spawn a fresh daemon.
 		return nil, fmt.Errorf("daemon version is outdated and was asked to quit: %w", config.ErrDaemonVersionMismatch)
 	}
 
 	clientMu.Lock()
+	if isSudo && sudoDaemonClient != nil {
+		cached := sudoDaemonClient
+		clientMu.Unlock()
+		_ = conn.Close()
+		return cached, nil
+	}
+	if !isSudo && daemonClient != nil {
+		cached := daemonClient
+		clientMu.Unlock()
+		_ = conn.Close()
+		return cached, nil
+	}
 	if isSudo {
 		sudoDaemonClient = cli
 		sudoDaemonConn = conn
@@ -131,7 +152,7 @@ func getClientWithoutCache(ctx context.Context, isSudo bool) (cli rpc.DaemonClie
 		err = fmt.Errorf("%w: %w", err, config.ErrDaemonNotRunning)
 		return
 	}
-	conn, err = grpc.NewClient("unix:"+sockPath, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err = grpc.NewClient("unix:"+sockPath, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithNoProxy())
 	if err != nil {
 		return
 	}
@@ -194,15 +215,22 @@ func runDaemon(ctx context.Context, exe string, isSudo bool) error {
 		return nil
 	}
 
+	startupLock, err := acquireDaemonStartupLock(ctx, isSudo)
+	if err != nil {
+		return fmt.Errorf("failed to acquire %s daemon startup lock: %w", daemonRole(isSudo), err)
+	}
+	defer startupLock.Close()
+	// Another CLI may have completed startup while this process waited.
+	if _, err = GetClient(isSudo); err == nil {
+		return nil
+	}
+
 	pidPath := config.GetPidPath(isSudo)
 	err = os.Remove(pidPath)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	role := "user"
-	if isSudo {
-		role = "root"
-	}
+	role := daemonRole(isSudo)
 	startupLogPath, err := startDaemonProcess(exe, isSudo)
 	diagnostics := "log: " + config.GetDaemonLogPath(isSudo)
 	if startupLogPath != "" {
@@ -211,8 +239,8 @@ func runDaemon(ctx context.Context, exe string, isSudo bool) error {
 	if err != nil {
 		return fmt.Errorf("failed to launch %s daemon (%s): %w", role, diagnostics, err)
 	}
-	// Authentication has finished. Bound only PID readiness, not the lifetime
-	// of the detached process or GetClient's existing RPC probes.
+	// Authentication has finished. Bound PID readiness separately from the
+	// detached process lifetime and the bounded GetClient bootstrap probes.
 	pidCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	if err = waitForDaemonPID(pidCtx, pidPath); err != nil {
