@@ -114,18 +114,18 @@ func pipeUDPFromTCP(ctx context.Context, tcpConn net.Conn, udpConn *net.UDPConn,
 		if err := tcpConn.SetReadDeadline(time.Now().Add(config.UDPRelayTimeout)); err != nil {
 			return fmt.Errorf("set TCP read deadline: %w", err)
 		}
-		datagram, err := framing.ReadDatagram(tcpConn, buf)
+		n, err := framing.ReadDatagram(tcpConn, buf)
 		if err != nil {
 			return fmt.Errorf("read datagram: %w", err)
 		}
-		if datagram.DataLength == 0 {
+		if n == 0 {
 			return errors.New("received zero-length datagram")
 		}
 
 		if err = udpConn.SetWriteDeadline(time.Now().Add(config.UDPRelayTimeout)); err != nil {
 			return fmt.Errorf("set UDP write deadline: %w", err)
 		}
-		if _, err = udpConn.Write(datagram.Data[:datagram.DataLength]); err != nil {
+		if _, err = udpConn.Write(buf[:n]); err != nil {
 			return fmt.Errorf("write UDP: %w", err)
 		}
 	}

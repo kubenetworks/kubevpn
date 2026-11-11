@@ -7,8 +7,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
 // recoverTUN returns an error on the first N reads, then delivers one packet, then parks.
@@ -58,8 +56,8 @@ func TestPumpTun_ToleratesTransientReadError(t *testing.T) {
 	defer cancel()
 
 	dispatched := make(chan struct{}, 1)
-	go d.pumpTun(ctx, "[Test]", func(buf []byte, _ int, _, _ net.IP) {
-		config.LPool.Put(buf[:])
+	go d.pumpTun(ctx, "[Test]", func(packet *packet) {
+		packet.release()
 		select {
 		case dispatched <- struct{}{}:
 		default:
@@ -103,7 +101,7 @@ func TestStage4PumpErrorThresholdAndReset(t *testing.T) {
 			} // resets the preceding two errors
 			return 1, net.ErrClosed
 		}
-		d.pumpTunBatchWithPool(ctx, "stage4", f, func(b []byte, _ int, _, _ net.IP) { delivered++; pool.Put(b) }, pool)
+		d.pumpTunBatchWithPool(ctx, "stage4", f, func(packet *packet) { delivered++; pool.Put(packet.data) }, pool)
 		if cancelOnRead {
 			if reads != 1 || delivered != 0 {
 				t.Fatal("canceled read dispatched prefix")
@@ -141,7 +139,7 @@ func TestPumpTun_CtxCancelQuietExit(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
-		d.pumpTun(ctx, "[Test]", func(buf []byte, _ int, _, _ net.IP) { config.LPool.Put(buf[:]) })
+		d.pumpTun(ctx, "[Test]", func(packet *packet) { packet.release() })
 		close(done)
 	}()
 

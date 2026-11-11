@@ -170,8 +170,8 @@ func BenchmarkPumpTunBatchReuse(b *testing.B) {
 					ct := newClientTransport(d, nil, nil)
 					defer drainPacketChan(d.tunInbound)
 					delivered := 0
-					dispatch := func(buf []byte, n int, s, dest net.IP) {
-						ct.routeOutbound(ctx, buf, n, s, dest)
+					dispatch := func(packet *packet) {
+						ct.routeOutbound(ctx, packet)
 						p := <-d.tunInbound // actual packet construction, transfer and release
 						valid := p.length == len(ip)+typePrefixLen && p.data[2] == packetTypeToGvisor &&
 							p.src.Equal(src) && p.dst.Equal(dst) && bytes.Equal(p.data[tunReserve:datagramHeaderLen+p.length], ip)
@@ -233,7 +233,7 @@ func TestStage4PumpFrameBoundary(t *testing.T) {
 		s[3] = 65535
 		return 4, nil
 	}}
-	d.pumpTunBatch(ctx, "stage4", f, func(b []byte, n int, s, dst net.IP) { tr.routeOutbound(ctx, b, n, s, dst) })
+	d.pumpTunBatch(ctx, "stage4", f, func(packet *packet) { tr.routeOutbound(ctx, packet) })
 	defer drainPacketChan(d.tunInbound)
 	if len(d.tunInbound) != 2 {
 		t.Fatalf("boundary dispatched=%d", len(d.tunInbound))
@@ -264,9 +264,9 @@ func TestStage4PumpPositiveError(t *testing.T) {
 		return 1, io.ErrUnexpectedEOF
 	}
 	d := &tunDevice{errChan: make(chan error, 1)}
-	d.pumpTunBatch(ctx, "stage4", f, func(b []byte, n int, _, _ net.IP) {
-		defer config.LPool.Put(b)
-		if !bytes.Equal(b[tunReserve:tunReserve+n], ip) {
+	d.pumpTunBatch(ctx, "stage4", f, func(packet *packet) {
+		defer packet.release()
+		if !bytes.Equal(packet.ip(), ip) {
 			t.Error("corrupt prefix")
 		}
 		delivered++
@@ -304,7 +304,7 @@ func TestStage4PumpOwnership(t *testing.T) {
 			d := &tunDevice{tunInbound: make(chan *packet, 512), errChan: make(chan error, 1)}
 			// The private seam exercises exactly the production pump with a local pool.
 			pump, ok := any(d).(interface {
-				pumpTunBatchWithPool(context.Context, string, batchTUN, func([]byte, int, net.IP, net.IP), interface {
+				pumpTunBatchWithPool(context.Context, string, batchTUN, func(*packet), interface {
 					Get() any
 					Put(any)
 				})
@@ -360,8 +360,8 @@ func TestStage4PumpOwnership(t *testing.T) {
 					return 0, context.Canceled
 				}
 			}
-			pump.pumpTunBatchWithPool(ctx, "stage4", f, func(b []byte, n int, s, dst net.IP) {
-				tr.routeOutbound(ctx, b, n, s, dst)
+			pump.pumpTunBatchWithPool(ctx, "stage4", f, func(packet *packet) {
+				tr.routeOutbound(ctx, packet)
 				held = append(held, <-d.tunInbound)
 			}, pool)
 			if reads != 5 || len(held) != count || pool.gets != 128+count || pool.puts != 128 {
@@ -399,10 +399,9 @@ func TestPumpTunBatchDispatchesEachSegment(t *testing.T) {
 	var mu sync.Mutex
 	var got [][]byte
 	done := make(chan struct{})
-	dispatch := func(buf []byte, n int, s, dd net.IP) {
-		cp := make([]byte, n)
-		copy(cp, buf[tunReserve:tunReserve+n])
-		config.LPool.Put(buf[:]) // dispatch owns buf and returns it to the pool
+	dispatch := func(packet *packet) {
+		cp := append([]byte(nil), packet.ip()...)
+		packet.release()
 		mu.Lock()
 		got = append(got, cp)
 		count := len(got)

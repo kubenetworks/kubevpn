@@ -19,9 +19,11 @@ import (
 	"golang.org/x/net/http2/h2c"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/admin"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
+	"google.golang.org/grpc/status"
 	"gopkg.in/natefinch/lumberjack.v2"
 	glog "gvisor.dev/gvisor/pkg/log"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -143,15 +145,17 @@ func (o *SvrOption) Start(ctx context.Context) error {
 
 // Stop cancels the server context and invokes the server's cleanup callback to shut down gracefully.
 func (o *SvrOption) Stop() {
-	o.cancel()
+	if o.cancel != nil {
+		o.cancel()
+	}
 	if o.svr != nil && o.svr.Cancel != nil {
 		o.svr.Cancel()
 	}
 }
 
 // rejectActiveDaemonSocket protects an older daemon that predates instance
-// locks. A failed health probe is treated as a stale socket and remains
-// recoverable; a healthy socket is never removed by a second process.
+// locks. Only connection failure plus a dead PID proves a socket is stale;
+// timeouts and ambiguous errors always preserve the existing endpoint.
 func rejectActiveDaemonSocket(ctx context.Context, isSudo bool) error {
 	sockPath := config.GetSockPath(isSudo)
 	if _, err := os.Stat(sockPath); err != nil {
@@ -169,7 +173,11 @@ func rejectActiveDaemonSocket(ctx context.Context, isSudo bool) error {
 	if err == nil {
 		return fmt.Errorf("%w: socket %s is active", errDaemonAlreadyRunning, sockPath)
 	}
-	return nil
+	staleTransport := status.Code(err) == codes.Unavailable || errors.Is(err, os.ErrNotExist)
+	if staleTransport && !pidFileProcessAlive(config.GetPidPath(isSudo)) {
+		return nil
+	}
+	return fmt.Errorf("cannot verify daemon socket %s is stale: %w", sockPath, err)
 }
 
 // createDowngradingHandler takes a gRPC server and a plain HTTP handler, and returns an HTTP handler that has the

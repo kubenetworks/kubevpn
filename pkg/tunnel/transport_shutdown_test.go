@@ -217,7 +217,10 @@ func TestStage3_ServerOutboundCancel(t *testing.T) {
 	dev := &tunDevice{tunInbound: make(chan *packet)}
 	tr := newServerTransport(dev, NewRouter())
 	done := make(chan struct{})
-	go func() { tr.routeOutbound(ctx, config.LPool.Get().([]byte), 20, nil, nil); close(done) }()
+	go func() {
+		tr.routeOutbound(ctx, newPacket(config.LPool.Get().([]byte), 20+typePrefixLen, nil, nil))
+		close(done)
+	}()
 	cancel()
 	select {
 	case <-done:
@@ -708,7 +711,7 @@ func TestStage4PumpBackoffCancel(t *testing.T) {
 	d := &tunDevice{errChan: make(chan error, 1)}
 	done := make(chan struct{})
 	go func() {
-		d.pumpTunBatch(ctx, "stage4", f, func(b []byte, _ int, _, _ net.IP) { config.LPool.Put(b) })
+		d.pumpTunBatch(ctx, "stage4", f, func(packet *packet) { packet.release() })
 		close(done)
 	}()
 	select {
@@ -742,8 +745,8 @@ func TestTransportShutdown_FullOutboundQueue(t *testing.T) {
 		if self {
 			dst = src
 		}
-		buf := config.LPool.Get().([]byte)
-		go func() { tr.routeOutbound(ctx, buf, 20, src, dst); close(done) }()
+		packet := newPacket(config.LPool.Get().([]byte), 20+typePrefixLen, src, dst)
+		go func() { tr.routeOutbound(ctx, packet); close(done) }()
 		cancel()
 		select {
 		case <-done:

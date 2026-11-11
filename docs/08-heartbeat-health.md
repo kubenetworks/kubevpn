@@ -37,8 +37,9 @@ The **#1 correlated TUN heartbeat and the transport supervisor are the primary t
 ### #1 TUN Heartbeat
 
 **Files:** `pkg/tunnel/client.go` — `clientTransport.heartbeats()`;
-`pkg/tunnel/heartbeat.go` — `HeartbeatStats`; `pkg/network/transport.go` —
-`transportSupervisor.monitorTransport()` (health and generation recovery).
+`pkg/tunnel/heartbeat.go` — `HeartbeatStats`; `pkg/network/transport_health.go` —
+`generationHealth.run()` (evidence evaluation); `pkg/network/transport.go` —
+`transportSupervisor` (the only serial prepare/publish/retire/retry owner).
 
 **What:** Sends ICMP Echo packets from the client's TUN IP to the router IP (`198.18.0.0`) every `config.HeartbeatInterval` (5 s). This is deliberately shorter than `config.KeepAliveTime` (60 s, which drives the deadlines and TCP keepalive) so the black-hole watchdog can detect a silent tunnel in seconds; sending more often only helps the server read deadline (`KeepAliveTime*3`).
 
@@ -101,8 +102,8 @@ accounting does not consume shared probe state or change reply attribution.
 
 ### #3 TCP Read/Write Deadline
 
-**Files:** client — `pkg/tunnel/attempt.go` (`connAttempt.readGeneration`,
-`writeGeneration`); server — `pkg/tunnel/server_endpoint.go`
+**Files:** client — `pkg/tunnel/attempt_read.go` / `attempt_write.go` (`connAttempt` pumps);
+server — `pkg/tunnel/server_endpoint.go`
 (`readFromTCPConnWriteToEndpoint`, `readFromEndpointWriteToRoute`) and
 `pkg/tunnel/buffered_conn.go` (`bufferedTCP.run`). `pkg/tunnel/slot.go` retains
 queue/retry ownership; each attempt closes and joins its pumps before the next dial.

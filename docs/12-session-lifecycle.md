@@ -160,9 +160,13 @@ DataSession.Cleanup() — root daemon, ALWAYS data-plane:
 
 `Stop` is idempotent and serializes worker admission with shutdown. Each generation owns
 joinable SSH/port-forward handles plus pending and returned data/xDS connections; late dials
-cannot publish after retirement. TUN serving routines join before their final queue drain.
-Terminal transport errors cancel the manager; `DataSession` observes cancellation outside
-the supervisor and runs cleanup, avoiding a supervisor self-join.
+cannot publish after retirement. `generation.mu` protects `retired/conns` and serializes
+`dials.Add` against retirement, with lock order `applyMu → supervisor.mu → generation.mu`;
+actual Dial/TLS/Close/Stop and watcher effects run outside metadata locks. The supervisor's
+serial loop is the only normal prepare/publish/retire/retry owner; `generationHealth` only
+evaluates evidence, and its timers are stopped on return. TUN serving routines join before
+their final queue drain. Terminal transport errors cancel the manager; `DataSession` observes
+cancellation outside the supervisor and runs cleanup, avoiding a supervisor self-join.
 
 ## Server Shutdown and Stack Ownership
 
@@ -180,21 +184,21 @@ returning. An ordinary accepted TCP handler returning on EOF is **not** server-f
 Server shutdown has explicit ownership boundaries:
 
 - Server device sends to `tunInbound`/`tunOutbound` select on cancellation. The private
-  RouteHub TUN bridge uses `enqueueTUN(ctx, pkt)`; success transfers a packet reference,
-  failure leaves it with the caller. `stopTUNBridge` signals `tunDone`, joins in-flight
-  admissions, then drains `tunQueue`. It never closes the data channel. Device `serve`
-  joins its routines before its final queue drains.
+  `tunBridge.send` transfers a packet reference on success and leaves it with the caller
+  on failure. `tunBridge.stop` signals shutdown, joins in-flight admissions, then drains
+  without closing the data channel. `deviceSession` owns cancel → device Close → routine
+  join → transport/device final drain.
 - `bufferedTCP` closes its transport on stop, including an idle or pre-canceled writer.
   Its stop callback removes routes, and registration rejects closed writers. Admission
   is joined before the writer's final drain; its `done` signals admission stop, not a
   general goroutine join. Route metadata locks are not held during socket Close or I/O.
 - Per-client gvisor `clientStack.done` closes after **both** the owned output loop and
   stack destruction finish. Grace expiry validates stack identity, epoch, and absence of
-  a current data route under `hub.mu` then `handler.mu`; late callbacks cannot delete a
+  a current data route under `routeTable.mu` then `peerRegistry.mu`; late callbacks cannot delete a
   restored/replacement stack. A control-before-data stack gets one bounded grace interval,
   not an interval refreshed by probes; data registration cancels it. This is not a claim
   that all foreign-library goroutines are joined (see [48](48-shared-server-gvisor-stack.md)).
-- `UDPConnOverTCP` serializes reads and writes separately; cancellation/Close unblocks
+- `wire.Conn` serializes reads and writes separately; cancellation/Close unblocks
   active I/O by closing the transport without acquiring those I/O mutexes.
   `relayUDPOverTCP` cancels and closes both TCP and UDP endpoints on cancellation or first
   copy completion, then joins both copy workers before returning. This contract is for

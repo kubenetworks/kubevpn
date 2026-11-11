@@ -122,7 +122,7 @@ func TestFault_SlotDies_OtherSlotsWork(t *testing.T) {
 					return
 				}
 				received[slotID].Add(1)
-				config.LPool.Put(pkt.data[:])
+				pkt.release()
 			}
 		}(i)
 	}
@@ -324,7 +324,7 @@ func TestFault_WriteFailsMidStream_CleanExit(t *testing.T) {
 	// Drain remaining packets
 	for len(slotCh) > 0 {
 		pkt := <-slotCh
-		config.LPool.Put(pkt.data[:])
+		pkt.release()
 	}
 }
 

@@ -55,7 +55,7 @@ func TestServerRouting_Path3_PrefixZeroTotunQueue(t *testing.T) {
 		if !pkt.dst.Equal(dstIP.To4()) {
 			t.Errorf("expected dst %s, got %s", dstIP, pkt.dst)
 		}
-		config.LPool.Put(pkt.data[:])
+		pkt.release()
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout: prefix=0 packet should go to tunQueue")
 	}
@@ -125,7 +125,7 @@ func TestConnectionPool_SlotIsolation(t *testing.T) {
 			t.Errorf("slot %d: expected 1 packet, got %d", i, len(s))
 		}
 		pkt := <-s
-		config.LPool.Put(pkt.data[:])
+		pkt.release()
 	}
 }
 
