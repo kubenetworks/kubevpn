@@ -41,10 +41,11 @@ plus a separate control connection to the same forwarding endpoint.
   sent before queued business traffic on each new data conn.
 - Shared primitives: `pkg/internal/wire/conn.go` owns `Conn`, `ReadDatagram`,
   `WriteDatagram`, `WriteDatagramProgress`, `WriteFull`; `batch.go` owns `BatchWriter`.
-  `pkg/tunnel/packet_io.go` owns framed reads and exact ingress Views. gVisor injection
-  transfers Views without copying; asynchronous routing and TUN output materialize them
-  into canonical buffers. Packet objects and their data buffers are recycled independently,
-  with metadata cleared at final release; packet batches remain private to tunnel.
+  `pkg/tunnel/packet_io.go` owns framed reads into pooled buffers. Asynchronous routing
+  and TUN output pass owning `packet`s without re-copying; gVisor injection copies once
+  at the stack boundary (`buffer.MakeWithData`). Packet objects and their data buffers
+  are recycled independently, with metadata cleared at final release; packet batches
+  remain private to tunnel.
   `pkg/tunnel/internal/netstack` owns stack construction and TCP/UDP/ICMP forwarders.
 
 The legacy diagrams, pseudocode and bug-fix/performance history below preserve earlier
