@@ -282,10 +282,12 @@ This is modeled on gvisor's chunk refcount (`buffer.View.Clone`/`Release`). Type
 `2` identifies control/heartbeat frames; `3..255` remain reserved.
 
 `packetReader` (`pkg/tunnel/packet_io.go`) is the only framed-socket-to-packet constructor for
-client/server data and control loops. It reuses one reader-owned `packet` on synchronous paths;
-dispatch calls `detach()` only when an asynchronous queue needs an independent owner. Channel
-success transfers the reference, failure releases it, and canonical pool Get/Put is centralized
-in `packet.go`. Client and server keep separate consume-packet dispatch functions, so routing,
+client/server data and control loops. It reads into the canonical `config.LPool` layout; packet
+metadata comes independently from `packetPool`, so every dispatch receives an independent owner.
+Channel success transfers the reference, failure releases it, and canonical pool Get/Put is
+centralized in `packet.go`. gVisor injection copies the raw IP slice with `buffer.MakeWithData`;
+the tunnel does not use `framing.Conn.ReadView` or expose gVisor View ownership across packet
+lifecycle boundaries. Client and server keep separate consume-packet dispatch functions, so routing,
 heartbeat correlation and gVisor policy do not leak into the shared reader.
 
 ## 8. Gvisor Stack

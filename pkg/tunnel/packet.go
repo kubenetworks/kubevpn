@@ -111,7 +111,9 @@ func (p *packet) release() {
 		p.dst = nil
 		p.probeEpoch = 0
 		p.probeQueued = false
-		config.LPool.Put(data[:])
+		if data != nil {
+			config.LPool.Put(data[:])
+		}
 		packetPool.Put(p)
 	case n < -1:
 		panic("core: packet released more times than acquired")
@@ -145,20 +147,6 @@ func packetBufferFromPool() []byte {
 	return config.LPool.Get().([]byte)[:]
 }
 
-// detach moves an owning reference into an independent packet for asynchronous
-// queue handoff. The original must be a reader-owned value with no extra refs;
-// its storage becomes empty and must not be released.
-func (p *packet) detach() *packet {
-	detached := newPacket(p.data, p.length, p.src, p.dst)
-	detached.probeEpoch = p.probeEpoch
-	detached.probeQueued = p.probeQueued
-	p.data = nil
-	p.length = 0
-	p.src, p.dst = nil, nil
-	p.probeEpoch, p.probeQueued = 0, false
-	return detached
-}
-
 // Data returns the raw packet buffer (includes framing headers and payload).
 func (d *packet) Data() []byte {
 	return d.data
@@ -180,7 +168,7 @@ func (p *packet) setIP(ip []byte) {
 }
 
 // frame returns a borrowed view of the wire frame. The wire writer stamps its
-// length immediately before I/O; frame itself never mutates the packet.
+// length immediately before I/O.
 func (p *packet) frame() []byte {
 	return p.data[:datagramHeaderLen+p.length]
 }

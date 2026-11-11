@@ -71,7 +71,7 @@ func BenchmarkClientDataPath(b *testing.B) {
 				send := func() {
 					buf := config.LPool.Get().([]byte)
 					n := copy(buf[tunReserve:], ip)
-					client.routeOutbound(ctx, buf, n, src, dst)
+					client.routeOutbound(ctx, newPacket(buf, n+typePrefixLen, src, dst))
 				}
 				receive := func() {
 					buf := make([]byte, config.LargeBufferSize)
