@@ -1,5 +1,12 @@
 # CLAUDE.md — KubeVPN Project Instructions
 
+@AGENTS.md
+
+> Relationship: [AGENTS.md](AGENTS.md) is the tool-neutral **workflow entry point**
+> (read design docs → implement → test → verify → commit); this file is the
+> **detailed reference** (architecture map, shared helpers, interface contracts)
+> that AGENTS.md links into. Update whichever matches where the change belongs.
+
 ## Project Overview
 
 KubeVPN is a CLI tool that connects local development environments to Kubernetes cluster networks. It creates TUN
