@@ -6,8 +6,13 @@ Sync mode (`kubevpn sync`) creates a clone of a Kubernetes workload with syncthi
 
 ## 2. Architecture
 
+To use sync mode:
+
+```shell cli-checked
+kubevpn sync deployment/myapp --sync ./src:/app
 ```
-kubevpn sync deployment/myapp --local-dir ./src --remote-dir /app
+
+```
 
   ┌─ User Daemon ─────────────────────────────────────────┐
   │                                                       │

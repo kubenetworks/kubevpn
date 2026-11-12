@@ -83,7 +83,8 @@ connecting to a NEW manager sends plaintext frames that the new manager XOR-deco
 the connection garbles and the watchdog reconnect-loops. During a rollout window where
 old clients may still connect, set `KUBEVPN_OBFUSCATE=0` in the traffic-manager Secret
 and remove it once the fleet is upgraded (the manager is created/upgraded by the
-connecting client, so normal kubevpn operation converges versions quickly).
+connecting client, so normal kubevpn operation converges versions quickly). See also:
+[33-client-upgrade.md](33-client-upgrade.md) — for detailed rollout guidance.
 
 **Caveat — TLS secret rotation**: `pkg/cluster/manager/upgrade.go` regenerates the
 traffic-manager Secret on upgrade (`rotateTLSSecret`). A manually added

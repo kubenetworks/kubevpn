@@ -105,7 +105,19 @@ cause (see [31-exit-codes.md](31-exit-codes.md)):
 | `cmd/kubevpn/cmds/upgrade.go` | `CmdUpgrade` command wiring |
 | `pkg/config/errors.go` | `ErrUpgrade*` sentinels |
 
-## 8. Related Docs
+## 9. Obfuscation Mixed-Version Rollout
+
+When upgrading from a version without obfuscation to a version with obfuscation (on by default), special care is needed:
+
+- **Old client + New manager**: An old client (without obfuscation code) connecting to a new manager sends plaintext frames that the new manager tries to XOR-decode — the connection becomes garbled and the watchdog reconnect-loops.
+
+- **Mitigation during rollout**: Set `KUBEVPN_OBFUSCATE=0` in the traffic-manager Secret to temporarily disable obfuscation while old clients are still in use. Remove this entry once the fleet is fully upgraded.
+
+- **TLS Secret rotation caveat**: The traffic-manager Secret is regenerated on upgrade. A manually added `KUBEVPN_OBFUSCATE=0` entry will be lost during rotation and must be re-applied. Note that with obfuscation on by default, losing the opt-out entry silently re-enables obfuscation.
+
+See also: [54-traffic-obfuscation.md](54-traffic-obfuscation.md) — full obfuscation design and implementation details.
+
+## 10. Related Docs
 
 - [34-privilege-escalation.md](34-privilege-escalation.md) — how `elevatePermission` re-execs
 - [35-daemon-bootstrap.md](35-daemon-bootstrap.md) — `StartupDaemon` relaunch after install
