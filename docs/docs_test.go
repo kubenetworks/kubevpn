@@ -30,6 +30,154 @@ func init() {
 	}
 }
 
+// LinkCheckResult represents a single issue found during link checking
+type LinkCheckResult struct {
+	File    string // Relative path to the file
+	Message string // Description of the issue
+}
+
+// checkCrossReferences scans a directory and returns all link check issues found
+func checkCrossReferences(rootDir string, skipDirs []string) ([]LinkCheckResult, error) {
+	var results []LinkCheckResult
+
+	// More precise link pattern - avoids matching things like [a](b, c)
+	// Matches [text](url) where url doesn't contain unescaped spaces
+	linkPattern := regexp.MustCompile(`\[([^\]]*)\]\(([^)\s]+(?:\s+[^)\s]+)*)\)`)
+
+	// Create skip set for quick lookup
+	skipSet := make(map[string]bool)
+	for _, d := range skipDirs {
+		skipSet[d] = true
+	}
+
+	err := filepath.Walk(rootDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			if skipSet[info.Name()] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".md") {
+			return nil
+		}
+
+		relPath, err := filepath.Rel(rootDir, path)
+		if err != nil {
+			relPath = path
+		}
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+
+		// Strip code blocks (```...```) before looking for links
+		content := stripCodeBlocks(string(data))
+
+		sourceDir := filepath.Dir(path)
+		for _, match := range linkPattern.FindAllStringSubmatch(content, -1) {
+			ref := strings.TrimSpace(match[2])
+
+			// Skip external links
+			if strings.HasPrefix(ref, "http://") || strings.HasPrefix(ref, "https://") || strings.HasPrefix(ref, "mailto:") {
+				continue
+			}
+
+			// Check for user directory paths (false positives like /etc/ should not be flagged)
+			if looksLikeUserDir(ref) {
+				results = append(results, LinkCheckResult{
+					File:    relPath,
+					Message: fmt.Sprintf("link contains user directory path: %s", ref),
+				})
+			}
+
+			// Strip fragment and query
+			cleanRef := ref
+			if idx := strings.Index(cleanRef, "#"); idx != -1 {
+				cleanRef = cleanRef[:idx]
+			}
+			if idx := strings.Index(cleanRef, "?"); idx != -1 {
+				cleanRef = cleanRef[:idx]
+			}
+			cleanRef = strings.TrimSpace(cleanRef)
+			if cleanRef == "" {
+				continue // anchor-only link
+			}
+
+			// Resolve the target path
+			var target string
+			switch {
+			case strings.HasPrefix(cleanRef, "/docs/"):
+				// Absolute path from repo docs root - check this first!
+				target = filepath.Join(repoRoot, cleanRef[1:]) // strip leading /
+			case filepath.IsAbs(cleanRef):
+				// Other absolute paths - skip checking (likely system paths)
+				continue
+			default:
+				// Relative path - resolve relative to source file directory
+				target = filepath.Join(sourceDir, cleanRef)
+			}
+
+			if _, err := os.Stat(target); os.IsNotExist(err) {
+				results = append(results, LinkCheckResult{
+					File:    relPath,
+					Message: fmt.Sprintf("broken link to %s (resolved to %s)", ref, target),
+				})
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return results, nil
+}
+
+// stripCodeBlocks removes code blocks (```...```) from markdown content
+// to avoid matching links inside code.
+func stripCodeBlocks(content string) string {
+	// Pattern to match fenced code blocks
+	codeBlockPattern := regexp.MustCompile("(?s)```.*?```")
+	return codeBlockPattern.ReplaceAllString(content, "")
+}
+
+var (
+	userDirPatterns = []*regexp.Regexp{
+		regexp.MustCompile(`^/Users/[^/]+`),           // macOS
+		regexp.MustCompile(`^/home/[^/]+`),            // Linux
+		regexp.MustCompile(`^[A-Za-z]:\\Users\\[^\\]+`), // Windows
+	}
+	// False positive patterns - these look like user dirs but are system paths
+	safePathPatterns = []*regexp.Regexp{
+		regexp.MustCompile(`^/etc/`),
+		regexp.MustCompile(`^/tmp/`),
+		regexp.MustCompile(`^/var/`),
+		regexp.MustCompile(`^/dev/`),
+		regexp.MustCompile(`^/proc/`),
+		regexp.MustCompile(`^/sys/`),
+	}
+)
+
+func looksLikeUserDir(path string) bool {
+	// First check if it's a known safe path
+	for _, p := range safePathPatterns {
+		if p.MatchString(path) {
+			return false
+		}
+	}
+	// Then check if it matches user dir patterns
+	for _, p := range userDirPatterns {
+		if p.MatchString(path) {
+			return true
+		}
+	}
+	return false
+}
+
 // TestDocReferencesInCode checks that every docs/ path referenced in Go source
 // and CLAUDE.md actually points to an existing file.
 func TestDocReferencesInCode(t *testing.T) {
@@ -166,35 +314,147 @@ func TestDocNoDuplicateNumbers(t *testing.T) {
 	}
 }
 
-// TestDocCrossReferences checks that docs/ internal links (e.g., [text](05-owner-id.md))
-// point to files that exist within the docs directory.
+// TestDocCrossReferences checks that docs/ internal links point to files that exist.
+// It scans:
+//   - docs/ directory (excluding testdata)
+//   - Root directory files: README.md, README_ZH.md, CONTRIBUTING.md, SECURITY.md
 func TestDocCrossReferences(t *testing.T) {
+	var results []LinkCheckResult
+
+	// First check the docs directory
 	docsDir := filepath.Join(repoRoot, "docs")
-	entries, err := os.ReadDir(docsDir)
+	docsResults, err := checkCrossReferences(docsDir, []string{"testdata"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	results = append(results, docsResults...)
+
+	// Then check the root directory files by checking them in their actual location
+	// To do this, we'll create a special check for individual files
+	rootFiles := []string{"README.md", "README_ZH.md", "CONTRIBUTING.md", "SECURITY.md"}
+	linkPattern := regexp.MustCompile(`\[([^\]]*)\]\(([^)\s]+(?:\s+[^)\s]+)*)\)`)
+
+	for _, f := range rootFiles {
+		path := filepath.Join(repoRoot, f)
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			continue // Skip if file doesn't exist
+		}
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		content := stripCodeBlocks(string(data))
+		sourceDir := repoRoot // Links are relative to repo root for these files
+
+		for _, match := range linkPattern.FindAllStringSubmatch(content, -1) {
+			ref := strings.TrimSpace(match[2])
+
+			// Skip external links
+			if strings.HasPrefix(ref, "http://") || strings.HasPrefix(ref, "https://") || strings.HasPrefix(ref, "mailto:") {
+				continue
+			}
+
+			// Check for user directory paths
+			if looksLikeUserDir(ref) {
+				results = append(results, LinkCheckResult{
+					File:    f,
+					Message: fmt.Sprintf("link contains user directory path: %s", ref),
+				})
+			}
+
+			// Strip fragment and query
+			cleanRef := ref
+			if idx := strings.Index(cleanRef, "#"); idx != -1 {
+				cleanRef = cleanRef[:idx]
+			}
+			if idx := strings.Index(cleanRef, "?"); idx != -1 {
+				cleanRef = cleanRef[:idx]
+			}
+			cleanRef = strings.TrimSpace(cleanRef)
+			if cleanRef == "" {
+				continue // anchor-only link
+			}
+
+			// Resolve the target path
+			var target string
+			switch {
+			case strings.HasPrefix(cleanRef, "/docs/"):
+				target = filepath.Join(repoRoot, cleanRef[1:])
+			case filepath.IsAbs(cleanRef):
+				continue // Skip other absolute paths
+			default:
+				target = filepath.Join(sourceDir, cleanRef)
+			}
+
+			if _, err := os.Stat(target); os.IsNotExist(err) {
+				results = append(results, LinkCheckResult{
+					File:    f,
+					Message: fmt.Sprintf("broken link to %s (resolved to %s)", ref, target),
+				})
+			}
+		}
+	}
+
+	// Report all issues
+	for _, r := range results {
+		t.Errorf("%s: %s", r.File, r.Message)
+	}
+}
+
+// TestDocCrossReferencesFixtures tests the cross-reference logic against our test fixtures
+// to verify it catches broken links, user directories, etc.
+func TestDocCrossReferencesFixtures(t *testing.T) {
+	testDir := filepath.Join(repoRoot, "docs", "testdata", "links")
+	results, err := checkCrossReferences(testDir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	linkPattern := regexp.MustCompile(`\[([^\]]*)\]\(([^)]+\.md)\)`)
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
-			continue
+	// Verify we found the expected number of issues
+	// Expected issues from our fixture:
+	// - ../README.md (broken)
+	// - missing.md (broken)
+	// - subdir/nowhere.md (broken)
+	// - images/nonexistent.png (broken)
+	// - /Users/test/doc.md (user dir + broken)
+	// - /home/user/file.md (user dir + broken)
+	// - C:\Users\test\doc.md (user dir + broken)
+	expectedIssueCount := 7 // 4 broken links + 3 user dir warnings (some have both)
+
+	if len(results) < expectedIssueCount {
+		t.Errorf("expected at least %d issues, found %d", expectedIssueCount, len(results))
+	}
+
+	// Check that specific issues are present
+	foundMissingMD := false
+	foundUserDir := false
+	foundAnchorLink := false // Should be skipped
+
+	for _, r := range results {
+		if strings.Contains(r.Message, "missing.md") {
+			foundMissingMD = true
 		}
-		data, err := os.ReadFile(filepath.Join(docsDir, e.Name()))
-		if err != nil {
-			t.Fatal(err)
+		if strings.Contains(r.Message, "user directory") {
+			foundUserDir = true
 		}
-		for _, match := range linkPattern.FindAllStringSubmatch(string(data), -1) {
-			ref := match[2]
-			if strings.HasPrefix(ref, "http") {
-				continue
-			}
-			target := filepath.Join(docsDir, ref)
-			if _, err := os.Stat(target); os.IsNotExist(err) {
-				t.Errorf("%s: broken link to %s", e.Name(), ref)
-			}
+		if strings.Contains(r.Message, "anchor") {
+			foundAnchorLink = true
 		}
 	}
+
+	if !foundMissingMD {
+		t.Error("expected to find broken link to missing.md")
+	}
+	if !foundUserDir {
+		t.Error("expected to find user directory path warning")
+	}
+	if foundAnchorLink {
+		t.Error("did not expect to find issue with anchor-only link")
+	}
+
+	t.Logf("Found %d issues as expected", len(results))
 }
 
 // TestDocFilesNotEmpty checks that no doc file is empty.
