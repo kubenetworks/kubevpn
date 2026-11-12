@@ -27,8 +27,9 @@ type clientTransport struct {
 	// controlSlot sends heartbeat requests without waiting on the business packet queue.
 	// The server answers them inline on this same control connection, so liveness evidence
 	// survives a kernel-RTO stall on the data slot; the outer SSH/PF transport is shared.
+	// Constructed here, before any routine starts: heartbeats read it without locking and
+	// must never race its creation.
 	controlSlot *connSlot
-	controlMu   sync.RWMutex
 	// gvisorInbound carries src == dst packets to the local loopback (self-to-self) gvisor stack.
 	gvisorInbound chan *packet
 	// interClient is the single transport-level gvisor stack that terminates inbound inter-client
@@ -44,12 +45,23 @@ type clientTransport struct {
 }
 
 func newClientTransport(dev *tunDevice, forward *DialConfig, stats *HeartbeatStats) *clientTransport {
-	return &clientTransport{
+	t := &clientTransport{
 		dev:           dev,
 		forward:       forward,
 		gvisorInbound: make(chan *packet, MaxSize),
 		stats:         stats,
 	}
+	// Build the control slot up front so the heartbeat routine — which starts concurrently
+	// with runControlSlot — always finds it ready on its initial send.
+	t.controlSlot = &connSlot{
+		id:          ConnPoolSize,
+		inbound:     make(chan *packet, MaxSize),
+		tunOutbound: dev.tunOutbound,
+		forward:     forward,
+		stats:       stats,
+		role:        slotRoleControl,
+	}
+	return t
 }
 
 // close releases residual queues only after serve has joined every routine,
@@ -130,20 +142,10 @@ func (t *clientTransport) runConnPool(ctx context.Context) {
 // runControlSlot manages the dedicated heartbeat connection. Requests bypass a full data
 // queue, but their replies still depend on the data path. The server recognizes this conn
 // by the packetTypeControl prefix on its first datagram and does NOT register it in Router.
+// The slot itself is built by newClientTransport, before routines start.
 func (t *clientTransport) runControlSlot(ctx context.Context) {
-	slot := &connSlot{
-		id:          ConnPoolSize,
-		inbound:     make(chan *packet, MaxSize),
-		tunOutbound: t.dev.tunOutbound,
-		forward:     t.forward,
-		stats:       t.stats,
-		role:        slotRoleControl,
-	}
-	t.controlMu.Lock()
-	t.controlSlot = slot
-	t.controlMu.Unlock()
 	t.stats.RequestProbe()
-	slot.run(ctx)
+	t.controlSlot.run(ctx)
 }
 
 // registrationPayloads builds the proactive route-registration payloads — one ICMP echo to the
@@ -203,9 +205,9 @@ func (t *clientTransport) heartbeats(ctx context.Context) {
 	// never sent is indistinguishable at the watchdog from a black-holed tunnel, and it will
 	// force-reconnect the port-forward every livenessStartupDeadline forever on the strength of it.
 	sendHeartbeat := func(payload []byte) {
-		t.controlMu.RLock()
+		// The control slot is constructed before any routine starts; the nil guard only
+		// covers tests that assemble a bare clientTransport.
 		slot := t.controlSlot
-		t.controlMu.RUnlock()
 		if slot == nil {
 			dataPlaneWarn.Load().Warnf(ctx, "hb-no-control-slot", "[Client] Heartbeat skipped: control slot not up yet")
 			return
