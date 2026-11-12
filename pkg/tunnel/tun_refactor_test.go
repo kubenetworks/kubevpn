@@ -22,9 +22,9 @@ func TestPumpTun_DispatchesValidSkipsInvalid(t *testing.T) {
 		src, dst net.IP
 	}
 	dispatched := make(chan got, 4)
-	go d.pumpTun(ctx, "[Test]", func(buf []byte, n int, src, dst net.IP) {
-		dispatched <- got{n, src, dst}
-		config.LPool.Put(buf[:])
+	go d.pumpTun(ctx, "[Test]", func(packet *packet) {
+		dispatched <- got{len(packet.ip()), packet.src, packet.dst}
+		packet.release()
 	})
 
 	// An unparseable packet (IP version nibble 0) must be dropped, not dispatched or fatal.
@@ -59,8 +59,8 @@ func TestPumpTun_ReadErrorStops(t *testing.T) {
 	d := &tunDevice{tun: tun, errChan: make(chan error, 1)}
 	done := make(chan struct{})
 	go func() {
-		d.pumpTun(context.Background(), "[Test]", func(buf []byte, _ int, _, _ net.IP) {
-			config.LPool.Put(buf[:])
+		d.pumpTun(context.Background(), "[Test]", func(packet *packet) {
+			packet.release()
 		})
 		close(done)
 	}()
@@ -105,4 +105,3 @@ func TestTrySendToSlot_DropsWhenFull(t *testing.T) {
 	}
 	config.LPool.Put(first.data[:])
 }
-

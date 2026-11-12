@@ -12,7 +12,6 @@ import (
 	log "github.com/sirupsen/logrus"
 	glog "gvisor.dev/gvisor/pkg/log"
 
-	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
@@ -74,7 +73,7 @@ func TestClientLog_Outbound(t *testing.T) {
 
 	select {
 	case pkt := <-device.tunInbound: // receive happens-after the log write
-		config.LPool.Put(pkt.data[:])
+		pkt.release()
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout waiting for outbound packet")
 	}
@@ -117,7 +116,7 @@ func TestClientLog_Inbound(t *testing.T) {
 
 	select {
 	case pkt := <-tunOutbound: // receive happens-after the log write
-		config.LPool.Put(pkt.data[:])
+		pkt.release()
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout waiting for inbound packet")
 	}
@@ -154,7 +153,7 @@ func TestClientLog_InfoLoggerSuppressed(t *testing.T) {
 
 	select {
 	case pkt := <-device.tunInbound:
-		config.LPool.Put(pkt.data[:])
+		pkt.release()
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout waiting for packet")
 	}

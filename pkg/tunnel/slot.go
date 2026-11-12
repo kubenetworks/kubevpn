@@ -8,6 +8,22 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
+type slotRole uint8
+
+const (
+	slotRoleData slotRole = iota
+	slotRoleControl
+)
+
+func (r slotRole) isControl() bool { return r == slotRoleControl }
+
+func (r slotRole) String() string {
+	if r == slotRoleControl {
+		return "control"
+	}
+	return "data"
+}
+
 // connSlot is one connection in the client pool. It owns its inbound packet channel and the
 // dial/reconnect lifecycle, and runs the framed read/write loops over the connection. It
 // replaces the previous slotID-threaded free functions.
@@ -26,9 +42,9 @@ type connSlot struct {
 	// type == packetTypeToGvisor packets directly into it (InjectIP) rather than into a per-slot
 	// stack, so the stack outlives any single slot. nil in tests that drive a slot in isolation.
 	interClient *interClientStack
-	// isControl marks this slot as the dedicated control-plane connection. On connect, it sends
-	// a packetTypeControl declaration so the server handles it separately (no Router registration).
-	isControl bool
+	// role is immutable after construction. Control slots send a packetTypeControl
+	// declaration so the server handles them separately (no Router registration).
+	role slotRole
 	// Retry timing seams are set only before run starts; nil uses real time.
 	retryNow  func() time.Time
 	retryWait func(context.Context, time.Duration) bool

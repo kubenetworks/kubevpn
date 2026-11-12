@@ -1,6 +1,7 @@
 package tunnel
 
 import (
+	"sync/atomic"
 	"time"
 
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
@@ -14,5 +15,10 @@ import (
 const dataPlaneWarnInterval = 30 * time.Second
 
 // dataPlaneWarn rate-limits the data plane's recurring failure warnings. Keys identify what recurs:
-// a call site for client-side failures, a peer address for per-destination drops.
-var dataPlaneWarn = plog.NewThrottle(dataPlaneWarnInterval)
+// a call site for client-side failures, a peer address for per-destination drops. Atomic access also
+// lets integration tests replace the throttle safely while background data-plane goroutines run.
+var dataPlaneWarn atomic.Pointer[plog.Throttle]
+
+func init() {
+	dataPlaneWarn.Store(plog.NewThrottle(dataPlaneWarnInterval))
+}

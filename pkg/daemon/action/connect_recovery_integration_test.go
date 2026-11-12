@@ -92,13 +92,16 @@ users:
 
 type recoveryPeer struct {
 	rpc.UnimplementedDaemonServer
-	mu          sync.Mutex
-	state       string
-	statusErr   error
-	connectErr  error
-	requests    []*rpc.ConnectRequest
-	statusCalls int
-	bounded     bool
+	mu              sync.Mutex
+	state           string
+	connectState    string
+	statusErr       error
+	connectErr      error
+	requests        []*rpc.ConnectRequest
+	restores        []bool
+	statusCalls     int
+	disconnectCalls int
+	bounded         bool
 }
 
 func (p *recoveryPeer) Status(ctx context.Context, req *rpc.StatusRequest) (*rpc.StatusResponse, error) {
@@ -121,14 +124,27 @@ func (p *recoveryPeer) Connect(stream rpc.Daemon_ConnectServer) error {
 	}
 	p.mu.Lock()
 	p.requests = append(p.requests, req)
+	p.restores = append(p.restores, isConnectionRestore(stream.Context()))
 	if p.connectErr != nil {
 		err := p.connectErr
 		p.mu.Unlock()
 		return err
 	}
-	p.state = StatusOk
+	p.state = p.connectState
+	if p.state == "" {
+		p.state = StatusOk
+	}
 	p.mu.Unlock()
 	return stream.Send(&rpc.ConnectResponse{ConnectionID: req.ConnectionID})
+}
+func (p *recoveryPeer) Disconnect(stream rpc.Daemon_DisconnectServer) error {
+	if _, err := stream.Recv(); err != nil {
+		return err
+	}
+	p.mu.Lock()
+	p.disconnectCalls++
+	p.mu.Unlock()
+	return stream.Send(&rpc.DisconnectResponse{})
 }
 func recoveryGRPCClient(t *testing.T, server rpc.DaemonServer) rpc.DaemonClient {
 	t.Helper()
@@ -190,6 +206,62 @@ func TestConnectRecovery_UserRetainsControlAndOriginalEndpoint(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestConnectRecovery_ManagedSocksReconcile(t *testing.T) {
+	t.Run("restarts a stopped listener without rebuilding root", func(t *testing.T) {
+		peer := &recoveryPeer{state: StatusOk}
+		svr, old, req := recoveryUserFixture(t, recoveryGRPCClient(t, peer))
+		req.EnableSocks = true
+		req.SocksEgress = true
+		req.SocksListen = "127.0.0.1:0"
+		if err := svr.redirectConnectToSudoDaemon(req, &fakeConnectServer{ctx: context.Background(), req: req}, logrus.New()); err != nil {
+			t.Fatal(err)
+		}
+		if addr := old.GetSocksListenAddr(); addr == "" || !portAccepting(addr) {
+			t.Fatalf("managed SOCKS was not restored on existing control session: %q", addr)
+		}
+		peer.mu.Lock()
+		rootConnects := len(peer.requests)
+		peer.mu.Unlock()
+		if rootConnects != 0 {
+			t.Fatalf("healthy root session was rebuilt %d times", rootConnects)
+		}
+		var retained rpc.ConnectRequest
+		if err := proto.Unmarshal(old.RequestRaw, &retained); err != nil {
+			t.Fatal(err)
+		}
+		if !retained.GetEnableSocks() || !retained.GetSocksEgress() || retained.GetSocksListen() != req.GetSocksListen() {
+			t.Fatalf("retained replay request lost new SOCKS options: %v", &retained)
+		}
+		old.Cleanup(context.Background())
+	})
+
+	t.Run("bind failure retains the existing VPN", func(t *testing.T) {
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer listener.Close()
+		peer := &recoveryPeer{state: StatusOk}
+		svr, old, req := recoveryUserFixture(t, recoveryGRPCClient(t, peer))
+		req.EnableSocks = true
+		req.SocksEgress = true
+		req.SocksListen = listener.Addr().String()
+		err = svr.redirectConnectToSudoDaemon(req, &fakeConnectServer{ctx: context.Background(), req: req}, logrus.New())
+		if err == nil {
+			t.Fatal("expected SOCKS bind failure")
+		}
+		if current, _ := svr.registry.find(old.ConnectionID); current != old {
+			t.Fatal("SOCKS bind failure replaced or removed the retained control session")
+		}
+		peer.mu.Lock()
+		rootConnects := len(peer.requests)
+		peer.mu.Unlock()
+		if rootConnects != 0 {
+			t.Fatalf("healthy root session was rebuilt %d times after bind failure", rootConnects)
+		}
+	})
 }
 
 func TestConnectRecovery_StatusErrorIsNotSuccess(t *testing.T) {

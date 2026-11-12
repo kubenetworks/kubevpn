@@ -174,6 +174,29 @@ func waitHeartbeatQuiescence(t *testing.T, nm *Runtime) {
 	}
 }
 
+func TestNetworkMonitor_OfflineSnapshotTracksCurrentState(t *testing.T) {
+	routes := &monitorRoutes{iface: "en0", gateway: "192.0.2.1", src: "192.0.2.2"}
+	nm, monitor, _ := monitorFixture(t, monitorState("en0"), routes)
+	monitorWait(t, func() bool {
+		nm.transport.mu.Lock()
+		defer nm.transport.mu.Unlock()
+		return nm.transport.monitor != nil
+	})
+	if nm.transport.networkOffline() {
+		t.Fatal("available default route reported offline")
+	}
+	routes.mu.Lock()
+	routes.unavailable = true
+	routes.mu.Unlock()
+	monitor.emit(monitorState(""), true)
+	monitorWait(t, nm.transport.networkOffline)
+	routes.mu.Lock()
+	routes.unavailable = false
+	routes.mu.Unlock()
+	monitor.emit(monitorState("en0"), true)
+	monitorWait(t, func() bool { return !nm.transport.networkOffline() })
+}
+
 // These use the running PF supervisor, but hold notifications so only its
 // existing tick can discover a routing/state change.
 func monitorTickWait(t *testing.T, f func() bool) {

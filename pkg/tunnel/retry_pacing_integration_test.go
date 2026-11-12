@@ -345,7 +345,7 @@ func TestRetryPacing_RapidPostDialFailures(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			h := newPacingHarness(t)
 			if mode == "declaration" {
-				h.slot.isControl = true
+				h.slot.role = slotRoleControl
 			}
 			if mode == "registration" {
 				h.slot.registrations = func(context.Context) [][]byte { return [][]byte{{packetTypeToGvisor}} }
@@ -488,7 +488,9 @@ func TestRetryPacing_SuccessfulTrafficDoesNotReset(t *testing.T) {
 			payload := (&clientTransport{dev: &tunDevice{addrsFn: func() (net.IP, net.IP, net.IP) {
 				return net.ParseIP(regTestTunIPv4), nil, nil
 			}}}).registrationPayloads(h.ctx)[0]
-			h.slot.isControl = control
+			if control {
+				h.slot.role = slotRoleControl
+			}
 			if !control {
 				h.slot.registrations = func(context.Context) [][]byte { return [][]byte{payload} }
 			}
@@ -618,9 +620,11 @@ func TestRetryPacing_JoinsOldWriterPreservesQueue(t *testing.T) {
 	h.slot.inbound <- first
 	pacingAwait(t, held.entered, "old writer")
 	var suffix []*packet
+	expected := make([][]byte, 0, 5)
 	for i := 1; i <= 5; i++ {
 		p := batchPacket(20, i)
 		suffix = append(suffix, p)
+		expected = append(expected, append([]byte(nil), p.data[:20]...))
 		h.slot.inbound <- p
 	}
 	peer.Close()
@@ -635,12 +639,12 @@ func TestRetryPacing_JoinsOldWriterPreservesQueue(t *testing.T) {
 	close(h.wait(125 * time.Millisecond).resume)
 	peer = h.dial(pacingPlan{})
 	peer.SetReadDeadline(time.Now().Add(3 * time.Second))
-	for i, p := range suffix {
+	for i := range suffix {
 		buf := make([]byte, 20)
 		if _, err := io.ReadFull(peer, buf); err != nil {
 			t.Fatal(err)
 		}
-		for j, b := range p.data[:20] {
+		for j, b := range expected[i] {
 			if buf[j] != b {
 				t.Fatalf("suffix %d corrupt/replayed at byte %d", i, j)
 			}
@@ -653,4 +657,66 @@ func TestRetryPacing_JoinsOldWriterPreservesQueue(t *testing.T) {
 		t.Fatalf("extra suffix replay: %d %v", n, err)
 	}
 	checkBatchRefs(t, append([]*packet{first}, suffix...))
+}
+
+func TestRetryPacing_PartialBatchReconnectDoesNotReplay(t *testing.T) {
+	previousObfuscation := framing.ObfuscationEnabled()
+	framing.SetObfuscation(false)
+	t.Cleanup(func() { framing.SetObfuscation(previousObfuscation) })
+	h := newPacingHarness(t)
+	retryResume := make(chan struct{})
+	secondDialStarted := make(chan struct{})
+	originalDial := h.slot.forward.DialContext
+	var dialCount atomic.Int32
+	h.slot.forward.DialContext = func(ctx context.Context) (*framing.Conn, error) {
+		if dialCount.Add(1) == 2 {
+			close(secondDialStarted)
+			select {
+			case <-retryResume:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		return originalDial(ctx)
+	}
+	h.start()
+	fault := &batchTestConn{limit: 45000, failAfter: 1}
+	var packets []*packet
+	for i, size := range []int{40000, 20000, 10000, 20, 20} {
+		pkt := batchPacket(size, i)
+		packets = append(packets, pkt)
+		h.slot.inbound <- pkt
+	}
+	firstPeer := h.dial(pacingPlan{wrap: func(conn net.Conn) net.Conn {
+		fault.Conn = conn
+		return fault
+	}})
+	defer firstPeer.Close()
+
+	pacingAwait(t, secondDialStarted, "second dial gate")
+	if got := len(h.slot.inbound); got != 2 {
+		t.Fatalf("untouched suffix length = %d, want 2", got)
+	}
+	close(retryResume)
+	secondPeer := h.dial(pacingPlan{})
+	defer secondPeer.Close()
+	_ = secondPeer.SetReadDeadline(time.Now().Add(3 * time.Second))
+	for _, seq := range []int{3, 4} {
+		var header [2]byte
+		if _, err := io.ReadFull(secondPeer, header[:]); err != nil {
+			t.Fatal(err)
+		}
+		payload := make([]byte, 18)
+		if _, err := io.ReadFull(secondPeer, payload); err != nil {
+			t.Fatal(err)
+		}
+		for _, value := range payload {
+			if value != byte(seq) {
+				t.Fatalf("received replay/corrupt suffix byte = %d, want %d", value, seq)
+			}
+		}
+	}
+	h.cancel()
+	pacingAwait(t, h.done, "partial batch replacement join")
+	checkBatchRefs(t, packets)
 }

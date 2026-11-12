@@ -30,15 +30,24 @@ Each daemon owns a fixed triple of files under the kubevpn config dir, keyed by 
 Resolved via `config.GetSockPath/GetPidPath/GetDaemonLogPath(isSudo)`. The `--sudo` flag on
 `kubevpn daemon` selects which side this process is.
 
+The user-owned `~/.kubevpn` directory tree is created and migrated to `0700`; sensitive files
+(the persisted DB, client ID, config, and temporary kubeconfigs) use `0600`. Only the
+unprivileged startup path performs permission migration — the root daemon shares these paths
+but never recursively changes their ownership or permissions. Socket files remain `0666` so the
+unprivileged user daemon can connect to the root-owned socket, while the `0700` parent directory
+blocks other OS users. Windows ACLs are separate from these POSIX modes.
+
 ## 3. Server Startup (`SvrOption.Start`)
 
 ```
 Start(ctx)
+  ├── acquire role instance lock       ── held until Serve exits; second process fails fast
+  ├── probe pre-existing socket        ── reclaim only refused socket + dead PID; timeouts preserve it
   ├── initLogging(isSudo)              ── lumberjack rotating file; wire logrus/klog/gvisor/plog
   ├── remove stale socket; net.Listen("unix", sockPath)
   │     └── SetUnlinkOnClose(false)   ── do NOT unlink on close (stale-detection owns the file)
   ├── go detectUnixSocksFile(ctx)     ── self-staleness watchdog (§5)
-  ├── chmod socket 0666 (FileModeSocket)   ── any local user can reach the user daemon
+  ├── chmod socket 0666 (FileModeSocket)   ── user→root IPC; private parent blocks other UIDs
   ├── writePIDToFile(isSudo)          ── os.Getpid() → pid file (FileModeFile 0644)
   ├── grpc.NewServer(
   │       ChainUnary : UnaryPanicHandler → UnaryClassifyInterceptor
@@ -46,7 +55,7 @@ Start(ctx)
   ├── admin.Register + health server + reflection.Register
   ├── h2c downgrading http.Server (§4)
   ├── svr = action.Server{Cancel: cleanup, IsSudo, GetClient, LogFile, ID}
-  │     └── if !IsSudo: go svr.LoadFromConfig(ctx)   ── replay persisted connections
+  │     └── if !IsSudo: go svr.RestoreAndReconcile(ctx) ── replay fully before reaping orphans
   ├── RegisterDaemonServer(grpc, svr)
   └── downgradingServer.Serve(lis)    ── blocks until ctx cancel / Close
 ```
@@ -95,10 +104,10 @@ guarded by `clientMu`):
 1. If the socket file is missing ⇒ `ErrDaemonNotRunning`.
 2. Return the cached client if present.
 3. Otherwise `grpc.NewClient("unix:"+sock, insecure, WithNoProxy)`.
-4. **Health gate**: gRPC health `Check`; non-`SERVING` ⇒ `ErrDaemonNotRunning`.
-5. **Version negotiation**: call `Upgrade{ClientVersion}`; if `NeedUpgrade`, send `Quit` to the
-   outdated daemon, **do not cache**, and return `ErrDaemonVersionMismatch` so the caller spawns a
-   fresh daemon.
+4. **Health gate**: gRPC health `Check` with `DaemonProbeTimeout`; non-`SERVING` ⇒ `ErrDaemonNotRunning`.
+5. **Version negotiation**: call `Upgrade{ClientVersion}` with the same bounded probe policy. If
+   `NeedUpgrade`, send `Quit` with the separate, longer `DaemonQuitTimeout`; **do not cache**, and
+   return `ErrDaemonVersionMismatch` so the caller spawns a fresh daemon.
 6. Cache and return.
 
 `getClientWithoutCache` is the uncached variant used by the watchdog (it must not poison the
@@ -110,31 +119,41 @@ cache).
 calling `runDaemon` for whichever is absent.
 
 `runDaemon(exe, isSudo)`:
-1. Short-circuit if `GetClient` already succeeds.
-2. Remove any stale PID file.
-3. Call the platform-specific `startDaemonProcess`, which launches via `pkg/daemon/elevate`
+1. Acquire the role's startup lock with `DaemonStartupLockTimeout` for waiters, then re-check
+   `GetClient` because another CLI may have completed startup while this process waited. The lock
+   is separate from the daemon's lifetime instance lock.
+2. If the probe fails but the PID is alive, preserve the PID/socket and return the probe error;
+   timeout is not process-death evidence. A version-mismatched process gets `DaemonExitTimeout` to
+   finish its cleanup before relaunch. The initial version-mismatch result is retained across the
+   second probe, which may observe only `Unavailable` while the old listener is already closed.
+3. Snapshot the previous PID contents/modification time instead of deleting the file.
+4. Call the platform-specific `startDaemonProcess`, which launches via `pkg/daemon/elevate`
    (see [34-privilege-escalation.md](34-privilege-escalation.md)):
    - sudo + not admin → `RunCmdWithElevated(exe, ["daemon","--sudo"], output)` (UAC/sudo prompt)
    - sudo + admin → `RunCmd(exe, ["daemon","--sudo"], output)`
    - user → `RunCmd(exe, ["daemon"], output)`
    - Unix supplies a private regular startup-log file; Windows passes nil and keeps ShellExecute.
-4. After launch/authentication returns, wait for the PID file every **50ms**, with a **30-second**
-   maximum (or the caller's earlier deadline). Cancellation and filesystem errors return directly;
-   a failed wait does not proceed to client acquisition. On success, re-acquire the client.
+5. After launch/authentication returns, wait every **50ms** for a nonempty, changed PID file, with
+   a **30-second** maximum (or the caller's earlier deadline). Cancellation and filesystem errors
+   return directly; a failed wait does not proceed to client acquisition. On success, re-acquire
+   the client. Cold client initialization is serialized per role, and startup probes inherit the
+   caller's context.
 
 Launch/readiness/client-acquisition failures include the daemon role and diagnostic log paths.
 The readiness limit starts **after** sudo authentication, not while a user enters their password.
 This is a PID-wait limit, **not** a complete `StartupDaemon` deadline: existing `GetClient`
-health/version probes still use their own background context. A readiness timeout does not kill
-an independently running daemon.
+health/version probes have their own `DaemonProbeTimeout`, and version-mismatch cleanup uses
+`DaemonQuitTimeout`. Long-lived RPC streams do not inherit these bootstrap deadlines. A readiness
+timeout does not kill an independently running daemon.
 
 ## 8. Logging & pprof
 
 `initLogging` builds a **lumberjack** rotating logger (`100MB` max size, `3` backups, `3` days,
 local time, daily `Rotate()` at midnight via `rotateLog`) and redirects logrus, std `log`, klog,
-gvisor `glog`, and `plog.L` into it at Debug level; `rest` client warnings are silenced.
-`CmdDaemon` additionally starts a pprof server per side and, for the sudo daemon, dumps all pprof
-profiles to disk on exit.
+gvisor `glog`, and `plog.L` into it at Debug level; `rest` client warnings are silenced. The rotation
+goroutine exits on daemon cancellation and is joined before the log file closes. Rotation failures
+fall back to stderr/startup-log diagnostics. `CmdDaemon` additionally starts a pprof server per side
+and, for the sudo daemon, dumps all pprof profiles to disk on exit.
 
 ## 9. Related Files
 

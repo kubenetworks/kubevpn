@@ -27,6 +27,8 @@ type Server struct {
 	registry connectionRegistry
 	// connectMu serializes connect decisions through cleanup, setup and publication.
 	connectMu sync.Mutex
+	// persistMu serializes registry snapshots, full recovery batches, and persisted-state replacement.
+	persistMu sync.Mutex
 	// newDataSession substitutes privileged setup in daemon integration tests.
 	newDataSession func(*handler.DataSession) handler.DataPlane
 

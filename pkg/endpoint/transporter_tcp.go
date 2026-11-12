@@ -56,7 +56,14 @@ func (tr *tcpTransporter) Dial(ctx context.Context, addr string) (net.Conn, erro
 		return nil, fmt.Errorf("TLS config missing: %w", netutil.ErrNoTLSConfig)
 	}
 	plog.G(ctx).Debugf("[Transport] Using TLS mode")
-	return tls.Client(conn, tr.tlsConfig), nil
+	tlsConn := tls.Client(conn, tr.tlsConfig)
+	handshakeCtx, cancel := context.WithTimeout(ctx, config.DialTimeout)
+	defer cancel()
+	if err := tlsConn.HandshakeContext(handshakeCtx); err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("tls handshake: %w", err)
+	}
+	return tlsConn, nil
 }
 
 type tcpKeepAliveListener struct {

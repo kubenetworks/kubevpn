@@ -3,6 +3,7 @@ package config
 import (
 	_ "embed"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -34,8 +35,12 @@ const (
 	FileModeFile os.FileMode = 0644
 	// FileModeExecutable is the mode for executables and directories: rwxr-xr-x.
 	FileModeExecutable os.FileMode = 0755
-	// FileModePrivate is the mode for owner-only files/directories: rwx------.
+	// FileModePrivate is the mode for owner-only executables: rwx------.
 	FileModePrivate os.FileMode = 0700
+	// FileModePrivateDir is the mode for owner-only directories: rwx------.
+	FileModePrivateDir os.FileMode = 0700
+	// FileModePrivateFile is the mode for owner-only regular files: rw-------.
+	FileModePrivateFile os.FileMode = 0600
 	// FileModeSocket is the mode for the daemon unix socket: rw-rw-rw-.
 	FileModeSocket os.FileMode = 0666
 )
@@ -64,12 +69,7 @@ func init() {
 	// them. StartupDaemon enforces that start order — see pkg/daemon/client.go.
 	paths := []string{homePath, daemonPath, logPath, GetPProfPath(), GetSyncthingPath(), GetTempPath()}
 	for _, path := range paths {
-		_, err = os.Stat(path)
-		if errors.Is(err, os.ErrNotExist) {
-			if err = os.MkdirAll(path, FileModeExecutable); err != nil {
-				panic(err)
-			}
-		} else if err != nil {
+		if err = ensurePrivateDir(path); err != nil {
 			panic(err)
 		}
 	}
@@ -77,11 +77,47 @@ func init() {
 	path := filepath.Join(homePath, ConfigFile)
 	_, err = os.Stat(path)
 	if errors.Is(err, os.ErrNotExist) {
-		err = os.WriteFile(path, config, FileModeFile)
+		err = os.WriteFile(path, config, FileModePrivateFile)
+	} else if err == nil {
+		err = ensurePrivateFileMode(path)
 	}
 	if err != nil {
 		panic(err)
 	}
+}
+
+func ensurePrivateDir(path string) error {
+	info, err := os.Stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		if err = os.MkdirAll(path, FileModePrivateDir); err != nil {
+			return fmt.Errorf("create private directory %s: %w", path, err)
+		}
+		if info, err = os.Stat(path); err != nil {
+			return fmt.Errorf("stat private directory %s: %w", path, err)
+		}
+	} else if err != nil {
+		return fmt.Errorf("stat private directory %s: %w", path, err)
+	} else if !info.IsDir() {
+		return fmt.Errorf("local state path is not a directory: %s", path)
+	}
+	if info.Mode().Perm() == FileModePrivateDir {
+		return nil
+	}
+	if err = migratePrivatePath(path, FileModePrivateDir); err != nil {
+		return fmt.Errorf("secure private directory %s: %w", path, err)
+	}
+	return nil
+}
+
+func ensurePrivateFileMode(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if info.Mode().Perm() == FileModePrivateFile {
+		return nil
+	}
+	return migratePrivatePath(path, FileModePrivateFile)
 }
 
 // GetSockPath returns the Unix domain socket path for the user or root daemon.

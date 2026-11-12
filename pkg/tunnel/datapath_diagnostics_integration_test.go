@@ -710,32 +710,34 @@ func TestDatapathDiagnosticsIntegration_DispatchSessionScope(t *testing.T) {
 	done := make(chan struct{})
 	go func() { defer close(done); ct.runConnPool(ctx) }()
 	defer func() { cancel(); <-done; <-stopped; ct.close() }()
-	waitFor(t, time.Second, func() bool {
-		d.mu.Lock()
-		defer d.mu.Unlock()
-		for _, s := range d.stages {
-			if s.name == "slot_enqueue" {
-				return true
-			}
-		}
-		return false
-	}, "dispatcher registered")
+	dev.enqueueStage = diagnosticStage(ctx, "tun_enqueue", "data", 0, 0)
+	defer dev.enqueueStage.close()
 	stats.BeginGeneration()
 	var packets []*packet
-	for i := 0; i < MaxSize+1; i++ {
+	for i := 0; i < MaxSize+3; i++ {
 		p := batchPacket(32, i)
 		p.dst = net.IPv4(10, 0, 0, 1)
 		packets = append(packets, p)
-		dev.tunInbound <- p
 	}
-	waitFor(t, time.Second, func() bool { return strings.Contains(logs.String(), "datapath_stall stage=slot_enqueue") }, "dispatcher blocked after generation change")
+	producerDone := make(chan struct{})
+	go func() {
+		defer close(producerDone)
+		for _, p := range packets {
+			if !diagnosticEnqueue(ctx, dev.tunInbound, p, dev.enqueueStage) {
+				p.release()
+				return
+			}
+		}
+	}()
+	waitFor(t, time.Second, func() bool { return strings.Contains(logs.String(), "datapath_stall stage=tun_enqueue") }, "shared queue blocked after generation change")
 	for _, line := range strings.Split(logs.String(), "\n") {
-		if strings.Contains(line, "datapath_stall stage=slot_enqueue") && (!strings.Contains(line, "scope=session") || strings.Contains(line, "generation=")) {
-			t.Error("dispatcher falsely attributed to transport generation: ", line)
+		if strings.Contains(line, "datapath_stall stage=tun_enqueue") && (!strings.Contains(line, "scope=session") || strings.Contains(line, "generation=1")) {
+			t.Error("TUN producer falsely attributed to transport generation: ", line)
 		}
 	}
 	cancel()
 	<-done
+	<-producerDone
 	ct.close()
 	checkBatchRefs(t, packets)
 }
@@ -767,7 +769,7 @@ func TestHeartbeatIntegration_QueuedOwnership(t *testing.T) {
 			done := make(chan struct{})
 			go func() {
 				defer close(done)
-				(&connAttempt{connSlot: &connSlot{id: ConnPoolSize, isControl: true, stats: stats, inbound: q}}).writeGeneration(context.Background(), a, errChanOf(), generation)
+				(&connAttempt{connSlot: &connSlot{id: ConnPoolSize, role: slotRoleControl, stats: stats, inbound: q}}).writeGeneration(context.Background(), a, errChanOf(), generation)
 			}()
 			if mode == "invalid_probe" {
 				peer, _ := framing.NewConn(context.Background(), b)
@@ -828,7 +830,7 @@ func TestHeartbeatIntegration_ProbeState(t *testing.T) {
 	writerDone := make(chan struct{})
 	go func() {
 		defer close(writerDone)
-		(&connAttempt{connSlot: &connSlot{id: ConnPoolSize, isControl: true, stats: stats, inbound: ct.controlSlot.inbound}}).writeGeneration(context.Background(), a, errChanOf(), 0)
+		(&connAttempt{connSlot: &connSlot{id: ConnPoolSize, role: slotRoleControl, stats: stats, inbound: ct.controlSlot.inbound}}).writeGeneration(context.Background(), a, errChanOf(), 0)
 	}()
 	peer, _ := framing.NewConn(context.Background(), b)
 	b.SetReadDeadline(time.Now().Add(time.Second))

@@ -8,7 +8,6 @@ import (
 	"sync"
 
 	framing "github.com/wencaiwulue/kubevpn/v2/pkg/internal/wire"
-	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 // ConnList holds multiple connections for the same client IP, supporting
@@ -74,8 +73,8 @@ type packetWriter interface {
 	writePacket(ctx context.Context, pkt *packet) error
 }
 
-// WritePacket writes an already-framed packet (length header stamped in pkt.data[:2]) to
-// the first healthy conn. For conns that implement packetWriter it transfers one reference
+// WritePacket writes a packet with reserved length headroom to the first healthy
+// conn. For conns that implement packetWriter it transfers one reference
 // (zero-copy); otherwise it falls back to net.Conn.Write (which copies). Dead conns are
 // removed. The caller retains its own reference and must release it after this returns.
 func (cl *ConnList) WritePacket(ctx context.Context, pkt *packet) (net.Conn, error) {
@@ -93,7 +92,7 @@ func writeRoutePacket(ctx context.Context, conn net.Conn, pkt *packet) (int, err
 		}
 		return 0, nil
 	}
-	return framing.WriteFull(conn, pkt.data[:datagramHeaderLen+pkt.length])
+	return pkt.writeTo(conn)
 }
 
 // WriteFunc attempts to call fn on each healthy conn until one succeeds.
@@ -227,9 +226,13 @@ func (cl *ConnList) writeMembers(ctx context.Context, members routeMembersSnapsh
 			}
 			return nil, err
 		}
-		// Capture membership identities before I/O, but reconcile only after
-		// the final outcome includes a cancellation callback that won the race.
-		failed := prepareFailure(m)
+		// Raw writes must capture failure cleanup before I/O. Buffered packet
+		// writers create and run their finalizer only on failure, avoiding one
+		// closure per successful write while preserving empty-route cleanup.
+		var failed func()
+		if !buffered {
+			failed = prepareFailure(m)
+		}
 		var stop func() bool
 		var closed chan struct{}
 		if mode == routeWritePacket && !buffered {
@@ -262,7 +265,11 @@ func (cl *ConnList) writeMembers(ctx context.Context, members routeMembersSnapsh
 		// failures are reconciled before another waiter can acquire this gate.
 		admissionCanceled := mode == routeWritePacket && buffered && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded))
 		if err != nil && !admissionCanceled {
-			failed()
+			if buffered {
+				prepareFailure(m)()
+			} else {
+				failed()
+			}
 		}
 		if !buffered {
 			cl.unlockWrite()
@@ -296,80 +303,28 @@ func (cl *ConnList) IsEmpty() bool {
 	return cl.Len() == 0
 }
 
-// Router serializes routes and peer transitions in the same transaction.
-// Lock order is hub.mu -> membership/peer mutex; no I/O occurs under these locks.
-type Router struct {
-	mu     sync.Mutex
-	routes map[string]*ConnList
-	peers  *peerRegistry
-	bridge *tunBridge
+// routeWriter owns candidate selection, write serialization and failure
+// reconciliation. It never performs socket I/O while holding routeTable.mu.
+type routeWriter struct {
+	table *routeTable
 }
 
-func NewRouter() *Router {
-	hub := &Router{routes: make(map[string]*ConnList), bridge: newTUNBridge()}
-	hub.peers = &peerRegistry{hub: hub, clients: make(map[string]*clientStack)}
-	return hub
-}
-
-// AddRoute registers a conn for the given source IP.
-// Multiple conns can be registered for the same IP (connection pool support).
-// False rejects a stopped buffered connection; its reader must terminate.
-func (hub *Router) AddRoute(ctx context.Context, srcIP net.IP, conn net.Conn) bool {
-	key := string(srcIP)
-	hub.mu.Lock()
-	if c, ok := conn.(*bufferedTCP); ok && c.closed.Load() {
-		hub.mu.Unlock()
-		return false
-	}
-	list := hub.routes[key]
-	created := list == nil
-	if created {
-		list = &ConnList{}
-		routeCtx := context.WithoutCancel(ctx)
-		list.gateStage = diagnosticStage(routeCtx, "raw_write_gate", "server", -1, 0)
-		list.writeStage = diagnosticStage(routeCtx, "raw_socket_write", "server", -1, 0)
-		hub.routes[key] = list
-	}
-	added := list.Add(conn)
-	n := list.Len()
-	if created {
-		hub.peers.onRouteAddedLocked(key)
-	}
-	hub.mu.Unlock()
-	if added {
-		list.gateStage.setPeer(srcIP)
-		list.writeStage.setPeer(srcIP)
-		if c, ok := conn.(*bufferedTCP); ok {
-			c.enqueueStage.setPeer(srcIP)
-			c.writeStage.setPeer(srcIP)
-		}
-	}
-	if created {
-		plog.G(ctx).Debugf("[Route] Add route: %s -> %s-%s", srcIP, conn.LocalAddr(), conn.RemoteAddr())
-	} else if added {
-		plog.G(ctx).Debugf("[Route] Add pool conn: %s -> %s-%s (now %d conns)", srcIP, conn.LocalAddr(), conn.RemoteAddr(), n)
-	}
-	return true
-}
-
-// WriteToRoute writes data to the conn(s) registered for dstIP.
-// Tries each conn in order; removes dead conns on failure.
-// Returns (conn used, nil) on success, or (nil, error) if no route or all conns dead.
-func (hub *Router) WriteToRoute(dstKey string, data []byte) (net.Conn, error) {
-	return hub.writeToRoute(context.Background(), dstKey, func(conn net.Conn) (int, error) {
-		return framing.WriteFull(conn, data)
-	}, routeWriteBytes)
+func (w *routeWriter) writeToRoutePacket(ctx context.Context, dstKey string, pkt *packet) (net.Conn, error) {
+	return w.write(ctx, dstKey, func(conn net.Conn) (int, error) {
+		return writeRoutePacket(ctx, conn, pkt)
+	}, routeWritePacket)
 }
 
 // prepareRawWriteFailure captures identities before I/O. The returned finalizer
 // runs only after writeMembers has joined cancellation and closed the transport.
-func (hub *Router) prepareRawWriteFailure(conn net.Conn) func() {
+func (w *routeWriter) prepareRawWriteFailure(conn net.Conn) func() {
 	type membership struct {
 		key    string
 		list   *ConnList
 		member *routeMember
 	}
 	var memberships []membership
+	hub := w.table
 	hub.mu.Lock()
 	for key, list := range hub.routes {
 		members := list.snapshot()
@@ -392,14 +347,8 @@ func (hub *Router) prepareRawWriteFailure(conn net.Conn) func() {
 	}
 }
 
-// WriteFuncToRoute calls fn on available conns for dstKey until one succeeds.
-func (hub *Router) WriteFuncToRoute(dstKey string, fn func(conn net.Conn) error) (net.Conn, error) {
-	return hub.writeToRoute(context.Background(), dstKey, func(conn net.Conn) (int, error) {
-		return 0, fn(conn)
-	}, routeWriteCallback)
-}
-
-func (hub *Router) writeToRoute(ctx context.Context, dstKey string, fn func(net.Conn) (int, error), mode routeWriteMode) (net.Conn, error) {
+func (w *routeWriter) write(ctx context.Context, dstKey string, fn func(net.Conn) (int, error), mode routeWriteMode) (net.Conn, error) {
+	hub := w.table
 	hub.mu.Lock()
 	list := hub.routes[dstKey]
 	if list == nil {
@@ -414,7 +363,7 @@ func (hub *Router) writeToRoute(ctx context.Context, dstKey string, fn func(net.
 		return hub.routes[dstKey] == list && list.containsMember(m)
 	}, func(m *routeMember) func() {
 		if _, buffered := m.conn.(packetWriter); !buffered && mode != routeWriteCallback {
-			return hub.prepareRawWriteFailure(m.conn)
+			return w.prepareRawWriteFailure(m.conn)
 		}
 		return func() {
 			hub.mu.Lock()
@@ -424,43 +373,6 @@ func (hub *Router) writeToRoute(ctx context.Context, dstKey string, fn func(net.
 			}
 		}
 	})
-}
-
-// WriteToRoutePacket writes an already-framed packet to the conn(s) registered for dstKey,
-// transferring ownership of one reference to the chosen conn (zero-copy via packetWriter).
-// The caller retains its own reference and must release it afterward.
-func (hub *Router) WriteToRoutePacket(ctx context.Context, dstKey string, pkt *packet) (net.Conn, error) {
-	return hub.writeToRoute(ctx, dstKey, func(conn net.Conn) (int, error) {
-		return writeRoutePacket(ctx, conn, pkt)
-	}, routeWritePacket)
-}
-
-// HasRoute checks if a route exists for the given destination IP key.
-func (hub *Router) HasRoute(dstKey string) bool {
-	hub.mu.Lock()
-	defer hub.mu.Unlock()
-	return hub.routes[dstKey] != nil
-}
-
-// RemoveRoutesByConn removes the given conn from all route entries.
-// Cleans up empty entries.
-func (hub *Router) RemoveRoutesByConn(ctx context.Context, conn net.Conn) {
-	hub.mu.Lock()
-	defer hub.mu.Unlock()
-	for key, list := range hub.routes {
-		if list.Remove(conn) {
-			hub.deleteEmptyLocked(key)
-		}
-	}
-}
-
-func (hub *Router) deleteEmptyLocked(key string) {
-	if list := hub.routes[key]; list != nil {
-		list.gateStage.close()
-		list.writeStage.close()
-	}
-	delete(hub.routes, key)
-	hub.peers.onRouteEmptyLocked(key)
 }
 
 var errNoRoute = fmt.Errorf("no route")

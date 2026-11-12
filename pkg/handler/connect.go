@@ -29,7 +29,8 @@ type ConnectOptions struct {
 	SessionBase
 
 	// Copied into action.connectionRecord for daemon restart replay.
-	RequestRaw []byte `json:"RequestRaw,omitempty"`
+	RequestRaw   []byte `json:"RequestRaw,omitempty"`
+	requestRawMu sync.RWMutex
 
 	// Identity: set from the incoming ConnectRequest and persisted (json tags).
 	ManagerNamespace     string
@@ -52,11 +53,28 @@ type ConnectOptions struct {
 	Sync   *SyncOptions
 
 	// Control-plane only: user-daemon-managed local SOCKS5 proxy for this connection.
-	// Persisted so status can report them and daemon-restart replay reflects them (the proxy
-	// goroutine itself is stopped via a rollback func and restarted from the replayed
-	// ConnectRequest, so no live handle is stored here).
+	// Persisted so status can report them and daemon-restart replay reflects them. The
+	// listener is owned by a replaceable cleanup function and recreated from RequestRaw,
+	// so no live handle is stored here.
 	SocksListenAddr string `json:"SocksListenAddr,omitempty"`
 	SocksEgress     bool   `json:"SocksEgress,omitempty"`
+	socksMu         sync.RWMutex
+	socksGeneration uint64
+	socksStop       func()
+}
+
+// GetRequestRaw returns a detached replay request snapshot.
+func (c *ConnectOptions) GetRequestRaw() []byte {
+	c.requestRawMu.RLock()
+	defer c.requestRawMu.RUnlock()
+	return slices.Clone(c.RequestRaw)
+}
+
+// SetRequestRaw replaces the replay request when retained control options change.
+func (c *ConnectOptions) SetRequestRaw(raw []byte) {
+	c.requestRawMu.Lock()
+	defer c.requestRawMu.Unlock()
+	c.RequestRaw = slices.Clone(raw)
 }
 
 // GetClusterName provides identity without exposing the Kubernetes factory.
@@ -79,10 +97,52 @@ func (c *ConnectOptions) StatusSnapshot(ctx context.Context) (SessionStatus, err
 }
 
 // GetSocksListenAddr returns the listen address of the managed SOCKS5 proxy, or "" if none.
-func (c *ConnectOptions) GetSocksListenAddr() string { return c.SocksListenAddr }
+func (c *ConnectOptions) GetSocksListenAddr() string {
+	c.socksMu.RLock()
+	defer c.socksMu.RUnlock()
+	return c.SocksListenAddr
+}
 
 // GetSocksEgress reports whether the managed SOCKS5 proxy runs in host-direct egress mode.
-func (c *ConnectOptions) GetSocksEgress() bool { return c.SocksEgress }
+func (c *ConnectOptions) GetSocksEgress() bool {
+	c.socksMu.RLock()
+	defer c.socksMu.RUnlock()
+	return c.SocksEgress
+}
+
+// SetSocksState publishes a running listener and returns its generation. The
+// generation prevents an old serve goroutine from clearing a replacement's state.
+func (c *ConnectOptions) SetSocksState(listen string, egress bool) uint64 {
+	c.socksMu.Lock()
+	defer c.socksMu.Unlock()
+	c.socksGeneration++
+	c.SocksListenAddr = listen
+	c.SocksEgress = egress
+	return c.socksGeneration
+}
+
+// ReplaceSocksStop swaps the current listener cleanup owner and retires the
+// previous listener without accumulating rollback closures across reconnects.
+func (c *ConnectOptions) ReplaceSocksStop(stop func()) {
+	c.socksMu.Lock()
+	previous := c.socksStop
+	c.socksStop = stop
+	c.socksMu.Unlock()
+	if previous != nil {
+		previous()
+	}
+}
+
+func (c *ConnectOptions) stopSocks() { c.ReplaceSocksStop(nil) }
+
+// ClearSocksState clears listen only if generation is still current.
+func (c *ConnectOptions) ClearSocksState(generation uint64) {
+	c.socksMu.Lock()
+	defer c.socksMu.Unlock()
+	if c.socksGeneration == generation {
+		c.SocksListenAddr = ""
+	}
+}
 
 // InitClient initializes the Kubernetes clientset, REST client, and config from the given factory.
 func (c *ConnectOptions) InitClient(f cmdutil.Factory) error {

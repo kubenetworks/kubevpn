@@ -177,12 +177,12 @@ func relayUDPReverse(ctx context.Context, conn net.Conn, udpEnd udpEndpoint) {
 		buf := config.LPool.Get().([]byte)
 		defer config.LPool.Put(buf)
 		for {
-			dgram, err := framing.ReadDatagram(conn, buf)
+			n, err := framing.ReadDatagram(conn, buf)
 			if err != nil {
 				errChan <- err
 				return
 			}
-			if _, err = udpEnd.writeTo(dgram.Data[:dgram.DataLength]); err != nil {
+			if _, err = udpEnd.writeTo(buf[:n]); err != nil {
 				errChan <- err
 				return
 			}

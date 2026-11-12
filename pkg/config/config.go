@@ -238,6 +238,18 @@ var (
 	SlotReconnectBackoff = 2 * time.Second
 	DaemonPollInterval   = 200 * time.Millisecond
 
+	// DaemonProbeTimeout bounds local health, version, and identity RPCs. It does
+	// not apply to long-lived streams or daemon cleanup.
+	DaemonProbeTimeout = 2 * time.Second
+	// DaemonQuitTimeout bounds version-mismatch cleanup, which may tear down
+	// multiple connections and must outlive the short bootstrap probe deadline.
+	DaemonQuitTimeout = 2 * time.Minute
+	// DaemonStartupLockTimeout bounds waiters behind another CLI's interactive
+	// elevation and launch. The lock holder may still wait for user authentication.
+	DaemonStartupLockTimeout = 35 * time.Second
+	// DaemonExitTimeout bounds waiting for an outdated daemon to finish cleanup.
+	DaemonExitTimeout = 30 * time.Second
+
 	// RolloutStatusTimeout bounds how long RolloutStatus waits for a workload
 	// rollout to finish. Without it, a sidecar that never becomes ready makes
 	// the operation (e.g. `kubevpn proxy`) hang indefinitely.

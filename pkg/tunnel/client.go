@@ -2,7 +2,6 @@ package tunnel
 
 import (
 	"context"
-	"net"
 	"sync"
 	"time"
 
@@ -82,30 +81,26 @@ func (t *clientTransport) routines() []namedRoutine {
 }
 
 // routeOutbound dispatches a packet read from the TUN: loop it back through the local gvisor
-// stack when src == dst, otherwise enqueue it for the connection pool (distributed by five-tuple).
-func (t *clientTransport) routeOutbound(ctx context.Context, buf []byte, n int, src, dst net.IP) {
-	// buf is canonical (pumpTun reserved buf[0:tunReserve]): set the type prefix and the
-	// IP already sits at buf[tunReserve:]. Both branches forward the same canonical buffer.
-	buf[datagramHeaderLen] = packetTypeToGvisor
-	logIPPacket(ctx, "[Client] OUTBOUND", buf[tunReserve:tunReserve+n])
+// stack when src == dst, otherwise enqueue it directly for the single data slot.
+func (t *clientTransport) routeOutbound(ctx context.Context, packet *packet) {
+	packet.setType(packetTypeToGvisor)
+	logIPPacket(ctx, "[Client] OUTBOUND", packet.ip())
 	out := t.dev.tunInbound
-	if src.Equal(dst) {
+	if packet.src.Equal(packet.dst) {
 		out = t.gvisorInbound
 	}
-	packet := newPacket(buf[:], n+typePrefixLen, src, dst)
 	if !diagnosticEnqueue(ctx, out, packet, t.dev.enqueueStage) {
 		packet.release()
 	}
 }
 
-// runConnPool creates the data slot.
-// Blocking sends provide backpressure; a full slot also stalls the shared dispatcher.
-// The slot owns its reconnect lifecycle, independent of the shared inter-client stack.
+// runConnPool creates the data slot and its shared inter-client stack. The
+// device queue is also the slot queue: there is no forwarding goroutine or
+// second queue. Producers stop through context cancellation, never close/nil.
 func (t *clientTransport) runConnPool(ctx context.Context) {
 	ctx, cancel := context.WithCancel(ctx)
 	// Create the shared inter-client stack before the slots: their readers inject inbound
-	// inter-client packets directly into it. Its output (replies to peers) goes to tunInbound,
-	// which this function's loop below hands to the data slot.
+	// inter-client packets directly into it. Its replies share the same data-slot queue.
 	t.interClient = newInterClientStack(ctx, t.dev.tunInbound, datagramHeaderLen)
 	defer func() { <-t.interClient.done; drainPacketChan(t.dev.tunInbound) }()
 	t.slots = make([]*connSlot, ConnPoolSize)
@@ -113,7 +108,7 @@ func (t *clientTransport) runConnPool(ctx context.Context) {
 	for i := range t.slots {
 		slot := &connSlot{
 			id:            i,
-			inbound:       make(chan *packet, MaxSize),
+			inbound:       t.dev.tunInbound,
 			tunOutbound:   t.dev.tunOutbound,
 			forward:       t.forward,
 			stats:         t.stats,
@@ -129,26 +124,7 @@ func (t *clientTransport) runConnPool(ctx context.Context) {
 		}(slot)
 	}
 	defer func() { cancel(); wg.Wait() }()
-
-	stage := diagnosticStage(ctx, "slot_enqueue", "data", 0, 0)
-	defer stage.close()
-	// Drain the shared tunInbound into the single data slot. Data packets block on the slot
-	// channel to propagate backpressure to the OS TCP stack, preventing silent drops that
-	// cause catastrophic RTO stalls.
-	for {
-		select {
-		case packet := <-t.dev.tunInbound:
-			if packet == nil {
-				return
-			}
-			if !diagnosticEnqueue(ctx, t.slots[0].inbound, packet, stage) {
-				packet.release()
-				return
-			}
-		case <-ctx.Done():
-			return
-		}
-	}
+	<-ctx.Done()
 }
 
 // runControlSlot manages the dedicated heartbeat connection. Requests bypass a full data
@@ -161,7 +137,7 @@ func (t *clientTransport) runControlSlot(ctx context.Context) {
 		tunOutbound: t.dev.tunOutbound,
 		forward:     t.forward,
 		stats:       t.stats,
-		isControl:   true,
+		role:        slotRoleControl,
 	}
 	t.controlMu.Lock()
 	t.controlSlot = slot
@@ -192,21 +168,21 @@ func (t *clientTransport) registrationPayloads(ctx context.Context) [][]byte {
 		if icmp, e := netutil.GenICMPPacket(srcIPv4, config.RouterIP); e == nil {
 			appendPayload(icmp)
 		} else {
-			dataPlaneWarn.Warnf(ctx, "reg-gen-v4", "[Client] Failed to build IPv4 route announcement: %v", e)
+			dataPlaneWarn.Load().Warnf(ctx, "reg-gen-v4", "[Client] Failed to build IPv4 route announcement: %v", e)
 		}
 	}
 	if srcIPv6 != nil {
 		if icmp, e := netutil.GenICMPPacketIPv6(srcIPv6, config.RouterIP6); e == nil {
 			appendPayload(icmp)
 		} else {
-			dataPlaneWarn.Warnf(ctx, "reg-gen-v6", "[Client] Failed to build IPv6 route announcement: %v", e)
+			dataPlaneWarn.Load().Warnf(ctx, "reg-gen-v6", "[Client] Failed to build IPv6 route announcement: %v", e)
 		}
 	}
 	if len(payloads) == 0 {
 		// Announcing nothing is not a benign no-op: the server keeps no route for us, so every
 		// heartbeat echo reply it generates is dropped and the tunnel is dead for an idle client
 		// even though all its connections look healthy. Never let this be silent again.
-		dataPlaneWarn.Warnf(ctx, "reg-empty",
+		dataPlaneWarn.Load().Warnf(ctx, "reg-empty",
 			"[Client] Cannot announce our route: no TUN address available on %q. Inbound traffic and "+
 				"heartbeat replies will be dropped by the server until this resolves", t.dev.tunName)
 	}
@@ -231,14 +207,15 @@ func (t *clientTransport) heartbeats(ctx context.Context) {
 		slot := t.controlSlot
 		t.controlMu.RUnlock()
 		if slot == nil {
-			dataPlaneWarn.Warnf(ctx, "hb-no-control-slot", "[Client] Heartbeat skipped: control slot not up yet")
+			dataPlaneWarn.Load().Warnf(ctx, "hb-no-control-slot", "[Client] Heartbeat skipped: control slot not up yet")
 			return
 		}
-		buf := config.LPool.Get().([]byte)
-		n := copy(buf[tunReserve:], payload)
-		buf[datagramHeaderLen] = packetTypeControl
-		if !t.stats.enqueueProbe(slot.inbound, newPacket(buf, n+typePrefixLen, nil, nil)) {
-			dataPlaneWarn.Warnf(ctx, "hb-slot-full", "[Client] Heartbeat dropped: control slot queue full")
+		packet := newPacketFromPool(config.LargeBufferSize)
+		n := copy(packet.data[tunReserve:], payload)
+		packet.length = n + typePrefixLen
+		packet.setType(packetTypeControl)
+		if !t.stats.enqueueProbe(slot.inbound, packet) {
+			dataPlaneWarn.Load().Warnf(ctx, "hb-slot-full", "[Client] Heartbeat dropped: control slot queue full")
 		}
 	}
 
@@ -246,7 +223,7 @@ func (t *clientTransport) heartbeats(ctx context.Context) {
 		srcIPv4, srcIPv6, dockerSrcIPv4 := t.dev.addrs()
 		plog.G(ctx).Debugf("[Client] Sending heartbeat (%s)", reason)
 		if srcIPv4 == nil && srcIPv6 == nil {
-			dataPlaneWarn.Warnf(ctx, "hb-no-addr",
+			dataPlaneWarn.Load().Warnf(ctx, "hb-no-addr",
 				"[Client] Heartbeat not sent: no TUN address available on %q; the data plane will be "+
 					"reported unhealthy until this resolves", t.dev.tunName)
 		}

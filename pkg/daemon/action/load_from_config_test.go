@@ -79,21 +79,15 @@ func validConfigWithConnectionYAML(t *testing.T) []byte {
 	return y
 }
 
-// TestLoadFromConfig_FileNotExist verifies that LoadFromConfig returns an error
-// (specifically os.ErrNotExist) when the DB file does not exist.
+// TestLoadFromConfig_FileNotExist verifies that a missing DB is a valid empty
+// state, allowing startup reconciliation to proceed without a restore error.
 func TestLoadFromConfig_FileNotExist(t *testing.T) {
 	saveRestoreDB(t)
-
-	// Ensure the file does not exist.
 	_ = os.Remove(config.GetDBPath())
 
 	svr := &Server{}
-	err := svr.LoadFromConfig(context.Background())
-	if err == nil {
-		t.Fatal("expected error when DB file does not exist, got nil")
-	}
-	if !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("expected os.ErrNotExist, got: %v", err)
+	if err := svr.LoadFromConfig(context.Background()); err != nil {
+		t.Fatalf("missing DB should be an empty state, got %v", err)
 	}
 }
 
@@ -132,6 +126,27 @@ func TestLoadFromConfig_TypeMismatch(t *testing.T) {
 // TestLoadFromConfig_EmptySecondaryConnect verifies the early-exit path:
 // when SecondaryConnect is empty LoadFromConfig returns nil immediately without
 // touching svr.connections or calling GetClient.
+func TestLoadFromConfig_InvalidDocumentsFailClosed(t *testing.T) {
+	for name, content := range map[string]string{
+		"empty file":          "",
+		"null document":       "null\n",
+		"null record":         `{"SecondaryConnect":[null]}`,
+		"missing request raw": `{"SecondaryConnect":[{"ConnectionID":"missing"}]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			saveRestoreDB(t)
+			writeDBFile(t, []byte(content))
+			svr := &Server{GetClient: func(bool) (rpc.DaemonClient, error) {
+				t.Fatal("invalid persisted records must fail before any daemon RPC")
+				return nil, nil
+			}}
+			if err := svr.LoadFromConfig(context.Background()); err == nil {
+				t.Fatal("expected invalid persisted state to fail closed")
+			}
+		})
+	}
+}
+
 func TestLoadFromConfig_EmptySecondaryConnect(t *testing.T) {
 	saveRestoreDB(t)
 	writeDBFile(t, validEmptyConfigYAML(t))

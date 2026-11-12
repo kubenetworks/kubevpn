@@ -2,7 +2,6 @@ package tunnel
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"io"
 	"net"
@@ -34,35 +33,22 @@ func (h *peerRegistry) readFromEndpointWriteToRoute(ctx context.Context, endpoin
 		}
 		logStackPacket(ctx, "[gVISOR] ", sniffer.DirectionSend, pkt.NetworkProtocolNumber, pkt)
 
-		buf := config.LPool.Get().([]byte)
 		if tunReserve+pkt.Size() > config.LargeBufferSize {
 			h.drops.report(ctx, dropOversized, nil)
-			config.LPool.Put(buf)
 			pkt.DecRef()
 			continue
 		}
-		dst := buf[tunReserve:]
-		ipLen := 0
-		for _, s := range pkt.AsSlices() {
-			ipLen += copy(dst[ipLen:], s)
-		}
-		pkt.DecRef()
-
-		_, dstIP, _, parseErr := netutil.ParseIPFast(buf[tunReserve : tunReserve+ipLen])
+		p := copyPacketToPool(pkt, packetTypeToTUN, datagramHeaderLen)
+		_, dstIP, _, parseErr := netutil.ParseIPFast(p.ip())
 		if parseErr != nil {
 			h.drops.report(ctx, dropInvalid, nil)
-			config.LPool.Put(buf)
+			p.release()
 			continue
 		}
-
-		payloadLen := ipLen + typePrefixLen
-		binary.BigEndian.PutUint16(buf[:datagramHeaderLen], uint16(payloadLen))
-		buf[datagramHeaderLen] = packetTypeToTUN
-
-		p := newPacket(buf, payloadLen, nil, dstIP)
+		p.dst = dstIP
 		token := stage.begin()
-		usedConn, err := h.hub.WriteToRoutePacket(ctx, string(dstIP), p)
-		stage.finish(token, 1, payloadLen, err == nil && ctx.Err() == nil)
+		usedConn, err := h.writer.writeToRoutePacket(ctx, string(dstIP), p)
+		stage.finish(token, 1, p.length, err == nil && ctx.Err() == nil)
 		if err != nil {
 			h.reportRouteDrop(ctx, err, dstIP)
 		} else if plog.IsDebugEnabled(ctx) {
@@ -72,128 +58,146 @@ func (h *peerRegistry) readFromEndpointWriteToRoute(ctx context.Context, endpoin
 	}
 }
 
-// readFromTCPConnWriteToEndpoint reads framed packets from a tunnel connection, routes
-// inter-client traffic directly via Router, and injects cluster-bound traffic into the
-// appropriate per-client gvisor stack. If the first datagram is a control frame
-// (packetTypeControl), the conn is handed off to handleControlConn instead.
+type serverConnRole uint8
+
+const (
+	serverConnRoleUnknown serverConnRole = iota
+	serverConnRoleData
+	serverConnRoleControl
+)
+
+// readFromTCPConnWriteToEndpoint owns connection framing, deadlines and role
+// detection. Data packets are consumed by dispatchServerDataPacket; a control
+// first datagram transfers the framed connection to the dedicated control loop.
 func (h *gvisorTCPHandler) readFromTCPConnWriteToEndpoint(ctx context.Context, conn net.Conn) {
 	inject := diagnosticStage(ctx, "gvisor_inject", "server", -1, 0)
 	defer inject.close()
-	dispatch := diagnosticStage(ctx, "route_dispatch", "server", -1, 0)
-	defer dispatch.close()
+	routeStage := diagnosticStage(ctx, "route_dispatch", "server", -1, 0)
+	defer routeStage.close()
 	readStage := diagnosticStage(ctx, "socket_read", "server", -1, 0)
 	defer readStage.close()
 	tunEnqueue := diagnosticStage(ctx, "tun_out_enqueue", "server", -1, 0)
 	defer tunEnqueue.close()
 	tcpConn, _ := framing.NewConn(ctx, conn)
 	defer tcpConn.Close()
-	defer h.hub.RemoveRoutesByConn(ctx, conn)
-	var firstPacket = true
+	defer h.table.removeRoutesByConn(ctx, conn)
+	role := serverConnRoleUnknown
 
 	dl := &periodicDeadline{timeout: config.KeepAliveTime * 3, set: tcpConn.SetReadDeadline}
-
+	reader := packetReader{conn: tcpConn}
 	for ctx.Err() == nil {
-		buf := config.LPool.Get().([]byte)[:]
 		if err := dl.refresh(); err != nil {
-			config.LPool.Put(buf[:])
 			plog.G(ctx).Errorf("[Gvisor-TCP] Failed to set read deadline: %v", err)
 			return
 		}
-		read, err := tcpConn.Read(buf[datagramHeaderLen:])
+		packet, err := reader.read()
 		if err != nil {
 			if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) {
 				plog.G(ctx).Debugf("[Gvisor-TCP] Connection closed: %v", err)
 			} else {
 				plog.G(ctx).Errorf("[Gvisor-TCP] Failed to read from tcp conn: %v", err)
 			}
-			config.LPool.Put(buf[:])
 			return
 		}
-		readStage.progress(1, read)
-		if read == 0 {
-			plog.G(ctx).Warnf("[Gvisor-TCP] Read empty packet from conn (length=%d)", read)
-			config.LPool.Put(buf[:])
+		readStage.progress(1, packet.length)
+		if packet.length == 0 {
+			plog.G(ctx).Warnf("[Gvisor-TCP] Read empty packet from conn (length=%d)", packet.length)
+			packet.release()
 			continue
 		}
-		// First datagram declares conn type: control conns are handled separately.
-		if firstPacket {
-			firstPacket = false
-			if buf[datagramHeaderLen] == packetTypeControl {
-				config.LPool.Put(buf[:])
+		if role == serverConnRoleUnknown {
+			if packet.kind() == packetKindControl {
+				role = serverConnRoleControl
+				packet.release()
 				plog.G(ctx).Debugf("[Gvisor-TCP] Control conn detected: %s", conn.RemoteAddr())
 				h.handleControlConn(ctx, tcpConn)
 				return
 			}
+			role = serverConnRoleData
 		}
-
-		ip := buf[tunReserve : datagramHeaderLen+read]
-		var protocol tcpip.NetworkProtocolNumber
-		if netutil.IsIPv4(ip) {
-			protocol = header.IPv4ProtocolNumber
-		} else if netutil.IsIPv6(ip) {
-			protocol = header.IPv6ProtocolNumber
-		} else {
-			h.drops.report(ctx, dropInvalid, nil)
-			config.LPool.Put(buf[:])
-			continue
-		}
-
-		src, dst, ipProtocol, parseErr := netutil.ParseIPFast(ip)
-		if parseErr != nil {
-			h.drops.report(ctx, dropInvalid, nil)
-			config.LPool.Put(buf[:])
-			continue
-		}
-
-		inject.setPeer(src)
-		dispatch.setPeer(src)
-		if !h.hub.AddRoute(ctx, src, conn) {
-			config.LPool.Put(buf[:])
+		if !h.dispatchServerDataPacket(ctx, conn, packet, inject, routeStage, tunEnqueue) {
 			return
 		}
-		dstKey := string(dst)
-		if h.hub.HasRoute(dstKey) {
-			pkt := newPacket(buf, read, src, dst)
-			binary.BigEndian.PutUint16(buf[:datagramHeaderLen], uint16(read))
-			token := dispatch.begin()
-			usedConn, writeErr := h.hub.WriteToRoutePacket(ctx, dstKey, pkt)
-			dispatch.finish(token, 1, read, writeErr == nil && ctx.Err() == nil)
-			if writeErr != nil {
-				h.reportRouteDrop(ctx, writeErr, dst)
-			} else if plog.IsDebugEnabled(ctx) {
-				plog.G(ctx).Debugf("[Gvisor-TCP] Routed %s -> %s via %s", src, dst, usedConn.RemoteAddr())
-			}
-			pkt.release()
-		} else if (config.CIDR.Contains(dst) || config.CIDR6.Contains(dst)) &&
-			ipProtocol != 1 && ipProtocol != 58 {
-			h.drops.report(ctx, dropRouteMissing, dst)
-			config.LPool.Put(buf[:])
-			continue
-		} else if buf[datagramHeaderLen] == packetTypeToGvisor {
-			cs := h.getOrCreateClientStack(string(src))
-			if cs == nil {
-				config.LPool.Put(buf[:])
-				return
-			}
-			pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
-				ReserveHeaderBytes: 0,
-				Payload:            buffer.MakeWithData(ip),
-			})
-			config.LPool.Put(buf[:])
-			logStackPacket(ctx, "[gVISOR] ", sniffer.DirectionRecv, protocol, pkt)
-			token := inject.begin()
-			cs.endpoint.InjectInbound(protocol, pkt)
-			inject.finish(token, 1, read, ctx.Err() == nil)
-			pkt.DecRef()
-			if plog.IsDebugEnabled(ctx) {
-				plog.G(ctx).Debugf("[Gvisor-TCP] Injected to stack: %s -> %s, protocol=%s, length=%d", src, dst, layers.IPProtocol(ipProtocol).String(), read)
-			}
-		} else {
-			pkt := newPacket(buf[:], read, src, dst)
-			if !h.hub.bridge.sendObserved(ctx, pkt, tunEnqueue) {
-				pkt.release()
-				return
-			}
-		}
 	}
+}
+
+// dispatchServerDataPacket consumes packet and preserves the server routing
+// priority: direct client route, no-route cluster drop, gVisor, then TUN bridge.
+// It returns false when the connection read loop must terminate.
+func (h *gvisorTCPHandler) dispatchServerDataPacket(ctx context.Context, conn net.Conn, packet *packet, inject, routeStage, tunEnqueue *datapathStage) bool {
+	read := packet.length
+	ip := packet.ip()
+	var protocol tcpip.NetworkProtocolNumber
+	if netutil.IsIPv4(ip) {
+		protocol = header.IPv4ProtocolNumber
+	} else if netutil.IsIPv6(ip) {
+		protocol = header.IPv6ProtocolNumber
+	} else {
+		h.drops.report(ctx, dropInvalid, nil)
+		packet.release()
+		return true
+	}
+
+	src, dst, ipProtocol, parseErr := netutil.ParseIPFast(ip)
+	if parseErr != nil {
+		h.drops.report(ctx, dropInvalid, nil)
+		packet.release()
+		return true
+	}
+	packet.src, packet.dst = src, dst
+	inject.setPeer(src)
+	routeStage.setPeer(src)
+	if !h.table.addRoute(ctx, src, conn) {
+		packet.release()
+		return false
+	}
+	dstKey := string(dst)
+	if h.table.hasRoute(dstKey) {
+		token := routeStage.begin()
+		usedConn, writeErr := h.writer.writeToRoutePacket(ctx, dstKey, packet)
+		routeStage.finish(token, 1, read, writeErr == nil && ctx.Err() == nil)
+		if writeErr != nil {
+			h.reportRouteDrop(ctx, writeErr, dst)
+		} else if plog.IsDebugEnabled(ctx) {
+			plog.G(ctx).Debugf("[Gvisor-TCP] Routed %s -> %s via %s", src, dst, usedConn.RemoteAddr())
+		}
+		packet.release()
+		return true
+	}
+	if (config.CIDR.Contains(dst) || config.CIDR6.Contains(dst)) && ipProtocol != 1 && ipProtocol != 58 {
+		h.drops.report(ctx, dropRouteMissing, dst)
+		packet.release()
+		return true
+	}
+	if packet.kind() == packetKindToGvisor {
+		cs := h.getOrCreateClientStack(string(src))
+		if cs == nil {
+			packet.release()
+			return false
+		}
+		pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
+			ReserveHeaderBytes: 0,
+			Payload:            buffer.MakeWithData(packet.ip()),
+		})
+		var logSrc, logDst net.IP
+		if plog.IsDebugEnabled(ctx) {
+			// src/dst alias ingress storage; retain independent addresses after release.
+			logSrc, logDst = append(net.IP(nil), src...), append(net.IP(nil), dst...)
+		}
+		packet.release()
+		logStackPacket(ctx, "[gVISOR] ", sniffer.DirectionRecv, protocol, pkt)
+		token := inject.begin()
+		cs.endpoint.InjectInbound(protocol, pkt)
+		inject.finish(token, 1, read, ctx.Err() == nil)
+		pkt.DecRef()
+		if logSrc != nil {
+			plog.G(ctx).Debugf("[Gvisor-TCP] Injected to stack: %s -> %s, protocol=%s, length=%d", logSrc, logDst, layers.IPProtocol(ipProtocol).String(), read)
+		}
+		return true
+	}
+	if !h.runtime.bridge.sendObserved(ctx, packet, tunEnqueue) {
+		packet.release()
+		return false
+	}
+	return true
 }

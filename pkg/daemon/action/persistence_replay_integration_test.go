@@ -1,12 +1,19 @@
 package action
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
+	"google.golang.org/protobuf/proto"
+	"sigs.k8s.io/yaml"
+
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/handler"
 	"gopkg.in/natefinch/lumberjack.v2"
@@ -35,13 +42,16 @@ func TestPersistence_LegacyJSONRealGRPCReplay(t *testing.T) {
 	log := &lumberjack.Logger{Filename: filepath.Join(t.TempDir(), "replay.log")}
 	defer log.Close()
 	svr := &Server{LogFile: log, GetClient: func(bool) (rpc.DaemonClient, error) { return client, nil }}
-	if err := svr.LoadFromConfig(context.Background()); err != nil {
-		t.Fatal(err)
+	if err := svr.LoadFromConfig(context.Background()); err == nil {
+		t.Fatal("expected the malformed record to be reported while the valid record replays")
 	}
 	peer.mu.Lock()
 	defer peer.mu.Unlock()
 	if len(peer.requests) != 1 {
 		t.Fatalf("replayed %d requests", len(peer.requests))
+	}
+	if len(peer.restores) != 1 || !peer.restores[0] {
+		t.Fatalf("replay did not mark the internal Connect as a restore: %v", peer.restores)
 	}
 	req := peer.requests[0]
 	if req.OwnerID != "disk-owner" || req.Namespace != "work" || req.ManagerNamespace != "manager" || req.KubeconfigBytes != "original-kubeconfig" || req.Image != "image:v1" || req.OriginKubeconfigPath != "/old/config" {
@@ -50,6 +60,131 @@ func TestPersistence_LegacyJSONRealGRPCReplay(t *testing.T) {
 	// Existing replay only restores Connect, not sync resources or DTO-only options.
 	if req.EnableSocks || req.ConnectionID != "" {
 		t.Fatal("replay synthesized fields absent from RequestRaw")
+	}
+}
+
+func TestPersistence_FutureSchemaVersionFailsClosed(t *testing.T) {
+	saveRestoreDB(t)
+	writeDBFile(t, []byte(`{"SchemaVersion":2,"SecondaryConnect":[]}`))
+	called := false
+	svr := &Server{GetClient: func(bool) (rpc.DaemonClient, error) {
+		called = true
+		return nil, nil
+	}}
+	if err := svr.LoadFromConfig(context.Background()); err == nil {
+		t.Fatal("expected unsupported future schema version to fail")
+	}
+	if called {
+		t.Fatal("future schema version must not replay connections")
+	}
+}
+
+func TestPersistence_PartialRestoreSkipsOrphanReconcile(t *testing.T) {
+	saveRestoreDB(t)
+	original := []byte(`{"SecondaryConnect":[{"RequestRaw":"/w=="},` + legacyConnectionJSON + `]}`)
+	writeDBFile(t, original)
+	peer := &recoveryPeer{connectState: StatusUnhealthy}
+	client := recoveryGRPCClient(t, peer)
+	log := &lumberjack.Logger{Filename: filepath.Join(t.TempDir(), "partial-replay.log")}
+	defer log.Close()
+	svr := &Server{LogFile: log, GetClient: func(bool) (rpc.DaemonClient, error) { return client, nil }}
+
+	svr.RestoreAndReconcile(context.Background())
+
+	peer.mu.Lock()
+	defer peer.mu.Unlock()
+	if len(peer.requests) != 1 {
+		t.Fatalf("valid record should still replay, got %d requests", len(peer.requests))
+	}
+	if peer.disconnectCalls != 0 {
+		t.Fatalf("partial restore triggered %d orphan disconnects", peer.disconnectCalls)
+	}
+	after, err := os.ReadFile(config.GetDBPath())
+	if err != nil || !bytes.Equal(after, original) {
+		t.Fatalf("partial restore rewrote the source DB: %q, err=%v", after, err)
+	}
+}
+
+type blockingRestorePeer struct {
+	rpc.UnimplementedDaemonServer
+	svr           *Server
+	secondStarted chan struct{}
+	releaseSecond chan struct{}
+}
+
+func (p *blockingRestorePeer) Connect(stream rpc.Daemon_ConnectServer) error {
+	req, err := stream.Recv()
+	if err != nil {
+		return err
+	}
+	if req.GetConnectionID() == "b" {
+		close(p.secondStarted)
+		<-p.releaseSecond
+	}
+	raw, err := proto.Marshal(req)
+	if err != nil {
+		return err
+	}
+	p.svr.registry.add(&handler.ConnectOptions{ConnectionID: req.GetConnectionID(), RequestRaw: raw}, true)
+	return stream.Send(&rpc.ConnectResponse{ConnectionID: req.GetConnectionID()})
+}
+
+func (p *blockingRestorePeer) Status(context.Context, *rpc.StatusRequest) (*rpc.StatusResponse, error) {
+	return &rpc.StatusResponse{}, nil
+}
+
+func TestPersistence_ExternalWriteWaitsForCompleteRestore(t *testing.T) {
+	saveRestoreDB(t)
+	peer := &blockingRestorePeer{secondStarted: make(chan struct{}), releaseSecond: make(chan struct{})}
+	log := &lumberjack.Logger{Filename: filepath.Join(t.TempDir(), "restore-lock.log")}
+	defer log.Close()
+	svr := &Server{LogFile: log}
+	peer.svr = svr
+	client := recoveryGRPCClient(t, peer)
+	svr.GetClient = func(bool) (rpc.DaemonClient, error) { return client, nil }
+	conf := &Config{SchemaVersion: currentConfigSchemaVersion, SecondaryConnect: []*connectionRecord{
+		{RequestRaw: mustMarshalConnectRequest(&rpc.ConnectRequest{Namespace: "a", ConnectionID: "a"})},
+		{RequestRaw: mustMarshalConnectRequest(&rpc.ConnectRequest{Namespace: "b", ConnectionID: "b"})},
+	}}
+	encoded, err := json.Marshal(conf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeDBFile(t, encoded)
+
+	restoreDone := make(chan struct{})
+	go func() {
+		defer close(restoreDone)
+		svr.RestoreAndReconcile(context.Background())
+	}()
+	<-peer.secondStarted
+	externalDone := make(chan error, 1)
+	go func() { externalDone <- svr.OffloadToConfig() }()
+	select {
+	case err := <-externalDone:
+		t.Fatalf("external persistence published a partial registry before restore completed: %v", err)
+	case <-time.After(150 * time.Millisecond):
+	}
+	close(peer.releaseSecond)
+	<-restoreDone
+	if err := <-externalDone; err != nil {
+		t.Fatalf("external persistence after restore: %v", err)
+	}
+
+	data, err := os.ReadFile(config.GetDBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	jsonData, err := yaml.YAMLToJSON(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restored Config
+	if err = json.Unmarshal(jsonData, &restored); err != nil {
+		t.Fatal(err)
+	}
+	if len(restored.SecondaryConnect) != 2 {
+		t.Fatalf("final DB contains %d records, want both restored records", len(restored.SecondaryConnect))
 	}
 }
 

@@ -23,15 +23,14 @@ func readFromEndpointWriteToTun(ctx context.Context, endpoint *channel.Endpoint,
 		pkt := endpoint.ReadContext(ctx)
 		if pkt != nil {
 			logStackPacket(ctx, prefix, sniffer.DirectionSend, pkt.NetworkProtocolNumber, pkt)
-			buf, length := copyPacketToPool(pkt, packetTypeToTUN, headroom)
+			packet := copyPacketToPool(pkt, packetTypeToTUN, headroom)
 			// Parse src/dst so a shared server-bound consumer (runConnPool's five-tuple hash) can
 			// route this packet to a slot. Without a dst, runConnPool would treat it as a heartbeat
 			// and broadcast it to every slot. Harmless for the self-to-self stack, whose output goes
 			// straight to the TUN (writeToTun ignores dst).
-			src, dst, _, _ := netutil.ParseIPFast(buf[tunReserve : datagramHeaderLen+length])
+			packet.src, packet.dst, _, _ = netutil.ParseIPFast(packet.ip())
 			// Honor cancellation so this goroutine cannot block forever on a full
 			// channel after its consumer has stopped draining (e.g. reconnect/shutdown).
-			packet := newPacket(buf[:], length, src, dst)
 			if !diagnosticEnqueue(ctx, out, packet, stage) {
 				packet.release()
 				return
@@ -52,7 +51,7 @@ func readFromGvisorInboundWriteToEndpoint(ctx context.Context, in <-chan *packet
 				return
 			}
 			var protocol tcpip.NetworkProtocolNumber
-			ip := packet.data[tunReserve : datagramHeaderLen+packet.length]
+			ip := packet.ip()
 			if netutil.IsIPv4(ip) {
 				protocol = header.IPv4ProtocolNumber
 			} else if netutil.IsIPv6(ip) {
