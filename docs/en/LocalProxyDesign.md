@@ -17,7 +17,8 @@ This version does not ship:
 - PAC files
 - a DNS listener
 - transparent interception
-- `kubevpn status` integration for proxy listener state
+
+Note: `kubevpn status -o wide` now shows SOCKS proxy listen address and mode (cluster/egress); `-o json`/`-o yaml` expose `SocksListenAddr`/`SocksEgress`.
 
 ## Problem
 
@@ -81,9 +82,8 @@ curl --proxy socks5h://127.0.0.1:1080 http://productpage.default.svc.cluster.loc
 
 ## Implementation Notes
 
-- Command entrypoints live in [/Users/tvorogme/projects/kubevpn/cmd/kubevpn/cmds/proxy_out.go](/Users/tvorogme/projects/kubevpn/cmd/kubevpn/cmds/proxy_out.go) and [/Users/tvorogme/projects/kubevpn/cmd/kubevpn/cmds/connect.go](/Users/tvorogme/projects/kubevpn/cmd/kubevpn/cmds/connect.go)
-- Managed proxy state handling lives in [/Users/tvorogme/projects/kubevpn/cmd/kubevpn/cmds/proxy_out_manager.go](/Users/tvorogme/projects/kubevpn/cmd/kubevpn/cmds/proxy_out_manager.go)
-- Local proxy implementation lives in [/Users/tvorogme/projects/kubevpn/pkg/localproxy](/Users/tvorogme/projects/kubevpn/pkg/localproxy)
+- Command entrypoints live in [cmd/kubevpn/cmds/proxy_out.go](https://github.com/wencaiwulue/kubevpn/blob/master/cmd/kubevpn/cmds/proxy_out.go) and [cmd/kubevpn/cmds/connect.go](https://github.com/wencaiwulue/kubevpn/blob/master/cmd/kubevpn/cmds/connect.go)
+- Local proxy implementation lives in [pkg/localproxy](https://github.com/wencaiwulue/kubevpn/blob/master/pkg/localproxy)
 
 ## Validation
 
@@ -93,26 +93,25 @@ Recommended validation scenarios:
 2. Access a Service hostname through `socks5h`
 3. Access a Service ClusterIP through `socks5h`
 4. Start `kubevpn connect --socks`
-5. Confirm `kubevpn disconnect` or `kubevpn quit` removes the managed proxy state and kubeconfig file
+5. Confirm `kubevpn disconnect <connection-id>` or `kubevpn disconnect --all` or `kubevpn quit` removes the managed proxy state
 
-### Milestone 1
+### Historical Milestones (all implemented)
 
+**Milestone 1**
 - design doc
 - CLI scaffolding
 - daemon action scaffolding
 - in-memory SOCKS5 server using current connection state
 
-### Milestone 2
-
+**Milestone 2**
 - real resolver/dialer integration
 - status output
 - documentation and examples
 
-### Milestone 3
-
+**Milestone 3**
 - HTTP CONNECT
-- optional PAC file generation
-- optional DNS helper listener
+- optional PAC file generation (not implemented)
+- optional DNS helper listener (not implemented)
 
 ## Why This Is The Right Feature
 
@@ -125,9 +124,11 @@ A local explicit proxy:
 - reuses kubevpn's existing transport and remote DNS
 - solves the exact class of failures seen with `sing-box` packet tunnel on macOS
 
-## Next Implementation Slice
+## Historical: Next Implementation Slice
 
-The smallest useful next coding step is:
+This section is preserved for historical reference — the implementation is now complete.
+
+The smallest useful next coding step at the time was:
 
 1. add `kubevpn proxy-out` command and flags
 2. add daemon action to attach proxy mode to an existing connection
