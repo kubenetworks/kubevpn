@@ -74,6 +74,13 @@ make gen
 - See [CLAUDE.md](CLAUDE.md) for more conventions
 - Run `go vet ./...` before submitting changes
 
+### AI coding agents
+
+If you work on this repo with an AI agent (Claude Code, Codex, Cursor, Gemini CLI, ...),
+point it at [AGENTS.md](AGENTS.md) — the tool-neutral development workflow — and
+[.claude/skills/kubevpn-dev/SKILL.md](.claude/skills/kubevpn-dev/SKILL.md), which
+follows the open Agent Skills format.
+
 ## Architecture Overview
 
 Before making changes, read the relevant design documents in [docs/](docs/README.md):
