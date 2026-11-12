@@ -20,3 +20,7 @@ func syncDirectory(path string) error {
 // retried. On unix the atomic write replaces the directory entry, so a concurrent
 // reader either sees the old or the new file; only a missing file is transient.
 func isTransientDBReadError(err error) bool { return errors.Is(err, os.ErrNotExist) }
+
+// isTransientReplaceError reports whether a failed rename over an existing file should
+// be retried. Unix rename is atomic — a failure is terminal, not a transient state.
+func isTransientReplaceError(error) bool { return false }

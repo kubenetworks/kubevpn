@@ -23,9 +23,19 @@ func isTransientDBReadError(err error) bool {
 	if errors.Is(err, os.ErrNotExist) {
 		return true
 	}
+	return isTransientReplaceError(err)
+}
+
+// isTransientReplaceError reports whether a failed rename over an existing file should
+// be retried. On Windows a concurrent reader holding the previous file keeps it
+// delete-pending, briefly denying both its replacement (access denied) and new opens
+// (sharing/lock violation); every state clears once the last reader handle closes.
+func isTransientReplaceError(err error) bool {
 	var errno syscall.Errno
 	if !errors.As(err, &errno) {
 		return false
 	}
-	return errno == windows.ERROR_SHARING_VIOLATION || errno == windows.ERROR_LOCK_VIOLATION
+	return errno == windows.ERROR_ACCESS_DENIED ||
+		errno == windows.ERROR_SHARING_VIOLATION ||
+		errno == windows.ERROR_LOCK_VIOLATION
 }

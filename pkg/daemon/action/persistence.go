@@ -308,7 +308,17 @@ func writeFileAtomically(path string, data []byte, mode os.FileMode) (err error)
 		return fmt.Errorf("close temporary file: %w", err)
 	}
 	if err = renameFile(tempPath, path); err != nil {
-		return fmt.Errorf("replace persisted configuration: %w", err)
+		// On Windows a concurrent reader holding the previous file keeps it delete-pending,
+		// briefly denying its replacement; retry while the error stays transient.
+		for i := 0; i < 50 && isTransientReplaceError(err); i++ {
+			time.Sleep(20 * time.Millisecond)
+			if err = renameFile(tempPath, path); err == nil {
+				break
+			}
+		}
+		if err != nil {
+			return fmt.Errorf("replace persisted configuration: %w", err)
+		}
 	}
 	if err = syncDirectory(dir); err != nil {
 		return fmt.Errorf("sync configuration directory: %w", err)
