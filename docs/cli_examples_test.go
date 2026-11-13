@@ -34,6 +34,10 @@ type cliExample struct {
 func extractCLIExamples(content string) []cliExample {
 	var examples []cliExample
 
+	// Normalize CRLF to LF: a Windows checkout converts LF files to CRLF, and the
+	// closing-fence comparison below must see bare "```" lines to close a block.
+	content = strings.ReplaceAll(content, "\r\n", "\n")
+
 	lines := strings.Split(content, "\n")
 	inBlock := false
 	var buffer bytes.Buffer

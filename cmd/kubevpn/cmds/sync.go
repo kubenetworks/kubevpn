@@ -2,9 +2,9 @@ package cmds
 
 import (
 	"context"
+	"fmt"
 	"os"
 
-	pkgerr "github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc/codes"
@@ -81,7 +81,7 @@ func CmdSync(f cmdutil.Factory) *cobra.Command {
 			if syncDir != "" {
 				local, remote, err := util.ParseDirMapping(syncDir)
 				if err != nil {
-					return pkgerr.Wrapf(err, "options 'sync' is invalid, %s", syncDir)
+					return fmt.Errorf("options 'sync' is invalid, %s: %w", syncDir, err)
 				}
 				options.LocalDir = local
 				options.RemoteDir = remote
