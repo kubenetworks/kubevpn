@@ -9,6 +9,7 @@ import (
 	"k8s.io/kubectl/pkg/util/templates"
 
 	pkgagent "github.com/wencaiwulue/kubevpn/v2/pkg/agent"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/inject"
 )
 
 // CmdAgent is the node-hosted traffic agent entrypoint (docs/55). Hidden: it
@@ -37,5 +38,29 @@ func CmdAgent(f cmdutil.Factory) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&podUID, "pod-uid", "", "UID of the target pod")
 	cmd.Flags().StringVar(&procRoot, "proc-root", "/host/proc", "Path to the mounted host /proc")
+	return cmd
+}
+
+// CmdAgentEnvoyConfig prints the envoy bootstrap config to stdout — used by
+// the node-hosted agent's envoy container before exec'ing envoy.
+func CmdAgentEnvoyConfig(f cmdutil.Factory) *cobra.Command {
+	var managerAddr string
+	cmd := &cobra.Command{
+		Use:    "agent-envoy-config",
+		Short:  i18n.T("Print the envoy xDS bootstrap config for the node-hosted agent"),
+		Long:   templates.LongDesc(i18n.T(`Print the envoy xDS bootstrap config for the node-hosted agent`)),
+		Hidden: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			b, err := inject.RenderEnvoyBootstrap(cmd.Context(), managerAddr)
+			if err != nil {
+				return err
+			}
+			_, err = cmd.OutOrStdout().Write(b)
+			return err
+		},
+		DisableFlagsInUseLine: true,
+	}
+	cmd.Flags().StringVar(&managerAddr, "manager", "", "traffic-manager address (host:port)")
+	_ = cmd.MarkFlagRequired("manager")
 	return cmd
 }

@@ -52,6 +52,9 @@ type InjectOptions struct {
 
 // isServiceTarget reports whether the given resource.Info represents a Kubernetes Service.
 func isServiceTarget(object *resource.Info) bool {
+	if object == nil || object.Mapping == nil {
+		return false
+	}
 	return clusterworkload.IsK8sService(object)
 }
 

@@ -45,6 +45,30 @@ func renderEnvoyConfig(tmplStr string, value string) string {
 	return buf.String()
 }
 
+// RenderEnvoyBootstrap renders the envoy bootstrap config for the node-hosted
+// agent envoy container. The managerAddr should be in "host:port" format;
+// the port is stripped and only the host is used in the bootstrap config.
+func RenderEnvoyBootstrap(_ context.Context, managerAddr string) ([]byte, error) {
+	// Strip port if present
+	host := managerAddr
+	if idx := findLastIndex(host, ":"); idx != -1 {
+		host = host[:idx]
+	}
+	configYaml := renderEnvoyConfig(string(envoyConfig), host)
+	return []byte(configYaml), nil
+}
+
+func findLastIndex(s, sep string) int {
+	lastIdx := -1
+	for i := len(s) - 1; i >= 0; i-- {
+		if len(sep) > 0 && s[i] == sep[0] {
+			lastIdx = i
+			break
+		}
+	}
+	return lastIdx
+}
+
 // envoyRuleSpec captures the parameters for adding a proxy rule to the Envoy config.
 // Avoids passing 10+ individual arguments through addEnvoyConfig → addVirtualRule.
 type envoyRuleSpec struct {
