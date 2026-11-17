@@ -69,6 +69,7 @@ func NewKubeVPNCommand() *cobra.Command {
 				CmdDNS(factory),
 				CmdSyncthing(factory),
 				CmdOnce(factory),
+				CmdAgent(factory),
 			},
 		},
 		{
