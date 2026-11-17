@@ -7,17 +7,20 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"net/http"
 	"os/exec"
 	"testing"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/util/retry"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/inject"
@@ -164,7 +167,7 @@ func TestIntegration_NodeAgentFunction(t *testing.T) {
 
 	// Phase 5: Verify iptables via exec into reviews pod
 	t.Run("05-verify/iptables-via-exec", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 
 		pods, err := u.clientset.CoreV1().Pods(u.namespace).List(ctx, metav1.ListOptions{
@@ -183,9 +186,11 @@ func TestIntegration_NodeAgentFunction(t *testing.T) {
 		// Port 15006 in network byte order (big-endian) hex is 3A9E
 		// /proc/net/tcp format: sl local_address rem_address st tx_queue rx_queue ...
 		// local_address format: ip:port in hex, network byte order
-		err = wait.PollUntilContextCancel(ctx, 5*time.Second, true, func(ctx context.Context) (bool, error) {
+		var lastOutput []byte
+		err = wait.PollUntilContextTimeout(ctx, 2*time.Second, 60*time.Second, true, func(ctx context.Context) (bool, error) {
 			cmd := exec.CommandContext(ctx, "kubectl", "exec", "-n", u.namespace, pod.Name, "--", "cat", "/proc/net/tcp")
 			output, err := cmd.CombinedOutput()
+			lastOutput = output
 			if err != nil {
 				t.Logf("Exec failed: %v, output: %s", err, string(output))
 				return false, nil
@@ -202,8 +207,7 @@ func TestIntegration_NodeAgentFunction(t *testing.T) {
 			return false, nil
 		})
 		if err != nil {
-			t.Logf("Warning: failed to verify iptables via /proc/net/tcp, but continuing: %v", err)
-			// This is not fatal - maybe the image doesn't have /proc mounted or different format
+			t.Fatalf("Failed to verify iptables via /proc/net/tcp: %v. Last output:\n%s", err, string(lastOutput))
 		}
 	})
 
@@ -238,37 +242,44 @@ func TestIntegration_NodeAgentFunction(t *testing.T) {
 		}
 		endpoint := fmt.Sprintf("http://%s:%d/health", ip, 9080)
 		// Without header, should get remote response
-		// Use a custom check since meshHealthChecker might retry too long
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
 
-		req, err := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
+		req, err := http.NewRequest("GET", endpoint, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
-		client := &http.Client{Timeout: 10 * time.Second}
 
-		var lastErr error
-		err = wait.ExponentialBackoffWithContext(ctx, wait.Backoff{
-			Duration: 2 * time.Second,
-			Factor:   1.5,
-			Steps:    10,
-		}, func(ctx context.Context) (bool, error) {
-			resp, err := client.Do(req)
-			if err != nil {
-				lastErr = err
-				return false, nil
-			}
-			defer resp.Body.Close()
-			if resp.StatusCode != 200 {
-				lastErr = fmt.Errorf("status code: %d", resp.StatusCode)
-				return false, nil
-			}
-			return true, nil
-		})
+		client := &http.Client{Timeout: 5 * time.Second}
+		err = retry.OnError(
+			healthCheckBackoff(),
+			func(err error) bool { return err != nil },
+			func() error {
+				var resp *http.Response
+				resp, err = client.Do(req)
+				if err != nil {
+					t.Logf("%s failed to do health check endpoint %s: %v", time.Now().Format(time.DateTime), endpoint, err)
+					return err
+				}
+				if resp.StatusCode != 200 {
+					if resp.Body != nil {
+						defer resp.Body.Close()
+						all, _ := io.ReadAll(resp.Body)
+						return fmt.Errorf("status code is %s, content: %v", resp.Status, string(all))
+					}
+					return fmt.Errorf("status code is %s", resp.Status)
+				}
+				defer resp.Body.Close()
+				content, err := io.ReadAll(resp.Body)
+				if err != nil {
+					return err
+				}
+				if string(content) != remote {
+					return fmt.Errorf("response=%s, want: %s", string(content), remote)
+				}
+				return nil
+			},
+		)
 		if err != nil {
-			t.Logf("Warning: failed to verify non-intercepted traffic: %v (last err: %v)", err, lastErr)
-			// Not fatal - maybe the mesh always intercepts, or timing issue
+			t.Fatalf("Failed to verify non-intercepted traffic (remote response not received): %v", err)
 		}
 	})
 
@@ -278,22 +289,25 @@ func TestIntegration_NodeAgentFunction(t *testing.T) {
 		if podUID == "" {
 			t.Skip("No reviews pod UID")
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 
 		jobName := inject.AgentJobName(podUID)
-		err := wait.PollUntilContextCancel(ctx, 3*time.Second, true, func(ctx context.Context) (bool, error) {
+		err := wait.PollUntilContextTimeout(ctx, 2*time.Second, 60*time.Second, true, func(ctx context.Context) (bool, error) {
 			_, err := u.clientset.BatchV1().Jobs(u.namespace).Get(ctx, jobName, metav1.GetOptions{})
 			if err == nil {
 				// Job still exists
 				return false, nil
 			}
-			// Assume not found means deleted
-			return true, nil
+			if k8serrors.IsNotFound(err) {
+				// Job deleted
+				return true, nil
+			}
+			// Other error, keep polling
+			return false, nil
 		})
 		if err != nil {
-			t.Logf("Warning: agent job %s may still exist: %v", jobName, err)
-			// Not fatal - cleanup will try again
+			t.Fatalf("Agent job %s still exists after leave: %v", jobName, err)
 		}
 	})
 	t.Run("07-cleanup/disconnect", func(t *testing.T) {
