@@ -1,8 +1,7 @@
 # AI Agent Access (Agent Guide + MCP Server)
 
-> Status: **planned** — design agreed, not yet implemented. Two phases: a published
-> agent-facing usage guide (docs only), then a `kubevpn-mcp` binary exposing the daemon
-> API as MCP tools.
+> Status: **implemented** — P1 lives in [agents-guide.md](agents-guide.md); P2 is the
+> `kubevpn mcp` subcommand (`cmd/kubevpn/cmds/mcp.go` + `pkg/mcp`).
 
 ## 1. The Question
 
