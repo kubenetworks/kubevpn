@@ -65,6 +65,11 @@
 - [53-ebpf-feasibility.md](./53-ebpf-feasibility.md): eBPF feasibility study
 - [54-traffic-obfuscation.md](./54-traffic-obfuscation.md): Traffic obfuscation and TLS enforcement
 
+## Planned Directions (design agreed, not yet implemented)
+
+- [55-node-hosted-agent.md](./55-node-hosted-agent.md): Node-hosted privileged agent — non-intrusive proxy attachment without pod restart
+- [56-ai-agent-access.md](./56-ai-agent-access.md): AI agent access — agent-facing usage guide + `kubevpn-mcp` MCP server
+
 ## Internals & Observability
 
 - [07-namespace-model.md](./07-namespace-model.md): Namespace model
