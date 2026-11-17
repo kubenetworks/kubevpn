@@ -198,3 +198,29 @@ Wire real components against `fake.NewSimpleClientset()`, structured as multi-ph
 | `pkg/cluster/manager/resources.go` | resource generator patterns for the Job spec |
 | `charts/kubevpn/` | Helm value `proxy.attachMode` |
 | docs/17-sidecar-injection.md | the mode this complements |
+
+## 14. Bug Fix: Shim Process Filtering
+
+**Problem**: The initial `FindNetnsPID` implementation selected the first process whose cgroup contained the pod UID. On containerd systems, the `containerd-shim` process runs in the host network namespace but is also in the pod's cgroup hierarchy. Since the shim has a lower PID than the pod's pause container, the agent would enter the *host network namespace* instead of the pod's network namespace.
+
+**Root Cause**:
+- `containerd-shim` process appears in `/proc` with cgroup path containing pod UID
+- The shim runs in the *host network namespace*, not the pod's
+- The pause container shares the pod's network namespace, but has a higher PID
+- First-match logic selects the shim, traffic interception fails silently
+
+**Fix**:
+1. **Filter shim processes**: Read `/proc/<pid>/comm` and reject known shim process names:
+   - `containerd-shim`
+   - `conmon`
+   - `containerd`
+   - `dockerd`
+   - `kubelet`
+2. **Exclude self**: The agent shouldn't select its own process
+3. **Select smallest PID**: After filtering, select the smallest PID (pause container)
+4. **Explicit error**: If only shim processes are found, return an error instead of failing silently
+
+**Verification**:
+- Added comprehensive unit tests in `pkg/agent/netns_test.go`
+- Enhanced e2e probe test to verify netns inode differs from agent's own netns
+- Added diagnostics dump helper in `nodeagent_function_integration_test.go` to capture failure state

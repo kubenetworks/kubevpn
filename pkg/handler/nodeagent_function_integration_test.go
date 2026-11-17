@@ -21,6 +21,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/retry"
+	"k8s.io/utils/ptr"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/inject"
@@ -30,6 +31,7 @@ func TestIntegration_NodeAgentFunction(t *testing.T) {
 	u := &ut{}
 	var originalAttachMode string
 	var podUID types.UID
+	var agentPodName string
 
 	// Phase 0: Cleanup even if test fails
 	t.Cleanup(func() {
@@ -133,7 +135,8 @@ func TestIntegration_NodeAgentFunction(t *testing.T) {
 		if len(pods.Items) == 0 {
 			t.Fatalf("No agent pods found for pod UID %s", podUID)
 		}
-		t.Logf("Found agent pod: %s", pods.Items[0].Name)
+		agentPodName = pods.Items[0].Name
+		t.Logf("Found agent pod: %s", agentPodName)
 	})
 	t.Run("04-verify/reviews-pod-not-patched", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -207,6 +210,9 @@ func TestIntegration_NodeAgentFunction(t *testing.T) {
 			return false, nil
 		})
 		if err != nil {
+			if agentPodName != "" {
+				dumpAgentPodDiagnostics(t, ctx, u.clientset, u.namespace, agentPodName)
+			}
 			t.Fatalf("Failed to verify iptables via /proc/net/tcp: %v. Last output:\n%s", err, string(lastOutput))
 		}
 	})
@@ -229,6 +235,9 @@ func TestIntegration_NodeAgentFunction(t *testing.T) {
 		u.waitManagerReady(t)
 		ip, err := u.getServiceIP("reviews")
 		if err != nil {
+			if agentPodName != "" {
+				dumpAgentPodDiagnostics(t, context.Background(), u.clientset, u.namespace, agentPodName)
+			}
 			t.Fatal(err)
 		}
 		endpoint := fmt.Sprintf("http://%s:%d/health", ip, 9080)
@@ -238,6 +247,9 @@ func TestIntegration_NodeAgentFunction(t *testing.T) {
 		u.waitManagerReady(t)
 		ip, err := u.getServiceIP("reviews")
 		if err != nil {
+			if agentPodName != "" {
+				dumpAgentPodDiagnostics(t, context.Background(), u.clientset, u.namespace, agentPodName)
+			}
 			t.Fatal(err)
 		}
 		endpoint := fmt.Sprintf("http://%s:%d/health", ip, 9080)
@@ -279,6 +291,9 @@ func TestIntegration_NodeAgentFunction(t *testing.T) {
 			},
 		)
 		if err != nil {
+			if agentPodName != "" {
+				dumpAgentPodDiagnostics(t, context.Background(), u.clientset, u.namespace, agentPodName)
+			}
 			t.Fatalf("Failed to verify non-intercepted traffic (remote response not received): %v", err)
 		}
 	})
@@ -312,8 +327,8 @@ func TestIntegration_NodeAgentFunction(t *testing.T) {
 	})
 	t.Run("07-cleanup/disconnect", func(t *testing.T) {
 		cmd := exec.Command("kubevpn", "disconnect")
-		cmd.Stdout = tWriter{t}
-		cmd.Stderr = tWriter{t}
+		cmd.StdOut = tWriter{t}
+		cmd.StdErr = tWriter{t}
 		_ = cmd.Run() // Best effort
 	})
 	t.Run("07-cleanup/restore-attach-mode", func(t *testing.T) {
@@ -456,4 +471,67 @@ type tWriter struct {
 func (w tWriter) Write(p []byte) (n int, err error) {
 	w.t.Log(string(p))
 	return len(p), nil
+}
+
+// dumpAgentPodDiagnostics logs diagnostic information about an agent pod on failure.
+func dumpAgentPodDiagnostics(t *testing.T, ctx context.Context, clientset kubernetes.Interface, namespace, podName string) {
+	t.Helper()
+	t.Log("========== AGENT POD DIAGNOSTICS ==========")
+
+	// 1. Get pod details
+	pod, err := clientset.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
+	if err != nil {
+		t.Logf("Failed to get agent pod: %v", err)
+	} else {
+		t.Logf("Agent pod: %s (phase: %s, node: %s)", pod.Name, pod.Status.Phase, pod.Spec.NodeName)
+		t.Logf("Container statuses:")
+		for _, cs := range pod.Status.ContainerStatuses {
+			var stateStr string
+			if cs.State.Running != nil {
+				stateStr = "Running"
+			} else if cs.State.Terminated != nil {
+				stateStr = fmt.Sprintf("Terminated (exit: %d, reason: %s)",
+					cs.State.Terminated.ExitCode, cs.State.Terminated.Reason)
+			} else if cs.State.Waiting != nil {
+				stateStr = fmt.Sprintf("Waiting (reason: %s)", cs.State.Waiting.Reason)
+			} else {
+				stateStr = fmt.Sprintf("%v", cs.State)
+			}
+			t.Logf("  - %s: ready=%v, restartCount=%d, state=%s",
+				cs.Name, cs.Ready, cs.RestartCount, stateStr)
+			if cs.LastTerminationState.Terminated != nil {
+				t.Logf("    Last termination: exit=%d, reason=%s",
+					cs.LastTerminationState.Terminated.ExitCode,
+					cs.LastTerminationState.Terminated.Reason)
+			}
+		}
+	}
+
+	// 2. Get logs from each container
+	containerNames := []string{"vpn", "envoy"} // Standard agent container names
+	for _, container := range containerNames {
+		t.Logf("--- %s container logs (last 100 lines) ---", container)
+		req := clientset.CoreV1().Pods(namespace).GetLogs(podName, &corev1.PodLogOptions{
+			Container: container,
+			TailLines: ptr.To(int64(100)),
+		})
+		logs, err := req.DoRaw(ctx)
+		if err != nil {
+			t.Logf("Failed to get %s logs: %v", container, err)
+		} else {
+			t.Logf("%s", string(logs))
+		}
+	}
+
+	// 3. kubectl get pod -o wide output
+	t.Log("--- kubectl get pod -o wide ---")
+	cmd := exec.CommandContext(ctx, "kubectl", "get", "pod", "-n", namespace, podName, "-o", "wide")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Logf("kubectl get pod failed: %v", err)
+	} else {
+		t.Logf("%s", string(output))
+	}
+
+	t.Log("========== END AGENT POD DIAGNOSTICS ==========")
 }

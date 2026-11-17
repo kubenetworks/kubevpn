@@ -62,7 +62,7 @@ func (e *nodeagentE2E) init() {
 		ObjectMeta: metav1.ObjectMeta{Name: e.namespace},
 	}, metav1.CreateOptions{})
 	if err != nil {
-		e.t.Fatalf("create test namespace %s: %v", e.namespace, err)
+		e.t.Fatalf("create test namespace: %v", err)
 	}
 	e.t.Logf("Created test namespace: %s", e.namespace)
 }
@@ -168,7 +168,7 @@ func TestIntegration_NodeAgentJobAttachesNetns(t *testing.T) {
 	}
 
 	// 4. Create the agent Job manually (using GenAgentJobSpec directly,
-	// since we don't have a full traffic-manager stack running)
+	// since we don't have a full traffic manager stack running)
 	jobInput := AgentJobInput{
 		ManagerNamespace: managerNS,
 		Image:            config.Image,
@@ -184,11 +184,25 @@ func TestIntegration_NodeAgentJobAttachesNetns(t *testing.T) {
 set -e
 echo "Probing for pod UID: ${POD_UID}"
 
+# First, record our own netns inode (before entering pod netns)
+self_netns=$(readlink /proc/self/ns/net)
+echo "Agent's own netns: ${self_netns}"
+
 # Test 1: Can we find the netns PID via /proc scan?
-kubevpn agent --pod-uid "${POD_UID}" --proc-root /host/proc -- /bin/true && echo "✓ Netns found and entered" || {
+# And verify we entered a different netns (not our own)
+pod_netns=$(kubevpn agent --pod-uid "${POD_UID}" --proc-root /host/proc -- /bin/bash -c 'readlink /proc/self/ns/net') && echo "✓ Netns found and entered. Pod netns: ${pod_netns}" || {
 	echo "✗ Failed to find/enter netns"
 	exit 1
 }
+
+# Verify we actually entered a different netns (not our own)
+if [ "${pod_netns}" = "${self_netns}" ]; then
+	echo "✗ ERROR: Entered wrong netns (still agent's own netns)"
+	echo "  Agent netns: ${self_netns}"
+	echo "  Pod netns:   ${pod_netns}"
+	exit 1
+fi
+echo "✓ Verified: Entered different netns (not agent's own)"
 
 # Test 2: Create a simple iptables rule inside the pod netns and verify it exists
 kubevpn agent --pod-uid "${POD_UID}" --proc-root /host/proc -- /bin/bash -c '
