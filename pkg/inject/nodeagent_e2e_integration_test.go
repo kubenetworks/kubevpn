@@ -47,6 +47,10 @@ func (e *nodeagentE2E) init() {
 	if e.restconfig, err = e.f.ToRESTConfig(); err != nil {
 		e.t.Fatalf("to rest config: %v", err)
 	}
+	// The full suite shares the apiserver with heavy neighbors; the default
+	// QPS=5/Burst=10 starves this test's poll loop into context deadline.
+	e.restconfig.QPS = 50
+	e.restconfig.Burst = 100
 	if e.restclient, err = rest.RESTClientFor(e.restconfig); err != nil {
 		e.t.Fatalf("to rest client: %v", err)
 	}
@@ -245,12 +249,15 @@ sleep infinity
 
 	// 6. Wait for the Job pod to start and check logs
 	var agentPod *v1.Pod
-	err = wait.PollUntilContextTimeout(e.ctx, 2*time.Second, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
+	err = wait.PollUntilContextTimeout(e.ctx, 2*time.Second, 5*time.Minute, true, func(ctx context.Context) (bool, error) {
 		pods, err := e.clientset.CoreV1().Pods(managerNS).List(ctx, metav1.ListOptions{
 			LabelSelector: fmt.Sprintf("kubevpn/pod-uid=%s", string(pod.UID)),
 		})
 		if err != nil {
-			return false, err
+			// Transient apiserver pressure (rate limiting) must not abort the
+			// poll — log and keep trying until the budget runs out.
+			t.Logf("List agent pods: %v (retrying)", err)
+			return false, nil
 		}
 		if len(pods.Items) == 0 {
 			return false, nil
