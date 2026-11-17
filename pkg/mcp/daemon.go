@@ -10,6 +10,9 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 )
 
+// connectStream is the bidirectional Connect stream client.
+type connectStream = rpc.Daemon_ConnectClient
+
 // daemonAPI is the slice of the daemon gRPC surface the MCP tools expose. It
 // exists so handlers are testable against a fake; rpc.DaemonClient satisfies it.
 type daemonAPI interface {
@@ -64,4 +67,12 @@ func wrapHint(err error) error {
 		return nil
 	}
 	return fmt.Errorf("%w (hint: %s)", err, elevationHint)
+}
+
+// tail returns the last n strings, original order.
+func tail(ss []string, n int) []string {
+	if len(ss) > n {
+		return ss[len(ss)-n:]
+	}
+	return ss
 }

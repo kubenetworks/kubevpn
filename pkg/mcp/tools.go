@@ -30,4 +30,11 @@ func registerTools(server *mcp.Server, opts Options, d daemonAPI) {
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in VersionInput) (*mcp.CallToolResult, *VersionOutput, error) {
 		return versionTool(ctx, d, opts, in)
 	})
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "kubevpn_connect",
+		Description: "Connect the local machine to a Kubernetes cluster network (VPN). Returns once established; the daemon owns the session. Scope proxies to this session afterwards.",
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false},
+	}, func(ctx context.Context, req *mcp.CallToolRequest, in ConnectInput) (*mcp.CallToolResult, *ConnectOutput, error) {
+		return connectTool(ctx, d, opts, in)
+	})
 }
