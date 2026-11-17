@@ -126,17 +126,51 @@ func TestIntegration_NodeAgentFunction(t *testing.T) {
 		}
 
 		// Also verify agent pod is running
-		pods, err := u.clientset.CoreV1().Pods(u.namespace).List(ctx, metav1.ListOptions{
-			LabelSelector: fmt.Sprintf("%s=%s", "kubevpn/pod-uid", podUID),
+		var pods *corev1.PodList
+		err = wait.PollUntilContextCancel(ctx, 2*time.Second, true, func(ctx context.Context) (bool, error) {
+			var err error
+			pods, err = u.clientset.CoreV1().Pods(u.namespace).List(ctx, metav1.ListOptions{
+				LabelSelector: fmt.Sprintf("%s=%s", "kubevpn/pod-uid", podUID),
+			})
+			if err != nil {
+				return false, nil
+			}
+			return len(pods.Items) > 0, nil
 		})
 		if err != nil {
-			t.Fatalf("Failed to list agent pods: %v", err)
-		}
-		if len(pods.Items) == 0 {
-			t.Fatalf("No agent pods found for pod UID %s", podUID)
+			t.Fatalf("No agent pods found for pod UID %s: %v", podUID, err)
 		}
 		agentPodName = pods.Items[0].Name
 		t.Logf("Found agent pod: %s", agentPodName)
+
+		// Wait for agent pod to be Running
+		var agentPod *corev1.Pod
+		waitCtx, waitCancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer waitCancel()
+		err = wait.PollUntilContextTimeout(waitCtx, 2*time.Second, 60*time.Second, true, func(ctx context.Context) (bool, error) {
+			var err error
+			agentPod, err = u.clientset.CoreV1().Pods(u.namespace).Get(ctx, agentPodName, metav1.GetOptions{})
+			if err != nil {
+				return false, nil
+			}
+			return agentPod.Status.Phase == corev1.PodRunning, nil
+		})
+		if err != nil {
+			// Dump diagnostics on timeout
+			if agentPod != nil {
+				t.Logf("Agent pod phase: %s", agentPod.Status.Phase)
+				t.Logf("Container statuses:")
+				for _, cs := range agentPod.Status.ContainerStatuses {
+					t.Logf("  - %s: phase=%v, restartCount=%d, lastState=%v",
+						cs.Name, cs.State, cs.RestartCount, cs.LastTerminationState)
+				}
+			}
+			dumpAgentPodDiagnostics(t, context.Background(), u.clientset, u.namespace, agentPodName)
+			t.Fatalf("Agent pod %s not running after 60s: %v", agentPodName, err)
+		}
+
+		// Always dump diagnostics once agent pod is Running
+		dumpAgentPodDiagnostics(t, context.Background(), u.clientset, u.namespace, agentPodName)
 	})
 	t.Run("04-verify/reviews-pod-not-patched", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -211,7 +245,7 @@ func TestIntegration_NodeAgentFunction(t *testing.T) {
 		})
 		if err != nil {
 			if agentPodName != "" {
-				dumpAgentPodDiagnostics(t, ctx, u.clientset, u.namespace, agentPodName)
+				dumpAgentPodDiagnostics(t, context.Background(), u.clientset, u.namespace, agentPodName)
 			}
 			t.Fatalf("Failed to verify iptables via /proc/net/tcp: %v. Last output:\n%s", err, string(lastOutput))
 		}
@@ -473,36 +507,42 @@ func (w tWriter) Write(p []byte) (n int, err error) {
 	return len(p), nil
 }
 
-// dumpAgentPodDiagnostics logs diagnostic information about an agent pod on failure.
-func dumpAgentPodDiagnostics(t *testing.T, ctx context.Context, clientset kubernetes.Interface, namespace, podName string) {
+// dumpAgentPodDiagnostics logs diagnostic information about an agent pod.
+// It uses independent contexts with 30s timeouts for each API call to avoid
+// being affected by any already timed-out test context.
+func dumpAgentPodDiagnostics(t *testing.T, _ context.Context, clientset kubernetes.Interface, namespace, podName string) {
 	t.Helper()
 	t.Log("========== AGENT POD DIAGNOSTICS ==========")
 
 	// 1. Get pod details
-	pod, err := clientset.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
-	if err != nil {
-		t.Logf("Failed to get agent pod: %v", err)
-	} else {
-		t.Logf("Agent pod: %s (phase: %s, node: %s)", pod.Name, pod.Status.Phase, pod.Spec.NodeName)
-		t.Logf("Container statuses:")
-		for _, cs := range pod.Status.ContainerStatuses {
-			var stateStr string
-			if cs.State.Running != nil {
-				stateStr = "Running"
-			} else if cs.State.Terminated != nil {
-				stateStr = fmt.Sprintf("Terminated (exit: %d, reason: %s)",
-					cs.State.Terminated.ExitCode, cs.State.Terminated.Reason)
-			} else if cs.State.Waiting != nil {
-				stateStr = fmt.Sprintf("Waiting (reason: %s)", cs.State.Waiting.Reason)
-			} else {
-				stateStr = fmt.Sprintf("%v", cs.State)
-			}
-			t.Logf("  - %s: ready=%v, restartCount=%d, state=%s",
-				cs.Name, cs.Ready, cs.RestartCount, stateStr)
-			if cs.LastTerminationState.Terminated != nil {
-				t.Logf("    Last termination: exit=%d, reason=%s",
-					cs.LastTerminationState.Terminated.ExitCode,
-					cs.LastTerminationState.Terminated.Reason)
+	{
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		pod, err := clientset.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
+		if err != nil {
+			t.Logf("Failed to get agent pod: %v", err)
+		} else {
+			t.Logf("Agent pod: %s (phase: %s, node: %s)", pod.Name, pod.Status.Phase, pod.Spec.NodeName)
+			t.Logf("Container statuses:")
+			for _, cs := range pod.Status.ContainerStatuses {
+				var stateStr string
+				if cs.State.Running != nil {
+					stateStr = "Running"
+				} else if cs.State.Terminated != nil {
+					stateStr = fmt.Sprintf("Terminated (exit: %d, reason: %s)",
+						cs.State.Terminated.ExitCode, cs.State.Terminated.Reason)
+				} else if cs.State.Waiting != nil {
+					stateStr = fmt.Sprintf("Waiting (reason: %s)", cs.State.Waiting.Reason)
+				} else {
+					stateStr = fmt.Sprintf("%v", cs.State)
+				}
+				t.Logf("  - %s: ready=%v, restartCount=%d, state=%s",
+					cs.Name, cs.Ready, cs.RestartCount, stateStr)
+				if cs.LastTerminationState.Terminated != nil {
+					t.Logf("    Last termination: exit=%d, reason=%s",
+						cs.LastTerminationState.Terminated.ExitCode,
+						cs.LastTerminationState.Terminated.Reason)
+				}
 			}
 		}
 	}
@@ -510,12 +550,14 @@ func dumpAgentPodDiagnostics(t *testing.T, ctx context.Context, clientset kubern
 	// 2. Get logs from each container
 	containerNames := []string{"vpn", "envoy"} // Standard agent container names
 	for _, container := range containerNames {
-		t.Logf("--- %s container logs (last 100 lines) ---", container)
+		t.Logf("--- %s container logs (last 50 lines) ---", container)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		req := clientset.CoreV1().Pods(namespace).GetLogs(podName, &corev1.PodLogOptions{
 			Container: container,
-			TailLines: ptr.To(int64(100)),
+			TailLines: ptr.To(int64(50)),
 		})
 		logs, err := req.DoRaw(ctx)
+		cancel()
 		if err != nil {
 			t.Logf("Failed to get %s logs: %v", container, err)
 		} else {
@@ -524,13 +566,17 @@ func dumpAgentPodDiagnostics(t *testing.T, ctx context.Context, clientset kubern
 	}
 
 	// 3. kubectl get pod -o wide output
-	t.Log("--- kubectl get pod -o wide ---")
-	cmd := exec.CommandContext(ctx, "kubectl", "get", "pod", "-n", namespace, podName, "-o", "wide")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Logf("kubectl get pod failed: %v", err)
-	} else {
-		t.Logf("%s", string(output))
+	{
+		t.Log("--- kubectl get pod -o wide ---")
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		cmd := exec.CommandContext(ctx, "kubectl", "get", "pod", "-n", namespace, podName, "-o", "wide")
+		output, err := cmd.CombinedOutput()
+		cancel()
+		if err != nil {
+			t.Logf("kubectl get pod failed: %v", err)
+		} else {
+			t.Logf("%s", string(output))
+		}
 	}
 
 	t.Log("========== END AGENT POD DIAGNOSTICS ==========")
