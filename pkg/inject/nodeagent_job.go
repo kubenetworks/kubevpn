@@ -71,7 +71,8 @@ kubevpn server --debug -l tun:/tcp://${TrafficManagerService}:10801?route=${CIDR
 `
 	// The envoy payload renders the same embedded bootstrap template the mesh
 	// envoy sidecar uses.
-	envoyScript := `kubevpn agent-envoy-config --manager ${TrafficManagerService} > /etc/kubevpn/envoy.yaml
+	envoyScript := `mkdir -p /etc/kubevpn
+kubevpn agent-envoy-config --manager ${TrafficManagerService} > /etc/kubevpn/envoy.yaml
 exec envoy -c /etc/kubevpn/envoy.yaml --log-level warning
 `
 
