@@ -8,6 +8,7 @@ import (
 	"context"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	pkgdaemon "github.com/wencaiwulue/kubevpn/v2/pkg/daemon"
 )
 
 // Options carries everything the command layer resolves once at startup.
@@ -26,7 +27,11 @@ type Options struct {
 
 // Run serves MCP over stdio until ctx is cancelled or stdin closes.
 func Run(ctx context.Context, opts Options) error {
+	cli, err := pkgdaemon.GetClient(false)
+	if err != nil {
+		return err
+	}
 	server := mcp.NewServer(&mcp.Implementation{Name: "kubevpn", Version: opts.Version}, nil)
-	registerTools(server, opts)
+	registerTools(server, opts, cli)
 	return server.Run(ctx, &mcp.StdioTransport{})
 }
