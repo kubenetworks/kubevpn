@@ -37,4 +37,25 @@ func registerTools(server *mcp.Server, opts Options, d daemonAPI) {
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in ConnectInput) (*mcp.CallToolResult, *ConnectOutput, error) {
 		return connectTool(ctx, d, opts, in)
 	})
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "kubevpn_proxy",
+		Description: "Proxy a cluster workload's traffic to this machine with header-based scoping. ALWAYS pass headers; leave the workload when finished.",
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false},
+	}, func(ctx context.Context, req *mcp.CallToolRequest, in ProxyInput) (*mcp.CallToolResult, *ProxyOutput, error) {
+		return proxyTool(ctx, d, opts, in)
+	})
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "kubevpn_leave",
+		Description: "Restore proxied workloads to their original spec. Always call before disconnecting.",
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false},
+	}, func(ctx context.Context, req *mcp.CallToolRequest, in LeaveInput) (*mcp.CallToolResult, *LeaveOutput, error) {
+		return leaveTool(ctx, d, opts, in)
+	})
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "kubevpn_disconnect",
+		Description: "End a KubeVPN VPN session. Empty connectionId disconnects the current session.",
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false},
+	}, func(ctx context.Context, req *mcp.CallToolRequest, in DisconnectInput) (*mcp.CallToolResult, *DisconnectOutput, error) {
+		return disconnectTool(ctx, d, opts, in)
+	})
 }

@@ -13,6 +13,15 @@ import (
 // connectStream is the bidirectional Connect stream client.
 type connectStream = rpc.Daemon_ConnectClient
 
+// proxyStreamClient is the bidirectional Proxy stream client.
+type proxyStreamClient = rpc.Daemon_ProxyClient
+
+// leaveStreamClient is the bidirectional Leave stream client.
+type leaveStreamClient = rpc.Daemon_LeaveClient
+
+// disconnectStreamClient is the bidirectional Disconnect stream client.
+type disconnectStreamClient = rpc.Daemon_DisconnectClient
+
 // daemonAPI is the slice of the daemon gRPC surface the MCP tools expose. It
 // exists so handlers are testable against a fake; rpc.DaemonClient satisfies it.
 type daemonAPI interface {
