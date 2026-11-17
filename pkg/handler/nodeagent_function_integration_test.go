@@ -327,8 +327,8 @@ func TestIntegration_NodeAgentFunction(t *testing.T) {
 	})
 	t.Run("07-cleanup/disconnect", func(t *testing.T) {
 		cmd := exec.Command("kubevpn", "disconnect")
-		cmd.StdOut = tWriter{t}
-		cmd.StdErr = tWriter{t}
+		cmd.Stdout = tWriter{t}
+		cmd.Stderr = tWriter{t}
 		_ = cmd.Run() // Best effort
 	})
 	t.Run("07-cleanup/restore-attach-mode", func(t *testing.T) {
