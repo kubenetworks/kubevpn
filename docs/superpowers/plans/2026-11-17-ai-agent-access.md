@@ -189,7 +189,7 @@ git commit -m "feat(mcp): add MCP SDK and pkg/mcp server skeleton"
 - Produces:
   - `type daemonAPI interface { ... }` (exact methods below) — all handlers take this;
   - `var _ daemonAPI = rpc.DaemonClient(nil)` compile assertion;
-  - `func drainProgress[T interface{ GetMessage() string }](s progressStream[T]) (last string, msgs []string, err error)`;
+  - `drainProgress` — generic drain helper (exact signature in the Step 3 code block);
   - `type progressStream[T any] interface { RecvMsg(msg T) error }`;
   - `var errElevationRequired` sentinel + `func withHint(err error) error` — handlers wrap daemon failures with agent-actionable hints.
 
