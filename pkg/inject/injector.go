@@ -20,6 +20,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	clusterworkload "github.com/wencaiwulue/kubevpn/v2/pkg/cluster/workload"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
@@ -46,15 +47,24 @@ type InjectOptions struct {
 	Secret           *v1.Secret
 	Image            string
 	OwnerID          string
+	AttachMode       string
+}
+
+// isServiceTarget reports whether the given resource.Info represents a Kubernetes Service.
+func isServiceTarget(object *resource.Info) bool {
+	return clusterworkload.IsK8sService(object)
 }
 
 // NewInjector returns the appropriate Injector for the given workload and options.
 //   - Service targets use Fargate mode (SSH + Envoy).
-//   - All other targets use Mesh mode (VPN + Envoy). When headers are empty,
-//     envoy matches all requests (full traffic interception, equivalent to legacy VPN-only).
+//   - Non-Service targets use the cluster-configured attach mode: node-hosted
+//     agent Jobs or mesh sidecars. Empty headers remain full-proxy inside either mode.
 func NewInjector(opts InjectOptions) Injector {
-	if clusterworkload.IsK8sService(opts.Object) {
+	if isServiceTarget(opts.Object) {
 		return &fargateInjector{opts: opts}
+	}
+	if opts.AttachMode == config.AttachModeNodeAgent {
+		return &nodeAgentInjector{opts: opts}
 	}
 	return &meshInjector{opts: opts}
 }

@@ -115,6 +115,7 @@ func (s *TunConfigServer) ProxyInject(req *rpc.InjectRequest, stream rpc.TunConf
 			Secret:           tlsSecret,
 			Image:            req.GetImage(),
 			OwnerID:          req.GetOwnerID(),
+			AttachMode:       attachModeFromEnv(),
 		})
 		if err := injector.Inject(ctx); err != nil {
 			return status.Errorf(codes.Internal, "inject sidecar into %s: %v", workload, err)

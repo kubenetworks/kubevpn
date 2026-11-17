@@ -3,6 +3,7 @@ package xds
 import (
 	"context"
 	"net"
+	"os"
 
 	"k8s.io/client-go/kubernetes"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
@@ -83,4 +84,15 @@ func (s *TunConfigServer) ReconcileAllocsFromConfigMap(ctx context.Context) {
 func (s *TunConfigServer) Close() {
 	s.routes.Close()
 	s.leases.Close()
+}
+
+// attachModeFromEnv reads the cluster-level proxy attach mode. Default is the
+// sidecar injector; the value is set by the Helm chart / genDeploySpec.
+func attachModeFromEnv() string {
+	switch os.Getenv("KUBEVPN_PROXY_ATTACH_MODE") {
+	case config.AttachModeNodeAgent:
+		return config.AttachModeNodeAgent
+	default:
+		return config.AttachModeSidecar
+	}
 }

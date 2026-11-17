@@ -10,6 +10,11 @@ import (
 )
 
 const (
+	// AttachModeSidecar is the default attach mode where the proxy runs as a sidecar container.
+	AttachModeSidecar = "sidecar"
+	// AttachModeNodeAgent is the attach mode where the proxy runs as a node agent.
+	AttachModeNodeAgent = "node-agent"
+
 	// ConfigMapPodTrafficManager is the name of the ConfigMap used by the traffic manager.
 	ConfigMapPodTrafficManager = "kubevpn-traffic-manager"
 
