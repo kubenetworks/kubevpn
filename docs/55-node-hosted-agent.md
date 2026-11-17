@@ -224,3 +224,26 @@ Wire real components against `fake.NewSimpleClientset()`, structured as multi-ph
 - Added comprehensive unit tests in `pkg/agent/netns_test.go`
 - Enhanced e2e probe test to verify netns inode differs from agent's own netns
 - Added diagnostics dump helper in `nodeagent_function_integration_test.go` to capture failure state
+
+## 15. Bug Fix: systemd cgroup driver Pod UID Escaping
+
+**Problem**: The agent reported "cannot find netns for pod uid <uid> under /host/proc" on minikube clusters using the systemd cgroup driver.
+
+**Root Cause**:
+- systemd cgroup driver escapes hyphens in pod UIDs to underscores in cgroup paths:
+  - cgroupfs driver: `.../kubepods/pod36a197bc-6510-443d-b926-fa0a09e91efd/...`
+  - systemd driver: `.../kubelet.slice/kubelet-kubepods-besteffort-pod36a197bc_6510_443d_b926_fa0a09e91efd.slice/...`
+- The original `FindNetnsPID` implementation matched the raw pod UID (with hyphens) directly against the cgroup file content
+- On systemd driver clusters, this match would never succeed
+
+**Fix**:
+1. **Normalize cgroup content**: Replace underscores with hyphens in the cgroup file content before matching
+2. **Why this works for both drivers**:
+   - cgroupfs driver paths are unaffected (no underscores to replace)
+   - systemd driver paths are converted back to raw UID form for matching
+3. **Added test coverage**: Test cases for systemd cgroup driver format and mixed formats
+
+**Verification**:
+- Added `TestFindNetnsPIDMatchesPodUIDInSystemdCgroupDriver` and `TestFindNetnsPIDMatchesPodUIDInBothCgroupDrivers`
+- All existing tests continue to pass
+- Verified on real minikube cluster with `--cgroup-driver=systemd`

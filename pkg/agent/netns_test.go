@@ -51,6 +51,41 @@ func TestFindNetnsPIDMatchesPodUIDInCgroupV1AndV2(t *testing.T) {
 	}
 }
 
+func TestFindNetnsPIDMatchesPodUIDInSystemdCgroupDriver(t *testing.T) {
+	// systemd cgroup driver replaces hyphens with underscores in pod UID
+	uid := "36a197bc-6510-443d-b926-fa0a09e91efd"
+	uidWithUnderscores := "36a197bc_6510_443d_b926_fa0a09e91efd"
+	root := buildFakeProc(t, map[int]procEntry{
+		1:    {cgroup: "0::/"},
+		1234: {cgroup: "0::/kubelet.slice/kubelet-kubepods-besteffort-pod" + uidWithUnderscores + ".slice/cri-containerd-xxx.scope", comm: "pause"},
+		1235: {cgroup: "0::/kubelet.slice/kubelet-kubepods-besteffort-pod" + uidWithUnderscores + ".slice/cri-containerd-yyy.scope", comm: "nginx"},
+	})
+	pid, err := FindNetnsPID(root, uid)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pid != 1234 {
+		t.Fatalf("want lowest matching PID 1234 (systemd cgroup driver), got %d", pid)
+	}
+}
+
+func TestFindNetnsPIDMatchesPodUIDInBothCgroupDrivers(t *testing.T) {
+	// Test mixing both cgroup driver formats in the same proc tree
+	uid := "1234-5678-9abc"
+	uidWithUnderscores := "1234_5678_9abc"
+	root := buildFakeProc(t, map[int]procEntry{
+		100: {cgroup: "0::/kubepods/pod" + uid + "/abc", comm: "pause-cgroupfs"}, // cgroupfs format
+		200: {cgroup: "0::/kubelet.slice/kubelet-kubepods-pod" + uidWithUnderscores + ".slice/cri-containerd-def.scope", comm: "pause-systemd"}, // systemd format
+	})
+	pid, err := FindNetnsPID(root, uid)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pid != 100 {
+		t.Fatalf("want lowest matching PID 100 (both cgroup drivers), got %d", pid)
+	}
+}
+
 func TestFindNetnsPIDErrorsWhenAbsent(t *testing.T) {
 	root := buildFakeProc(t, map[int]procEntry{1: {cgroup: "0::/"}})
 	if _, err := FindNetnsPID(root, "nope"); err == nil {

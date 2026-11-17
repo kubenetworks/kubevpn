@@ -25,6 +25,14 @@ var shimProcessNames = map[string]bool{
 // processes, and returns the smallest remaining PID (which is typically the
 // pause/infra container that shares the pod's network namespace).
 // procRoot is the mounted host /proc.
+//
+// Handles both cgroupfs and systemd cgroup drivers:
+//   - cgroupfs driver uses raw pod UID with hyphens: "pod36a197bc-6510-443d-b926-fa0a09e91efd"
+//   - systemd driver escapes hyphens to underscores: "pod36a197bc_6510_443d_b926_fa0a09e91efd"
+//
+// We normalize cgroup content by replacing underscores with hyphens before matching,
+// which works for both drivers (cgroupfs paths are unaffected, systemd paths are
+// converted back to raw UID form for matching).
 func FindNetnsPID(procRoot, podUID string) (int, error) {
 	entries, err := os.ReadDir(procRoot)
 	if err != nil {
@@ -53,7 +61,10 @@ func FindNetnsPID(procRoot, podUID string) (int, error) {
 		if err != nil {
 			continue // kernel threads / racing exits
 		}
-		if strings.Contains(string(data), podUID) {
+		// Normalize cgroup content: replace underscores with hyphens to handle
+		// systemd cgroup driver's escaping of pod UID hyphens to underscores
+		normalized := strings.ReplaceAll(string(data), "_", "-")
+		if strings.Contains(normalized, podUID) {
 			candidates = append(candidates, pid)
 		}
 	}
