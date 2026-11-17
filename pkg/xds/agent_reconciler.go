@@ -92,7 +92,9 @@ func (r *AgentReconciler) reconcileOnce(ctx context.Context) error {
 
 	// Collect all pods selected by any node-agent Virtual
 	wantPods := make(map[types.UID]*corev1.Pod)
-	wantOwners := make(map[types.UID]string) // pod UID -> owner ID
+	wantOwners := make(map[types.UID]string)       // pod UID -> owner ID
+	wantWorkloadNS := make(map[types.UID]string)   // pod UID -> workload namespace
+	wantWorkloadID := make(map[types.UID]string)   // pod UID -> workload node ID (Virtual.UID)
 
 	for _, v := range virtuals {
 		if v.Selector == "" {
@@ -113,6 +115,8 @@ func (r *AgentReconciler) reconcileOnce(ctx context.Context) error {
 			// Use the first rule's owner ID for labeling; it doesn't matter
 			// which one we pick since the Job is shared across all owners.
 			wantOwners[pod.UID] = v.Rules[0].OwnerID
+			wantWorkloadNS[pod.UID] = v.Namespace
+			wantWorkloadID[pod.UID] = v.UID
 		}
 	}
 
@@ -172,6 +176,8 @@ func (r *AgentReconciler) reconcileOnce(ctx context.Context) error {
 
 		input := inject.AgentJobInput{
 			ManagerNamespace: r.managerNamespace,
+			Namespace:        wantWorkloadNS[podUID],
+			NodeID:           wantWorkloadID[podUID],
 			Image:            config.Image,
 			OwnerID:          wantOwners[podUID],
 			Secret:           r.secret,

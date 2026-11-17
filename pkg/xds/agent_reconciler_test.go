@@ -70,6 +70,8 @@ func seedWorld(t *testing.T) (*fake.Clientset, *AgentReconciler) {
 	}
 
 	job := inject.GenAgentJobSpec(inject.AgentJobInput{
+		Namespace:        "default",
+		NodeID:           "deployments.apps.web",
 		ManagerNamespace: managerNS,
 		Image:            config.Image,
 		OwnerID:          "owner-1",

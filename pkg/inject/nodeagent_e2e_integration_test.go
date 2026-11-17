@@ -170,6 +170,8 @@ func TestIntegration_NodeAgentJobAttachesNetns(t *testing.T) {
 	// 4. Create the agent Job manually (using GenAgentJobSpec directly,
 	// since we don't have a full traffic manager stack running)
 	jobInput := AgentJobInput{
+		Namespace:        e.namespace,
+		NodeID:           "deployments.apps.nginx",
 		ManagerNamespace: managerNS,
 		Image:            config.Image,
 		OwnerID:          "test-owner-1",
@@ -299,6 +301,8 @@ func TestIntegration_NodeAgentFake(t *testing.T) {
 		Spec: v1.PodSpec{NodeName: "test-node"},
 	}
 	input := AgentJobInput{
+		Namespace:        "test",
+		NodeID:           "deployments.apps.nginx",
 		ManagerNamespace: "test-ns",
 		Image:            "test-image",
 		OwnerID:          "test-owner",

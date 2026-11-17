@@ -10,16 +10,22 @@ import (
 	"k8s.io/utils/ptr"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
 // AgentJobInput captures the parameters needed to generate an agent Job spec.
 // Extracted from InjectOptions to decouple the reconciler from the full injector state.
 type AgentJobInput struct {
 	ManagerNamespace string
-	Image            string
-	OwnerID          string
-	Secret           *v1.Secret
-	Pod              *v1.Pod
+	// Namespace is the target workload's namespace (NOT the manager's) — part
+	// of the envoy node identifier.
+	Namespace string
+	// NodeID identifies the workload in the xDS control plane.
+	NodeID string
+	Image  string
+	OwnerID string
+	Secret  *v1.Secret
+	Pod     *v1.Pod
 }
 
 // agentJobInput captures the parameters needed to generate an agent Job spec.
@@ -54,6 +60,7 @@ func GenAgentJobSpec(input AgentJobInput) *batchv1.Job {
 		{Name: "CIDR6", Value: config.CIDR6.String()},
 		{Name: "TrafficManagerService", Value: trafficManagerAddr(input.ManagerNamespace)},
 		{Name: "POD_UID", Value: string(input.Pod.UID)},
+		{Name: "ENVOY_NODE_ID", Value: util.GenEnvoyUID(input.Namespace, input.NodeID)},
 	}, tlsEnv...)
 
 	vpnScript := `echo 1 > /proc/sys/net/ipv4/ip_forward
@@ -70,10 +77,11 @@ ip6tables -t nat -A PREROUTING -p tcp ! -s ::1 ! -d ${CIDR6} -j DNAT --to :15006
 kubevpn server --debug -l tun:/tcp://${TrafficManagerService}:10801?route=${CIDR4}
 `
 	// The envoy payload renders the same embedded bootstrap template the mesh
-	// envoy sidecar uses.
+	// envoy sidecar uses, with the same node identifier the sidecar passes
+	// via --service-node/--service-cluster (ADS requires node id + cluster).
 	envoyScript := `mkdir -p /etc/kubevpn
 kubevpn agent-envoy-config --manager ${TrafficManagerService} > /etc/kubevpn/envoy.yaml
-exec envoy -c /etc/kubevpn/envoy.yaml --log-level warning
+exec envoy -c /etc/kubevpn/envoy.yaml --log-level warning --service-node ${ENVOY_NODE_ID} --service-cluster ${ENVOY_NODE_ID}
 `
 
 	job := &batchv1.Job{

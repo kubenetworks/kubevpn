@@ -103,6 +103,8 @@ func EnsureAgentJob(ctx context.Context, cs kubernetes.Interface, input AgentJob
 func ensureAgentJob(ctx context.Context, cs kubernetes.Interface, o InjectOptions, pod *v1.Pod) error {
 	input := AgentJobInput{
 		ManagerNamespace: o.ManagerNamespace,
+		Namespace:        o.Controller.Namespace,
+		NodeID:           o.NodeID,
 		Image:            o.Image,
 		OwnerID:          o.OwnerID,
 		Secret:           o.Secret,
