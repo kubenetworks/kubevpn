@@ -1,7 +1,8 @@
 # Node-hosted Traffic Agent (Non-intrusive Proxy Attachment)
 
-> Status: **planned** — design agreed, not yet implemented. Sidecar injection
-> ([17-sidecar-injection.md](17-sidecar-injection.md)) remains the default until this ships.
+> Status: **implemented (P1-P3)** — opt-in non-intrusive proxy attachment mode
+> is now available. Sidecar injection ([17-sidecar-injection.md](17-sidecar-injection.md))
+> remains the default for compatibility.
 
 ## 1. The Question
 
@@ -181,9 +182,9 @@ Wire real components against `fake.NewSimpleClientset()`, structured as multi-ph
 | Telepresence node-agent mechanism, privileges, pros/cons | Measured (their docs, 2026-11: `/docs/howtos/agent-modes`, `/docs/concepts/architecture`) |
 | Sidecar bootstrap rules to replicate | Measured (`pkg/inject/container.go`, docs/17) |
 | Injection runs server-side in the manager | Measured (`pkg/xds/inject_service.go`, docs/17 §7) |
-| One image contains both vpn-server and envoy binaries | **Assumption** — verify `pkg/inject/container.go` image refs at implementation |
-| `/proc` cgroup scan finds the pod netns | Reasoned (cgroupfs layout, kubelet convention); **no prototype yet** — P1 must validate before P2 |
-| Managed-cluster PSS rejection behavior | Reasoned from PSA semantics; add an explicit inject-time probe in P2 |
+| One image contains both vpn-server and envoy binaries | **Measured** — `config.Image` contains all binaries, invoked via subcommands |
+| `/proc` cgroup scan finds the pod netns | **Implemented** (`pkg/agent/netns.go`); integration test written (`pkg/inject/nodeagent_e2e_integration_test.go`); real-cluster verification pending due to test cluster unavailability |
+| Managed-cluster PSS rejection behavior | **Implemented** — clean error path with user-facing message on privileged job rejection (tested in fake-cluster integration tests) |
 
 ## 13. Related Files
 
