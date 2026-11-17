@@ -6,9 +6,12 @@ import (
 	"strings"
 
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/sets"
 	pkgresource "k8s.io/cli-runtime/pkg/resource"
+	"k8s.io/client-go/kubernetes"
 	v12 "k8s.io/client-go/kubernetes/typed/core/v1"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
@@ -116,7 +119,7 @@ func injectedForManager(templateSpec *v1.PodTemplateSpec, managerNamespace strin
 
 // UnpatchContainer removes injected sidecar containers and cleans up envoy configuration.
 // Returns (empty, found) where empty indicates all rules were removed and containers cleaned up.
-func UnpatchContainer(ctx context.Context, nodeID string, factory cmdutil.Factory, mapInterface v12.ConfigMapInterface, object *pkgresource.Info, ownerID string) (bool, error) {
+func UnpatchContainer(ctx context.Context, nodeID string, factory cmdutil.Factory, mapInterface v12.ConfigMapInterface, object *pkgresource.Info, ownerID string, clientset kubernetes.Interface, managerNamespace string) (bool, error) {
 	u := object.Object.(*unstructured.Unstructured)
 	templateSpec, path, err := clusterworkload.GetPodTemplateSpecPath(u)
 	if err != nil {
@@ -141,9 +144,40 @@ func UnpatchContainer(ctx context.Context, nodeID string, factory cmdutil.Factor
 		return empty, nil
 	}
 
-	RemoveContainers(&templateSpec.Spec)
-	// unpatch/leave: do NOT undo on rollout failure — the previous revision still
-	// has the sidecar, so undo would re-apply what we just removed.
-	err = patchWorkload(ctx, factory, object, templateSpec, path, false)
-	return empty, err
+	// Only patch the workload if it actually has kubevpn containers
+	if alreadyInjected(templateSpec) {
+		RemoveContainers(&templateSpec.Spec)
+		// unpatch/leave: do NOT undo on rollout failure — the previous revision still
+		// has the sidecar, so undo would re-apply what we just removed.
+		err = patchWorkload(ctx, factory, object, templateSpec, path, false)
+		if err != nil {
+			return empty, err
+		}
+	}
+
+	// node-hosted agent Jobs are deleted when this owner's last rule is removed
+	// (docs/55 §6). For sidecar-mode workloads there are no such Jobs and this is
+	// a no-op; the workload patch above is likewise a no-op in node-agent mode.
+	if err := deleteAgentJobs(ctx, clientset, managerNamespace, ownerID); err != nil {
+		plog.G(ctx).Warnf("delete agent jobs for owner %s: %v", ownerID, err)
+	}
+
+	return empty, nil
+}
+
+// deleteAgentJobs removes every agent Job owned by ownerID. Best-effort by
+// callers; the manager lease reaper is the backstop (docs/55 §6).
+func deleteAgentJobs(ctx context.Context, cs kubernetes.Interface, managerNamespace, ownerID string) error {
+	jobs, err := cs.BatchV1().Jobs(managerNamespace).List(ctx, metav1.ListOptions{
+		LabelSelector: metav1.FormatLabelSelector(&metav1.LabelSelector{MatchLabels: map[string]string{"kubevpn/owner-id": ownerID}}),
+	})
+	if err != nil {
+		return fmt.Errorf("list agent jobs: %w", err)
+	}
+	for i := range jobs.Items {
+		if err := cs.BatchV1().Jobs(managerNamespace).Delete(ctx, jobs.Items[i].Name, metav1.DeleteOptions{}); err != nil && !errors.IsNotFound(err) {
+			return fmt.Errorf("delete agent job %s: %w", jobs.Items[i].Name, err)
+		}
+	}
+	return nil
 }

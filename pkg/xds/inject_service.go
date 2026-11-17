@@ -162,7 +162,7 @@ func (s *TunConfigServer) LeaveInject(req *rpc.InjectRequest, stream rpc.TunConf
 		if err != nil {
 			return err
 		}
-		empty, err := inject.UnpatchContainer(ctx, nodeID, s.factory, s.clientset.CoreV1().ConfigMaps(s.namespace), controller, req.GetOwnerID())
+		empty, err := inject.UnpatchContainer(ctx, nodeID, s.factory, s.clientset.CoreV1().ConfigMaps(s.namespace), controller, req.GetOwnerID(), s.clientset, s.namespace)
 		if err != nil {
 			return status.Errorf(codes.Internal, "leave workload %s: %v", workload, err)
 		}
