@@ -40,9 +40,9 @@ func TestGenRole(t *testing.T) {
 	if role.Namespace != namespace {
 		t.Fatalf("expected namespace %q, got %q", namespace, role.Namespace)
 	}
-	// Rule 0: configmaps/secrets; Rules 1-2: CIDR detection (see genRole / docs/46).
-	if len(role.Rules) != 3 {
-		t.Fatalf("expected 3 rules, got %d", len(role.Rules))
+	// Rule 0: configmaps/secrets; Rules 1-2: CIDR detection; Rule 3: batch/jobs (see genRole / docs/46).
+	if len(role.Rules) != 4 {
+		t.Fatalf("expected 4 rules, got %d", len(role.Rules))
 	}
 
 	rule := role.Rules[0]
@@ -200,7 +200,7 @@ func TestGenDeploySpec(t *testing.T) {
 	image := "docker.io/naison/kubevpn:test"
 	imagePullSecret := "my-pull-secret"
 
-	deploy := genDeploySpec(namespace, image, imagePullSecret)
+	deploy := genDeploySpec(namespace, image, imagePullSecret, config.AttachModeSidecar)
 
 	if deploy.Name != config.ConfigMapPodTrafficManager {
 		t.Fatalf("expected name %q, got %q", config.ConfigMapPodTrafficManager, deploy.Name)
@@ -295,7 +295,7 @@ func TestGenDeploySpec(t *testing.T) {
 }
 
 func TestGenDeploySpecNoImagePullSecret(t *testing.T) {
-	deploy := genDeploySpec("ns", "img:latest", "")
+	deploy := genDeploySpec("ns", "img:latest", "", config.AttachModeSidecar)
 
 	if len(deploy.Spec.Template.Spec.ImagePullSecrets) != 0 {
 		t.Fatalf("expected no imagePullSecrets when name is empty, got %d", len(deploy.Spec.Template.Spec.ImagePullSecrets))
@@ -303,7 +303,7 @@ func TestGenDeploySpecNoImagePullSecret(t *testing.T) {
 }
 
 func TestGenDeploySpec_Probes(t *testing.T) {
-	deploy := genDeploySpec("test-ns", "img:latest", "")
+	deploy := genDeploySpec("test-ns", "img:latest", "", config.AttachModeSidecar)
 	containers := deploy.Spec.Template.Spec.Containers
 	if len(containers) != 3 {
 		t.Fatalf("expected 3 containers, got %d", len(containers))
@@ -379,7 +379,7 @@ func TestGenDeploySpec_Probes(t *testing.T) {
 }
 
 func TestGenDeploySpec_ContainerPorts(t *testing.T) {
-	deploy := genDeploySpec("test-ns", "img:latest", "")
+	deploy := genDeploySpec("test-ns", "img:latest", "", config.AttachModeSidecar)
 	containers := deploy.Spec.Template.Spec.Containers
 	if len(containers) != 3 {
 		t.Fatalf("expected 3 containers, got %d", len(containers))
@@ -432,7 +432,7 @@ func TestGenDeploySpec_ContainerPorts(t *testing.T) {
 }
 
 func TestGenDeploySpec_SecurityContext(t *testing.T) {
-	deploy := genDeploySpec("test-ns", "img:latest", "")
+	deploy := genDeploySpec("test-ns", "img:latest", "", config.AttachModeSidecar)
 	containers := deploy.Spec.Template.Spec.Containers
 	if len(containers) != 3 {
 		t.Fatalf("expected 3 containers, got %d", len(containers))
@@ -472,7 +472,7 @@ func TestGenDeploySpec_SecurityContext(t *testing.T) {
 var _ *v1.ServiceAccount = genServiceAccount("x")
 var _ *v1.Service = genService("x")
 var _ *v1.Secret = genSecret("x", nil, nil, nil)
-var _ *appsv1.Deployment = genDeploySpec("x", "", "")
+var _ *appsv1.Deployment = genDeploySpec("x", "", "", config.AttachModeSidecar)
 
 func TestWaitPodReady_Timeout(t *testing.T) {
 	namespace := "test-ns"

@@ -46,6 +46,9 @@ rbac:
   # namespaces. Disable only if this manager serves a single namespace.
   proxyClusterRole: true
 
+proxy:
+  attachMode: sidecar
+
 podAnnotations: { }
 podLabels:
 

@@ -94,7 +94,7 @@ func upgradeDeploySpec(ctx context.Context, f cmdutil.Factory, ns, name, image s
 					break
 				}
 			}
-			deploySpec := genDeploySpec(ns, image, imagePullSecret)
+			deploySpec := genDeploySpec(ns, image, imagePullSecret, config.AttachModeSidecar)
 			*spec = deploySpec.Spec.Template.Spec
 			return nil
 		})

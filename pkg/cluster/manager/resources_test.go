@@ -43,7 +43,7 @@ func TestTcpProbes(t *testing.T) {
 // Req3: the traffic-manager server and xds containers default to
 // --debug so kubectl logs shows Debug; dns has no debug flag and must not get it.
 func TestGenDeploySpec_SidecarDefaultDebug(t *testing.T) {
-	deploy := genDeploySpec("ns", "img:latest", "")
+	deploy := genDeploySpec("ns", "img:latest", "", config.AttachModeSidecar)
 	byName := map[string]v1.Container{}
 	for _, c := range deploy.Spec.Template.Spec.Containers {
 		byName[c.Name] = c
@@ -63,7 +63,7 @@ func TestGenDeploySpec_SidecarDefaultDebug(t *testing.T) {
 }
 
 func TestGenDeploySpec_ImagePullSecret(t *testing.T) {
-	deploy := genDeploySpec("ns", "img:latest", "my-secret")
+	deploy := genDeploySpec("ns", "img:latest", "my-secret", config.AttachModeSidecar)
 	secrets := deploy.Spec.Template.Spec.ImagePullSecrets
 	if len(secrets) != 1 || secrets[0].Name != "my-secret" {
 		t.Errorf("expected imagePullSecret 'my-secret', got %v", secrets)
@@ -73,21 +73,21 @@ func TestGenDeploySpec_ImagePullSecret(t *testing.T) {
 // Fix 1: the traffic-manager must use the Recreate strategy so at most one
 // xds pod (and thus one TunConfigServer lease writer) runs at a time.
 func TestGenDeploySpec_RecreateStrategy(t *testing.T) {
-	deploy := genDeploySpec("ns", "img:latest", "")
+	deploy := genDeploySpec("ns", "img:latest", "", config.AttachModeSidecar)
 	if deploy.Spec.Strategy.Type != appsv1.RecreateDeploymentStrategyType {
 		t.Errorf("expected Recreate strategy, got %q", deploy.Spec.Strategy.Type)
 	}
 }
 
 func TestGenDeploySpec_NoImagePullSecret(t *testing.T) {
-	deploy := genDeploySpec("ns", "img:latest", "")
+	deploy := genDeploySpec("ns", "img:latest", "", config.AttachModeSidecar)
 	if len(deploy.Spec.Template.Spec.ImagePullSecrets) != 0 {
 		t.Errorf("expected no imagePullSecrets, got %v", deploy.Spec.Template.Spec.ImagePullSecrets)
 	}
 }
 
 func TestGenDeploySpec_ProbesSet(t *testing.T) {
-	deploy := genDeploySpec("ns", "img:latest", "")
+	deploy := genDeploySpec("ns", "img:latest", "", config.AttachModeSidecar)
 	containers := deploy.Spec.Template.Spec.Containers
 	if len(containers) != 3 {
 		t.Fatalf("expected 3 containers, got %d", len(containers))

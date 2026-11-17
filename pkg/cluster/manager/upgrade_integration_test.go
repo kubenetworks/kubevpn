@@ -48,7 +48,7 @@ func TestManagerUpgrade_TLSDeploymentServiceLifecycle(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
 			const ns = "team"
-			dep := genDeploySpec(ns, "old-image", "registry-credentials")
+			dep := genDeploySpec(ns, "old-image", "registry-credentials", config.AttachModeSidecar)
 			dep.APIVersion, dep.Kind = "apps/v1", "Deployment"
 			dep.ResourceVersion, dep.Generation = "1", 1
 			dep.Status = appsv1.DeploymentStatus{ObservedGeneration: 1, Replicas: 1, UpdatedReplicas: 1, AvailableReplicas: 1}
@@ -253,11 +253,11 @@ func TestManagerUpgrade_TLSDeploymentServiceLifecycle(t *testing.T) {
 func TestManagerImages_RollbackAndPodSelection(t *testing.T) {
 	ctx := context.Background()
 	const ns = "team"
-	dep := genDeploySpec(ns, "desired-image", "")
+	dep := genDeploySpec(ns, "desired-image", "", config.AttachModeSidecar)
 	pod := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "manager", Namespace: ns, Labels: map[string]string{"app": config.ConfigMapPodTrafficManager}}, Spec: dep.Spec.Template.Spec, Status: v1.PodStatus{Conditions: []v1.PodCondition{{Type: v1.PodReady, Status: v1.ConditionTrue}}, ContainerStatuses: []v1.ContainerStatus{{Ready: true}}}}
 	pod.Spec.Containers[0].Image = "rollback-image"
 	// The pod and deployment must not share the container backing array.
-	dep = genDeploySpec(ns, "desired-image", "")
+	dep = genDeploySpec(ns, "desired-image", "", config.AttachModeSidecar)
 	cs := fake.NewSimpleClientset(dep, pod)
 	desired, running, err := Images(ctx, cs, ns)
 	if err != nil || desired != "desired-image" || running != "rollback-image" {

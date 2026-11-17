@@ -96,6 +96,12 @@ func genRole(namespace string) *rbacv1.Role {
 				APIGroups: []string{""},
 				Resources: []string{"services"},
 			},
+			{
+				// Manage node-agent Jobs for attach mode node-agent
+				Verbs:     []string{"create", "get", "list", "watch", "delete"},
+				APIGroups: []string{"batch"},
+				Resources: []string{"jobs"},
+			},
 		},
 	)
 }
@@ -260,7 +266,7 @@ func tcpProbes(port int32) (*v1.Probe, *v1.Probe, *v1.Probe) {
 		&v1.Probe{ProbeHandler: handler, InitialDelaySeconds: 1, PeriodSeconds: 2, FailureThreshold: 15}
 }
 
-func genDeploySpec(namespace, image, imagePullSecretName string) *appsv1.Deployment {
+func genDeploySpec(namespace, image, imagePullSecretName, attachMode string) *appsv1.Deployment {
 	tcp10801 := config.PortNameTCP
 	tcp9002 := config.PortNameEnvoy
 	udp53 := config.PortNameDNS
@@ -334,7 +340,10 @@ func genDeploySpec(namespace, image, imagePullSecretName string) *appsv1.Deploym
 									},
 								},
 							}},
-							Env: []v1.EnvVar{},
+							Env: []v1.EnvVar{{
+								Name:  "KUBEVPN_PROXY_ATTACH_MODE",
+								Value: attachMode,
+							}},
 							Ports: []v1.ContainerPort{{
 								Name:          tcp10801,
 								ContainerPort: config.PortTCP,
