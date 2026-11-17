@@ -5,11 +5,13 @@ import (
 	"net"
 	"os"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/xds/internal/discovery"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/xds/internal/envoy"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/xds/internal/leases"
@@ -21,11 +23,12 @@ const LeaseDuration = leases.LeaseDuration
 // TunConfigServer adapts the RPC protocol to the lease and discovery domains.
 type TunConfigServer struct {
 	rpc.UnimplementedTunConfigServiceServer
-	clientset kubernetes.Interface
-	namespace string
-	factory   cmdutil.Factory
-	leases    *leases.Manager
-	routes    *discovery.Broadcaster
+	clientset        kubernetes.Interface
+	namespace        string
+	factory          cmdutil.Factory
+	leases           *leases.Manager
+	routes           *discovery.Broadcaster
+	agentReconciler  *AgentReconciler
 }
 
 // NewTunConfigServer initializes the mandatory allocator before serving RPCs.
@@ -41,6 +44,15 @@ func NewTunConfigServer(ctx context.Context, clientset kubernetes.Interface, nam
 	}
 	s.leases = manager
 	s.routes = discovery.New(ctx, clientset)
+
+	// Best-effort load TLS secret for agent reconciler
+	secret, err := clientset.CoreV1().Secrets(namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		plog.G(ctx).Warnf("[TunConfigServer] failed to load TLS secret, agent reconciler disabled: %v", err)
+	} else {
+		s.agentReconciler = NewAgentReconciler(clientset, namespace, secret)
+	}
+
 	return s, nil
 }
 
