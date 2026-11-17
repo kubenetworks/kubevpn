@@ -53,6 +53,19 @@ func Upgrade(ctx context.Context, f cmdutil.Factory, namespace, image string) er
 	return upgradeServiceSpec(ctx, f, namespace)
 }
 
+// existingAttachMode reads KUBEVPN_PROXY_ATTACH_MODE from the pod spec's containers.
+// If not found, returns config.AttachModeSidecar as default.
+func existingAttachMode(spec *v1.PodSpec) string {
+	for _, container := range spec.Containers {
+		for _, env := range container.Env {
+			if env.Name == "KUBEVPN_PROXY_ATTACH_MODE" {
+				return env.Value
+			}
+		}
+	}
+	return config.AttachModeSidecar
+}
+
 func upgradeDeploySpec(ctx context.Context, f cmdutil.Factory, ns, name, image string) error {
 	r := f.NewBuilder().
 		WithScheme(scheme.Scheme, scheme.Scheme.PrioritizedVersionsAllGroups()...).
@@ -94,7 +107,8 @@ func upgradeDeploySpec(ctx context.Context, f cmdutil.Factory, ns, name, image s
 					break
 				}
 			}
-			deploySpec := genDeploySpec(ns, image, imagePullSecret, config.AttachModeSidecar)
+			attachMode := existingAttachMode(spec)
+			deploySpec := genDeploySpec(ns, image, imagePullSecret, attachMode)
 			*spec = deploySpec.Spec.Template.Spec
 			return nil
 		})
