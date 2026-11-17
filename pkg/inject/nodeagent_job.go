@@ -12,26 +12,48 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
-// agentJobName is deterministic per target pod, making create-or-skip
+// AgentJobInput captures the parameters needed to generate an agent Job spec.
+// Extracted from InjectOptions to decouple the reconciler from the full injector state.
+type AgentJobInput struct {
+	ManagerNamespace string
+	Image            string
+	OwnerID          string
+	Secret           *v1.Secret
+	Pod              *v1.Pod
+}
+
+// agentJobInput captures the parameters needed to generate an agent Job spec.
+// Extracted from InjectOptions to decouple the reconciler from the full injector state.
+// Deprecated: Use AgentJobInput instead.
+type agentJobInput = AgentJobInput
+
+// AgentJobName is deterministic per target pod, making create-or-skip
 // idempotent for reconcile.
-func agentJobName(uid types.UID) string {
+func AgentJobName(uid types.UID) string {
 	return fmt.Sprintf("kubevpn-nodeagent-%s", uid)
 }
 
-// genAgentJobSpec builds the privileged, node-pinned agent Job (docs/55 §4).
+// agentJobName is deterministic per target pod, making create-or-skip
+// idempotent for reconcile.
+// Deprecated: Use AgentJobName instead.
+func agentJobName(uid types.UID) string {
+	return AgentJobName(uid)
+}
+
+// GenAgentJobSpec builds the privileged, node-pinned agent Job (docs/55 §4).
 // Two containers mirror the mesh sidecar pair; both enter the pod netns via
 // `kubevpn agent` before exec'ing their payload.
-func genAgentJobSpec(opts InjectOptions, pod *v1.Pod) *batchv1.Job {
+func GenAgentJobSpec(input AgentJobInput) *batchv1.Job {
 	privileged := true
 	tlsEnv := []v1.EnvVar{}
-	if opts.Secret != nil {
-		tlsEnv = tlsEnvVars(opts.Secret)
+	if input.Secret != nil {
+		tlsEnv = tlsEnvVars(input.Secret)
 	}
 	commonEnv := append([]v1.EnvVar{
 		{Name: "CIDR4", Value: config.CIDR.String()},
 		{Name: "CIDR6", Value: config.CIDR6.String()},
-		{Name: "TrafficManagerService", Value: trafficManagerAddr(opts.ManagerNamespace)},
-		{Name: "POD_UID", Value: string(pod.UID)},
+		{Name: "TrafficManagerService", Value: trafficManagerAddr(input.ManagerNamespace)},
+		{Name: "POD_UID", Value: string(input.Pod.UID)},
 	}, tlsEnv...)
 
 	vpnScript := `echo 1 > /proc/sys/net/ipv4/ip_forward
@@ -44,7 +66,7 @@ ip6tables -P INPUT ACCEPT
 iptables -P FORWARD ACCEPT
 ip6tables -P FORWARD ACCEPT
 iptables -t nat -A PREROUTING -p tcp ! -s 127.0.0.1 ! -d ${CIDR4} -j DNAT --to :15006
-ip6tables -t nat -A PREROUTING -p tcp ! -s 0:0:0:0:0:0:0:1 ! -d ${CIDR6} -j DNAT --to :15006
+ip6tables -t nat -A PREROUTING -p tcp ! -s ::1 ! -d ${CIDR6} -j DNAT --to :15006
 kubevpn server --debug -l tun:/tcp://${TrafficManagerService}:10801?route=${CIDR4}
 `
 	// The envoy payload renders the same embedded bootstrap template the mesh
@@ -55,23 +77,23 @@ exec envoy -c /etc/kubevpn/envoy.yaml --log-level warning
 
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      agentJobName(pod.UID),
-			Namespace: opts.ManagerNamespace,
+			Name:      AgentJobName(input.Pod.UID),
+			Namespace: input.ManagerNamespace,
 			Labels: map[string]string{
-				"kubevpn/owner-id": opts.OwnerID,
-				"kubevpn/pod-uid":  string(pod.UID),
+				"kubevpn/owner-id": input.OwnerID,
+				"kubevpn/pod-uid":  string(input.Pod.UID),
 			},
 		},
 		Spec: batchv1.JobSpec{
 			BackoffLimit: ptr.To[int32](3),
 			Template: v1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
-					"kubevpn/owner-id": opts.OwnerID,
-					"kubevpn/pod-uid":  string(pod.UID),
+					"kubevpn/owner-id": input.OwnerID,
+					"kubevpn/pod-uid":  string(input.Pod.UID),
 				}},
 				Spec: v1.PodSpec{
 					RestartPolicy: v1.RestartPolicyOnFailure,
-					NodeSelector:  map[string]string{"kubernetes.io/hostname": pod.Spec.NodeName},
+					NodeSelector:  map[string]string{"kubernetes.io/hostname": input.Pod.Spec.NodeName},
 					HostPID:       true,
 					Volumes: []v1.Volume{{
 						Name: "host-proc",
@@ -82,8 +104,8 @@ exec envoy -c /etc/kubevpn/envoy.yaml --log-level warning
 					Containers: []v1.Container{
 						{
 							Name:    "vpn",
-							Image:   opts.Image,
-							Command: []string{"kubevpn", "agent", "--pod-uid", string(pod.UID), "--proc-root", "/host/proc", "--", "/bin/bash", "-c", vpnScript},
+							Image:   input.Image,
+							Command: []string{"kubevpn", "agent", "--pod-uid", string(input.Pod.UID), "--proc-root", "/host/proc", "--", "/bin/bash", "-c", vpnScript},
 							Env:     commonEnv,
 							SecurityContext: &v1.SecurityContext{
 								Privileged: &privileged,
@@ -92,8 +114,8 @@ exec envoy -c /etc/kubevpn/envoy.yaml --log-level warning
 						},
 						{
 							Name:    "envoy",
-							Image:   opts.Image,
-							Command: []string{"kubevpn", "agent", "--pod-uid", string(pod.UID), "--proc-root", "/host/proc", "--", "/bin/bash", "-c", envoyScript},
+							Image:   input.Image,
+							Command: []string{"kubevpn", "agent", "--pod-uid", string(input.Pod.UID), "--proc-root", "/host/proc", "--", "/bin/bash", "-c", envoyScript},
 							Env:     commonEnv,
 							SecurityContext: &v1.SecurityContext{
 								Privileged: &privileged,
@@ -106,4 +128,12 @@ exec envoy -c /etc/kubevpn/envoy.yaml --log-level warning
 		},
 	}
 	return job
+}
+
+// genAgentJobSpec builds the privileged, node-pinned agent Job (docs/55 §4).
+// Two containers mirror the mesh sidecar pair; both enter the pod netns via
+// `kubevpn agent` before exec'ing their payload.
+// Deprecated: Use GenAgentJobSpec instead.
+func genAgentJobSpec(input AgentJobInput) *batchv1.Job {
+	return GenAgentJobSpec(input)
 }

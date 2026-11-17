@@ -31,6 +31,14 @@ func (n *nodeAgentInjector) Inject(ctx context.Context) error {
 		return err
 	}
 	ports, portmap := collectPorts(templateSpec, o.PortMaps)
+
+	// Extract template labels as selector for the reconciler
+	var selector string
+	podLabels, found, err := unstructured.NestedStringMap(u.Object, "spec", "template", "metadata", "labels")
+	if err == nil && found && len(podLabels) > 0 {
+		selector = labels.Set(podLabels).AsSelector().String()
+	}
+
 	// Rules are identical to mesh mode — same xDS contract, same OwnerID merge.
 	if err = addEnvoyConfig(ctx, o.Clientset.CoreV1().ConfigMaps(o.ManagerNamespace), envoyRuleSpec{
 		Namespace:    o.Controller.Namespace,
@@ -41,6 +49,7 @@ func (n *nodeAgentInjector) Inject(ctx context.Context) error {
 		PortMap:      portmap,
 		Ports:        ports,
 		OwnerID:      o.OwnerID,
+		Selector:     selector,
 	}); err != nil {
 		return fmt.Errorf("add envoy config: %w", err)
 	}
@@ -78,13 +87,27 @@ func listControllerPods(ctx context.Context, cs kubernetes.Interface, controller
 	})
 }
 
-// ensureAgentJob creates the deterministic agent Job; AlreadyExists is a no-op
+// EnsureAgentJob creates the deterministic agent Job; AlreadyExists is a no-op
 // (second owner, reconcile re-run).
-func ensureAgentJob(ctx context.Context, cs kubernetes.Interface, o InjectOptions, pod *v1.Pod) error {
-	_, err := cs.BatchV1().Jobs(o.ManagerNamespace).Create(ctx, genAgentJobSpec(o, pod), metav1.CreateOptions{})
+func EnsureAgentJob(ctx context.Context, cs kubernetes.Interface, input AgentJobInput) error {
+	_, err := cs.BatchV1().Jobs(input.ManagerNamespace).Create(ctx, GenAgentJobSpec(input), metav1.CreateOptions{})
 	if errors.IsAlreadyExists(err) {
 		return nil
 	}
 	return err
+}
+
+// ensureAgentJob creates the deterministic agent Job; AlreadyExists is a no-op
+// (second owner, reconcile re-run).
+// Deprecated: Use EnsureAgentJob instead.
+func ensureAgentJob(ctx context.Context, cs kubernetes.Interface, o InjectOptions, pod *v1.Pod) error {
+	input := AgentJobInput{
+		ManagerNamespace: o.ManagerNamespace,
+		Image:            o.Image,
+		OwnerID:          o.OwnerID,
+		Secret:           o.Secret,
+		Pod:              pod,
+	}
+	return EnsureAgentJob(ctx, cs, input)
 }
 

@@ -71,6 +71,9 @@ type envoyRuleSpec struct {
 	PortMap      map[int32]string
 	FargateMode  bool
 	OwnerID      string
+	// Selector is the pod label selector for the workload, used by the agent
+	// reconciler to match pods to rules. Only set in node-agent mode.
+	Selector string
 }
 
 // validate checks that all required fields are populated.
@@ -133,9 +136,15 @@ func addVirtualRule(ctx context.Context, v []*controlplane.Virtual, spec envoyRu
 			UID:           spec.NodeID,
 			Namespace:     spec.Namespace,
 			FargateMode:   spec.FargateMode,
+			Selector:      spec.Selector,
 			Ports:         spec.Ports,
 			Rules:         []*controlplane.Rule{newRule},
 		})
+	}
+
+	// If we have a selector and the existing Virtual doesn't, set it
+	if spec.Selector != "" && v[index].Selector == "" {
+		v[index].Selector = spec.Selector
 	}
 
 	// 2) same owner updating their own rule (matched by OwnerID, non-fargate)
