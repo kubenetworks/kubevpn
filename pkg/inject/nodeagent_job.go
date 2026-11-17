@@ -25,35 +25,31 @@ func genAgentJobSpec(opts InjectOptions, pod *v1.Pod) *batchv1.Job {
 	privileged := true
 	tlsEnv := []v1.EnvVar{}
 	if opts.Secret != nil {
-		tlsEnv = []v1.EnvVar{
-			{Name: "tls_crt", ValueFrom: &v1.EnvVarSource{SecretKeyRef: &v1.SecretKeySelector{LocalObjectReference: v1.LocalObjectReference{Name: opts.Secret.Name}, Key: "tls_crt"}}},
-			{Name: "tls_key", ValueFrom: &v1.EnvVarSource{SecretKeyRef: &v1.SecretKeySelector{LocalObjectReference: v1.LocalObjectReference{Name: opts.Secret.Name}, Key: "tls_key"}}},
-			{Name: "tls_server_name", ValueFrom: &v1.EnvVarSource{SecretKeyRef: &v1.SecretKeySelector{LocalObjectReference: v1.LocalObjectReference{Name: opts.Secret.Name}, Key: "tls_server_name"}}},
-		}
+		tlsEnv = tlsEnvVars(opts.Secret)
 	}
 	commonEnv := append([]v1.EnvVar{
 		{Name: "CIDR4", Value: config.CIDR.String()},
 		{Name: "CIDR6", Value: config.CIDR6.String()},
-		{Name: "TrafficManagerService", Value: fmt.Sprintf("kubevpn-traffic-manager.%s", opts.ManagerNamespace)},
+		{Name: "TrafficManagerService", Value: trafficManagerAddr(opts.ManagerNamespace)},
 		{Name: "POD_UID", Value: string(pod.UID)},
 	}, tlsEnv...)
 
-	vpnScript := `
-echo 1 > /proc/sys/net/ipv4/ip_forward
+	vpnScript := `echo 1 > /proc/sys/net/ipv4/ip_forward
 echo 0 > /proc/sys/net/ipv6/conf/all/disable_ipv6
 echo 1 > /proc/sys/net/ipv6/conf/all/forwarding
 echo 0 > /proc/sys/net/ipv4/tcp_timestamps
-for b in iptables-nft iptables-legacy; do "$b" -t nat -L &>/dev/null && update-alternatives --set iptables /usr/sbin/"$b" && update-alternatives --set ip6tables /usr/sbin/${b/iptables/ip6tables} && break; done
-iptables -P INPUT ACCEPT; ip6tables -P INPUT ACCEPT
-iptables -P FORWARD ACCEPT; ip6tables -P FORWARD ACCEPT
+for b in iptables-nft iptables-legacy; do "$b" -t nat -L &>/dev/null && update-alternatives --set iptables /usr/sbin/$b && update-alternatives --set ip6tables /usr/sbin/${b/iptables/ip6tables} && break; done
+iptables -P INPUT ACCEPT
+ip6tables -P INPUT ACCEPT
+iptables -P FORWARD ACCEPT
+ip6tables -P FORWARD ACCEPT
 iptables -t nat -A PREROUTING -p tcp ! -s 127.0.0.1 ! -d ${CIDR4} -j DNAT --to :15006
-ip6tables -t nat -A PREROUTING -p tcp ! -s ::1 ! -d ${CIDR6} -j DNAT --to :15006
-exec kubevpn server --debug -l tun:/tcp://${TrafficManagerService}:10801?route=${CIDR4}
+ip6tables -t nat -A PREROUTING -p tcp ! -s 0:0:0:0:0:0:0:1 ! -d ${CIDR6} -j DNAT --to :15006
+kubevpn server --debug -l tun:/tcp://${TrafficManagerService}:10801?route=${CIDR4}
 `
 	// The envoy payload renders the same embedded bootstrap template the mesh
 	// envoy sidecar uses.
-	envoyScript := `
-kubevpn agent-envoy-config --manager ${TrafficManagerService} > /etc/kubevpn/envoy.yaml
+	envoyScript := `kubevpn agent-envoy-config --manager ${TrafficManagerService} > /etc/kubevpn/envoy.yaml
 exec envoy -c /etc/kubevpn/envoy.yaml --log-level warning
 `
 
@@ -87,8 +83,7 @@ exec envoy -c /etc/kubevpn/envoy.yaml --log-level warning
 						{
 							Name:    "vpn",
 							Image:   opts.Image,
-							Command: []string{"/bin/bash", "-c"},
-							Args:    []string{fmt.Sprintf("kubevpn agent --pod-uid %s --proc-root /host/proc -- /bin/bash -c %q", pod.UID, vpnScript)},
+							Command: []string{"kubevpn", "agent", "--pod-uid", string(pod.UID), "--proc-root", "/host/proc", "--", "/bin/bash", "-c", vpnScript},
 							Env:     commonEnv,
 							SecurityContext: &v1.SecurityContext{
 								Privileged: &privileged,
@@ -98,8 +93,7 @@ exec envoy -c /etc/kubevpn/envoy.yaml --log-level warning
 						{
 							Name:    "envoy",
 							Image:   opts.Image,
-							Command: []string{"/bin/bash", "-c"},
-							Args:    []string{fmt.Sprintf("kubevpn agent --pod-uid %s --proc-root /host/proc -- /bin/bash -c %q", pod.UID, envoyScript)},
+							Command: []string{"kubevpn", "agent", "--pod-uid", string(pod.UID), "--proc-root", "/host/proc", "--", "/bin/bash", "-c", envoyScript},
 							Env:     commonEnv,
 							SecurityContext: &v1.SecurityContext{
 								Privileged: &privileged,

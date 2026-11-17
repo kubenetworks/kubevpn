@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"maps"
 	"sort"
+	"strings"
 	"text/template"
 
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -51,22 +52,11 @@ func renderEnvoyConfig(tmplStr string, value string) string {
 func RenderEnvoyBootstrap(_ context.Context, managerAddr string) ([]byte, error) {
 	// Strip port if present
 	host := managerAddr
-	if idx := findLastIndex(host, ":"); idx != -1 {
+	if idx := strings.LastIndex(host, ":"); idx != -1 {
 		host = host[:idx]
 	}
 	configYaml := renderEnvoyConfig(string(envoyConfig), host)
 	return []byte(configYaml), nil
-}
-
-func findLastIndex(s, sep string) int {
-	lastIdx := -1
-	for i := len(s) - 1; i >= 0; i-- {
-		if len(sep) > 0 && s[i] == sep[0] {
-			lastIdx = i
-			break
-		}
-	}
-	return lastIdx
 }
 
 // envoyRuleSpec captures the parameters for adding a proxy rule to the Envoy config.
@@ -152,8 +142,8 @@ func addVirtualRule(ctx context.Context, v []*controlplane.Virtual, spec envoyRu
 	if !v[index].IsFargateMode() {
 		for j, rule := range v[index].Rules {
 			if rule.OwnerID == spec.OwnerID {
-				v[index].Rules[j].Headers = util.Merge[string, string](v[index].Rules[j].Headers, spec.Headers)
-				v[index].Rules[j].PortMap = util.Merge[int32, string](v[index].Rules[j].PortMap, spec.PortMap)
+				v[index].Rules[j].Headers = util.Merge(v[index].Rules[j].Headers, spec.Headers)
+				v[index].Rules[j].PortMap = util.Merge(v[index].Rules[j].PortMap, spec.PortMap)
 				v[index].Rules[j].LocalTunIPv4 = spec.LocalTunIPv4
 				v[index].Rules[j].LocalTunIPv6 = spec.LocalTunIPv6
 				return v
