@@ -114,6 +114,14 @@ func TestSSHFunctions(t *testing.T) {
 	// 4) test proxy mode with service mesh and gvisor
 	t.Run("04-proxy-mesh-fargate/kubevpnLeave", u.kubevpnLeave)
 	t.Run("04-proxy-mesh-fargate/kubevpnUninstall", u.kubevpnUninstall(""))
+	t.Run("04-proxy-mesh-fargate/re-pin-sidecar", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		if err := u.setManagerAttachMode(ctx, pkgconfig.AttachModeSidecar); err != nil {
+			t.Fatalf("Failed to re-pin attach mode to sidecar: %v", err)
+		}
+		u.waitManagerReady(t)
+	})
 	t.Run("04-proxy-mesh-fargate/kubevpnProxyWithServiceMeshAndFargateMode", u.kubevpnProxyWithServiceMeshAndFargateMode)
 	t.Run("04-proxy-mesh-fargate/commonTest", u.commonTest)
 	t.Run("04-proxy-mesh-fargate/serviceMeshReviewsServiceIP", u.serviceMeshReviewsServiceIP)
@@ -141,6 +149,17 @@ func TestSSHFunctions(t *testing.T) {
 	// 7) install centrally in ns kubevpn -- connect mode
 	t.Run("07-central-connect/centerKubevpnUninstall", u.kubevpnUninstall(""))
 	t.Run("07-central-connect/centerKubevpnInstallInNsKubevpn", u.kubevpnConnectToNsKubevpn)
+	t.Run("07-central-connect/pin-sidecar-in-kubevpn-ns", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		if err := u.setManagerAttachModeInNamespace(ctx, pkgconfig.AttachModeSidecar, "kubevpn"); err != nil {
+			t.Fatalf("Failed to pin attach mode to sidecar in kubevpn ns: %v", err)
+		}
+		// Wait for manager in kubevpn ns to be ready
+		if err := waitSSHManagerReadyWithContext(ctx, u.clientset, "kubevpn"); err != nil {
+			t.Logf("Warning: failed to wait for manager in kubevpn ns to be ready: %v", err)
+		}
+	})
 	t.Run("07-central-connect/centerKubevpnConnect", u.kubevpnConnect)
 	t.Run("07-central-connect/checkServiceShouldNotInNsDefault", u.checkServiceShouldNotInNsDefault)
 	t.Run("07-central-connect/centerCheckConnectStatus", u.centerCheckConnectStatus)
@@ -975,7 +994,11 @@ func (u *sshUt) startupHttpServer(t *testing.T, addr, str string) {
 }
 
 func (u *sshUt) getCurrentAttachMode(ctx context.Context) (string, error) {
-	deploy, err := u.clientset.AppsV1().Deployments(u.namespace).Get(ctx, pkgconfig.ConfigMapPodTrafficManager, v1.GetOptions{})
+	return u.getCurrentAttachModeInNamespace(ctx, u.namespace)
+}
+
+func (u *sshUt) getCurrentAttachModeInNamespace(ctx context.Context, namespace string) (string, error) {
+	deploy, err := u.clientset.AppsV1().Deployments(namespace).Get(ctx, pkgconfig.ConfigMapPodTrafficManager, v1.GetOptions{})
 	if err != nil {
 		return "", err
 	}
@@ -990,13 +1013,17 @@ func (u *sshUt) getCurrentAttachMode(ctx context.Context) (string, error) {
 }
 
 func (u *sshUt) setManagerAttachMode(ctx context.Context, mode string) error {
+	return u.setManagerAttachModeInNamespace(ctx, mode, u.namespace)
+}
+
+func (u *sshUt) setManagerAttachModeInNamespace(ctx context.Context, mode string, namespace string) error {
 	// Use retry with ResourceVersion for safe updates
 	return wait.ExponentialBackoffWithContext(ctx, wait.Backoff{
 		Duration: 500 * time.Millisecond,
 		Factor:   2,
 		Steps:    5,
 	}, func(ctx context.Context) (bool, error) {
-		deploy, err := u.clientset.AppsV1().Deployments(u.namespace).Get(ctx, pkgconfig.ConfigMapPodTrafficManager, v1.GetOptions{})
+		deploy, err := u.clientset.AppsV1().Deployments(namespace).Get(ctx, pkgconfig.ConfigMapPodTrafficManager, v1.GetOptions{})
 		if err != nil {
 			return false, err
 		}
@@ -1029,7 +1056,7 @@ func (u *sshUt) setManagerAttachMode(ctx context.Context, mode string) error {
 			return true, nil
 		}
 
-		_, err = u.clientset.AppsV1().Deployments(u.namespace).Update(ctx, deploy, v1.UpdateOptions{})
+		_, err = u.clientset.AppsV1().Deployments(namespace).Update(ctx, deploy, v1.UpdateOptions{})
 		if err != nil {
 			// Conflict, retry
 			return false, nil

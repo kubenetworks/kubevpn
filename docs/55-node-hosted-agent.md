@@ -267,3 +267,17 @@ Wire real components against `fake.NewSimpleClientset()`, structured as multi-ph
 **Follow-up**: This is tracked as a known issue to be addressed in a future release. Potential fix directions include:
 - SSH-relayed client mesh routing improvements
 - Inject-time transport type awareness for smarter attach-mode selection
+
+## 17. Important Note: Uninstall Resets Attach-Mode
+
+**Note**: When you uninstall the traffic manager (using `kubevpn uninstall kubevpn`), the attach-mode configuration is deleted. When you reinstall or the manager is automatically recreated, it will default to `attachMode=auto` (which may select node-agent mode if the cluster has sufficient privileges).
+
+**Impact**:
+- Tests that rely on sidecar mode (like `TestSSHFunctions`) must re-pin the attach-mode after any uninstall step
+- Users who have configured a specific attach-mode must reapply their configuration after uninstalling and reinstalling
+
+**Workaround for Tests**:
+- After any `kubevpnUninstall` step, explicitly set the attach-mode back to `sidecar` (or your desired mode) before proceeding with proxy/mesh tests
+- `TestSSHFunctions` has been updated to do this in two locations:
+  1. After `04-proxy-mesh-fargate/kubevpnUninstall`
+  2. After `07-central-connect/centerKubevpnInstallInNsKubevpn` (for the kubevpn namespace)
