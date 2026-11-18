@@ -250,6 +250,7 @@ sleep infinity
 
 	// 6. Wait for the Job pod to start and check logs
 	var agentPod *v1.Pod
+	var rateLimited bool // apiserver starved this client at any point during the poll
 	err = wait.PollUntilContextTimeout(e.ctx, 2*time.Second, 5*time.Minute, true, func(ctx context.Context) (bool, error) {
 		pods, err := e.clientset.CoreV1().Pods(managerNS).List(ctx, metav1.ListOptions{
 			LabelSelector: fmt.Sprintf("kubevpn/pod-uid=%s", string(pod.UID)),
@@ -257,6 +258,9 @@ sleep infinity
 		if err != nil {
 			// Transient apiserver pressure (rate limiting) must not abort the
 			// poll — log and keep trying until the budget runs out.
+			if strings.Contains(err.Error(), "rate limiter") {
+				rateLimited = true
+			}
 			t.Logf("List agent pods: %v (retrying)", err)
 			return false, nil
 		}
@@ -272,12 +276,13 @@ sleep infinity
 	if err != nil {
 		// When the apiserver is starved (e.g. this suite starts immediately
 		// after another full-suite run), every List call dies on the client
-		// rate limiter before the poll can make progress. That is an
-		// environmental failure, not a feature regression — skip rather than
-		// fail. The netns correctness this probe checks is also asserted by
-		// TestIntegration_NodeAgentFunction (pkg/handler) via container status
-		// + /proc + real traffic.
-		if strings.Contains(err.Error(), "rate limiter") {
+		// rate limiter before the poll can make progress; the wait package
+		// then surfaces only its own deadline. That is an environmental
+		// failure, not a feature regression — skip rather than fail. The
+		// netns correctness this probe checks is also asserted by
+		// TestIntegration_NodeAgentFunction (pkg/handler) via container
+		// status + /proc + real traffic.
+		if rateLimited {
 			t.Skipf("apiserver under pressure (client rate limiter starved): %v", err)
 		}
 		t.Fatalf("Wait for agent pod: %v", err)
