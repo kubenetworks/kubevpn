@@ -57,9 +57,34 @@ const reviewsUDPPort = 9081
 
 func TestFunctions(t *testing.T) {
 	u := &ut{}
+	var originalAttachMode string
 	// 1) test connect
 	t.Run("01-connect/init", u.init)
 	t.Run("01-connect/kubevpnConnect", u.kubevpnConnect)
+	// Pin attach mode to sidecar for test compatibility
+	t.Run("01-connect/pin-sidecar", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		var err error
+		originalAttachMode, err = u.getCurrentAttachMode(ctx)
+		if err != nil {
+			t.Logf("Warning: failed to get original attach mode: %v", err)
+			originalAttachMode = pkgconfig.AttachModeSidecar
+		}
+		if err := u.setManagerAttachMode(ctx, pkgconfig.AttachModeSidecar); err != nil {
+			t.Fatalf("Failed to set attach mode to sidecar: %v", err)
+		}
+		u.waitManagerReady(t)
+	})
+	t.Cleanup(func() {
+		// Restore original attach mode
+		if u.clientset != nil && originalAttachMode != "" {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+			_ = u.setManagerAttachMode(ctx, originalAttachMode)
+			_ = waitManagerReadyWithContext(ctx, u.clientset, u.namespace)
+		}
+	})
 	t.Run("01-connect/commonTest", u.commonTest)
 	t.Run("01-connect/checkConnectStatus", u.checkConnectStatus)
 

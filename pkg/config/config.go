@@ -10,7 +10,9 @@ import (
 )
 
 const (
-	// AttachModeSidecar is the default attach mode where the proxy runs as a sidecar container.
+	// AttachModeAuto is the default attach mode where the proxy automatically detects if node-agent is possible, falling back to sidecar.
+	AttachModeAuto = "auto"
+	// AttachModeSidecar is the attach mode where the proxy runs as a sidecar container.
 	AttachModeSidecar = "sidecar"
 	// AttachModeNodeAgent is the attach mode where the proxy runs as a node agent.
 	AttachModeNodeAgent = "node-agent"

@@ -45,7 +45,7 @@ spec:
                 name: {{ include "kubevpn.fullname" . }}
           env:
             - name: KUBEVPN_PROXY_ATTACH_MODE
-              value: {{ .Values.proxy.attachMode | default "sidecar" | quote }}
+              value: {{ .Values.proxy.attachMode | default "auto" | quote }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:

@@ -142,7 +142,7 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 
 	// 8) create deployment
 	plog.StepStart(ctx, "Creating Deployment")
-	deploy := genDeploySpec(namespace, image, imagePullSecretName, config.AttachModeSidecar)
+	deploy := genDeploySpec(namespace, image, imagePullSecretName, config.AttachModeAuto)
 	deploy, err = clientset.AppsV1().Deployments(namespace).Create(ctx, deploy, metav1.CreateOptions{})
 	if err != nil {
 		return false, fmt.Errorf("failed to create deployment for %s: %w", config.ConfigMapPodTrafficManager, err)

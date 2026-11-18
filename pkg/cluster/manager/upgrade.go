@@ -54,7 +54,7 @@ func Upgrade(ctx context.Context, f cmdutil.Factory, namespace, image string) er
 }
 
 // existingAttachMode reads KUBEVPN_PROXY_ATTACH_MODE from the pod spec's containers.
-// If not found, returns config.AttachModeSidecar as default.
+// If not found, returns config.AttachModeAuto as default.
 func existingAttachMode(spec *v1.PodSpec) string {
 	for _, container := range spec.Containers {
 		for _, env := range container.Env {
@@ -63,7 +63,7 @@ func existingAttachMode(spec *v1.PodSpec) string {
 			}
 		}
 	}
-	return config.AttachModeSidecar
+	return config.AttachModeAuto
 }
 
 func upgradeDeploySpec(ctx context.Context, f cmdutil.Factory, ns, name, image string) error {
