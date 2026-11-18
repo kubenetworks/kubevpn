@@ -114,6 +114,10 @@ func TestSSHFunctions(t *testing.T) {
 	// 4) test proxy mode with service mesh and gvisor
 	t.Run("04-proxy-mesh-fargate/kubevpnLeave", u.kubevpnLeave)
 	t.Run("04-proxy-mesh-fargate/kubevpnUninstall", u.kubevpnUninstall(""))
+	t.Run("04-proxy-mesh-fargate/kubevpnProxyWithServiceMeshAndFargateMode", u.kubevpnProxyWithServiceMeshAndFargateMode)
+	// The connect above re-created the (uninstalled) manager with the default
+	// attach mode (auto → node-agent on privileged clusters); re-pin sidecar
+	// now that the deployment exists again.
 	t.Run("04-proxy-mesh-fargate/re-pin-sidecar", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
@@ -122,7 +126,6 @@ func TestSSHFunctions(t *testing.T) {
 		}
 		u.waitManagerReady(t)
 	})
-	t.Run("04-proxy-mesh-fargate/kubevpnProxyWithServiceMeshAndFargateMode", u.kubevpnProxyWithServiceMeshAndFargateMode)
 	t.Run("04-proxy-mesh-fargate/commonTest", u.commonTest)
 	t.Run("04-proxy-mesh-fargate/serviceMeshReviewsServiceIP", u.serviceMeshReviewsServiceIP)
 	t.Run("04-proxy-mesh-fargate/checkProxyWithServiceMeshAndGvisorStatus", u.checkProxyWithServiceMeshAndGvisorStatus)
