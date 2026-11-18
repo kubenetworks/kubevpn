@@ -147,6 +147,33 @@ func TestCheckCanaryJob_PodNeverRuns(t *testing.T) {
 	}
 }
 
+func TestCheckCanaryJob_TimeoutBranch(t *testing.T) {
+	// Create a test that verifies the timeout path when job is created but pod never reaches Running/Succeeded
+	originalTimeout := ProbeTimeout
+	originalPollInterval := ProbePollInterval
+	defer func() {
+		ProbeTimeout = originalTimeout
+		ProbePollInterval = originalPollInterval
+	}()
+	// Use a very short timeout for this test
+	ProbeTimeout = 100 * time.Millisecond
+	ProbePollInterval = 20 * time.Millisecond
+
+	cs := fake.NewSimpleClientset()
+	// Make sure job create succeeds
+	viable, reason := checkCanaryJob(context.Background(), cs, "test-ns")
+	if viable {
+		t.Errorf("expected viable=false on timeout, got true (reason=%q)", reason)
+	}
+	if reason == "" {
+		t.Errorf("expected non-empty reason on timeout")
+	}
+	// Verify reason mentions timeout
+	if len(reason) < len("probe timed out after") || reason[:len("probe timed out after")] != "probe timed out after" {
+		t.Errorf("expected timeout reason, got %q", reason)
+	}
+}
+
 func TestAttachModeDetector(t *testing.T) {
 	cs := fake.NewSimpleClientset(&corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{

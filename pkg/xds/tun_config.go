@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -34,6 +35,8 @@ type TunConfigServer struct {
 
 	// Attach mode detection
 	detectorOnce    *sync.Once
+	// detectorViable and detectorReason are cached results from attach-mode detection.
+	// Results are cached until manager restart; detection does not retry on cluster state changes.
 	detectorViable  bool
 	detectorReason  string
 }
@@ -118,7 +121,10 @@ func (s *TunConfigServer) ResolveAttachMode(ctx context.Context) string {
 
 	// Auto mode: run detection once and cache
 	s.detectorOnce.Do(func() {
-		s.detectorViable, s.detectorReason = inject.DetectNodeAgentViability(ctx, s.clientset, s.namespace)
+		// Use independent timeout context for detection (not caller's ctx, which might be short-lived)
+		detectCtx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+		defer cancel()
+		s.detectorViable, s.detectorReason = inject.DetectNodeAgentViability(detectCtx, s.clientset, s.namespace)
 	})
 
 	if s.detectorViable {

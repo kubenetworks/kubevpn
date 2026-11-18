@@ -128,7 +128,7 @@ func checkCanaryJob(ctx context.Context, clientset kubernetes.Interface, namespa
 			GracePeriodSeconds: &[]int64{0}[0],
 		})
 		if err != nil && !errors.IsNotFound(err) {
-			plog.G(ctx).Debugf("Failed to clean up canary Job %s: %v", jobName, err)
+			plog.G(context.Background()).Debugf("Failed to clean up canary Job %s: %v", jobName, err)
 		}
 	}()
 
@@ -147,13 +147,16 @@ func checkCanaryJob(ctx context.Context, clientset kubernetes.Interface, namespa
 	return waitForProbePod(ctx, clientset, namespace, jobName)
 }
 
-var rng = rand.New(rand.NewSource(time.Now().UnixNano()))
-
 func probeJobName() string {
-	return fmt.Sprintf("%s%08x", probeJobNamePrefix, rng.Uint32())
+	return fmt.Sprintf("%s%08x", probeJobNamePrefix, rand.Uint32())
 }
 
-// newProbeJob creates a minimal privileged Job that runs /bin/true
+// newProbeJob creates a minimal privileged Job that runs to completion immediately.
+// Uses registry.k8s.io/pause:3.9 (lightweight, almost always cached on nodes).
+// The pause container exits immediately → pod becomes Succeeded quickly.
+// Note: If pause image is not cached and cluster has no external network access,
+// pod will stay Pending → probe times out → returns false (acceptable, as this
+// indicates the cluster cannot run the privileged node-agent pod anyway).
 func newProbeJob(name, namespace string) *batchv1.Job {
 	privileged := true
 	return &batchv1.Job{
@@ -177,8 +180,8 @@ func newProbeJob(name, namespace string) *batchv1.Job {
 					Containers: []corev1.Container{
 						{
 							Name:    "probe",
-							Image:   config.Image,
-							Command: []string{"/bin/true"},
+							Image:   "registry.k8s.io/pause:3.9",
+							Command: []string{"/pause"},
 							SecurityContext: &corev1.SecurityContext{
 								Privileged: &privileged,
 							},
