@@ -247,3 +247,23 @@ Wire real components against `fake.NewSimpleClientset()`, structured as multi-ph
 - Added `TestFindNetnsPIDMatchesPodUIDInSystemdCgroupDriver` and `TestFindNetnsPIDMatchesPodUIDInBothCgroupDrivers`
 - All existing tests continue to pass
 - Verified on real minikube cluster with `--cgroup-driver=systemd`
+
+## 16. Known Limitation: Node-agent + SSH Jump Mesh Timeout
+
+**Problem**: When using node-agent mode with an SSH jump host, the service mesh proxy (`TestSSHFunctions/03-proxy-mesh`) times out after 310 seconds. In contrast, the same test passes with sidecar mode.
+
+**Root Cause**:
+- Auto-detect mode selects node-agent based on cluster privileges without awareness of SSH transport
+- Node-agent mesh routing through SSH jump hosts has an unresolved issue with traffic interception
+- This is specific to the combination of node-agent + SSH jump + service mesh; basic proxy (without mesh) works fine
+
+**Workaround**: SSH users should explicitly set `proxy.attachMode=sidecar` when using service mesh.
+
+**Evidence**:
+- CI `TestSSHFunctions/03-proxy-mesh` consistently times out in node-agent + SSH jump scenario
+- Same test passes reliably with sidecar mode + SSH jump
+- Regular connect (without SSH jump) works fine with node-agent mesh
+
+**Follow-up**: This is tracked as a known issue to be addressed in a future release. Potential fix directions include:
+- SSH-relayed client mesh routing improvements
+- Inject-time transport type awareness for smarter attach-mode selection

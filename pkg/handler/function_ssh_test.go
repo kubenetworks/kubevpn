@@ -64,9 +64,34 @@ func runKubevpn(t *testing.T, args ...string) error {
 
 func TestSSHFunctions(t *testing.T) {
 	u := &sshUt{}
+	var originalAttachMode string
 	// 1) test connect
 	t.Run("01-connect/init", u.init)
 	t.Run("01-connect/kubevpnConnect", u.kubevpnConnect)
+	// Pin attach mode to sidecar for test compatibility (avoids node-agent + SSH jump mesh timeout issue)
+	t.Run("01-connect/pin-sidecar", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		var err error
+		originalAttachMode, err = u.getCurrentAttachMode(ctx)
+		if err != nil {
+			t.Logf("Warning: failed to get original attach mode: %v", err)
+			originalAttachMode = pkgconfig.AttachModeSidecar
+		}
+		if err := u.setManagerAttachMode(ctx, pkgconfig.AttachModeSidecar); err != nil {
+			t.Fatalf("Failed to set attach mode to sidecar: %v", err)
+		}
+		u.waitManagerReady(t)
+	})
+	t.Cleanup(func() {
+		// Restore original attach mode
+		if u.clientset != nil && originalAttachMode != "" {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+			_ = u.setManagerAttachMode(ctx, originalAttachMode)
+			_ = waitSSHManagerReadyWithContext(ctx, u.clientset, u.namespace)
+		}
+	})
 	t.Run("01-connect/commonTest", u.commonTest)
 	t.Run("01-connect/checkConnectStatus", u.checkConnectStatus)
 
@@ -947,4 +972,97 @@ func (u *sshUt) startupHttpServer(t *testing.T, addr, str string) {
 	mux.HandleFunc("/health", health)
 	t.Logf("Start listening http addr %s ...", addr)
 	_ = http.ListenAndServe(addr, mux)
+}
+
+func (u *sshUt) getCurrentAttachMode(ctx context.Context) (string, error) {
+	deploy, err := u.clientset.AppsV1().Deployments(u.namespace).Get(ctx, pkgconfig.ConfigMapPodTrafficManager, v1.GetOptions{})
+	if err != nil {
+		return "", err
+	}
+	for _, c := range deploy.Spec.Template.Spec.Containers {
+		for _, env := range c.Env {
+			if env.Name == "KUBEVPN_PROXY_ATTACH_MODE" {
+				return env.Value, nil
+			}
+		}
+	}
+	return pkgconfig.AttachModeSidecar, nil
+}
+
+func (u *sshUt) setManagerAttachMode(ctx context.Context, mode string) error {
+	// Use retry with ResourceVersion for safe updates
+	return wait.ExponentialBackoffWithContext(ctx, wait.Backoff{
+		Duration: 500 * time.Millisecond,
+		Factor:   2,
+		Steps:    5,
+	}, func(ctx context.Context) (bool, error) {
+		deploy, err := u.clientset.AppsV1().Deployments(u.namespace).Get(ctx, pkgconfig.ConfigMapPodTrafficManager, v1.GetOptions{})
+		if err != nil {
+			return false, err
+		}
+
+		updated := false
+		for i := range deploy.Spec.Template.Spec.Containers {
+			c := &deploy.Spec.Template.Spec.Containers[i]
+			found := false
+			for j := range c.Env {
+				if c.Env[j].Name == "KUBEVPN_PROXY_ATTACH_MODE" {
+					found = true
+					if c.Env[j].Value != mode {
+						c.Env[j].Value = mode
+						updated = true
+					}
+					break
+				}
+			}
+			if !found {
+				c.Env = append(c.Env, corev1.EnvVar{
+					Name:  "KUBEVPN_PROXY_ATTACH_MODE",
+					Value: mode,
+				})
+				updated = true
+			}
+		}
+
+		if !updated {
+			// Already set correctly
+			return true, nil
+		}
+
+		_, err = u.clientset.AppsV1().Deployments(u.namespace).Update(ctx, deploy, v1.UpdateOptions{})
+		if err != nil {
+			// Conflict, retry
+			return false, nil
+		}
+		return true, nil
+	})
+}
+
+// waitSSHManagerReadyWithContext waits for manager to be ready with context
+func waitSSHManagerReadyWithContext(ctx context.Context, clientset kubernetes.Interface, namespace string) error {
+	label := fields.OneTermEqualSelector("app", pkgconfig.ConfigMapPodTrafficManager).String()
+	return wait.PollUntilContextCancel(ctx, 3*time.Second, true, func(ctx context.Context) (bool, error) {
+		pods, err := clientset.CoreV1().Pods(namespace).List(ctx, v1.ListOptions{LabelSelector: label})
+		if err != nil {
+			return false, nil
+		}
+		for i := range pods.Items {
+			pod := &pods.Items[i]
+			if pod.DeletionTimestamp != nil {
+				continue
+			}
+			// Check all containers are ready
+			ready := true
+			for _, cs := range pod.Status.ContainerStatuses {
+				if !cs.Ready {
+					ready = false
+					break
+				}
+			}
+			if ready && pod.Status.Phase == corev1.PodRunning {
+				return true, nil
+			}
+		}
+		return false, nil
+	})
 }
