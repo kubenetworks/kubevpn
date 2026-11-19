@@ -14,7 +14,11 @@ import (
 // Run serves the protocol listeners configured by the server command.
 func Run(ctx context.Context, servers []endpoint.Server) error {
 	if os.Getenv("KUBEVPN_AGENT_CLEANUP_IPTABLES") == "1" {
-		// Set up signal handler for iptables cleanup
+		// Set up signal handler for iptables cleanup: flush the node-agent DNAT
+		// rules, then cancel the serve context so the process exits promptly
+		// (the pod's grace period must cover the flush, not a hung serve loop).
+		serveCtx, serveCancel := context.WithCancel(ctx)
+		defer serveCancel()
 		cleanupCtx, cleanupCancel := context.WithCancel(context.Background())
 		defer cleanupCancel()
 		stopChan := make(chan os.Signal, 1)
@@ -25,10 +29,12 @@ func Run(ctx context.Context, servers []endpoint.Server) error {
 			<-stopChan
 			cleanupIptables(cleanupCtx)
 			cleanupCancel()
+			serveCancel()
 		}()
 
 		// Also clean up on normal exit
 		defer cleanupIptables(context.Background())
+		return endpoint.Serve(serveCtx, servers)
 	}
 
 	return endpoint.Serve(ctx, servers)
