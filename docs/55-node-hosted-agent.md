@@ -272,3 +272,27 @@ This simplifies the code, reduces test flakiness, and makes the default behavior
 Note: When you uninstall the traffic manager (using `kubevpn uninstall kubevpn`), the attach-mode configuration is deleted. When you reinstall or the manager is automatically recreated, it will default to `attachMode=node-agent`.
 
 Impact: Tests that rely on sidecar mode (like `TestSSHFunctions`) must explicitly pin the attach-mode after any uninstall step. Workaround for tests: After any `kubevpnUninstall` step, explicitly set the attach-mode back to `sidecar` (or your desired mode) before proceeding with proxy/mesh tests.
+
+## 18. Bug Fix: Stale Node-Agent Jobs Cause DHCP Lease Contention
+
+**Problem**: When the traffic manager was recreated (uninstall then install, or crash recovery), stale node-agent jobs from the previous manager would reconnect to the new manager and compete for DHCP leases. This caused 3-6 minutes of mesh traffic disruption (verified in CI TestFunctions 03/05) as:
+- Stale agents held leases in the 198.18.0.0/16 pool
+- New agents and user clients had to wait for lease expiration or reclamation
+- Traffic routing was unstable during this period
+
+**Root Cause**:
+- Node-agent jobs are long-lived and survive manager restarts
+- They automatically reconnect to the traffic manager service
+- The new manager accepts all connections, including stale agents from previous sessions
+- Stale agents request/hold DHCP leases that should belong to new agents
+
+**Fix**:
+1. **Explicit cleanup during manager creation**: In `createOutboundPod` (the "fresh manager" path), call `cleanupAllNodeAgentJobs` before creating the new Deployment
+2. **Cleanup scope**: Deletes all jobs with the `kubevpn/pod-uid` label across all namespaces
+3. **Timing**: Runs after TLS secret creation and before Deployment creation
+4. **Why this path only**: When the manager already exists (attach-mode rollout), we don't want to disrupt active agent jobs that are still being used
+
+**Verification**:
+- The fix is only in the create path, not the upgrade path (preserves existing jobs when manager is updated)
+- `TestCleanupTrafficManagerResources_RemovesNodeAgentJobsAllNamespaces` already verifies the cleanup function works
+- CI TestFunctions 03/05 should no longer experience the 3-6 minute disruption window

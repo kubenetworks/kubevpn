@@ -140,6 +140,11 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 		return false, err
 	}
 
+	// Clean up stale node-agent jobs across all namespaces before starting the new manager.
+	// Stale agents from previous managers would reconnect to the new manager and compete for DHCP leases,
+	// causing 3-6 minutes of mesh traffic disruption (verified in CI TestFunctions 03/05).
+	cleanupAllNodeAgentJobs(ctx, clientset, metav1.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0)})
+
 	// 8) create deployment
 	plog.StepStart(ctx, "Creating Deployment")
 	deploy := genDeploySpec(namespace, image, imagePullSecretName, config.AttachModeNodeAgent)
