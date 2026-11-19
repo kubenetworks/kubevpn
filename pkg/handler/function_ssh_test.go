@@ -113,19 +113,11 @@ func TestSSHFunctions(t *testing.T) {
 
 	// 4) test proxy mode with service mesh and gvisor
 	t.Run("04-proxy-mesh-fargate/kubevpnLeave", u.kubevpnLeave)
-	t.Run("04-proxy-mesh-fargate/kubevpnUninstall", u.kubevpnUninstall(""))
+	// NOTE: no uninstall here. Uninstalling mid-suite deletes the manager and
+	// the reconnect re-creates it with the default attach mode (auto →
+	// node-agent), whose restart also breaks the live SSH-jump session. The
+	// uninstall+install flow is covered by 07-central-connect.
 	t.Run("04-proxy-mesh-fargate/kubevpnProxyWithServiceMeshAndFargateMode", u.kubevpnProxyWithServiceMeshAndFargateMode)
-	// The connect above re-created the (uninstalled) manager with the default
-	// attach mode (auto → node-agent on privileged clusters); re-pin sidecar
-	// now that the deployment exists again.
-	t.Run("04-proxy-mesh-fargate/re-pin-sidecar", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-		defer cancel()
-		if err := u.setManagerAttachMode(ctx, pkgconfig.AttachModeSidecar); err != nil {
-			t.Fatalf("Failed to re-pin attach mode to sidecar: %v", err)
-		}
-		u.waitManagerReady(t)
-	})
 	t.Run("04-proxy-mesh-fargate/commonTest", u.commonTest)
 	t.Run("04-proxy-mesh-fargate/serviceMeshReviewsServiceIP", u.serviceMeshReviewsServiceIP)
 	t.Run("04-proxy-mesh-fargate/checkProxyWithServiceMeshAndGvisorStatus", u.checkProxyWithServiceMeshAndGvisorStatus)
