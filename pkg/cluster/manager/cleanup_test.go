@@ -179,3 +179,69 @@ func TestCleanupTrafficManagerResources_DoesNotRemoveCentralClusterScopedRBACInO
 		t.Errorf("ClusterRoleBinding %s should remain when uninstalling a non-central namespace", proxyRBACName)
 	}
 }
+
+func TestCleanupTrafficManagerResources_RemovesNodeAgentJobsAllNamespaces(t *testing.T) {
+	ctx := context.Background()
+	ns := "kubevpn"
+
+	// Create some namespaces
+	ns1 := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "default"}}
+	ns2 := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "test"}}
+	ns3 := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "kubevpn"}}
+
+	// Create node-agent jobs in different namespaces
+	job1 := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "kubevpn-nodeagent-pod1",
+			Namespace: "default",
+			Labels:    map[string]string{"kubevpn/pod-uid": "pod1", "kubevpn/owner-id": "owner1"},
+		},
+	}
+	job2 := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "kubevpn-nodeagent-pod2",
+			Namespace: "test",
+			Labels:    map[string]string{"kubevpn/pod-uid": "pod2", "kubevpn/owner-id": "owner2"},
+		},
+	}
+	job3 := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "kubevpn-nodeagent-pod3",
+			Namespace: "kubevpn",
+			Labels:    map[string]string{"kubevpn/pod-uid": "pod3", "kubevpn/owner-id": "owner3"},
+		},
+	}
+	// A non-node-agent job that should NOT be deleted
+	otherJob := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "some-other-job",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "test"},
+		},
+	}
+
+	cs := fake.NewSimpleClientset(ns1, ns2, ns3, job1, job2, job3, otherJob)
+
+	CleanupTrafficManagerResources(ctx, cs, ns)
+
+	// Verify node-agent jobs are deleted
+	checks := []struct {
+		namespace string
+		name      string
+	}{
+		{"default", "kubevpn-nodeagent-pod1"},
+		{"test", "kubevpn-nodeagent-pod2"},
+		{"kubevpn", "kubevpn-nodeagent-pod3"},
+	}
+	for _, c := range checks {
+		_, err := cs.BatchV1().Jobs(c.namespace).Get(ctx, c.name, metav1.GetOptions{})
+		if err == nil {
+			t.Errorf("node-agent job %s/%s should have been deleted", c.namespace, c.name)
+		}
+	}
+
+	// Verify non-node-agent job still exists
+	if _, err := cs.BatchV1().Jobs("default").Get(ctx, "some-other-job", metav1.GetOptions{}); err != nil {
+		t.Errorf("non-node-agent job should not have been deleted: %v", err)
+	}
+}

@@ -3,6 +3,7 @@ package inject
 import (
 	"context"
 	"fmt"
+	"time"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -78,7 +79,15 @@ func (n *nodeAgentInjector) Inject(ctx context.Context) error {
 		if pod.Spec.HostUsers != nil && !*pod.Spec.HostUsers {
 			return fmt.Errorf("pod %s/%s uses hostUsers: false — node-agent attach is unsupported", pod.Namespace, pod.Name)
 		}
-		if err = ensureAgentJob(ctx, o.Clientset, o, pod); err != nil {
+		if err = EnsureAgentJob(ctx, o.Clientset, AgentJobInput{
+			ManagerNamespace: o.ManagerNamespace,
+			Namespace:        o.Controller.Namespace,
+			NodeID:           o.NodeID,
+			Image:            o.Image,
+			OwnerID:          o.OwnerID,
+			Secret:           o.Secret,
+			Pod:              pod,
+		}); err != nil {
 			return fmt.Errorf("ensure agent job for pod %s/%s: %w", pod.Namespace, pod.Name, err)
 		}
 	}
@@ -102,14 +111,59 @@ func listControllerPods(ctx context.Context, cs kubernetes.Interface, controller
 	})
 }
 
-// EnsureAgentJob creates the deterministic agent Job; AlreadyExists is a no-op
-// (second owner, reconcile re-run).
+// EnsureAgentJob creates the deterministic agent Job; AlreadyExists is handled
+// by checking if the job is terminating — if so, waits for it to disappear
+// before recreating.
 func EnsureAgentJob(ctx context.Context, cs kubernetes.Interface, input AgentJobInput) error {
+	name := AgentJobName(input.Pod.UID)
 	_, err := cs.BatchV1().Jobs(input.ManagerNamespace).Create(ctx, GenAgentJobSpec(input), metav1.CreateOptions{})
-	if errors.IsAlreadyExists(err) {
+	if err == nil {
 		return nil
 	}
-	return err
+	if !errors.IsAlreadyExists(err) {
+		return err
+	}
+
+	// Job exists: check if it's terminating
+	job, err := cs.BatchV1().Jobs(input.ManagerNamespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		if errors.IsNotFound(err) {
+			// Job disappeared between Create and Get: try again once
+			_, err = cs.BatchV1().Jobs(input.ManagerNamespace).Create(ctx, GenAgentJobSpec(input), metav1.CreateOptions{})
+		}
+		return err
+	}
+
+	if job.DeletionTimestamp == nil {
+		// Job exists and is not terminating: no-op
+		return nil
+	}
+
+	// Job is terminating: wait for it to disappear
+	plog.G(ctx).Debugf("Agent job %q is terminating, waiting for it to disappear", name)
+	ctxWait, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctxWait.Done():
+			return fmt.Errorf("timed out waiting for terminating agent job %q: %w", name, ctxWait.Err())
+		case <-ticker.C:
+			_, err := cs.BatchV1().Jobs(input.ManagerNamespace).Get(ctx, name, metav1.GetOptions{})
+			if errors.IsNotFound(err) {
+				// Job is gone: recreate it
+				plog.G(ctx).Debugf("Agent job %q disappeared, recreating", name)
+				_, err = cs.BatchV1().Jobs(input.ManagerNamespace).Create(ctx, GenAgentJobSpec(input), metav1.CreateOptions{})
+				return err
+			}
+			if err != nil {
+				plog.G(ctx).Warnf("Failed to get agent job %q while waiting: %v", name, err)
+			}
+			// Job still exists: keep waiting
+		}
+	}
 }
 
 // ensureAgentJob creates the deterministic agent Job; AlreadyExists is a no-op

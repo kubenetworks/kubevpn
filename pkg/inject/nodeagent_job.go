@@ -72,9 +72,10 @@ iptables -P INPUT ACCEPT
 ip6tables -P INPUT ACCEPT
 iptables -P FORWARD ACCEPT
 ip6tables -P FORWARD ACCEPT
-iptables -t nat -A PREROUTING -p tcp ! -s 127.0.0.1 ! -d ${CIDR4} -j DNAT --to :15006
-ip6tables -t nat -A PREROUTING -p tcp ! -s ::1 ! -d ${CIDR6} -j DNAT --to :15006
-kubevpn server --debug -l tun:/tcp://${TrafficManagerService}:10801?route=${CIDR4}
+iptables -t nat -A PREROUTING -p tcp ! -s 127.0.0.1 ! -d ${CIDR4} -j DNAT --to :15006 -m comment --comment "kubevpn-nodeagent"
+ip6tables -t nat -A PREROUTING -p tcp ! -s ::1 ! -d ${CIDR6} -j DNAT --to :15006 -m comment --comment "kubevpn-nodeagent"
+export KUBEVPN_AGENT_CLEANUP_IPTABLES=1
+exec kubevpn server --debug -l tun:/tcp://${TrafficManagerService}:10801?route=${CIDR4}
 `
 	// The envoy payload renders the same embedded bootstrap template the mesh
 	// envoy sidecar uses, with the same node identifier the sidecar passes

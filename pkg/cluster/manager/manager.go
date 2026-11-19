@@ -235,9 +235,10 @@ func ensureProxyRBAC(ctx context.Context, clientset kubernetes.Interface, worklo
 // in the given namespace: the route-discovery and proxy-inject RBAC (-route, -proxy),
 // the eight core resources named config.ConfigMapPodTrafficManager, and — when the
 // namespace is the central kubevpn namespace — the cluster-scoped proxy
-// ClusterRole/ClusterRoleBinding. It is the shared teardown for both the handler-layer
-// connect cleanup and the daemon-layer Uninstall RPC, so the two paths cannot drift on
-// which resources an uninstall must remove.
+// ClusterRole/ClusterRoleBinding. It also removes all node-agent jobs across all
+// namespaces. It is the shared teardown for both the handler-layer connect cleanup and
+// the daemon-layer Uninstall RPC, so the two paths cannot drift on which resources an
+// uninstall must remove.
 func CleanupTrafficManagerResources(ctx context.Context, clientset kubernetes.Interface, namespace string) {
 	options := metav1.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0)}
 	// Route-discovery and proxy-inject RBAC (distinct names). In central mode they live
@@ -254,6 +255,30 @@ func CleanupTrafficManagerResources(ctx context.Context, clientset kubernetes.In
 	if namespace == config.DefaultNamespaceKubevpn {
 		_ = clientset.RbacV1().ClusterRoleBindings().Delete(ctx, proxyRBACName, options)
 		_ = clientset.RbacV1().ClusterRoles().Delete(ctx, proxyRBACName, options)
+	}
+	// Clean up all node-agent jobs across all namespaces
+	cleanupAllNodeAgentJobs(ctx, clientset, options)
+}
+
+// cleanupAllNodeAgentJobs deletes all jobs with label kubevpn/pod-uid across all namespaces
+func cleanupAllNodeAgentJobs(ctx context.Context, clientset kubernetes.Interface, options metav1.DeleteOptions) {
+	// List all namespaces first
+	namespaces, err := clientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return
+	}
+	for _, ns := range namespaces.Items {
+		// List node-agent jobs in this namespace
+		jobs, err := clientset.BatchV1().Jobs(ns.Name).List(ctx, metav1.ListOptions{
+			LabelSelector: "kubevpn/pod-uid",
+		})
+		if err != nil {
+			continue
+		}
+		// Delete each job
+		for _, job := range jobs.Items {
+			_ = clientset.BatchV1().Jobs(ns.Name).Delete(ctx, job.Name, options)
+		}
 	}
 }
 
