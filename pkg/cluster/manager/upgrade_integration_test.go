@@ -287,9 +287,14 @@ func TestManagerUpgrade_PreservesAttachMode(t *testing.T) {
 			expectedEnv: config.AttachModeNodeAgent,
 		},
 		{
-			name:        "default to auto when no env exists",
+			name:        "preserve existing sidecar mode",
+			existingEnv: config.AttachModeSidecar,
+			expectedEnv: config.AttachModeSidecar,
+		},
+		{
+			name:        "default to node-agent when no env exists",
 			existingEnv: "",
-			expectedEnv: config.AttachModeAuto,
+			expectedEnv: config.AttachModeNodeAgent,
 		},
 	}
 

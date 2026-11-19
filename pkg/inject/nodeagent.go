@@ -13,6 +13,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	clusterworkload "github.com/wencaiwulue/kubevpn/v2/pkg/cluster/workload"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 // nodeAgentInjector attaches to a workload without patching it: writes the
@@ -24,6 +25,20 @@ type nodeAgentInjector struct {
 
 func (n *nodeAgentInjector) Inject(ctx context.Context) error {
 	o := n.opts
+
+	// Check PSA labels on manager namespace: if enforce is restricted or baseline,
+	// return a clean error telling users to set sidecar mode explicitly.
+	if ns, err := o.Clientset.CoreV1().Namespaces().Get(ctx, o.ManagerNamespace, metav1.GetOptions{}); err != nil {
+		// If we can't read the namespace (e.g., RBAC), log warning and continue
+		// (let the real Job creation fail with authoritative error)
+		plog.G(ctx).Warnf("[node-agent] failed to check PSA labels on namespace %s: %v", o.ManagerNamespace, err)
+	} else {
+		enforceLevel := ns.Labels["pod-security.kubernetes.io/enforce"]
+		if enforceLevel == "restricted" || enforceLevel == "baseline" {
+			return fmt.Errorf("cluster disallows privileged pods (PSA enforce=%q): set proxy.attachMode=sidecar (helm) to use sidecar injection", enforceLevel)
+		}
+	}
+
 	u := o.Controller.Object.(*unstructured.Unstructured)
 
 	templateSpec, _, err := clusterworkload.GetPodTemplateSpecPath(u)
@@ -112,4 +127,3 @@ func ensureAgentJob(ctx context.Context, cs kubernetes.Interface, o InjectOption
 	}
 	return EnsureAgentJob(ctx, cs, input)
 }
-

@@ -4,8 +4,6 @@ import (
 	"context"
 	"net"
 	"os"
-	"sync"
-	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -13,7 +11,6 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/inject"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/xds/internal/discovery"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/xds/internal/envoy"
@@ -32,13 +29,6 @@ type TunConfigServer struct {
 	leases           *leases.Manager
 	routes           *discovery.Broadcaster
 	agentReconciler  *AgentReconciler
-
-	// Attach mode detection
-	detectorOnce    *sync.Once
-	// detectorViable and detectorReason are cached results from attach-mode detection.
-	// Results are cached until manager restart; detection does not retry on cluster state changes.
-	detectorViable  bool
-	detectorReason  string
 }
 
 // NewTunConfigServer initializes the mandatory allocator before serving RPCs.
@@ -46,7 +36,6 @@ func NewTunConfigServer(ctx context.Context, clientset kubernetes.Interface, nam
 	s := &TunConfigServer{
 		clientset: clientset,
 		namespace: namespace,
-		detectorOnce: &sync.Once{},
 	}
 	rules := envoy.New(clientset, namespace)
 	manager, err := leases.New(ctx, clientset, namespace, leases.Callbacks{
@@ -112,38 +101,18 @@ func (s *TunConfigServer) Close() {
 	s.leases.Close()
 }
 
-// ResolveAttachMode returns the effective attach mode, running detection if needed when mode is "auto".
+// ResolveAttachMode returns the effective attach mode. Defaults to node-agent.
 func (s *TunConfigServer) ResolveAttachMode(ctx context.Context) string {
-	mode := attachModeFromEnv()
-	if mode != config.AttachModeAuto {
-		return mode
-	}
-
-	// Auto mode: run detection once and cache
-	s.detectorOnce.Do(func() {
-		// Use independent timeout context for detection (not caller's ctx, which might be short-lived)
-		detectCtx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-		defer cancel()
-		s.detectorViable, s.detectorReason = inject.DetectNodeAgentViability(detectCtx, s.clientset, s.namespace)
-	})
-
-	if s.detectorViable {
-		plog.G(ctx).Infof("attach-mode auto-detected: node-agent (%s)", s.detectorReason)
-		return config.AttachModeNodeAgent
-	}
-	plog.G(ctx).Infof("attach-mode auto-detected: sidecar (%s)", s.detectorReason)
-	return config.AttachModeSidecar
+	return attachModeFromEnv()
 }
 
 // attachModeFromEnv reads the cluster-level proxy attach mode. Default is the
-// auto mode; the value is set by the Helm chart / genDeploySpec.
+// node-agent mode; the value is set by the Helm chart / genDeploySpec.
 func attachModeFromEnv() string {
 	switch os.Getenv("KUBEVPN_PROXY_ATTACH_MODE") {
-	case config.AttachModeNodeAgent:
-		return config.AttachModeNodeAgent
 	case config.AttachModeSidecar:
 		return config.AttachModeSidecar
 	default:
-		return config.AttachModeAuto
+		return config.AttachModeNodeAgent
 	}
 }

@@ -49,13 +49,11 @@ rbac:
 proxy:
   # attachMode controls how the traffic manager attaches to workloads.
   # Valid values:
-  #   - "auto": (default) automatically detect if node-agent is viable (PSA privileged),
-  #             fall back to sidecar if not
-  #   - "sidecar": inject sidecar containers into workload pods (most compatible,
-  #                requires pod restarts)
-  #   - "node-agent": run a per-pod agent on the node (non-intrusive, no pod restarts,
+  #   - "node-agent": (default) run a per-pod agent on the node (non-intrusive, no pod restarts,
   #                   requires privileged workloads)
-  attachMode: auto
+  #   - "sidecar": inject sidecar containers into workload pods (most compatible,
+  #                requires pod restarts, use for restricted clusters or SSH users)
+  attachMode: node-agent
 
 podAnnotations: { }
 podLabels:

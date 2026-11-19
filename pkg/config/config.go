@@ -10,11 +10,9 @@ import (
 )
 
 const (
-	// AttachModeAuto is the default attach mode where the proxy automatically detects if node-agent is possible, falling back to sidecar.
-	AttachModeAuto = "auto"
 	// AttachModeSidecar is the attach mode where the proxy runs as a sidecar container.
 	AttachModeSidecar = "sidecar"
-	// AttachModeNodeAgent is the attach mode where the proxy runs as a node agent.
+	// AttachModeNodeAgent is the attach mode where the proxy runs as a node agent (default).
 	AttachModeNodeAgent = "node-agent"
 
 	// ConfigMapPodTrafficManager is the name of the ConfigMap used by the traffic manager.
