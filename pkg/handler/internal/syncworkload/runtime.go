@@ -175,7 +175,7 @@ func (d *Runtime) DoSync(ctx context.Context, kubeconfigJsonBytes []byte, image 
 		}
 		plog.G(ctx).Debugf("Created sync resource %s/%s in target cluster", u.GetObjectKind().GroupVersionKind().GroupKind().String(), u.GetName())
 		plog.G(ctx).Debugf("Waiting for sync resource %s/%s to be ready", u.GetObjectKind().GroupVersionKind().GroupKind().String(), u.GetName())
-		err = clusterworkload.WaitPodReady(ctx, d.clientset.CoreV1().Pods(d.WorkloadNamespace), fields.SelectorFromSet(labelsMap).String(), "")
+		err = clusterworkload.WaitPodReady(ctx, d.clientset.CoreV1(), d.WorkloadNamespace, fields.SelectorFromSet(labelsMap).String(), "")
 		if err != nil {
 			return err
 		}

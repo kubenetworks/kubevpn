@@ -202,10 +202,9 @@ func TestWaitPodReady_AlreadyRunning(t *testing.T) {
 	}
 
 	clientset := fake.NewSimpleClientset(readyPod)
-	podClient := clientset.CoreV1().Pods("default")
 
 	ctx := context.Background()
-	err := clusterworkload.WaitPodReady(ctx, podClient, "app=web", "")
+	err := clusterworkload.WaitPodReady(ctx, clientset.CoreV1(), "default", "app=web", "")
 	if err != nil {
 		t.Fatalf("WaitPodReady returned error for already-running pod: %v", err)
 	}

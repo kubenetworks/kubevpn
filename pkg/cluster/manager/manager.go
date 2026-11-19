@@ -153,7 +153,7 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 	if err != nil {
 		return false, err
 	}
-	if err = workload.WaitPodReady(ctx, clientset.CoreV1().Pods(namespace), selector.String(), "traffic manager"); err != nil {
+	if err = workload.WaitPodReady(ctx, clientset.CoreV1(), namespace, selector.String(), "traffic manager"); err != nil {
 		return false, err
 	}
 	plog.StepDone(ctx, "Traffic manager ready in namespace %q", namespace)

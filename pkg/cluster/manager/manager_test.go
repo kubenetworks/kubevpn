@@ -479,7 +479,6 @@ func TestWaitPodReady_Timeout(t *testing.T) {
 	labelSelector := "app=test-timeout"
 
 	clientset := fake.NewSimpleClientset()
-	podClient := clientset.CoreV1().Pods(namespace)
 
 	// Create a pod that is Pending (not ready) — it will never transition.
 	pendingPod := &v1.Pod{
@@ -498,7 +497,7 @@ func TestWaitPodReady_Timeout(t *testing.T) {
 			},
 		},
 	}
-	_, err := podClient.Create(context.Background(), pendingPod, metav1.CreateOptions{})
+	_, err := clientset.CoreV1().Pods(namespace).Create(context.Background(), pendingPod, metav1.CreateOptions{})
 	if err != nil {
 		t.Fatalf("failed to create pending pod: %v", err)
 	}
@@ -507,7 +506,7 @@ func TestWaitPodReady_Timeout(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err = workload.WaitPodReady(ctx, podClient, labelSelector, "")
+	err = workload.WaitPodReady(ctx, clientset.CoreV1(), namespace, labelSelector, "")
 	if err == nil {
 		t.Fatal("expected timeout error, got nil")
 	}
@@ -521,7 +520,6 @@ func TestWaitPodReady_TransitionsToReady(t *testing.T) {
 	labelSelector := "app=test-transition"
 
 	clientset := fake.NewSimpleClientset()
-	podClient := clientset.CoreV1().Pods(namespace)
 
 	// Create a pod that starts as Pending (not ready).
 	pendingPod := &v1.Pod{
@@ -540,7 +538,7 @@ func TestWaitPodReady_TransitionsToReady(t *testing.T) {
 			},
 		},
 	}
-	_, err := podClient.Create(context.Background(), pendingPod, metav1.CreateOptions{})
+	_, err := clientset.CoreV1().Pods(namespace).Create(context.Background(), pendingPod, metav1.CreateOptions{})
 	if err != nil {
 		t.Fatalf("failed to create pending pod: %v", err)
 	}
@@ -556,7 +554,7 @@ func TestWaitPodReady_TransitionsToReady(t *testing.T) {
 				Status: v1.ConditionTrue,
 			},
 		}
-		_, updateErr := podClient.UpdateStatus(context.Background(), readyPod, metav1.UpdateOptions{})
+		_, updateErr := clientset.CoreV1().Pods(namespace).UpdateStatus(context.Background(), readyPod, metav1.UpdateOptions{})
 		if updateErr != nil {
 			// Cannot t.Fatal from goroutine; the test will fail on timeout instead.
 			t.Errorf("failed to update pod status: %v", updateErr)
@@ -566,7 +564,7 @@ func TestWaitPodReady_TransitionsToReady(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	err = workload.WaitPodReady(ctx, podClient, labelSelector, "")
+	err = workload.WaitPodReady(ctx, clientset.CoreV1(), namespace, labelSelector, "")
 	if err != nil {
 		t.Fatalf("expected pod to become ready, got error: %v", err)
 	}
