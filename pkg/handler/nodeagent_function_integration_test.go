@@ -203,6 +203,7 @@ func TestIntegration_NodeAgentFunction(t *testing.T) {
 	})
 
 	// Phase 5: Verify iptables via exec into reviews pod
+	var currentReviewsPodName string
 	t.Run("05-verify/iptables-via-exec", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
@@ -218,6 +219,7 @@ func TestIntegration_NodeAgentFunction(t *testing.T) {
 		}
 
 		pod := &pods.Items[0]
+		currentReviewsPodName = pod.Name
 
 		// Check /proc/net/tcp for port 15006 in LISTEN state (0A)
 		// Port 15006 in network byte order (big-endian) hex is 3A9E
@@ -245,7 +247,7 @@ func TestIntegration_NodeAgentFunction(t *testing.T) {
 		})
 		if err != nil {
 			if agentPodName != "" {
-				dumpAgentPodDiagnostics(t, context.Background(), u.clientset, u.namespace, agentPodName)
+				dumpDiagnostics(t, context.Background(), u.clientset, u.namespace, agentPodName, currentReviewsPodName)
 			}
 			t.Fatalf("Failed to verify iptables via /proc/net/tcp: %v. Last output:\n%s", err, string(lastOutput))
 		}
@@ -270,66 +272,24 @@ func TestIntegration_NodeAgentFunction(t *testing.T) {
 		ip, err := u.getServiceIP("reviews")
 		if err != nil {
 			if agentPodName != "" {
-				dumpAgentPodDiagnostics(t, context.Background(), u.clientset, u.namespace, agentPodName)
+				dumpDiagnostics(t, context.Background(), u.clientset, u.namespace, agentPodName, "")
 			}
 			t.Fatal(err)
 		}
 		endpoint := fmt.Sprintf("http://%s:%d/health", ip, 9080)
-		u.meshHealthChecker(t, endpoint, map[string]string{"env": "test"}, local)
+		checkMeshIntercept(t, u, endpoint, map[string]string{"env": "test"}, local, agentPodName, "")
 	})
 	t.Run("06-traffic/not-intercepted-without-header", func(t *testing.T) {
 		u.waitManagerReady(t)
 		ip, err := u.getServiceIP("reviews")
 		if err != nil {
 			if agentPodName != "" {
-				dumpAgentPodDiagnostics(t, context.Background(), u.clientset, u.namespace, agentPodName)
+				dumpDiagnostics(t, context.Background(), u.clientset, u.namespace, agentPodName, "")
 			}
 			t.Fatal(err)
 		}
 		endpoint := fmt.Sprintf("http://%s:%d/health", ip, 9080)
-		// Without header, should get remote response
-
-		req, err := http.NewRequest("GET", endpoint, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		client := &http.Client{Timeout: 5 * time.Second}
-		err = retry.OnError(
-			healthCheckBackoff(),
-			func(err error) bool { return err != nil },
-			func() error {
-				var resp *http.Response
-				resp, err = client.Do(req)
-				if err != nil {
-					t.Logf("%s failed to do health check endpoint %s: %v", time.Now().Format(time.DateTime), endpoint, err)
-					return err
-				}
-				if resp.StatusCode != 200 {
-					if resp.Body != nil {
-						defer resp.Body.Close()
-						all, _ := io.ReadAll(resp.Body)
-						return fmt.Errorf("status code is %s, content: %v", resp.Status, string(all))
-					}
-					return fmt.Errorf("status code is %s", resp.Status)
-				}
-				defer resp.Body.Close()
-				content, err := io.ReadAll(resp.Body)
-				if err != nil {
-					return err
-				}
-				if string(content) != remote {
-					return fmt.Errorf("response=%s, want: %s", string(content), remote)
-				}
-				return nil
-			},
-		)
-		if err != nil {
-			if agentPodName != "" {
-				dumpAgentPodDiagnostics(t, context.Background(), u.clientset, u.namespace, agentPodName)
-			}
-			t.Fatalf("Failed to verify non-intercepted traffic (remote response not received): %v", err)
-		}
+		checkMeshIntercept(t, u, endpoint, nil, remote, agentPodName, "")
 	})
 
 	// Phase 7: Cleanup and verify
@@ -359,13 +319,158 @@ func TestIntegration_NodeAgentFunction(t *testing.T) {
 			t.Fatalf("Agent job %s still exists after leave: %v", jobName, err)
 		}
 	})
-	t.Run("07-cleanup/disconnect", func(t *testing.T) {
+	// Note: NOT disconnecting or restoring attach mode here - phase 8 will re-proxy
+
+	// Phase 8: Leave → Re-proxy lifecycle experiment
+	var newAgentPodName string
+	var reviewsPodName string
+	t.Run("08-leave-reproxy/re-proxy-with-headers", u.kubevpnProxyWithServiceMesh)
+	t.Run("08-leave-reproxy/get-reviews-pod", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+
+		var pod *corev1.Pod
+		err := wait.PollUntilContextCancel(ctx, 3*time.Second, true, func(ctx context.Context) (bool, error) {
+			pods, err := u.clientset.CoreV1().Pods(u.namespace).List(ctx, metav1.ListOptions{
+				LabelSelector: fields.OneTermEqualSelector("app", "reviews").String(),
+			})
+			if err != nil {
+				return false, err
+			}
+			for _, p := range pods.Items {
+				if p.DeletionTimestamp == nil && p.Status.Phase == corev1.PodRunning && p.Status.PodIP != "" {
+					pod = &p
+					return true, nil
+				}
+			}
+			return false, nil
+		})
+		if err != nil {
+			t.Fatalf("Failed to find running reviews pod: %v", err)
+		}
+		reviewsPodName = pod.Name
+		t.Logf("Found reviews pod: %s", reviewsPodName)
+	})
+	t.Run("08-leave-reproxy/agent-job-recreated", func(t *testing.T) {
+		if podUID == "" {
+			t.Skip("No reviews pod UID")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+
+		jobName := inject.AgentJobName(podUID)
+		t.Logf("Looking for agent job: %s", jobName)
+
+		err := wait.PollUntilContextTimeout(ctx, 2*time.Second, 60*time.Second, true, func(ctx context.Context) (bool, error) {
+			job, err := u.clientset.BatchV1().Jobs(u.namespace).Get(ctx, jobName, metav1.GetOptions{})
+			if err != nil {
+				return false, nil
+			}
+			return job.Status.Active > 0 || job.Status.Succeeded > 0, nil
+		})
+		if err != nil {
+			t.Fatalf("Agent job %s not found or not active after re-proxy: %v", jobName, err)
+		}
+
+		// Also verify agent pod is running
+		var pods *corev1.PodList
+		err = wait.PollUntilContextTimeout(ctx, 2*time.Second, 60*time.Second, true, func(ctx context.Context) (bool, error) {
+			var err error
+			pods, err = u.clientset.CoreV1().Pods(u.namespace).List(ctx, metav1.ListOptions{
+				LabelSelector: fmt.Sprintf("%s=%s", "kubevpn/pod-uid", podUID),
+			})
+			if err != nil {
+				return false, nil
+			}
+			return len(pods.Items) > 0, nil
+		})
+		if err != nil {
+			t.Fatalf("No agent pods found for pod UID %s after re-proxy: %v", podUID, err)
+		}
+		newAgentPodName = pods.Items[0].Name
+		t.Logf("Found new agent pod: %s", newAgentPodName)
+
+		// Wait for agent pod to be Running
+		var agentPod *corev1.Pod
+		waitCtx, waitCancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer waitCancel()
+		err = wait.PollUntilContextTimeout(waitCtx, 2*time.Second, 60*time.Second, true, func(ctx context.Context) (bool, error) {
+			var err error
+			agentPod, err = u.clientset.CoreV1().Pods(u.namespace).Get(ctx, newAgentPodName, metav1.GetOptions{})
+			if err != nil {
+				return false, nil
+			}
+			return agentPod.Status.Phase == corev1.PodRunning, nil
+		})
+		if err != nil {
+			// Dump diagnostics on timeout
+			if agentPod != nil {
+				t.Logf("Agent pod phase: %s", agentPod.Status.Phase)
+				t.Logf("Container statuses:")
+				for _, cs := range agentPod.Status.ContainerStatuses {
+					t.Logf("  - %s: phase=%v, restartCount=%d, lastState=%v",
+						cs.Name, cs.State, cs.RestartCount, cs.LastTerminationState)
+				}
+			}
+			dumpDiagnostics(t, context.Background(), u.clientset, u.namespace, newAgentPodName, reviewsPodName)
+			t.Fatalf("New agent pod %s not running after 60s: %v", newAgentPodName, err)
+		}
+
+		// Always dump diagnostics once agent pod is Running
+		dumpAgentPodDiagnostics(t, context.Background(), u.clientset, u.namespace, newAgentPodName)
+	})
+	t.Run("08-leave-reproxy/verify/intercepted-with-header", func(t *testing.T) {
+		ip, err := u.getServiceIP("reviews")
+		if err != nil {
+			dumpDiagnostics(t, context.Background(), u.clientset, u.namespace, newAgentPodName, reviewsPodName)
+			t.Fatal(err)
+		}
+		endpoint := fmt.Sprintf("http://%s:%d/health", ip, 9080)
+		checkMeshIntercept(t, u, endpoint, map[string]string{"env": "test"}, local, newAgentPodName, reviewsPodName)
+	})
+	t.Run("08-leave-reproxy/verify/non-intercepted", func(t *testing.T) {
+		ip, err := u.getServiceIP("reviews")
+		if err != nil {
+			dumpDiagnostics(t, context.Background(), u.clientset, u.namespace, newAgentPodName, reviewsPodName)
+			t.Fatal(err)
+		}
+		endpoint := fmt.Sprintf("http://%s:%d/health", ip, 9080)
+		checkMeshIntercept(t, u, endpoint, nil, remote, newAgentPodName, reviewsPodName)
+	})
+	// Phase 8 final cleanup
+	t.Run("08-leave-reproxy/final-cleanup/leave", u.kubevpnLeave)
+	t.Run("08-leave-reproxy/final-cleanup/verify-agent-job-deleted", func(t *testing.T) {
+		if podUID == "" {
+			t.Skip("No reviews pod UID")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+
+		jobName := inject.AgentJobName(podUID)
+		err := wait.PollUntilContextTimeout(ctx, 2*time.Second, 60*time.Second, true, func(ctx context.Context) (bool, error) {
+			_, err := u.clientset.BatchV1().Jobs(u.namespace).Get(ctx, jobName, metav1.GetOptions{})
+			if err == nil {
+				// Job still exists
+				return false, nil
+			}
+			if k8serrors.IsNotFound(err) {
+				// Job deleted
+				return true, nil
+			}
+			// Other error, keep polling
+			return false, nil
+		})
+		if err != nil {
+			t.Fatalf("Agent job %s still exists after final leave: %v", jobName, err)
+		}
+	})
+	t.Run("08-leave-reproxy/final-cleanup/disconnect", func(t *testing.T) {
 		cmd := exec.Command("kubevpn", "disconnect")
 		cmd.Stdout = tWriter{t}
 		cmd.Stderr = tWriter{t}
 		_ = cmd.Run() // Best effort
 	})
-	t.Run("07-cleanup/restore-attach-mode", func(t *testing.T) {
+	t.Run("08-leave-reproxy/final-cleanup/restore-attach-mode", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
 		if err := u.setManagerAttachMode(ctx, originalAttachMode); err != nil {
@@ -580,4 +685,111 @@ func dumpAgentPodDiagnostics(t *testing.T, _ context.Context, clientset kubernet
 	}
 
 	t.Log("========== END AGENT POD DIAGNOSTICS ==========")
+}
+
+// dumpDiagnostics dumps diagnostics for both agent pod and manager pod.
+func dumpDiagnostics(t *testing.T, ctx context.Context, clientset kubernetes.Interface, namespace, agentPodName, reviewsPodName string) {
+	t.Helper()
+	if agentPodName != "" {
+		dumpAgentPodDiagnostics(t, ctx, clientset, namespace, agentPodName)
+	}
+
+	// Dump manager pod xds container logs
+	t.Log("========== MANAGER POD DIAGNOSTICS ==========")
+	label := fields.OneTermEqualSelector("app", config.ConfigMapPodTrafficManager).String()
+	pods, err := clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{LabelSelector: label})
+	if err != nil || len(pods.Items) == 0 {
+		t.Logf("Failed to list manager pods: %v", err)
+	} else {
+		managerPodName := pods.Items[0].Name
+		t.Logf("Manager pod: %s", managerPodName)
+
+		// Get xds container logs
+		logCtx, logCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer logCancel()
+		req := clientset.CoreV1().Pods(namespace).GetLogs(managerPodName, &corev1.PodLogOptions{
+			Container: "xds",
+			TailLines: ptr.To(int64(30)),
+		})
+		logs, err := req.DoRaw(logCtx)
+		if err != nil {
+			t.Logf("Failed to get xds container logs: %v", err)
+		} else {
+			t.Logf("xds container logs (last 30 lines):\n%s", string(logs))
+		}
+	}
+
+	// Dump reviews pod network diagnostics if available
+	if reviewsPodName != "" {
+		t.Log("========== REVIEWS POD NETWORK DIAGNOSTICS ==========")
+		// Check /proc/net/tcp
+		execCtx, execCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer execCancel()
+		cmd := exec.CommandContext(execCtx, "kubectl", "exec", "-n", namespace, reviewsPodName, "--", "cat", "/proc/net/tcp")
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Logf("Failed to cat /proc/net/tcp from reviews pod: %v, output: %s", err, string(output))
+		} else {
+			t.Logf("/proc/net/tcp from reviews pod:\n%s", string(output))
+		}
+
+		// Check iptables (may fail if iptables not available)
+		cmd = exec.CommandContext(execCtx, "kubectl", "exec", "-n", namespace, reviewsPodName, "--", "iptables", "-t", "nat", "-S", "PREROUTING")
+		output, err = cmd.CombinedOutput()
+		if err != nil {
+			t.Logf("Failed to get iptables PREROUTING rules from reviews pod (expected if iptables not installed): %v", err)
+		} else {
+			t.Logf("iptables -t nat -S PREROUTING from reviews pod:\n%s", string(output))
+		}
+	}
+	t.Log("========== END DIAGNOSTICS ==========")
+}
+
+// checkMeshIntercept checks traffic interception with or without headers.
+func checkMeshIntercept(t *testing.T, u *ut, endpoint string, headers map[string]string, expect string, agentPodName, reviewsPodName string) {
+	t.Helper()
+	u.waitManagerReady(t)
+
+	req, err := http.NewRequest("GET", endpoint, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	err = retry.OnError(
+		healthCheckBackoff(),
+		func(err error) bool { return err != nil },
+		func() error {
+			var resp *http.Response
+			resp, err = client.Do(req)
+			if err != nil {
+				t.Logf("%s failed to do health check endpoint %s: %v", time.Now().Format(time.DateTime), endpoint, err)
+				return err
+			}
+			if resp.StatusCode != 200 {
+				if resp.Body != nil {
+					defer resp.Body.Close()
+					all, _ := io.ReadAll(resp.Body)
+					return fmt.Errorf("status code is %s, content: %v", resp.Status, string(all))
+				}
+				return fmt.Errorf("status code is %s", resp.Status)
+			}
+			defer resp.Body.Close()
+			content, err := io.ReadAll(resp.Body)
+			if err != nil {
+				return err
+			}
+			if string(content) != expect {
+				return fmt.Errorf("response=%s, want: %s", string(content), expect)
+			}
+			return nil
+		},
+	)
+	if err != nil {
+		dumpDiagnostics(t, context.Background(), u.clientset, u.namespace, agentPodName, reviewsPodName)
+		t.Fatalf("Failed to verify traffic: %v", err)
+	}
 }
