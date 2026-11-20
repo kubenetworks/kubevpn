@@ -142,6 +142,10 @@ func TestSSHFunctions(t *testing.T) {
 	t.Run("06-run/kubevpnQuit", u.kubevpnQuit)
 
 	// 7) install centrally in ns kubevpn -- connect mode
+	// The default-ns manager (from the 01-connect SSH session) must be torn
+	// down first: its agent Job for the reviews pod collides with the central
+	// manager's (deterministic per-pod Job name), black-holing central mesh.
+	t.Run("07-central-connect/disconnectDefault", u.kubevpnDisconnect)
 	t.Run("07-central-connect/centerKubevpnUninstall", u.kubevpnUninstall(""))
 	t.Run("07-central-connect/centerKubevpnInstallInNsKubevpn", u.kubevpnConnectToNsKubevpn)
 	t.Run("07-central-connect/pin-sidecar-in-kubevpn-ns", func(t *testing.T) {
@@ -926,6 +930,16 @@ func (u *sshUt) kubevpnStatus(t *testing.T) {
 
 func (u *sshUt) kubevpnQuit(t *testing.T) {
 	if err := runKubevpn(t, "quit"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// kubevpnDisconnect drops the active connection WITHOUT quitting the daemon.
+// Must run before uninstalling the default-ns manager: an active session
+// auto-reconnects after its manager is deleted and re-creates it, so the
+// uninstall would appear ineffective (checkServiceShouldNotInNsDefault).
+func (u *sshUt) kubevpnDisconnect(t *testing.T) {
+	if err := runKubevpn(t, "disconnect"); err != nil {
 		t.Fatal(err)
 	}
 }
