@@ -21,6 +21,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -938,15 +939,31 @@ func (u *sshUt) kubevpnQuit(t *testing.T) {
 // Must run before uninstalling the default-ns manager: an active session
 // auto-reconnects after its manager is deleted and re-creates it, so the
 // uninstall would appear ineffective (checkServiceShouldNotInNsDefault).
+// Tolerant by design: when the daemon was already quit (06-run/kubevpnQuit),
+// there is no connection left and disconnect fails — that is fine.
 func (u *sshUt) kubevpnDisconnect(t *testing.T) {
 	if err := runKubevpn(t, "disconnect"); err != nil {
-		t.Fatal(err)
+		t.Logf("disconnect returned an error (tolerated, may be no active connection): %v", err)
 	}
 }
 
 func (u *sshUt) checkServiceShouldNotInNsDefault(t *testing.T) {
 	_, err := u.clientset.CoreV1().Services(u.namespace).Get(context.Background(), pkgconfig.ConfigMapPodTrafficManager, v1.GetOptions{})
 	if !k8serrors.IsNotFound(err) {
+		// Dump what is actually living in the default namespace so the log
+		// explains why the uninstall appeared ineffective.
+		svcs, listErr := u.clientset.CoreV1().Services(u.namespace).List(context.Background(), metav1.ListOptions{})
+		if listErr == nil {
+			for i := range svcs.Items {
+				t.Logf("service present in ns %q: %s", u.namespace, svcs.Items[i].Name)
+			}
+			pods, podErr := u.clientset.CoreV1().Pods(u.namespace).List(context.Background(), metav1.ListOptions{})
+			if podErr == nil {
+				for i := range pods.Items {
+					t.Logf("pod in ns %q: %s phase=%s", u.namespace, pods.Items[i].Name, pods.Items[i].Status.Phase)
+				}
+			}
+		}
 		t.Fatal(err)
 	}
 }
