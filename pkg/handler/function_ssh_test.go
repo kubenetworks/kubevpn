@@ -160,7 +160,15 @@ func TestSSHFunctions(t *testing.T) {
 			t.Logf("Warning: failed to wait for manager in kubevpn ns to be ready: %v", err)
 		}
 	})
-	t.Run("07-central-connect/centerKubevpnConnect", u.kubevpnConnect)
+	// The central connect MUST target ns kubevpn: a bare connect would resolve
+	// the kubeconfig's (possibly drifted) namespace and re-create the
+	// default-ns manager that disconnectDefault/centerKubevpnUninstall removed.
+	t.Run("07-central-connect/centerKubevpnConnect", func(t *testing.T) {
+		if err := runKubevpn(t, "connect", "--namespace", "kubevpn", "--debug",
+			"--ssh-addr", "localhost:2222", "--ssh-username", "naison", "--ssh-password", "naison"); err != nil {
+			t.Fatal(err)
+		}
+	})
 	t.Run("07-central-connect/checkServiceShouldNotInNsDefault", u.checkServiceShouldNotInNsDefault)
 	t.Run("07-central-connect/centerCheckConnectStatus", u.centerCheckConnectStatus)
 	t.Run("07-central-connect/centerCommonTest", u.commonTest)
