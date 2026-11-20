@@ -901,7 +901,7 @@ func (u *sshUt) centerCheckProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 func (u *sshUt) kubevpnUninstall(ns string) func(t *testing.T) {
 	if ns != "" {
 		return func(t *testing.T) {
-			if err := runKubevpn(t, "uninstall", "kubevpn", "-n", ns); err != nil {
+			if err := runKubevpn(t, "uninstall", "-n", ns); err != nil {
 				t.Fatal(err)
 			}
 			cmd := exec.Command("kubectl", "delete", "ns", ns, "--wait")
@@ -913,7 +913,10 @@ func (u *sshUt) kubevpnUninstall(ns string) func(t *testing.T) {
 		}
 	}
 	return func(t *testing.T) {
-		if err := runKubevpn(t, "uninstall", "kubevpn"); err != nil {
+		// Explicit -n: the kubeconfig's namespace may have drifted (e.g. a
+		// previous `connect -n kubevpn` persists it), so an unpinned uninstall
+		// would target the wrong namespace and leave the default manager alive.
+		if err := runKubevpn(t, "uninstall", "-n", u.namespace); err != nil {
 			t.Fatal(err)
 		}
 	}
