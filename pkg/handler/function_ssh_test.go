@@ -984,6 +984,8 @@ func (u *sshUt) kubectl(t *testing.T) {
 	// and describe (events, exit codes) but not the sidecar container logs that explain
 	// why traffic did not route or a sidecar crash-looped.
 	dumpKubeVPNSidecarLogs(t, u.clientset)
+	// Also dump central mesh diagnostics for leave/re-inject scenarios
+	u.dumpCentralMeshDiagnostics(t)
 	cmdGetPod := exec.Command("kubectl", "get", "pods", "-o", "wide", "-A")
 	cmdGetSvc := exec.Command("kubectl", "get", "services", "-o", "wide", "-A")
 	cmdDescribePod := exec.Command("kubectl", "describe", "pods", "-A")
@@ -997,6 +999,103 @@ func (u *sshUt) kubectl(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+}
+
+// dumpCentralMeshDiagnostics dumps targeted diagnostics for central mesh scenarios,
+// especially after leave/re-inject where interception may fail. It shares details
+// about: reviews pod sidecars, iptables rules (if available), and traffic-manager xds logs.
+func (u *sshUt) dumpCentralMeshDiagnostics(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	t.Log("=== Central Mesh Diagnostics ===")
+
+	// 1. List reviews pods with container statuses
+	t.Log("--- Reviews Pod Container Status ---")
+	pods, err := u.clientset.CoreV1().Pods(u.namespace).List(ctx, v1.ListOptions{
+		LabelSelector: "app=reviews",
+	})
+	if err != nil {
+		t.Logf("Failed to list reviews pods: %v", err)
+	} else {
+		for _, pod := range pods.Items {
+			t.Logf("Pod: %s/%s (Phase: %s)", pod.Namespace, pod.Name, pod.Status.Phase)
+			for _, container := range pod.Spec.Containers {
+				t.Logf("  Container: %s (Image: %s)", container.Name, container.Image)
+			}
+			for _, cs := range pod.Status.ContainerStatuses {
+				t.Logf("  Status: %s Ready: %v Restarts: %d", cs.Name, cs.Ready, cs.RestartCount)
+				if cs.State.Waiting != nil {
+					t.Logf("    Waiting Reason: %s Message: %s", cs.State.Waiting.Reason, cs.State.Waiting.Message)
+				}
+				if cs.State.Terminated != nil {
+					t.Logf("    Terminated Reason: %s Message: %s", cs.State.Terminated.Reason, cs.State.Terminated.Message)
+				}
+			}
+		}
+	}
+
+	// 2. If reviews pod exists, try to get iptables rules from vpn sidecar
+	if len(pods.Items) > 0 {
+		pod := pods.Items[0]
+		t.Logf("--- Reviews Pod %s iptables PREROUTING Rules ---", pod.Name)
+		// Find the vpn sidecar container name
+		vpnContainerName := ""
+		for _, container := range pod.Spec.Containers {
+			if container.Name == "vpn" || container.Name == "kubevpn" || strings.Contains(container.Name, "vpn") {
+				vpnContainerName = container.Name
+				break
+			}
+		}
+		if vpnContainerName != "" {
+			// Try to run iptables command (best-effort, may fail due to missing iptables)
+			cmd := exec.CommandContext(ctx, "kubectl", "exec", "-n", pod.Namespace, pod.Name, "-c", vpnContainerName, "--", "iptables", "-t", "nat", "-S", "PREROUTING")
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			t.Logf("exec: %v", cmd.Args)
+			if err := cmd.Run(); err != nil {
+				t.Logf("iptables command failed (may be missing in image): %v", err)
+			}
+		} else {
+			t.Logf("No vpn sidecar found in reviews pod %s", pod.Name)
+		}
+	}
+
+	// 3. Get traffic-manager pod logs, specifically xds container, last 30 lines
+	t.Log("--- Traffic-Manager xds Container Logs (last 30 lines) ---")
+	// Check both kubevpn namespace and current namespace for traffic-manager
+	for _, ns := range []string{"kubevpn", u.namespace} {
+		tmPods, err := u.clientset.CoreV1().Pods(ns).List(ctx, v1.ListOptions{
+			LabelSelector: "app=" + pkgconfig.ConfigMapPodTrafficManager,
+		})
+		if err != nil {
+			t.Logf("Failed to list traffic-manager pods in namespace %s: %v", ns, err)
+			continue
+		}
+		for _, tmPod := range tmPods.Items {
+			// Try each container that might be xds-related
+			for _, container := range tmPod.Spec.Containers {
+				if container.Name == "xds" || container.Name == "control-plane" || strings.Contains(container.Name, "xds") {
+					t.Logf("Pod: %s/%s Container: %s", tmPod.Namespace, tmPod.Name, container.Name)
+					cmd := exec.CommandContext(ctx, "kubectl", "logs", "-n", tmPod.Namespace, tmPod.Name, "-c", container.Name, "--tail=30")
+					cmd.Stdout = os.Stdout
+					cmd.Stderr = os.Stderr
+					t.Logf("exec: %v", cmd.Args)
+					_ = cmd.Run() // best-effort
+				}
+			}
+			// If no specific xds container, just get all logs
+			if len(tmPod.Spec.Containers) == 1 {
+				t.Logf("Pod: %s/%s (all containers)", tmPod.Namespace, tmPod.Name)
+				cmd := exec.CommandContext(ctx, "kubectl", "logs", "-n", tmPod.Namespace, tmPod.Name, "--tail=30")
+				cmd.Stdout = os.Stdout
+				cmd.Stderr = os.Stderr
+				t.Logf("exec: %v", cmd.Args)
+				_ = cmd.Run() // best-effort
+			}
+		}
+	}
+	t.Log("=== End Central Mesh Diagnostics ===")
 }
 
 func (u *sshUt) init(t *testing.T) {

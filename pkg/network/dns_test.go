@@ -246,7 +246,7 @@ func TestExtendSearchDomains(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := extendSearchDomains(tt.search, tt.namespaces)
+			result := ExtendSearchDomains(tt.search, tt.namespaces)
 
 			// Check that all wanted domains are present
 			for _, want := range tt.wantDomains {

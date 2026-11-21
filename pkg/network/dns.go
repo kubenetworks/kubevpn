@@ -65,7 +65,7 @@ func (nm *Runtime) setupDNS(ctx context.Context) error {
 	// Extend search domains to include all namespaces for cross-namespace short-name resolution
 	// This fixes the case where user connects to "kubevpn" namespace but proxies workloads
 	// in "default" namespace: short name "reviews" resolves as "reviews.default.svc.cluster.local"
-	relovConf.Search = extendSearchDomains(relovConf.Search, ns)
+	relovConf.Search = ExtendSearchDomains(relovConf.Search, ns)
 
 	plog.G(ctx).Debugf("Listing namespace %s services...", nm.cfg.WorkloadNamespace)
 	nm.dns.dnsConfig = &dns.Config{
@@ -119,10 +119,10 @@ func (nm *Runtime) listResolvableNamespaces(ctx context.Context) []string {
 	return ns
 }
 
-// extendSearchDomains expands the search domain list to include suffixes for all known namespaces.
+// ExtendSearchDomains expands the search domain list to include suffixes for all known namespaces.
 // This enables short-name resolution for services in namespaces that are being proxied but
 // are different from the connect namespace.
-func extendSearchDomains(search []string, namespaces []string) []string {
+func ExtendSearchDomains(search []string, namespaces []string) []string {
 	if len(namespaces) <= 1 {
 		return search
 	}
