@@ -53,6 +53,28 @@ func TestProxyInject_RejectsEmptyTunIP(t *testing.T) {
 	}
 }
 
+// TestProxyInject_RejectsEmptyOwnerID verifies input validation: with a factory present
+// but no OwnerID, the manager rejects the request with InvalidArgument before touching
+// the cluster. The factory points at a nonexistent kubeconfig (never dialed, since the
+// validation error fires first) to keep this a no-cluster test.
+func TestProxyInject_RejectsEmptyOwnerID(t *testing.T) {
+	env := newTestEnv(t)
+	env.server.factory = util.InitFactoryByPath("/nonexistent-kubeconfig", "test-ns")
+
+	stream, err := env.client.ProxyInject(context.Background(), &rpc.InjectRequest{
+		Namespace:    "test-ns",
+		Workloads:    []string{"deployments.apps/foo"},
+		LocalTunIPv4: "198.18.0.5",
+		// OwnerID intentionally empty
+	})
+	if err != nil {
+		t.Fatalf("ProxyInject open stream: %v", err)
+	}
+	if _, err = stream.Recv(); status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("expected codes.InvalidArgument for empty OwnerID, got %v", err)
+	}
+}
+
 // TestLeaveInject_UnavailableWithoutFactory verifies LeaveInject fails cleanly with
 // codes.Unavailable when the manager has no factory (not configured), via real gRPC.
 func TestLeaveInject_UnavailableWithoutFactory(t *testing.T) {

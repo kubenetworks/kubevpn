@@ -68,6 +68,9 @@ func (s *TunConfigServer) ProxyInject(req *rpc.InjectRequest, stream rpc.TunConf
 	if req.GetLocalTunIPv4() == "" {
 		return status.Error(codes.InvalidArgument, "local tun IPv4 is empty")
 	}
+	if req.GetOwnerID() == "" {
+		return status.Error(codes.InvalidArgument, "owner ID must not be empty - client session state may be stale; reconnect and retry")
+	}
 
 	logger := injectStreamLogger(func(m string) error {
 		return stream.Send(&rpc.InjectResponse{Message: m})

@@ -107,6 +107,10 @@ func (c *ConnectOptions) dialManagerWithRetry(ctx context.Context) (*grpc.Client
 // success it starts the client-side port Mapper for any K8s Service workloads the manager
 // reports — the SSH reverse tunnels to the developer's machine cannot run in the pod.
 func (c *ConnectOptions) createRemoteInboundViaManager(ctx context.Context, namespace string, headers map[string]string, portMap []string, image, localTunIPv4, localTunIPv6 string, workloads []string) error {
+	if c.OwnerID == "" {
+		return fmt.Errorf("cannot resolve owner ID for connection in namespace %s - reconnect and retry", namespace)
+	}
+
 	conn, err := c.dialManagerWithRetry(ctx)
 	if err != nil {
 		return err
