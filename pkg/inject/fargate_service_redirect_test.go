@@ -45,7 +45,9 @@ func TestFargate_Inject_AlreadyInjected_StillRedirectsService(t *testing.T) {
 		TypeMeta:   metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"},
 		ObjectMeta: metav1.ObjectMeta{Name: svcName, Namespace: workloadNS},
 		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": svcName}},
 			Template: v1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": svcName}},
 				Spec: v1.PodSpec{
 					Containers: []v1.Container{{
 						Name:  "reviews",
@@ -58,6 +60,16 @@ func TestFargate_Inject_AlreadyInjected_StillRedirectsService(t *testing.T) {
 	AddEnvoyAndSSHContainer(&dep.Spec.Template, workloadNS, nodeID, false, managerNS, "img:test")
 	if !injectedForManager(&dep.Spec.Template, managerNS) {
 		t.Fatal("precondition: expected the deployment to be injected-for-manager")
+	}
+
+	// Create an actual running pod with sidecars (for dual verification)
+	pod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "reviews-12345",
+			Namespace: workloadNS,
+			Labels:    map[string]string{"app": svcName}, // matches deployment selector
+		},
+		Spec: dep.Spec.Template.Spec, // has sidecars
 	}
 
 	unstructedMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(dep)
@@ -77,7 +89,7 @@ func TestFargate_Inject_AlreadyInjected_StillRedirectsService(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: managerNS},
 		Data:       map[string]string{},
 	}
-	clientset := fake.NewSimpleClientset(svc, cm)
+	clientset := fake.NewSimpleClientset(svc, cm, pod)
 
 	injector := &fargateInjector{opts: InjectOptions{
 		Clientset:        clientset,
