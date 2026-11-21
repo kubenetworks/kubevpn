@@ -60,15 +60,21 @@ func (f *fargateInjector) Inject(ctx context.Context) error {
 	}
 
 	if injectedForManager(templateSpec, o.ManagerNamespace) {
-		workload := fmt.Sprintf("%s/%s", o.Controller.Mapping.Resource.Resource, o.Controller.Name)
-		plog.G(ctx).Infof("Workload %s/%s already injected; skipping re-injection, updating service target ports", o.Controller.Namespace, workload)
-		// The sidecar is already present and its envoy resolves listeners dynamically from
-		// xDS, so the rule written above (with fresh EnvoyListenerPorts) takes effect
-		// without a re-injection/restart. Still (re)point the Service at those ports:
-		// returning early here — the previous behavior — left a service-mode proxy's Service
-		// targeting the original app port, so header-matched traffic never reached the
-		// sidecar and fell through to the real workload instead of the local PC.
-		return ModifyServiceTargetPort(ctx, o.Clientset, o.Controller.Namespace, o.Object.Name, containerPort2EnvoyListenerPort)
+		// Dual verification: template says injected, but check actual pods too.
+		// If template is stale (leave just removed sidecars but controller object is cached),
+		// actual pods won't have sidecars and we need to continue injecting.
+		if actualPodsHaveSidecars(ctx, o.Clientset, o.Controller, o.ManagerNamespace) {
+			workload := fmt.Sprintf("%s/%s", o.Controller.Mapping.Resource.Resource, o.Controller.Name)
+			plog.G(ctx).Infof("Workload %s/%s already injected; skipping re-injection, updating service target ports", o.Controller.Namespace, workload)
+			// The sidecar is already present and its envoy resolves listeners dynamically from
+			// xDS, so the rule written above (with fresh EnvoyListenerPorts) takes effect
+			// without a re-injection/restart. Still (re)point the Service at those ports:
+			// returning early here — the previous behavior — left a service-mode proxy's Service
+			// targeting the original app port, so header-matched traffic never reached the
+			// sidecar and fell through to the real workload instead of the local PC.
+			return ModifyServiceTargetPort(ctx, o.Clientset, o.Controller.Namespace, o.Object.Name, containerPort2EnvoyListenerPort)
+		}
+		plog.G(ctx).Infof("Controller template appears injected, but actual pods do not have sidecars; proceeding with injection")
 	}
 	if alreadyInjected(templateSpec) {
 		// Sidecars exist but target a different traffic-manager namespace whose
@@ -77,7 +83,10 @@ func (f *fargateInjector) Inject(ctx context.Context) error {
 		plog.G(ctx).Infof("Re-injecting sidecar into %s/%s: traffic-manager namespace changed", o.Controller.Namespace, o.Controller.Name)
 	}
 
-	enableIPv6, _ := util.DetectPodSupportIPv6(ctx, o.Factory, o.ManagerNamespace)
+	var enableIPv6 bool
+		if o.Factory != nil {
+			enableIPv6, _ = util.DetectPodSupportIPv6(ctx, o.Factory, o.ManagerNamespace)
+		}
 	AddEnvoyAndSSHContainer(templateSpec, o.Controller.Namespace, o.NodeID, enableIPv6, o.ManagerNamespace, o.Image)
 
 	// inject: undo on rollout failure to restore the working (pre-injection) revision.

@@ -68,6 +68,20 @@ func Main(ctx context.Context, factory cmdutil.Factory, port uint, logger *log.E
 
 	errChan := make(chan error, 2)
 
+	// Start agent reconciler if available
+	if tunConfig.agentReconciler != nil {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			plog.G(ctx).Infof("[AgentReconciler] starting")
+			if err := tunConfig.agentReconciler.Start(ctx); err != nil && err != ctx.Err() {
+				plog.G(ctx).Warnf("[AgentReconciler] stopped: %v", err)
+			}
+		}()
+	} else {
+		plog.G(ctx).Infof("[AgentReconciler] disabled")
+	}
+
 	workers.Add(1)
 	go func() {
 		defer workers.Done()

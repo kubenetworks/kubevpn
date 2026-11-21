@@ -52,6 +52,11 @@
 - [37-uninstall-cleanup.md](./37-uninstall-cleanup.md): Uninstall and cleanup procedures
 - [47-portforward-blackhole-liveness.md](./47-portforward-blackhole-liveness.md): Port-forward blackhole liveness check
 
+## AI Agent Access
+
+- [56-ai-agent-access.md](./56-ai-agent-access.md): AI agent access — agent-facing usage guide + `kubevpn mcp` MCP server
+- [agents-guide.md](./agents-guide.md): Agent-facing usage guide for AI coding agents
+
 ## Security & Networking
 
 - [08-heartbeat-health.md](./08-heartbeat-health.md): Heartbeat and health checking
@@ -64,6 +69,7 @@
 - [49-ssh-dataplane-bypass.md](./49-ssh-dataplane-bypass.md): SSH data plane bypass
 - [53-ebpf-feasibility.md](./53-ebpf-feasibility.md): eBPF feasibility study
 - [54-traffic-obfuscation.md](./54-traffic-obfuscation.md): Traffic obfuscation and TLS enforcement
+- [55-node-hosted-agent.md](./55-node-hosted-agent.md): Node-hosted privileged agent — non-intrusive proxy attachment without pod restart
 
 ## Internals & Observability
 

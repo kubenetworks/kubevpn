@@ -21,10 +21,12 @@ func newFakeManager(t *testing.T) *Manager {
 		}},
 	)
 	return &Manager{
-		clientset: clientset,
-		namespace: "test-ns",
-		cidr:      config.CIDR,
-		cidr6:     config.CIDR6,
+		clientset:  clientset,
+		namespace:  "test-ns",
+		cidr:       config.CIDR,
+		cidr6:      config.CIDR6,
+		cidrAgent:  config.CIDRAgent,
+		cidr6Agent: config.CIDR6Agent,
 	}
 }
 

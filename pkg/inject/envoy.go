@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"maps"
 	"sort"
+	"strings"
 	"text/template"
 
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -45,6 +46,19 @@ func renderEnvoyConfig(tmplStr string, value string) string {
 	return buf.String()
 }
 
+// RenderEnvoyBootstrap renders the envoy bootstrap config for the node-hosted
+// agent envoy container. The managerAddr should be in "host:port" format;
+// the port is stripped and only the host is used in the bootstrap config.
+func RenderEnvoyBootstrap(_ context.Context, managerAddr string) ([]byte, error) {
+	// Strip port if present
+	host := managerAddr
+	if idx := strings.LastIndex(host, ":"); idx != -1 {
+		host = host[:idx]
+	}
+	configYaml := renderEnvoyConfig(string(envoyConfig), host)
+	return []byte(configYaml), nil
+}
+
 // envoyRuleSpec captures the parameters for adding a proxy rule to the Envoy config.
 // Avoids passing 10+ individual arguments through addEnvoyConfig → addVirtualRule.
 type envoyRuleSpec struct {
@@ -57,6 +71,11 @@ type envoyRuleSpec struct {
 	PortMap      map[int32]string
 	FargateMode  bool
 	OwnerID      string
+	// Selector is the pod label selector for the workload, used by the agent
+	// reconciler to match pods to rules. Only set in node-agent mode.
+	Selector string
+	// IsAgent indicates that this rule comes from a node-agent connection, not a direct user connection.
+	IsAgent bool
 }
 
 // validate checks that all required fields are populated.
@@ -110,6 +129,7 @@ func addVirtualRule(ctx context.Context, v []*controlplane.Virtual, spec envoyRu
 		LocalTunIPv6: spec.LocalTunIPv6,
 		OwnerID:      spec.OwnerID,
 		PortMap:      spec.PortMap,
+		IsAgent:      spec.IsAgent,
 	}
 
 	// 1) no existing Virtual for this workload — create one
@@ -119,17 +139,23 @@ func addVirtualRule(ctx context.Context, v []*controlplane.Virtual, spec envoyRu
 			UID:           spec.NodeID,
 			Namespace:     spec.Namespace,
 			FargateMode:   spec.FargateMode,
+			Selector:      spec.Selector,
 			Ports:         spec.Ports,
 			Rules:         []*controlplane.Rule{newRule},
 		})
+	}
+
+	// If we have a selector and the existing Virtual doesn't, set it
+	if spec.Selector != "" && v[index].Selector == "" {
+		v[index].Selector = spec.Selector
 	}
 
 	// 2) same owner updating their own rule (matched by OwnerID, non-fargate)
 	if !v[index].IsFargateMode() {
 		for j, rule := range v[index].Rules {
 			if rule.OwnerID == spec.OwnerID {
-				v[index].Rules[j].Headers = util.Merge[string, string](v[index].Rules[j].Headers, spec.Headers)
-				v[index].Rules[j].PortMap = util.Merge[int32, string](v[index].Rules[j].PortMap, spec.PortMap)
+				v[index].Rules[j].Headers = util.Merge(v[index].Rules[j].Headers, spec.Headers)
+				v[index].Rules[j].PortMap = util.Merge(v[index].Rules[j].PortMap, spec.PortMap)
 				v[index].Rules[j].LocalTunIPv4 = spec.LocalTunIPv4
 				v[index].Rules[j].LocalTunIPv6 = spec.LocalTunIPv6
 				return v

@@ -23,6 +23,8 @@ conflicts with the documented design. Locate the doc by change area:
 | Connection identity / lifecycle | [docs/04-connection-id.md](docs/04-connection-id.md), [docs/12-session-lifecycle.md](docs/12-session-lifecycle.md) |
 | Logging | [docs/13-logging-architecture.md](docs/13-logging-architecture.md) |
 | Client self-upgrade | [docs/33-client-upgrade.md](docs/33-client-upgrade.md) |
+| Non-intrusive proxy attachment (node-hosted agent) | [docs/55-node-hosted-agent.md](docs/55-node-hosted-agent.md) |
+| AI agent access / MCP server | [docs/56-ai-agent-access.md](docs/56-ai-agent-access.md) |
 | SSH / privilege escalation | [docs/15-ssh-architecture.md](docs/15-ssh-architecture.md), [docs/34-privilege-escalation.md](docs/34-privilege-escalation.md) |
 | File sync / sync mode | [docs/23-syncthing-file-sync.md](docs/23-syncthing-file-sync.md), [docs/26-sync-mode.md](docs/26-sync-mode.md) |
 | Something else | Find it in [docs/README.md](docs/README.md) |
@@ -38,8 +40,10 @@ Full details in [CLAUDE.md](CLAUDE.md) — the "Dual-Session Pattern" and
   `SessionBase`. Never re-add stub methods to satisfy an interface — put the
   operation on the owning role interface (`Connection` / `DataPlane` /
   `ProxyController` in `pkg/handler/connection.go`) and type-assert at call sites.
-- **`cmd/` is frozen.** No CLI behavior changes. Sole exception: the
-  `pkg/core` → `pkg/endpoint` rename in `cmd/kubevpn/cmds/server.go`.
+- **`cmd/` is frozen: existing commands' parameters, behavior, and output must not
+  change.** Adding NEW subcommands (new files in `cmd/kubevpn/cmds/` + registration) is
+  allowed. Sole source-modification exception: the `pkg/core` → `pkg/endpoint` rename in
+  `cmd/kubevpn/cmds/server.go` (import path/package qualifiers only).
 - **Do not re-implement shared helpers.** Check the "Shared Helpers" table in
   CLAUDE.md first (`newStreamWriter`, `resolveKubeconfigBytes`,
   `util.InitFactoryByBytes`, `cleanupConnection`, `handler.DeleteTrafficManagerCoreResources`, …).
@@ -83,7 +87,7 @@ Real-TUN tests, on demand: `sudo -E env PATH="$PATH" make ut-tun`.
 ## 5. Commit & PR rules
 
 - One logical change per commit; don't bundle unrelated fixes.
-- Never modify `cmd/` (see exception above).
+- Never change existing `cmd/` command behavior/parameters (adding new subcommands is allowed; see §2).
 - File renames use `git mv` to preserve history.
 - Keep `README.md` and `README_ZH.md` in sync (bilingual, 1:1 structure);
   user docs live at kubevpn.dev, design docs in this repo's `docs/`.

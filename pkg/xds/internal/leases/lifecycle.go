@@ -11,6 +11,7 @@ type Request struct {
 	ExcludeIPs []net.IP
 	ConfirmIP  net.IP
 	Hostname   string
+	IsAgent    bool
 }
 
 // Event is an immutable allocation or proposal snapshot delivered to a subscriber.

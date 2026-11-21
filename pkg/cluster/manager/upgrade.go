@@ -53,6 +53,19 @@ func Upgrade(ctx context.Context, f cmdutil.Factory, namespace, image string) er
 	return upgradeServiceSpec(ctx, f, namespace)
 }
 
+// existingAttachMode reads KUBEVPN_PROXY_ATTACH_MODE from the pod spec's containers.
+// If not found, returns config.AttachModeNodeAgent as default.
+func existingAttachMode(spec *v1.PodSpec) string {
+	for _, c := range spec.Containers {
+		for _, env := range c.Env {
+			if env.Name == "KUBEVPN_PROXY_ATTACH_MODE" {
+				return env.Value
+			}
+		}
+	}
+	return config.AttachModeNodeAgent
+}
+
 func upgradeDeploySpec(ctx context.Context, f cmdutil.Factory, ns, name, image string) error {
 	r := f.NewBuilder().
 		WithScheme(scheme.Scheme, scheme.Scheme.PrioritizedVersionsAllGroups()...).
@@ -94,7 +107,8 @@ func upgradeDeploySpec(ctx context.Context, f cmdutil.Factory, ns, name, image s
 					break
 				}
 			}
-			deploySpec := genDeploySpec(ns, image, imagePullSecret)
+			attachMode := existingAttachMode(spec)
+			deploySpec := genDeploySpec(ns, image, imagePullSecret, attachMode)
 			*spec = deploySpec.Spec.Template.Spec
 			return nil
 		})
@@ -109,10 +123,7 @@ func upgradeDeploySpec(ctx context.Context, f cmdutil.Factory, ns, name, image s
 		}
 	}
 	for _, p := range patches {
-		_, err = resource.
-			NewHelper(p.Info.Client, p.Info.Mapping).
-			DryRun(false).
-			Patch(p.Info.Namespace, p.Info.Name, k8stypes.StrategicMergePatchType, p.Patch, nil)
+		_, err = resource.NewHelper(p.Info.Client, p.Info.Mapping).DryRun(false).Patch(p.Info.Namespace, p.Info.Name, k8stypes.StrategicMergePatchType, p.Patch, nil)
 		if err != nil {
 			plog.G(ctx).Errorf("Failed to patch image update to pod template: %v", err)
 			return err

@@ -46,14 +46,13 @@ const (
 	remote           = `{"status": "Reviews is healthy"}`
 	remoteSyncOrigin = `{"status":"Authors is healthy"}`
 	remoteSyncPod    = `{"status":"Authors is healthy in pod"}`
+	// reviewsUDPPort is the UDP port declared on the reviews workload
+	// (samples/bookinfo.yaml), distinct from the TCP 9080 so fargate's per-number
+	// port map does not clash. In mesh full-proxy the envoy UDP listener binds this
+	// container port and forwards to tunIP:<same port>, so the local udpServer must
+	// listen on it and the client must dial it — it cannot be a random port.
+	reviewsUDPPort = 9081
 )
-
-// reviewsUDPPort is the UDP port declared on the reviews workload
-// (samples/bookinfo.yaml), distinct from the TCP 9080 so fargate's per-number
-// port map does not clash. In mesh full-proxy the envoy UDP listener binds this
-// container port and forwards to tunIP:<same port>, so the local udpServer must
-// listen on it and the client must dial it — it cannot be a random port.
-const reviewsUDPPort = 9081
 
 func TestFunctions(t *testing.T) {
 	u := &ut{}
@@ -255,7 +254,6 @@ func healthCheckBackoff() wait.Backoff {
 // minutes (TLS handshake timeouts), blacking out the traffic-manager pod and
 // breaking the ADS stream until it recovers; the default 150s budget expires
 // mid-outage and the assertion fails on infra flakiness rather than a real bug.
-// The wider, jittered budget rides out that window.
 // See docs/43-macos-ci-apiserver-flakiness.md.
 func meshHealthCheckBackoff() wait.Backoff {
 	return wait.Backoff{Duration: time.Second * 5, Factor: 1.0, Jitter: 0.1, Steps: 60}
@@ -493,7 +491,7 @@ func (u *ut) testUDP(t *testing.T) {
 	port := reviewsUDPPort
 	// Tie the server's lifetime to the test so its socket is released when the
 	// test finishes; otherwise the goroutine keeps the fixed port bound and a
-	// later testUDP run (e.g. centerTestUDP) fails with "address already in use".
+	// later testUDP run (e.g., centerTestUDP) fails with "address already in use".
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	go u.udpServer(ctx, t, port)
@@ -510,7 +508,7 @@ func (u *ut) testUDP(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			t.Logf("Dail udp to IP: %s", ip)
+			t.Logf("Dial udp to IP: %s", ip)
 			return u.udpClient(t, ip, port)
 		})
 	if err != nil {
@@ -551,7 +549,7 @@ func (u *ut) udpClient(t *testing.T, ip string, port int) error {
 }
 
 func (u *ut) udpServer(ctx context.Context, t *testing.T, port int) {
-	// 创建监听
+	// Create listening
 	udpConn, err := net.ListenUDP("udp4", &net.UDPAddr{
 		IP:   net.ParseIP("127.0.0.1"),
 		Port: port,
@@ -711,6 +709,7 @@ func (u *ut) checkConnectStatus(t *testing.T) {
 		t.Fatalf("expect: %s, but was: %s", string(marshal), string(output))
 	}
 }
+
 func (u *ut) centerCheckConnectStatus(t *testing.T) {
 	cmd := exec.Command("kubevpn", "status", "-o", "json")
 	output, err := cmd.Output()
@@ -1023,7 +1022,7 @@ func (u *ut) checkServiceShouldNotInNsDefault(t *testing.T) {
 func (u *ut) kubectl(t *testing.T) {
 	// Capture KubeVPN sidecar logs first: the kubectl commands below dump pod status
 	// and describe (events, exit codes) but not the sidecar container logs that explain
-	// why traffic did not route or a sidecar crash-looped.
+	// why traffic did not route or a sidecar crash-loops.
 	dumpKubeVPNSidecarLogs(t, u.clientset)
 	cmdGetPod := exec.Command("kubectl", "get", "pods", "-o", "wide", "-A")
 	cmdGetSvc := exec.Command("kubectl", "get", "services", "-o", "wide", "-A")

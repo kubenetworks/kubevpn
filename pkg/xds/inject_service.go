@@ -68,6 +68,9 @@ func (s *TunConfigServer) ProxyInject(req *rpc.InjectRequest, stream rpc.TunConf
 	if req.GetLocalTunIPv4() == "" {
 		return status.Error(codes.InvalidArgument, "local tun IPv4 is empty")
 	}
+	if req.GetOwnerID() == "" {
+		return status.Error(codes.InvalidArgument, "owner ID must not be empty - client session state may be stale; reconnect and retry")
+	}
 
 	logger := injectStreamLogger(func(m string) error {
 		return stream.Send(&rpc.InjectResponse{Message: m})
@@ -115,6 +118,7 @@ func (s *TunConfigServer) ProxyInject(req *rpc.InjectRequest, stream rpc.TunConf
 			Secret:           tlsSecret,
 			Image:            req.GetImage(),
 			OwnerID:          req.GetOwnerID(),
+			AttachMode:       s.ResolveAttachMode(ctx),
 		})
 		if err := injector.Inject(ctx); err != nil {
 			return status.Errorf(codes.Internal, "inject sidecar into %s: %v", workload, err)
@@ -161,7 +165,7 @@ func (s *TunConfigServer) LeaveInject(req *rpc.InjectRequest, stream rpc.TunConf
 		if err != nil {
 			return err
 		}
-		empty, err := inject.UnpatchContainer(ctx, nodeID, s.factory, s.clientset.CoreV1().ConfigMaps(s.namespace), controller, req.GetOwnerID())
+		empty, err := inject.UnpatchContainer(ctx, nodeID, s.factory, s.clientset.CoreV1().ConfigMaps(s.namespace), controller, req.GetOwnerID(), s.clientset, s.namespace)
 		if err != nil {
 			return status.Errorf(codes.Internal, "leave workload %s: %v", workload, err)
 		}

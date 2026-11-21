@@ -196,6 +196,82 @@ func TestDNS_SetupServiceGet(t *testing.T) {
 	}
 }
 
+func TestExtendSearchDomains(t *testing.T) {
+	// Test cases for cross-namespace search domain extension.
+	tests := []struct {
+		name        string
+		search      []string
+		namespaces  []string
+		wantDomains []string // domains we expect to see in the result
+	}{
+		{
+			name:       "single namespace returns unchanged",
+			search:     []string{"kubevpn.svc.cluster.local", "svc.cluster.local"},
+			namespaces: []string{"kubevpn"},
+			wantDomains: []string{
+				"kubevpn.svc.cluster.local",
+				"svc.cluster.local",
+			},
+		},
+		{
+			name:       "multiple namespaces adds additional search domains",
+			search:     []string{"kubevpn.svc.cluster.local", "svc.cluster.local"},
+			namespaces: []string{"kubevpn", "default", "test"},
+			wantDomains: []string{
+				"kubevpn.svc.cluster.local",
+				"svc.cluster.local",
+				"default.svc.cluster.local",
+				"test.svc.cluster.local",
+			},
+		},
+		{
+			name:       "empty search uses default suffixes",
+			search:     []string{},
+			namespaces: []string{"kubevpn", "default"},
+			wantDomains: []string{
+				"default.svc.cluster.local",
+				"default.cluster.local",
+			},
+		},
+		{
+			name:       "avoid duplicates",
+			search:     []string{"kubevpn.svc.cluster.local", "default.svc.cluster.local"},
+			namespaces: []string{"kubevpn", "default"},
+			wantDomains: []string{
+				"kubevpn.svc.cluster.local",
+				"default.svc.cluster.local",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ExtendSearchDomains(tt.search, tt.namespaces)
+
+			// Check that all wanted domains are present
+			for _, want := range tt.wantDomains {
+				found := false
+				for _, got := range result {
+					if got == want {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("expected domain %q in result, got %v", want, result)
+				}
+			}
+
+			// Check that original order is preserved
+			for i, want := range tt.search {
+				if i < len(result) && result[i] != want {
+					t.Errorf("original order not preserved: result[%d] = %q, want %q", i, result[i], want)
+				}
+			}
+		})
+	}
+}
+
 // startTestDNSServer starts a minimal UDP DNS server on a random local port.
 // It responds to all A queries with 127.0.0.1.
 func startTestDNSServer(t *testing.T) (addr string, cleanup func()) {

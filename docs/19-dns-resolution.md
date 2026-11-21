@@ -139,7 +139,32 @@ For service short-name resolution (e.g., `curl my-svc:8080`), KubeVPN adds entri
 
 `withHostsFileLock()` uses `flock(LOCK_EX)` on Unix (`dns_lock_unix.go`) or a global named Mutex on Windows (`dns_lock_windows.go`, via `windows.CreateMutex`/`WaitForSingleObject`) to prevent concurrent writes from multiple KubeVPN instances. If the lock cannot be acquired, `fn` runs unlocked as a best-effort fallback (single-instance usage stays correct) on both platforms.
 
-## 6. Related Files
+## 6. Cross-Namespace Short Name Resolution
+
+When connecting to a Kubernetes cluster in one namespace (e.g., `kubevpn`) but proxying workloads in other namespaces (e.g., `default`), KubeVPN automatically enables short-name resolution across all namespaces.
+
+### How it works:
+
+1. **Extended search domains**: The DNS configuration includes not just the workload namespace, but also all other namespaces in the cluster. For example:
+   - Original search domains: `["kubevpn.svc.cluster.local", "svc.cluster.local"]`
+   - Extended search domains: `["kubevpn.svc.cluster.local", "svc.cluster.local", "default.svc.cluster.local", "test.svc.cluster.local"]`
+
+2. **Short-name resolution flow**:
+   - User runs `curl reviews` (short name)
+   - System resolver tries `reviews.kubevpn.svc.cluster.local` (connect namespace)
+   - If not found, tries `reviews.default.svc.cluster.local` (proxied namespace)
+   - Eventually resolves to the correct service in the proxied namespace
+
+3. **Platform support**: This works on all platforms (Linux/macOS/Windows) through the platform-specific DNS setup:
+   - **Linux**: systemd-resolved or tailscale library with extended search domains
+   - **macOS**: `/etc/resolver` files plus extended search domains
+   - **Windows**: LUID API with extended search domains
+
+### Hosts file fallback:
+
+In addition to search domain expansion, KubeVPN also receives service records from the traffic manager through the `WatchNamespaceRoutes` gRPC stream. These records are added to `/etc/hosts`, providing an additional layer of name resolution.
+
+## 7. Related Files
 
 | File | Purpose |
 |------|---------|
@@ -149,4 +174,5 @@ For service short-name resolution (e.g., `curl my-svc:8080`), KubeVPN adds entri
 | `pkg/dns/dns_unix.go` | macOS DNS setup (/etc/resolver) |
 | `pkg/dns/dns_windows.go` | Windows DNS setup (LUID API) |
 | `pkg/dns/dns_lock_unix.go` | Unix hosts file locking (flock) |
+| `pkg/network/dns.go` | Runtime DNS setup, namespace listing, and search domain extension |
 | `pkg/dns/dns_lock_windows.go` | Windows hosts file locking (Mutex) |

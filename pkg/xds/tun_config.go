@@ -3,12 +3,15 @@ package xds
 import (
 	"context"
 	"net"
+	"os"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
+	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/xds/internal/discovery"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/xds/internal/envoy"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/xds/internal/leases"
@@ -20,16 +23,20 @@ const LeaseDuration = leases.LeaseDuration
 // TunConfigServer adapts the RPC protocol to the lease and discovery domains.
 type TunConfigServer struct {
 	rpc.UnimplementedTunConfigServiceServer
-	clientset kubernetes.Interface
-	namespace string
-	factory   cmdutil.Factory
-	leases    *leases.Manager
-	routes    *discovery.Broadcaster
+	clientset        kubernetes.Interface
+	namespace        string
+	factory          cmdutil.Factory
+	leases           *leases.Manager
+	routes           *discovery.Broadcaster
+	agentReconciler  *AgentReconciler
 }
 
 // NewTunConfigServer initializes the mandatory allocator before serving RPCs.
 func NewTunConfigServer(ctx context.Context, clientset kubernetes.Interface, namespace string) (*TunConfigServer, error) {
-	s := &TunConfigServer{clientset: clientset, namespace: namespace}
+	s := &TunConfigServer{
+		clientset: clientset,
+		namespace: namespace,
+	}
 	rules := envoy.New(clientset, namespace)
 	manager, err := leases.New(ctx, clientset, namespace, leases.Callbacks{
 		Sync:   rules.Sync,
@@ -40,6 +47,15 @@ func NewTunConfigServer(ctx context.Context, clientset kubernetes.Interface, nam
 	}
 	s.leases = manager
 	s.routes = discovery.New(ctx, clientset)
+
+	// Best-effort load TLS secret for agent reconciler
+	secret, err := clientset.CoreV1().Secrets(namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		plog.G(ctx).Warnf("[TunConfigServer] failed to load TLS secret, agent reconciler disabled: %v", err)
+	} else {
+		s.agentReconciler = NewAgentReconciler(clientset, namespace, secret)
+	}
+
 	return s, nil
 }
 
@@ -58,7 +74,7 @@ func tunIPResponse(event *leases.Event) *rpc.TunIPResponse {
 }
 
 func (s *TunConfigServer) GetTunIP(ctx context.Context, req *rpc.TunIPRequest) (*rpc.TunIPResponse, error) {
-	event, err := s.leases.GetTunIP(ctx, &leases.Request{OwnerID: req.OwnerID, ExcludeIPs: parseExcludeIPs(req.ExcludeIPs), ConfirmIP: net.ParseIP(req.ConfirmIP), Hostname: req.Hostname})
+	event, err := s.leases.GetTunIP(ctx, &leases.Request{OwnerID: req.OwnerID, ExcludeIPs: parseExcludeIPs(req.ExcludeIPs), ConfirmIP: net.ParseIP(req.ConfirmIP), Hostname: req.Hostname, IsAgent: req.IsAgent})
 	if err != nil {
 		return nil, err
 	}
@@ -83,4 +99,20 @@ func (s *TunConfigServer) ReconcileAllocsFromConfigMap(ctx context.Context) {
 func (s *TunConfigServer) Close() {
 	s.routes.Close()
 	s.leases.Close()
+}
+
+// ResolveAttachMode returns the effective attach mode. Defaults to node-agent.
+func (s *TunConfigServer) ResolveAttachMode(ctx context.Context) string {
+	return attachModeFromEnv()
+}
+
+// attachModeFromEnv reads the cluster-level proxy attach mode. Default is the
+// node-agent mode; the value is set by the Helm chart / genDeploySpec.
+func attachModeFromEnv() string {
+	switch os.Getenv("KUBEVPN_PROXY_ATTACH_MODE") {
+	case config.AttachModeSidecar:
+		return config.AttachModeSidecar
+	default:
+		return config.AttachModeNodeAgent
+	}
 }

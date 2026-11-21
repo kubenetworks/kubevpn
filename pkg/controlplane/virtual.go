@@ -38,9 +38,13 @@ type Virtual struct {
 	// data in production clusters uses the key "Uid"; changing this tag would make
 	// all stored configs unreadable. The yaml tag is kept for documentation only.
 	UID string `yaml:"Uid" json:"Uid"` // group.resource.name
-	FargateMode   bool   `yaml:"fargateMode,omitempty" json:"fargateMode,omitempty"`
-	Ports         []ContainerPort
-	Rules         []*Rule
+	FargateMode bool   `yaml:"fargateMode,omitempty" json:"fargateMode,omitempty"`
+	// Selector is the workload's pod label selector, recorded at node-agent
+	// inject time so the reconciler can match pods to rules. Zero value means
+	// the rule was written by sidecar mode; reconciler skips it.
+	Selector string `yaml:"selector,omitempty" json:"selector,omitempty"`
+	Ports    []ContainerPort
+	Rules    []*Rule
 }
 
 // ContainerPort describes a port on a container with optional envoy listener binding.
@@ -109,6 +113,9 @@ type Rule struct {
 	// use ssh reverse tunnel, envoy rule endpoint localhost:envoyRulePort will forward to local pc localhost:localPort
 	// localPort is required and envoyRulePort is optional
 	PortMap map[int32]string
+	// IsAgent indicates that this rule belongs to a node-agent connection, not a direct user connection.
+	// When both agent and user rules exist with matching headers, user rules take precedence.
+	IsAgent bool `yaml:"isAgent,omitempty" json:"isAgent,omitempty"`
 }
 
 // PortMapping represents a parsed port mapping from the PortMap string encoding.

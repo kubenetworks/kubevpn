@@ -3,6 +3,7 @@ package xds
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	xdscore "github.com/cncf/xds/go/xds/core/v3"
@@ -39,6 +40,9 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
 )
+
+// warnedEmptyOwnerID tracks (namespace/uid) pairs we've already warned about to avoid log spam
+var warnedEmptyOwnerID sync.Map
 
 // The envoy config data types (Virtual, Rule, ContainerPort, PortMapping) and their
 // pure helpers now live in the leaf package pkg/controlplane, so pkg/inject can use
@@ -142,8 +146,37 @@ func To(a *Virtual, enableIPv6 bool, logger *log.Entry) (
 ) {
 	var res xdsResources
 	fargate := a.IsFargateMode()
-	logger.Debugf("[xDS] convert %s/%s: fargate=%v ipv6=%v ports=%d rules=%d",
-		a.Namespace, a.UID, fargate, enableIPv6, len(a.Ports), len(a.Rules))
+
+	// Filter out zombie rules with empty OwnerID only for schema v2+ (schema violation)
+	// For schema v0/v1 (legacy), preserve backward compatibility and keep empty OwnerID rules
+	// Log empty OwnerID rules clearly for debugging regardless of schema version.
+	validRules := make([]*Rule, 0, len(a.Rules))
+	key := fmt.Sprintf("%s/%s", a.Namespace, a.UID)
+	for _, r := range a.Rules {
+		if r.OwnerID == "" {
+			if a.SchemaVersion >= 2 {
+				if _, alreadyWarned := warnedEmptyOwnerID.LoadOrStore(key, true); !alreadyWarned {
+					logger.Warnf("[xDS] %s/%s: removing zombie rule (headers=%v, tunV4=%q, tunV6=%q) - empty OwnerID (schema v%d violation); this warning will not repeat for this virtual service",
+						a.Namespace, a.UID, r.Headers, r.LocalTunIPv4, r.LocalTunIPv6, a.SchemaVersion)
+				}
+				continue
+			} else {
+				if _, alreadyWarned := warnedEmptyOwnerID.LoadOrStore(key, true); !alreadyWarned {
+					logger.Warnf("[xDS] %s/%s: legacy rule with empty OwnerID (headers=%v, tunV4=%q, tunV6=%q) - schema v%d, keeping for backward compatibility; this warning will not repeat for this virtual service",
+						a.Namespace, a.UID, r.Headers, r.LocalTunIPv4, r.LocalTunIPv6, a.SchemaVersion)
+				}
+			}
+		}
+		validRules = append(validRules, r)
+	}
+
+	// Create a copy of Virtual with only valid rules for processing
+	// (original is not modified)
+	validVirtual := *a
+	validVirtual.Rules = validRules
+
+	logger.Debugf("[xDS] convert %s/%s: fargate=%v ipv6=%v ports=%d rules=%d (filtered from %d)",
+		a.Namespace, a.UID, fargate, enableIPv6, len(a.Ports), len(validRules), len(a.Rules))
 	for _, port := range a.Ports {
 		// Mesh binds the container port; fargate binds the dedicated envoy listener port.
 		listenPort := port.ContainerPort
@@ -152,9 +185,9 @@ func To(a *Virtual, enableIPv6 bool, logger *log.Entry) (
 		}
 		logger.Debugf("[xDS] %s/%s port %d/%s -> listen on %d", a.Namespace, a.UID, port.ContainerPort, port.Protocol, listenPort)
 		if port.Protocol == corev1.ProtocolUDP {
-			addUDPPort(a, &res, port, listenPort, enableIPv6, logger)
+			addUDPPort(&validVirtual, &res, port, listenPort, enableIPv6, logger)
 		} else {
-			addTCPPort(a, &res, port, listenPort, fargate, enableIPv6, logger)
+			addTCPPort(&validVirtual, &res, port, listenPort, fargate, enableIPv6, logger)
 		}
 	}
 
@@ -175,8 +208,8 @@ func To(a *Virtual, enableIPv6 bool, logger *log.Entry) (
 	// traffic-manager sidecar log even when it does not run at debug level. Reveals, per
 	// workload, whether a full-proxy (empty-headers) rule exists and its TUN IP / owner —
 	// the key signal for diagnosing "traffic fell through to origin_cluster".
-	rules := make([]string, 0, len(a.Rules))
-	for _, r := range a.Rules {
+	rules := make([]string, 0, len(validRules))
+	for _, r := range validRules {
 		rules = append(rules, fmt.Sprintf("{headers=%v tunV4=%q tunV6=%q owner=%q portmap=%v}",
 			r.Headers, r.LocalTunIPv4, r.LocalTunIPv6, r.OwnerID, r.PortMap))
 	}

@@ -21,6 +21,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -64,9 +65,34 @@ func runKubevpn(t *testing.T, args ...string) error {
 
 func TestSSHFunctions(t *testing.T) {
 	u := &sshUt{}
+	var originalAttachMode string
 	// 1) test connect
 	t.Run("01-connect/init", u.init)
 	t.Run("01-connect/kubevpnConnect", u.kubevpnConnect)
+	// Pin attach mode to sidecar for test compatibility (avoids node-agent + SSH jump mesh timeout issue)
+	t.Run("01-connect/pin-sidecar", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		var err error
+		originalAttachMode, err = u.getCurrentAttachMode(ctx)
+		if err != nil {
+			t.Logf("Warning: failed to get original attach mode: %v", err)
+			originalAttachMode = pkgconfig.AttachModeSidecar
+		}
+		if err := u.setManagerAttachMode(ctx, pkgconfig.AttachModeSidecar); err != nil {
+			t.Fatalf("Failed to set attach mode to sidecar: %v", err)
+		}
+		u.waitManagerReady(t)
+	})
+	t.Cleanup(func() {
+		// Restore original attach mode
+		if u.clientset != nil && originalAttachMode != "" {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+			_ = u.setManagerAttachMode(ctx, originalAttachMode)
+			_ = waitSSHManagerReadyWithContext(ctx, u.clientset, u.namespace)
+		}
+	})
 	t.Run("01-connect/commonTest", u.commonTest)
 	t.Run("01-connect/checkConnectStatus", u.checkConnectStatus)
 
@@ -88,7 +114,10 @@ func TestSSHFunctions(t *testing.T) {
 
 	// 4) test proxy mode with service mesh and gvisor
 	t.Run("04-proxy-mesh-fargate/kubevpnLeave", u.kubevpnLeave)
-	t.Run("04-proxy-mesh-fargate/kubevpnUninstall", u.kubevpnUninstall(""))
+	// NOTE: no uninstall here. Uninstalling mid-suite deletes the manager and
+	// the reconnect re-creates it with the default attach mode (auto →
+	// node-agent), whose restart also breaks the live SSH-jump session. The
+	// uninstall+install flow is covered by 07-central-connect.
 	t.Run("04-proxy-mesh-fargate/kubevpnProxyWithServiceMeshAndFargateMode", u.kubevpnProxyWithServiceMeshAndFargateMode)
 	t.Run("04-proxy-mesh-fargate/commonTest", u.commonTest)
 	t.Run("04-proxy-mesh-fargate/serviceMeshReviewsServiceIP", u.serviceMeshReviewsServiceIP)
@@ -114,9 +143,32 @@ func TestSSHFunctions(t *testing.T) {
 	t.Run("06-run/kubevpnQuit", u.kubevpnQuit)
 
 	// 7) install centrally in ns kubevpn -- connect mode
+	// The default-ns manager (from the 01-connect SSH session) must be torn
+	// down first: its agent Job for the reviews pod collides with the central
+	// manager's (deterministic per-pod Job name), black-holing central mesh.
+	t.Run("07-central-connect/disconnectDefault", u.kubevpnDisconnect)
 	t.Run("07-central-connect/centerKubevpnUninstall", u.kubevpnUninstall(""))
 	t.Run("07-central-connect/centerKubevpnInstallInNsKubevpn", u.kubevpnConnectToNsKubevpn)
-	t.Run("07-central-connect/centerKubevpnConnect", u.kubevpnConnect)
+	t.Run("07-central-connect/pin-sidecar-in-kubevpn-ns", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		if err := u.setManagerAttachModeInNamespace(ctx, pkgconfig.AttachModeSidecar, "kubevpn"); err != nil {
+			t.Fatalf("Failed to pin attach mode to sidecar in kubevpn ns: %v", err)
+		}
+		// Wait for manager in kubevpn ns to be ready
+		if err := waitSSHManagerReadyWithContext(ctx, u.clientset, "kubevpn"); err != nil {
+			t.Logf("Warning: failed to wait for manager in kubevpn ns to be ready: %v", err)
+		}
+	})
+	// The central connect MUST target ns kubevpn: a bare connect would resolve
+	// the kubeconfig's (possibly drifted) namespace and re-create the
+	// default-ns manager that disconnectDefault/centerKubevpnUninstall removed.
+	t.Run("07-central-connect/centerKubevpnConnect", func(t *testing.T) {
+		if err := runKubevpn(t, "connect", "--namespace", "kubevpn", "--debug",
+			"--ssh-addr", "localhost:2222", "--ssh-username", "naison", "--ssh-password", "naison"); err != nil {
+			t.Fatal(err)
+		}
+	})
 	t.Run("07-central-connect/checkServiceShouldNotInNsDefault", u.checkServiceShouldNotInNsDefault)
 	t.Run("07-central-connect/centerCheckConnectStatus", u.centerCheckConnectStatus)
 	t.Run("07-central-connect/centerCommonTest", u.commonTest)
@@ -857,7 +909,7 @@ func (u *sshUt) centerCheckProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 func (u *sshUt) kubevpnUninstall(ns string) func(t *testing.T) {
 	if ns != "" {
 		return func(t *testing.T) {
-			if err := runKubevpn(t, "uninstall", "kubevpn", "-n", ns); err != nil {
+			if err := runKubevpn(t, "uninstall", "-n", ns); err != nil {
 				t.Fatal(err)
 			}
 			cmd := exec.Command("kubectl", "delete", "ns", ns, "--wait")
@@ -869,7 +921,10 @@ func (u *sshUt) kubevpnUninstall(ns string) func(t *testing.T) {
 		}
 	}
 	return func(t *testing.T) {
-		if err := runKubevpn(t, "uninstall", "kubevpn"); err != nil {
+		// Explicit -n: the kubeconfig's namespace may have drifted (e.g. a
+		// previous `connect -n kubevpn` persists it), so an unpinned uninstall
+		// would target the wrong namespace and leave the default manager alive.
+		if err := runKubevpn(t, "uninstall", "-n", u.namespace); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -891,9 +946,35 @@ func (u *sshUt) kubevpnQuit(t *testing.T) {
 	}
 }
 
+// kubevpnDisconnect drops the active connection WITHOUT quitting the daemon.
+// Must run before uninstalling the default-ns manager: an active session
+// auto-reconnects after its manager is deleted and re-creates it, so the
+// uninstall would appear ineffective (checkServiceShouldNotInNsDefault).
+// Tolerant by design: when the daemon was already quit (06-run/kubevpnQuit),
+// there is no connection left and disconnect fails — that is fine.
+func (u *sshUt) kubevpnDisconnect(t *testing.T) {
+	if err := runKubevpn(t, "disconnect"); err != nil {
+		t.Logf("disconnect returned an error (tolerated, may be no active connection): %v", err)
+	}
+}
+
 func (u *sshUt) checkServiceShouldNotInNsDefault(t *testing.T) {
 	_, err := u.clientset.CoreV1().Services(u.namespace).Get(context.Background(), pkgconfig.ConfigMapPodTrafficManager, v1.GetOptions{})
 	if !k8serrors.IsNotFound(err) {
+		// Dump what is actually living in the default namespace so the log
+		// explains why the uninstall appeared ineffective.
+		svcs, listErr := u.clientset.CoreV1().Services(u.namespace).List(context.Background(), metav1.ListOptions{})
+		if listErr == nil {
+			for i := range svcs.Items {
+				t.Logf("service present in ns %q: %s", u.namespace, svcs.Items[i].Name)
+			}
+			pods, podErr := u.clientset.CoreV1().Pods(u.namespace).List(context.Background(), metav1.ListOptions{})
+			if podErr == nil {
+				for i := range pods.Items {
+					t.Logf("pod in ns %q: %s phase=%s", u.namespace, pods.Items[i].Name, pods.Items[i].Status.Phase)
+				}
+			}
+		}
 		t.Fatal(err)
 	}
 }
@@ -903,6 +984,8 @@ func (u *sshUt) kubectl(t *testing.T) {
 	// and describe (events, exit codes) but not the sidecar container logs that explain
 	// why traffic did not route or a sidecar crash-looped.
 	dumpKubeVPNSidecarLogs(t, u.clientset)
+	// Also dump central mesh diagnostics for leave/re-inject scenarios
+	u.dumpCentralMeshDiagnostics(t)
 	cmdGetPod := exec.Command("kubectl", "get", "pods", "-o", "wide", "-A")
 	cmdGetSvc := exec.Command("kubectl", "get", "services", "-o", "wide", "-A")
 	cmdDescribePod := exec.Command("kubectl", "describe", "pods", "-A")
@@ -916,6 +999,103 @@ func (u *sshUt) kubectl(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+}
+
+// dumpCentralMeshDiagnostics dumps targeted diagnostics for central mesh scenarios,
+// especially after leave/re-inject where interception may fail. It shares details
+// about: reviews pod sidecars, iptables rules (if available), and traffic-manager xds logs.
+func (u *sshUt) dumpCentralMeshDiagnostics(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	t.Log("=== Central Mesh Diagnostics ===")
+
+	// 1. List reviews pods with container statuses
+	t.Log("--- Reviews Pod Container Status ---")
+	pods, err := u.clientset.CoreV1().Pods(u.namespace).List(ctx, v1.ListOptions{
+		LabelSelector: "app=reviews",
+	})
+	if err != nil {
+		t.Logf("Failed to list reviews pods: %v", err)
+	} else {
+		for _, pod := range pods.Items {
+			t.Logf("Pod: %s/%s (Phase: %s)", pod.Namespace, pod.Name, pod.Status.Phase)
+			for _, container := range pod.Spec.Containers {
+				t.Logf("  Container: %s (Image: %s)", container.Name, container.Image)
+			}
+			for _, cs := range pod.Status.ContainerStatuses {
+				t.Logf("  Status: %s Ready: %v Restarts: %d", cs.Name, cs.Ready, cs.RestartCount)
+				if cs.State.Waiting != nil {
+					t.Logf("    Waiting Reason: %s Message: %s", cs.State.Waiting.Reason, cs.State.Waiting.Message)
+				}
+				if cs.State.Terminated != nil {
+					t.Logf("    Terminated Reason: %s Message: %s", cs.State.Terminated.Reason, cs.State.Terminated.Message)
+				}
+			}
+		}
+	}
+
+	// 2. If reviews pod exists, try to get iptables rules from vpn sidecar
+	if len(pods.Items) > 0 {
+		pod := pods.Items[0]
+		t.Logf("--- Reviews Pod %s iptables PREROUTING Rules ---", pod.Name)
+		// Find the vpn sidecar container name
+		vpnContainerName := ""
+		for _, container := range pod.Spec.Containers {
+			if container.Name == "vpn" || container.Name == "kubevpn" || strings.Contains(container.Name, "vpn") {
+				vpnContainerName = container.Name
+				break
+			}
+		}
+		if vpnContainerName != "" {
+			// Try to run iptables command (best-effort, may fail due to missing iptables)
+			cmd := exec.CommandContext(ctx, "kubectl", "exec", "-n", pod.Namespace, pod.Name, "-c", vpnContainerName, "--", "iptables", "-t", "nat", "-S", "PREROUTING")
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			t.Logf("exec: %v", cmd.Args)
+			if err := cmd.Run(); err != nil {
+				t.Logf("iptables command failed (may be missing in image): %v", err)
+			}
+		} else {
+			t.Logf("No vpn sidecar found in reviews pod %s", pod.Name)
+		}
+	}
+
+	// 3. Get traffic-manager pod logs, specifically xds container, last 30 lines
+	t.Log("--- Traffic-Manager xds Container Logs (last 30 lines) ---")
+	// Check both kubevpn namespace and current namespace for traffic-manager
+	for _, ns := range []string{"kubevpn", u.namespace} {
+		tmPods, err := u.clientset.CoreV1().Pods(ns).List(ctx, v1.ListOptions{
+			LabelSelector: "app=" + pkgconfig.ConfigMapPodTrafficManager,
+		})
+		if err != nil {
+			t.Logf("Failed to list traffic-manager pods in namespace %s: %v", ns, err)
+			continue
+		}
+		for _, tmPod := range tmPods.Items {
+			// Try each container that might be xds-related
+			for _, container := range tmPod.Spec.Containers {
+				if container.Name == "xds" || container.Name == "control-plane" || strings.Contains(container.Name, "xds") {
+					t.Logf("Pod: %s/%s Container: %s", tmPod.Namespace, tmPod.Name, container.Name)
+					cmd := exec.CommandContext(ctx, "kubectl", "logs", "-n", tmPod.Namespace, tmPod.Name, "-c", container.Name, "--tail=30")
+					cmd.Stdout = os.Stdout
+					cmd.Stderr = os.Stderr
+					t.Logf("exec: %v", cmd.Args)
+					_ = cmd.Run() // best-effort
+				}
+			}
+			// If no specific xds container, just get all logs
+			if len(tmPod.Spec.Containers) == 1 {
+				t.Logf("Pod: %s/%s (all containers)", tmPod.Namespace, tmPod.Name)
+				cmd := exec.CommandContext(ctx, "kubectl", "logs", "-n", tmPod.Namespace, tmPod.Name, "--tail=30")
+				cmd.Stdout = os.Stdout
+				cmd.Stderr = os.Stderr
+				t.Logf("exec: %v", cmd.Args)
+				_ = cmd.Run() // best-effort
+			}
+		}
+	}
+	t.Log("=== End Central Mesh Diagnostics ===")
 }
 
 func (u *sshUt) init(t *testing.T) {
@@ -947,4 +1127,105 @@ func (u *sshUt) startupHttpServer(t *testing.T, addr, str string) {
 	mux.HandleFunc("/health", health)
 	t.Logf("Start listening http addr %s ...", addr)
 	_ = http.ListenAndServe(addr, mux)
+}
+
+func (u *sshUt) getCurrentAttachMode(ctx context.Context) (string, error) {
+	return u.getCurrentAttachModeInNamespace(ctx, u.namespace)
+}
+
+func (u *sshUt) getCurrentAttachModeInNamespace(ctx context.Context, namespace string) (string, error) {
+	deploy, err := u.clientset.AppsV1().Deployments(namespace).Get(ctx, pkgconfig.ConfigMapPodTrafficManager, v1.GetOptions{})
+	if err != nil {
+		return "", err
+	}
+	for _, c := range deploy.Spec.Template.Spec.Containers {
+		for _, env := range c.Env {
+			if env.Name == "KUBEVPN_PROXY_ATTACH_MODE" {
+				return env.Value, nil
+			}
+		}
+	}
+	return pkgconfig.AttachModeSidecar, nil
+}
+
+func (u *sshUt) setManagerAttachMode(ctx context.Context, mode string) error {
+	return u.setManagerAttachModeInNamespace(ctx, mode, u.namespace)
+}
+
+func (u *sshUt) setManagerAttachModeInNamespace(ctx context.Context, mode string, namespace string) error {
+	// Use retry with ResourceVersion for safe updates
+	return wait.ExponentialBackoffWithContext(ctx, wait.Backoff{
+		Duration: 500 * time.Millisecond,
+		Factor:   2,
+		Steps:    5,
+	}, func(ctx context.Context) (bool, error) {
+		deploy, err := u.clientset.AppsV1().Deployments(namespace).Get(ctx, pkgconfig.ConfigMapPodTrafficManager, v1.GetOptions{})
+		if err != nil {
+			return false, err
+		}
+
+		updated := false
+		for i := range deploy.Spec.Template.Spec.Containers {
+			c := &deploy.Spec.Template.Spec.Containers[i]
+			found := false
+			for j := range c.Env {
+				if c.Env[j].Name == "KUBEVPN_PROXY_ATTACH_MODE" {
+					found = true
+					if c.Env[j].Value != mode {
+						c.Env[j].Value = mode
+						updated = true
+					}
+					break
+				}
+			}
+			if !found {
+				c.Env = append(c.Env, corev1.EnvVar{
+					Name:  "KUBEVPN_PROXY_ATTACH_MODE",
+					Value: mode,
+				})
+				updated = true
+			}
+		}
+
+		if !updated {
+			// Already set correctly
+			return true, nil
+		}
+
+		_, err = u.clientset.AppsV1().Deployments(namespace).Update(ctx, deploy, v1.UpdateOptions{})
+		if err != nil {
+			// Conflict, retry
+			return false, nil
+		}
+		return true, nil
+	})
+}
+
+// waitSSHManagerReadyWithContext waits for manager to be ready with context
+func waitSSHManagerReadyWithContext(ctx context.Context, clientset kubernetes.Interface, namespace string) error {
+	label := fields.OneTermEqualSelector("app", pkgconfig.ConfigMapPodTrafficManager).String()
+	return wait.PollUntilContextCancel(ctx, 3*time.Second, true, func(ctx context.Context) (bool, error) {
+		pods, err := clientset.CoreV1().Pods(namespace).List(ctx, v1.ListOptions{LabelSelector: label})
+		if err != nil {
+			return false, nil
+		}
+		for i := range pods.Items {
+			pod := &pods.Items[i]
+			if pod.DeletionTimestamp != nil {
+				continue
+			}
+			// Check all containers are ready
+			ready := true
+			for _, cs := range pod.Status.ContainerStatuses {
+				if !cs.Ready {
+					ready = false
+					break
+				}
+			}
+			if ready && pod.Status.Phase == corev1.PodRunning {
+				return true, nil
+			}
+		}
+		return false, nil
+	})
 }

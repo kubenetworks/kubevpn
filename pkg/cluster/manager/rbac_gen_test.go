@@ -22,9 +22,9 @@ func TestGenRole_Fields(t *testing.T) {
 		t.Errorf("Namespace: got %q, want %q", role.Namespace, ns)
 	}
 	// Rule 0: configmaps/secrets (resourceName-scoped); Rules 1-2: CIDR detection
-	// (pods/services + pods/exec, see genRole / docs/46).
-	if len(role.Rules) != 3 {
-		t.Fatalf("Rules len: got %d, want 3", len(role.Rules))
+	// (pods/services + pods/exec, see genRole / docs/46); Rule 3: batch/jobs.
+	if len(role.Rules) != 4 {
+		t.Fatalf("Rules len: got %d, want 4", len(role.Rules))
 	}
 	rule := role.Rules[0]
 	wantVerbs := []string{"get", "list", "watch", "create", "update", "patch", "delete"}

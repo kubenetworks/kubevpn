@@ -69,12 +69,15 @@ func NewKubeVPNCommand() *cobra.Command {
 				CmdDNS(factory),
 				CmdSyncthing(factory),
 				CmdOnce(factory),
+				CmdAgent(factory),
+				CmdAgentEnvoyConfig(factory),
 			},
 		},
 		{
 			Message: "Management commands:",
 			Commands: []*cobra.Command{
 				CmdStatus(factory),
+				CmdMCP(factory),
 				CmdAlias(factory),
 				CmdConnection(factory),
 				CmdRoute(factory),
