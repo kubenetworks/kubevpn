@@ -61,6 +61,7 @@ func GenAgentJobSpec(input AgentJobInput) *batchv1.Job {
 		{Name: "TrafficManagerService", Value: trafficManagerAddr(input.ManagerNamespace)},
 		{Name: "POD_UID", Value: string(input.Pod.UID)},
 		{Name: "ENVOY_NODE_ID", Value: util.GenEnvoyUID(input.Namespace, input.NodeID)},
+		{Name: "KUBEVPN_AGENT_CONNECTION", Value: "1"},
 	}, tlsEnv...)
 
 	vpnScript := `echo 1 > /proc/sys/net/ipv4/ip_forward

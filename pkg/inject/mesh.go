@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -174,10 +175,58 @@ func deleteAgentJobs(ctx context.Context, cs kubernetes.Interface, managerNamesp
 	if err != nil {
 		return fmt.Errorf("list agent jobs: %w", err)
 	}
+	if len(jobs.Items) == 0 {
+		return nil
+	}
+
+	// Delete the jobs first
 	for i := range jobs.Items {
 		if err := cs.BatchV1().Jobs(managerNamespace).Delete(ctx, jobs.Items[i].Name, metav1.DeleteOptions{}); err != nil && !errors.IsNotFound(err) {
-			return fmt.Errorf("delete agent job %s: %w", jobs.Items[i].Name, err)
+			plog.G(ctx).Warnf("delete agent job %s: %v", jobs.Items[i].Name, err)
+			// Continue trying to delete other jobs even if one fails
 		}
 	}
+
+	// Best-effort wait for pods to terminate (up to 10 seconds)
+	// This helps ensure old agent pods release their DHCP leases before returning
+	waitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	podSelector := metav1.FormatLabelSelector(&metav1.LabelSelector{
+		MatchLabels: map[string]string{"kubevpn/owner-id": ownerID},
+	})
+
+	for waitCtx.Err() == nil {
+		pods, err := cs.CoreV1().Pods(managerNamespace).List(waitCtx, metav1.ListOptions{
+			LabelSelector: podSelector,
+		})
+		if err != nil {
+			// If we can't list pods, just return early - this is best-effort
+			plog.G(ctx).Debugf("list agent pods for cleanup: %v", err)
+			return nil
+		}
+		if len(pods.Items) == 0 {
+			// All pods are gone
+			return nil
+		}
+		// Check if all remaining pods are terminating
+		allTerminating := true
+		for _, pod := range pods.Items {
+			if pod.DeletionTimestamp == nil {
+				allTerminating = false
+				break
+			}
+		}
+		if allTerminating {
+			plog.G(ctx).Debugf("all %d agent pods are terminating, returning early", len(pods.Items))
+			return nil
+		}
+		// Wait a bit before checking again
+		select {
+		case <-waitCtx.Done():
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+	plog.G(ctx).Debugf("timeout waiting for agent pods to terminate, returning anyway")
 	return nil
 }

@@ -183,6 +183,35 @@ func TestNodeAgentInject_WritesRulesAndCreatesPinnedJob(t *testing.T) {
 	}
 }
 
+func TestGenAgentJobSpec_HasAgentConnectionEnvVar(t *testing.T) {
+	_, opts, pod := newFakeWorld(t)
+	input := AgentJobInput{
+		ManagerNamespace: opts.ManagerNamespace,
+		Namespace:        opts.Controller.Namespace,
+		NodeID:           opts.NodeID,
+		Image:            opts.Image,
+		OwnerID:          opts.OwnerID,
+		Secret:           opts.Secret,
+		Pod:              pod,
+	}
+
+	job := GenAgentJobSpec(input)
+
+	// Verify KUBEVPN_AGENT_CONNECTION env var is set to "1" in all containers
+	for _, c := range job.Spec.Template.Spec.Containers {
+		found := false
+		for _, env := range c.Env {
+			if env.Name == "KUBEVPN_AGENT_CONNECTION" && env.Value == "1" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("container %q missing KUBEVPN_AGENT_CONNECTION env var", c.Name)
+		}
+	}
+}
+
 func TestNodeAgentInject_IsIdempotentPerOwner(t *testing.T) {
 	clientset, opts, pod := newFakeWorld(t)
 	_, err := clientset.CoreV1().Pods(pod.Namespace).Create(context.Background(), pod.DeepCopy(), metav1.CreateOptions{})
@@ -331,3 +360,81 @@ func TestEnsureAgentJob_TerminatingJob_WaitsAndRecreates(t *testing.T) {
 	// Test passes as long as we didn't panic
 }
 
+func TestDeleteAgentJobs_DeletesJobs(t *testing.T) {
+	clientset, opts, pod := newFakeWorld(t)
+	input := AgentJobInput{
+		ManagerNamespace: opts.ManagerNamespace,
+		Namespace:        opts.Controller.Namespace,
+		NodeID:           opts.NodeID,
+		Image:            opts.Image,
+		OwnerID:          opts.OwnerID,
+		Secret:           opts.Secret,
+		Pod:              pod,
+	}
+
+	// Create an agent job first
+	job := GenAgentJobSpec(input)
+	_, err := clientset.BatchV1().Jobs(input.ManagerNamespace).Create(context.Background(), job, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("precreate job: %v", err)
+	}
+
+	// Create a pod for the job too (labeled with kubevpn/owner-id)
+	podForJob := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "agent-pod-1",
+			Namespace: opts.ManagerNamespace,
+			Labels: map[string]string{
+				"kubevpn/owner-id": opts.OwnerID,
+				"kubevpn/pod-uid":  string(pod.UID),
+			},
+		},
+		Spec: v1.PodSpec{
+			Containers: []v1.Container{{Name: "vpn", Image: opts.Image}},
+		},
+		Status: v1.PodStatus{
+			Phase: v1.PodRunning,
+		},
+	}
+	_, err = clientset.CoreV1().Pods(opts.ManagerNamespace).Create(context.Background(), podForJob, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("precreate pod: %v", err)
+	}
+
+	// Verify job exists before delete
+	jobs, err := clientset.BatchV1().Jobs(input.ManagerNamespace).List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		t.Fatalf("list jobs: %v", err)
+	}
+	if len(jobs.Items) != 1 {
+		t.Fatalf("expected 1 job before delete, got %d", len(jobs.Items))
+	}
+
+	// Call deleteAgentJobs with a short timeout context
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	err = deleteAgentJobs(ctx, clientset, opts.ManagerNamespace, opts.OwnerID)
+	if err != nil {
+		t.Fatalf("deleteAgentJobs: %v", err)
+	}
+
+	// Verify job is deleted
+	jobs, err = clientset.BatchV1().Jobs(input.ManagerNamespace).List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		t.Fatalf("list jobs: %v", err)
+	}
+	if len(jobs.Items) != 0 {
+		t.Fatalf("expected 0 jobs after delete, got %d", len(jobs.Items))
+	}
+}
+
+func TestDeleteAgentJobs_NoJobs_NoOp(t *testing.T) {
+	clientset, opts, _ := newFakeWorld(t)
+
+	// Call deleteAgentJobs when no jobs exist
+	ctx := context.Background()
+	err := deleteAgentJobs(ctx, clientset, opts.ManagerNamespace, opts.OwnerID)
+	if err != nil {
+		t.Fatalf("deleteAgentJobs with no jobs should not error: %v", err)
+	}
+}
