@@ -2,6 +2,7 @@ package xds
 
 import (
 	"strings"
+	"sync"
 	"testing"
 
 	cluster "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
@@ -953,5 +954,103 @@ func TestBuildFilterChains_HTTPManagerConfig(t *testing.T) {
 
 	if hcm.GetStreamIdleTimeout().GetSeconds() != 0 {
 		t.Fatalf("expected stream idle timeout 0, got %v", hcm.GetStreamIdleTimeout())
+	}
+}
+
+// TestVirtual_To_FiltersEmptyOwnerID verifies that rules with empty OwnerID are filtered out for schema v2+ and kept for schema v0/v1.
+func TestVirtual_To_FiltersEmptyOwnerID(t *testing.T) {
+	validRule := &Rule{
+		OwnerID:      "owner-1",
+		Headers:      map[string]string{"env": "test"},
+		LocalTunIPv4: "198.18.0.1",
+		PortMap:      map[int32]string{9080: "9080"},
+	}
+	emptyOwnerRule := &Rule{
+		OwnerID:      "",
+		Headers:      map[string]string{"env": "legacy"},
+		LocalTunIPv4: "198.18.0.2",
+		PortMap:      map[int32]string{9080: "9080"},
+	}
+
+	testCases := []struct {
+		name           string
+		schemaVersion  int
+		expectFiltered bool
+	}{
+		{
+			name:           "SchemaVersion 2 filters empty OwnerID rules",
+			schemaVersion:  2,
+			expectFiltered: true,
+		},
+		{
+			name:           "SchemaVersion 1 keeps empty OwnerID rules",
+			schemaVersion:  1,
+			expectFiltered: false,
+		},
+		{
+			name:           "SchemaVersion 0 keeps empty OwnerID rules",
+			schemaVersion:  0,
+			expectFiltered: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Clear warnedEmptyOwnerID between test cases
+			warnedEmptyOwnerID = sync.Map{}
+
+			v := &Virtual{
+				Namespace:     "default",
+				UID:           "deployments.apps.test",
+				SchemaVersion: tc.schemaVersion,
+				Ports:         []ContainerPort{{ContainerPort: 9080, Protocol: corev1.ProtocolTCP}},
+				Rules:         []*Rule{validRule, emptyOwnerRule},
+			}
+			logger := log.NewEntry(log.New())
+			listeners, clusters, routes, endpoints := To(v, false, logger)
+			t.Logf("SchemaVersion %d: %d listeners, %d clusters, %d routes, %d endpoints", tc.schemaVersion, len(listeners), len(clusters), len(routes), len(endpoints))
+
+			// Count how many unique clusters we have for the valid rule
+			validClusterCount := 0
+			for _, res := range clusters {
+				name := res.(*cluster.Cluster).GetName()
+				if name == "198.18.0.1_9080" {
+					validClusterCount++
+				}
+			}
+			if validClusterCount != 1 {
+				t.Fatalf("expected exactly 1 cluster for valid rule, got %d", validClusterCount)
+			}
+
+			// Check if emptyOwnerRule's cluster exists
+			emptyOwnerClusterExists := false
+			for _, res := range clusters {
+				name := res.(*cluster.Cluster).GetName()
+				if name == "198.18.0.2_9080" {
+					emptyOwnerClusterExists = true
+					break
+				}
+			}
+
+			if tc.expectFiltered {
+				if emptyOwnerClusterExists {
+					t.Fatalf("expected empty OwnerID rule to be filtered out, but cluster exists")
+				}
+				// Check that routes only include valid rule
+				rc := routes[0].(*route.RouteConfiguration)
+				if len(rc.GetVirtualHosts()[0].GetRoutes()) != 2 { // valid rule + default route
+					t.Fatalf("expected exactly 2 routes (valid rule + default), got %d", len(rc.GetVirtualHosts()[0].GetRoutes()))
+				}
+			} else {
+				if !emptyOwnerClusterExists {
+					t.Fatalf("expected empty OwnerID rule to be kept, but cluster does not exist")
+				}
+				// Check that routes include both rules
+				rc := routes[0].(*route.RouteConfiguration)
+				if len(rc.GetVirtualHosts()[0].GetRoutes()) != 3 { // valid rule + empty owner rule + default route
+					t.Fatalf("expected exactly 3 routes (2 rules + default), got %d", len(rc.GetVirtualHosts()[0].GetRoutes()))
+				}
+			}
+		})
 	}
 }

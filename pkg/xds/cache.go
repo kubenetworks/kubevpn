@@ -3,6 +3,7 @@ package xds
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	xdscore "github.com/cncf/xds/go/xds/core/v3"
@@ -39,6 +40,9 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
 )
+
+// warnedEmptyOwnerID tracks (namespace/uid) pairs we've already warned about to avoid log spam
+var warnedEmptyOwnerID sync.Map
 
 // The envoy config data types (Virtual, Rule, ContainerPort, PortMapping) and their
 // pure helpers now live in the leaf package pkg/controlplane, so pkg/inject can use
@@ -147,15 +151,20 @@ func To(a *Virtual, enableIPv6 bool, logger *log.Entry) (
 	// For schema v0/v1 (legacy), preserve backward compatibility and keep empty OwnerID rules
 	// Log empty OwnerID rules clearly for debugging regardless of schema version.
 	validRules := make([]*Rule, 0, len(a.Rules))
+	key := fmt.Sprintf("%s/%s", a.Namespace, a.UID)
 	for _, r := range a.Rules {
 		if r.OwnerID == "" {
 			if a.SchemaVersion >= 2 {
-				logger.Errorf("[xDS] %s/%s: removing zombie rule (headers=%v, tunV4=%q, tunV6=%q) - empty OwnerID (schema v%d violation)",
-					a.Namespace, a.UID, r.Headers, r.LocalTunIPv4, r.LocalTunIPv6, a.SchemaVersion)
+				if _, alreadyWarned := warnedEmptyOwnerID.LoadOrStore(key, true); !alreadyWarned {
+					logger.Warnf("[xDS] %s/%s: removing zombie rule (headers=%v, tunV4=%q, tunV6=%q) - empty OwnerID (schema v%d violation); this warning will not repeat for this virtual service",
+						a.Namespace, a.UID, r.Headers, r.LocalTunIPv4, r.LocalTunIPv6, a.SchemaVersion)
+				}
 				continue
 			} else {
-				logger.Warnf("[xDS] %s/%s: legacy rule with empty OwnerID (headers=%v, tunV4=%q, tunV6=%q) - schema v%d, keeping for backward compatibility",
-					a.Namespace, a.UID, r.Headers, r.LocalTunIPv4, r.LocalTunIPv6, a.SchemaVersion)
+				if _, alreadyWarned := warnedEmptyOwnerID.LoadOrStore(key, true); !alreadyWarned {
+					logger.Warnf("[xDS] %s/%s: legacy rule with empty OwnerID (headers=%v, tunV4=%q, tunV6=%q) - schema v%d, keeping for backward compatibility; this warning will not repeat for this virtual service",
+						a.Namespace, a.UID, r.Headers, r.LocalTunIPv4, r.LocalTunIPv6, a.SchemaVersion)
+				}
 			}
 		}
 		validRules = append(validRules, r)
