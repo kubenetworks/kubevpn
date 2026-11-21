@@ -118,6 +118,18 @@ const (
 	// 2001:2::/64 network is part of the 2001:2::/48 (reserved for benchmarking)
 	// https://www.iana.org/assignments/iana-ipv6-special-registry/iana-ipv6-special-registry.xhtml
 	IPv6Pool = "2001:2::/64"
+	// IPv4UserPool is the lower half of IPv4Pool reserved for user connections.
+	// Range: 198.18.0.1 - 198.18.127.254
+	IPv4UserPool = "198.18.0.0/17"
+	// IPv4AgentPool is the upper half of IPv4Pool reserved for agent connections.
+	// Range: 198.18.128.1 - 198.18.255.254
+	IPv4AgentPool = "198.18.128.0/17"
+	// IPv6UserPool is the lower half of IPv6Pool reserved for user connections.
+	// Range: 2001:2:: - 2001:2::7fff:ffff:ffff:ffff
+	IPv6UserPool = "2001:2::/65"
+	// IPv6AgentPool is the upper half of IPv6Pool reserved for agent connections.
+	// Range: 2001:2::8000:0:0:0 - 2001:2::ffff:ffff:ffff:ffff
+	IPv6AgentPool = "2001:2::8000:0:0:0/65"
 	// DockerIPv4Pool is the IPv4 CIDR used for kubevpn Docker bridge networks.
 	/*
 		reason：docker use 172.17.0.0/16 network conflict with k8s service kubernetes
@@ -186,6 +198,14 @@ var (
 	CIDR *net.IPNet
 	// CIDR6 is the parsed IPv6 network used for TUN address allocation.
 	CIDR6 *net.IPNet
+	// CIDRUser is the parsed IPv4 network used for user TUN address allocation.
+	CIDRUser *net.IPNet
+	// CIDRAgent is the parsed IPv4 network used for agent TUN address allocation.
+	CIDRAgent *net.IPNet
+	// CIDR6User is the parsed IPv6 network used for user TUN address allocation.
+	CIDR6User *net.IPNet
+	// CIDR6Agent is the parsed IPv6 network used for agent TUN address allocation.
+	CIDR6Agent *net.IPNet
 	// RouterIP is the gateway IPv4 address within CIDR.
 	RouterIP net.IP
 	// RouterIP6 is the gateway IPv6 address within CIDR6.
@@ -204,6 +224,22 @@ func init() {
 		panic(err)
 	}
 	RouterIP6, CIDR6, err = net.ParseCIDR(IPv6Pool)
+	if err != nil {
+		panic(err)
+	}
+	_, CIDRUser, err = net.ParseCIDR(IPv4UserPool)
+	if err != nil {
+		panic(err)
+	}
+	_, CIDRAgent, err = net.ParseCIDR(IPv4AgentPool)
+	if err != nil {
+		panic(err)
+	}
+	_, CIDR6User, err = net.ParseCIDR(IPv6UserPool)
+	if err != nil {
+		panic(err)
+	}
+	_, CIDR6Agent, err = net.ParseCIDR(IPv6AgentPool)
 	if err != nil {
 		panic(err)
 	}

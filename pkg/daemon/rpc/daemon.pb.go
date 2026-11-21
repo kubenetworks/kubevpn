@@ -3187,6 +3187,7 @@ type TunIPRequest struct {
 	ExcludeIPs []string `protobuf:"bytes,4,rep,name=ExcludeIPs,proto3" json:"ExcludeIPs,omitempty"` // client local interface IPs to avoid during allocation
 	ConfirmIP  string   `protobuf:"bytes,5,opt,name=ConfirmIP,proto3" json:"ConfirmIP,omitempty"`   // client confirms it validated this proposed (dry-run) IP; server commits it
 	Hostname   string   `protobuf:"bytes,6,opt,name=Hostname,proto3" json:"Hostname,omitempty"`     // client machine name, recorded in TUN_ALLOCS for debugging (field 3 is a historical gap, do not reuse)
+	IsAgent    bool     `protobuf:"varint,7,opt,name=IsAgent,proto3" json:"IsAgent,omitempty"`      // true if this is a node-agent connection, false for user connections
 }
 
 func (x *TunIPRequest) Reset() {

@@ -101,6 +101,7 @@ type Allocation struct {
 	Version   int64
 	LastRenew time.Time // last time the client renewed (heartbeat)
 	Hostname  string    // client machine name, for debugging which machine owns this lease
+	IsAgent   bool      // true if this is an agent connection, false for user
 }
 
 // persistedAlloc is the YAML-serializable form of Allocation.
@@ -116,6 +117,7 @@ type persistedAlloc struct {
 	Version   int64  `json:"version"`
 	LastRenew int64  `json:"lastRenew"` // unix timestamp
 	Hostname  string `json:"hostname,omitempty"`
+	IsAgent   bool   `json:"isAgent,omitempty"`
 }
 
 // initDHCPBackoff controls how NewManager retries a transient InitDHCP

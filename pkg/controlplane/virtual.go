@@ -113,6 +113,9 @@ type Rule struct {
 	// use ssh reverse tunnel, envoy rule endpoint localhost:envoyRulePort will forward to local pc localhost:localPort
 	// localPort is required and envoyRulePort is optional
 	PortMap map[int32]string
+	// IsAgent indicates that this rule belongs to a node-agent connection, not a direct user connection.
+	// When both agent and user rules exist with matching headers, user rules take precedence.
+	IsAgent bool `yaml:"isAgent,omitempty" json:"isAgent,omitempty"`
 }
 
 // PortMapping represents a parsed port mapping from the PortMap string encoding.

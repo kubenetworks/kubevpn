@@ -74,7 +74,7 @@ func tunIPResponse(event *leases.Event) *rpc.TunIPResponse {
 }
 
 func (s *TunConfigServer) GetTunIP(ctx context.Context, req *rpc.TunIPRequest) (*rpc.TunIPResponse, error) {
-	event, err := s.leases.GetTunIP(ctx, &leases.Request{OwnerID: req.OwnerID, ExcludeIPs: parseExcludeIPs(req.ExcludeIPs), ConfirmIP: net.ParseIP(req.ConfirmIP), Hostname: req.Hostname})
+	event, err := s.leases.GetTunIP(ctx, &leases.Request{OwnerID: req.OwnerID, ExcludeIPs: parseExcludeIPs(req.ExcludeIPs), ConfirmIP: net.ParseIP(req.ConfirmIP), Hostname: req.Hostname, IsAgent: req.IsAgent})
 	if err != nil {
 		return nil, err
 	}

@@ -74,6 +74,8 @@ type envoyRuleSpec struct {
 	// Selector is the pod label selector for the workload, used by the agent
 	// reconciler to match pods to rules. Only set in node-agent mode.
 	Selector string
+	// IsAgent indicates that this rule comes from a node-agent connection, not a direct user connection.
+	IsAgent bool
 }
 
 // validate checks that all required fields are populated.
@@ -127,6 +129,7 @@ func addVirtualRule(ctx context.Context, v []*controlplane.Virtual, spec envoyRu
 		LocalTunIPv6: spec.LocalTunIPv6,
 		OwnerID:      spec.OwnerID,
 		PortMap:      spec.PortMap,
+		IsAgent:      spec.IsAgent,
 	}
 
 	// 1) no existing Virtual for this workload — create one

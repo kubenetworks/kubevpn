@@ -74,6 +74,7 @@ func (s *Manager) loadAllocs(ctx context.Context) {
 			Version:   pa.Version,
 			LastRenew: lastRenew,
 			Hostname:  pa.Hostname,
+			IsAgent:   pa.IsAgent,
 		}
 		loaded++
 	}
@@ -113,6 +114,7 @@ func (s *Manager) saveAllocs(ctx context.Context) error {
 			Version:   alloc.Version,
 			LastRenew: alloc.LastRenew.Unix(),
 			Hostname:  alloc.Hostname,
+			IsAgent:   alloc.IsAgent,
 		}
 		if alloc.IPv4 != nil {
 			pa.IPv4 = alloc.IPv4.String()

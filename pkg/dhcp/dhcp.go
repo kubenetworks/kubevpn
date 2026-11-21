@@ -99,15 +99,15 @@ func (m *Manager) InitDHCP(ctx context.Context) error {
 	return nil
 }
 
-// RentIP allocates the next available IPv4 and IPv6 addresses from the DHCP pool.
+// RentIP allocates the next available IPv4 and IPv6 addresses from the DHCP pool (user range).
 func (m *Manager) RentIP(ctx context.Context) (*net.IPNet, *net.IPNet, error) {
-	return m.rentIP(ctx, nil, nil, nil)
+	return m.rentIP(ctx, nil, nil, nil, false)
 }
 
-// RentIPExcluding allocates the next available IPv4 and IPv6 addresses,
+// RentIPExcluding allocates the next available IPv4 and IPv6 addresses (user range),
 // skipping any IP that matches a local interface address or appears in excludeIPs.
 func (m *Manager) RentIPExcluding(ctx context.Context, excludeIPs []net.IP) (*net.IPNet, *net.IPNet, error) {
-	return m.rentIP(ctx, nil, nil, excludeIPs)
+	return m.rentIP(ctx, nil, nil, excludeIPs, false)
 }
 
 // RentIPPreferring tries to allocate the given preferred IPv4/IPv6 first, so a
@@ -115,7 +115,18 @@ func (m *Manager) RentIPExcluding(ctx context.Context, excludeIPs []net.IP) (*ne
 // available address when a preferred IP is unavailable (already allocated, out
 // of range, matches a local interface, or is in excludeIPs).
 func (m *Manager) RentIPPreferring(ctx context.Context, prefV4, prefV6 net.IP, excludeIPs []net.IP) (*net.IPNet, *net.IPNet, error) {
-	return m.rentIP(ctx, prefV4, prefV6, excludeIPs)
+	return m.rentIP(ctx, prefV4, prefV6, excludeIPs, false)
+}
+
+// RentIPForAgent allocates the next available IPv4 and IPv6 addresses from the agent pool.
+func (m *Manager) RentIPForAgent(ctx context.Context) (*net.IPNet, *net.IPNet, error) {
+	return m.rentIP(ctx, nil, nil, nil, true)
+}
+
+// RentIPExcludingForAgent allocates the next available IPv4 and IPv6 addresses from the agent pool,
+// skipping any IP that matches a local interface address or appears in excludeIPs.
+func (m *Manager) RentIPExcludingForAgent(ctx context.Context, excludeIPs []net.IP) (*net.IPNet, *net.IPNet, error) {
+	return m.rentIP(ctx, nil, nil, excludeIPs, true)
 }
 
 // InRange reports whether ip falls within the managed IPv4 or IPv6 CIDR range.
@@ -171,6 +182,18 @@ func makeShouldSkip(excludeIPs []net.IP) func(net.IP) bool {
 	}
 }
 
+// makeShouldSkipForRange returns a predicate reporting whether an IP must be skipped
+// because it's outside the allowed range, matches a local interface address, or appears in excludeIPs.
+func makeShouldSkipForRange(excludeIPs []net.IP, allowedCIDR *net.IPNet) func(net.IP) bool {
+	baseSkip := makeShouldSkip(excludeIPs)
+	return func(ip net.IP) bool {
+		if allowedCIDR != nil && !allowedCIDR.Contains(ip) {
+			return true
+		}
+		return baseSkip(ip)
+	}
+}
+
 // allocateOne allocates one address from r: the preferred IP if given and
 // usable, otherwise the next available one. IPs skipped along the way are
 // appended to useless for later release.
@@ -193,9 +216,43 @@ func allocateOne(r *ipallocator.Range, preferred net.IP, shouldSkip func(net.IP)
 	}
 }
 
-func (m *Manager) rentIP(ctx context.Context, prefV4, prefV6 net.IP, excludeIPs []net.IP) (*net.IPNet, *net.IPNet, error) {
-	plog.G(ctx).Debugf("Renting IP from DHCP in namespace %s", m.namespace)
-	shouldSkip := makeShouldSkip(excludeIPs)
+// allocateOneInRange allocates one address from r within the specified CIDR range:
+// the preferred IP if given, in range and usable, otherwise the next available one in range.
+// IPs skipped along the way are appended to useless for later release.
+func allocateOneInRange(r *ipallocator.Range, preferred net.IP, shouldSkip func(net.IP) bool, useless *[]net.IP, allowedCIDR *net.IPNet) (net.IP, error) {
+	if preferred != nil && allowedCIDR.Contains(preferred) && !shouldSkip(preferred) {
+		if err := r.Allocate(preferred); err == nil {
+			return preferred, nil
+		}
+		// preferred unavailable (already allocated / out of range) → fall back
+	}
+	for {
+		ip, err := r.AllocateNext()
+		if err != nil {
+			return nil, fmt.Errorf("allocate next IP: %w: %w", err, config.ErrDHCPExhausted)
+		}
+		if allowedCIDR.Contains(ip) && !shouldSkip(ip) {
+			return ip, nil
+		}
+		*useless = append(*useless, ip)
+	}
+}
+
+func (m *Manager) rentIP(ctx context.Context, prefV4, prefV6 net.IP, excludeIPs []net.IP, isAgent bool) (*net.IPNet, *net.IPNet, error) {
+	plog.G(ctx).Debugf("Renting IP from DHCP in namespace %s (isAgent=%v)", m.namespace, isAgent)
+
+	var allowedCIDRv4, allowedCIDRv6 *net.IPNet
+	if isAgent {
+		allowedCIDRv4 = config.CIDRAgent
+		allowedCIDRv6 = config.CIDR6Agent
+	} else {
+		allowedCIDRv4 = config.CIDRUser
+		allowedCIDRv6 = config.CIDR6User
+	}
+
+	shouldSkip := makeShouldSkipForRange(excludeIPs, allowedCIDRv4)
+	shouldSkipv6 := makeShouldSkipForRange(excludeIPs, allowedCIDRv6)
+
 	var uselessIPs []net.IP
 	var v4, v6 net.IP
 	// Not folded into retryUpdate: uselessIPs must be reset once per retry
@@ -204,10 +261,32 @@ func (m *Manager) rentIP(ctx context.Context, prefV4, prefV6 net.IP, excludeIPs 
 	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		uselessIPs = nil
 		return m.updateDHCPConfigMap(ctx, func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) (err error) {
-			if v4, err = allocateOne(ipv4, prefV4, shouldSkip, &uselessIPs); err != nil {
+			// Try preferred first if it's in the allowed range
+			if prefV4 != nil && allowedCIDRv4.Contains(prefV4) {
+				if v4, err = allocateOne(ipv4, prefV4, makeShouldSkip(excludeIPs), &uselessIPs); err == nil {
+					// Successfully got preferred v4
+				} else {
+					// Fall back to range-based allocation
+					v4, err = allocateOneInRange(ipv4, nil, shouldSkip, &uselessIPs, allowedCIDRv4)
+				}
+			} else {
+				v4, err = allocateOneInRange(ipv4, prefV4, shouldSkip, &uselessIPs, allowedCIDRv4)
+			}
+			if err != nil {
 				return err
 			}
-			v6, err = allocateOne(ipv6, prefV6, shouldSkip, &uselessIPs)
+
+			// Same for v6
+			if prefV6 != nil && allowedCIDRv6.Contains(prefV6) {
+				if v6, err = allocateOne(ipv6, prefV6, makeShouldSkip(excludeIPs), &uselessIPs); err == nil {
+					// Successfully got preferred v6
+				} else {
+					// Fall back to range-based allocation
+					v6, err = allocateOneInRange(ipv6, nil, shouldSkipv6, &uselessIPs, allowedCIDRv6)
+				}
+			} else {
+				v6, err = allocateOneInRange(ipv6, prefV6, shouldSkipv6, &uselessIPs, allowedCIDRv6)
+			}
 			return err
 		})
 	})

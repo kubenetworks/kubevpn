@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
 	"runtime"
 	"time"
 
@@ -18,6 +19,8 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/tun"
 )
+
+var isAgent = os.Getenv("KUBEVPN_AGENT_CONNECTION") == "1"
 
 type tunAddresses struct {
 	localTunIPv4 *net.IPNet
@@ -55,6 +58,7 @@ func (nm *Runtime) rentIP(ctx context.Context) error {
 			Namespace:  nm.cfg.ManagerNamespace,
 			ExcludeIPs: buildExcludeIPs(nm.cfg.ReservedTunIPs),
 			Hostname:   nm.cfg.Hostname,
+			IsAgent:    isAgent,
 		}, grpc.WaitForReady(true))
 		callCancel()
 		if err != nil {
@@ -289,6 +293,7 @@ func (nm *Runtime) doWatchTunIP(ctx context.Context, currentVersion *int64) erro
 		Namespace:  nm.cfg.ManagerNamespace,
 		ExcludeIPs: nm.excludesForReassert(),
 		Hostname:   nm.cfg.Hostname,
+		IsAgent:    isAgent,
 	})
 	if ctx.Err() != nil {
 		return ctx.Err()
@@ -311,6 +316,7 @@ func (nm *Runtime) doWatchTunIP(ctx context.Context, currentVersion *int64) erro
 	stream, err := client.WatchTunIP(ctx, &rpc.TunIPRequest{
 		OwnerID:   nm.cfg.OwnerID,
 		Namespace: nm.cfg.ManagerNamespace,
+		IsAgent:   isAgent,
 	})
 	if err != nil {
 		return fmt.Errorf("watch tun IP: %w", err)
@@ -382,6 +388,7 @@ func (nm *Runtime) handleProposalFamily(ctx context.Context, client rpc.TunConfi
 			Namespace:  nm.cfg.ManagerNamespace,
 			ExcludeIPs: rej,
 			Hostname:   nm.cfg.Hostname,
+			IsAgent:    isAgent,
 		}); err != nil {
 			return err
 		}
@@ -394,6 +401,7 @@ func (nm *Runtime) handleProposalFamily(ctx context.Context, client rpc.TunConfi
 		ConfirmIP:  cand.IP.String(),
 		ExcludeIPs: excludes,
 		Hostname:   nm.cfg.Hostname,
+		IsAgent:    isAgent,
 	})
 	if err != nil {
 		return err
@@ -466,6 +474,7 @@ func (nm *Runtime) applyPushedTunIP(ctx context.Context, client rpc.TunConfigSer
 			Namespace:  nm.cfg.ManagerNamespace,
 			ExcludeIPs: rej,
 			Hostname:   nm.cfg.Hostname,
+			IsAgent:    isAgent,
 		}); err != nil {
 			return err
 		}
