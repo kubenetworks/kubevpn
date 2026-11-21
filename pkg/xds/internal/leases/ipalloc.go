@@ -34,7 +34,7 @@ func (s *Manager) GetTunIP(ctx context.Context, req *Request) (*Event, error) {
 				cand = p.candV6
 			}
 			if cand != nil && cand.IP.Equal(req.ConfirmIP) {
-				return s.commitFamilyLocked(ctx, req.OwnerID, isV6, cand, excludeIPs, req.Hostname)
+				return s.commitFamilyLocked(ctx, req.OwnerID, isV6, cand, excludeIPs, req.Hostname, req.IsAgent)
 			}
 		}
 		// stale/unknown confirm → fall through to normal handling
@@ -179,7 +179,7 @@ func tunResp(alloc *Allocation) *Event {
 // if it was taken since the proposal), releases the owner's old IP of that family,
 // leaves the other family untouched, persists, and pushes the committed (DryRun=
 // false) full allocation. Caller holds s.mu.
-func (s *Manager) commitFamilyLocked(ctx context.Context, owner string, isV6 bool, candidate *net.IPNet, excludeIPs []net.IP, hostname string) (*Event, error) {
+func (s *Manager) commitFamilyLocked(ctx context.Context, owner string, isV6 bool, candidate *net.IPNet, excludeIPs []net.IP, hostname string, isAgent bool) (*Event, error) {
 	cur := s.allocs[owner]
 	var curV4, curV6 *net.IPNet
 	if cur != nil {
@@ -217,10 +217,7 @@ func (s *Manager) commitFamilyLocked(ctx context.Context, owner string, isV6 boo
 	}
 	if rentErr != nil {
 		plog.G(ctx).Warnf("[TunConfig] commit %v for owner %s failed (%v); allocating a safe IP", candidate.IP, owner, rentErr)
-		isAgent := false
-		if candidate.IP.To4() != nil {
-			isAgent = config.CIDRAgent.Contains(candidate.IP)
-		}
+		// Use the provided isAgent flag; do NOT infer from candidate IP
 		var v4, v6 *net.IPNet
 		var ferr error
 		if isAgent {
@@ -253,10 +250,7 @@ func (s *Manager) commitFamilyLocked(ctx context.Context, owner string, isV6 boo
 	if hn == "" && cur != nil {
 		hn = cur.Hostname
 	}
-	newAlloc := &Allocation{IPv4: curV4, IPv6: curV6, Version: time.Now().UnixNano(), LastRenew: time.Now(), Hostname: hn}
-	if cur != nil {
-		newAlloc.IsAgent = cur.IsAgent
-	}
+	newAlloc := &Allocation{IPv4: curV4, IPv6: curV6, Version: time.Now().UnixNano(), LastRenew: time.Now(), Hostname: hn, IsAgent: isAgent}
 	if isV6 {
 		newAlloc.IPv6 = committed
 	} else {
@@ -379,15 +373,30 @@ func (s *Manager) familyCandidate(ctx context.Context, owner, wantStr string, cu
 }
 
 // allocateForOwner allocates a TUN IP for ownerID, preferring the IP the owner
-// most recently held (when remembered and not excluded) so reconnects are
+// most recently held (when remembered, not excluded, and in the correct range) so reconnects are
 // sticky, and falling back to the next available IP otherwise. Caller holds s.mu.
 func (s *Manager) allocateForOwner(ctx context.Context, ownerID string, excludeIPs []net.IP, isAgent bool) (*net.IPNet, *net.IPNet, error) {
 	if rec, ok := s.lastIPs[ownerID]; ok && rec.v4 != nil && !isIPExcluded(rec.v4, excludeIPs) {
-		var prefV6 net.IP
-		if rec.v6 != nil {
-			prefV6 = rec.v6.IP
+		// Check if the preferred IP is in the correct range for the current isAgent flag
+		var correctCIDR *net.IPNet
+		var correctCIDRv6 *net.IPNet
+		if isAgent {
+			correctCIDR = config.CIDRAgent
+			correctCIDRv6 = config.CIDR6Agent
+		} else {
+			correctCIDR = config.CIDRUser
+			correctCIDRv6 = config.CIDR6User
 		}
-		return s.dhcp.RentIPPreferring(ctx, rec.v4.IP, prefV6, excludeIPs)
+
+		// Only use sticky IP if it's in the correct CIDR range
+		if correctCIDR.Contains(rec.v4.IP) {
+			var prefV6 net.IP
+			if rec.v6 != nil && correctCIDRv6.Contains(rec.v6.IP) {
+				prefV6 = rec.v6.IP
+			}
+			return s.dhcp.RentIPPreferring(ctx, rec.v4.IP, prefV6, excludeIPs)
+		}
+		// Fall through to fresh allocation if sticky IP is in wrong range
 	}
 	if isAgent {
 		return s.dhcp.RentIPForAgent(ctx)
