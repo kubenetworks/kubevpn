@@ -399,9 +399,9 @@ func (s *Manager) allocateForOwner(ctx context.Context, ownerID string, excludeI
 		// Fall through to fresh allocation if sticky IP is in wrong range
 	}
 	if isAgent {
-		return s.dhcp.RentIPForAgent(ctx)
+		return s.dhcp.RentIPExcludingForAgent(ctx, excludeIPs)
 	}
-	return s.dhcp.RentIP(ctx)
+	return s.dhcp.RentIPExcluding(ctx, excludeIPs)
 }
 
 // rollbackAlloc releases a freshly-rented IP and drops its in-memory record after

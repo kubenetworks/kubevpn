@@ -25,6 +25,14 @@ import (
 type tunIPPool struct {
 	IPv4 poolEntry `yaml:"ipv4" json:"ipv4"`
 	IPv6 poolEntry `yaml:"ipv6" json:"ipv6"`
+	// Agent pools are separate from the user pools because the underlying
+	// allocator is contiguous (sequential offsets only): without a dedicated
+	// segment, an agent lease could not be carved out of the middle of the
+	// user pool's bitmap. Absent entries are lazily initialized from
+	// config.CIDRAgent/CIDR6Agent for backward compatibility with ConfigMaps
+	// written before the agent/user split.
+	AgentIPv4 poolEntry `yaml:"agentIpv4,omitempty" json:"agentIpv4,omitempty"`
+	AgentIPv6 poolEntry `yaml:"agentIpv6,omitempty" json:"agentIpv6,omitempty"`
 }
 
 type poolEntry struct {
@@ -56,16 +64,22 @@ type Manager struct {
 	clientset kubernetes.Interface
 	cidr      *net.IPNet
 	cidr6     *net.IPNet
-	namespace string
+	// Agent pools: separate segments so agent leases never collide with user
+	// leases (the per-pool allocators are contiguous — see tunIPPool).
+	cidrAgent  *net.IPNet
+	cidr6Agent *net.IPNet
+	namespace  string
 }
 
 // NewDHCPManager creates a Manager for the given namespace using the default CIDRs.
 func NewDHCPManager(clientset kubernetes.Interface, namespace string) *Manager {
 	return &Manager{
-		clientset: clientset,
-		namespace: namespace,
-		cidr:      config.CIDR,
-		cidr6:     config.CIDR6,
+		clientset:  clientset,
+		namespace:  namespace,
+		cidr:       config.CIDR,
+		cidr6:      config.CIDR6,
+		cidrAgent:  config.CIDRAgent,
+		cidr6Agent: config.CIDR6Agent,
 	}
 }
 
@@ -148,14 +162,26 @@ func (m *Manager) InRange(ip net.IP) bool {
 // that family. The write is atomic: if either family fails, nothing is allocated.
 func (m *Manager) RentSpecificIP(ctx context.Context, v4, v6 net.IP) error {
 	plog.G(ctx).Debugf("Renting specific IP: v4=%v v6=%v", v4, v6)
-	return m.retryUpdate(ctx, func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) error {
+	return m.retryUpdate(ctx, func(ipv4, ipv6, ipv4Agent, ipv6Agent *ipallocator.Range) error {
+		allocFor := func(ip net.IP) *ipallocator.Range {
+			if m.inAgentSegment(ip) {
+				if ip.To4() != nil {
+					return ipv4Agent
+				}
+				return ipv6Agent
+			}
+			if ip.To4() != nil {
+				return ipv4
+			}
+			return ipv6
+		}
 		if v4 != nil {
-			if err := ipv4.Allocate(v4); err != nil {
+			if err := allocFor(v4).Allocate(v4); err != nil {
 				return fmt.Errorf("cannot allocate IPv4 %s: %w", v4, err)
 			}
 		}
 		if v6 != nil {
-			if err := ipv6.Allocate(v6); err != nil {
+			if err := allocFor(v6).Allocate(v6); err != nil {
 				return fmt.Errorf("cannot allocate IPv6 %s: %w", v6, err)
 			}
 		}
@@ -226,32 +252,59 @@ func allocateOneInRange(r *ipallocator.Range, preferred net.IP, shouldSkip func(
 		}
 		// preferred unavailable (already allocated / out of range) → fall back
 	}
-	for {
+
+	// First, try to find an available IP by directly checking the allowed range
+	// This is more efficient than using AllocateNext() for non-starting ranges
+	startIP := allowedCIDR.IP.Mask(allowedCIDR.Mask)
+	// Create a copy to iterate on
+	ip := make(net.IP, len(startIP))
+	copy(ip, startIP)
+
+	// Limit iterations to the size of a /17 (32768 IPs) to prevent infinite loops
+	for i := 0; i < 32768; i++ {
+		if !allowedCIDR.Contains(ip) {
+			break // reached end of the allowed CIDR
+		}
+		if !shouldSkip(ip) {
+			if err := r.Allocate(ip); err == nil {
+				// Success! We found an available IP in the allowed range
+				return ip, nil
+			}
+			// IP already allocated, try next one
+		}
+		// Increment to next IP
+		for j := len(ip) - 1; j >= 0; j-- {
+			ip[j]++
+			if ip[j] != 0 {
+				break // no more carry-over needed
+			}
+		}
+	}
+
+	// If the above didn't work, use the AllocateNext method but with a safety limit
+	// This might happen if the allocator has internal state we can't easily predict
+	// Limit to 65536 iterations (size of a /16) to prevent hanging
+	for i := 0; i < 65536; i++ {
 		ip, err := r.AllocateNext()
 		if err != nil {
 			return nil, fmt.Errorf("allocate next IP: %w: %w", err, config.ErrDHCPExhausted)
 		}
 		if allowedCIDR.Contains(ip) && !shouldSkip(ip) {
+			// Success! We found an available IP in the allowed range
 			return ip, nil
 		}
 		*useless = append(*useless, ip)
 	}
+
+	// If all else fails, return an error
+	return nil, fmt.Errorf("allocate next IP: %w", config.ErrDHCPExhausted)
 }
 
 func (m *Manager) rentIP(ctx context.Context, prefV4, prefV6 net.IP, excludeIPs []net.IP, isAgent bool) (*net.IPNet, *net.IPNet, error) {
 	plog.G(ctx).Debugf("Renting IP from DHCP in namespace %s (isAgent=%v)", m.namespace, isAgent)
 
-	var allowedCIDRv4, allowedCIDRv6 *net.IPNet
-	if isAgent {
-		allowedCIDRv4 = config.CIDRAgent
-		allowedCIDRv6 = config.CIDR6Agent
-	} else {
-		allowedCIDRv4 = config.CIDRUser
-		allowedCIDRv6 = config.CIDR6User
-	}
-
-	shouldSkip := makeShouldSkipForRange(excludeIPs, allowedCIDRv4)
-	shouldSkipv6 := makeShouldSkipForRange(excludeIPs, allowedCIDRv6)
+	skipV4 := makeShouldSkip(excludeIPs)
+	skipV6 := makeShouldSkip(excludeIPs)
 
 	var uselessIPs []net.IP
 	var v4, v6 net.IP
@@ -260,32 +313,36 @@ func (m *Manager) rentIP(ctx context.Context, prefV4, prefV6 net.IP, excludeIPs 
 	// retry closure rather than inside the mutate func.
 	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		uselessIPs = nil
-		return m.updateDHCPConfigMap(ctx, func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) (err error) {
-			// Try preferred first if it's in the allowed range
-			if prefV4 != nil && allowedCIDRv4.Contains(prefV4) {
-				if v4, err = allocateOne(ipv4, prefV4, makeShouldSkip(excludeIPs), &uselessIPs); err == nil {
-					// Successfully got preferred v4
-				} else {
-					// Fall back to range-based allocation
-					v4, err = allocateOneInRange(ipv4, nil, shouldSkip, &uselessIPs, allowedCIDRv4)
+		return m.updateDHCPConfigMap(ctx, func(ipv4, ipv6, ipv4Agent, ipv6Agent *ipallocator.Range) (err error) {
+			// Route to the segment-scoped allocator: each pool's allocator is
+			// contiguous, so its AllocateNext is always in-segment — no
+			// walk-and-skip over the other segment is needed (and for the IPv6
+			// agent segment it would be mathematically impossible).
+			ipv4Pool, ipv6Pool := ipv4, ipv6
+			if isAgent {
+				ipv4Pool, ipv6Pool = ipv4Agent, ipv6Agent
+			}
+
+			// Try preferred first
+			if prefV4 != nil && !skipV4(prefV4) {
+				if v4, err = allocateOne(ipv4Pool, prefV4, skipV4, &uselessIPs); err != nil {
+					// preferred unavailable (already allocated / out of segment)
+					v4, err = allocateOne(ipv4Pool, nil, skipV4, &uselessIPs)
 				}
 			} else {
-				v4, err = allocateOneInRange(ipv4, prefV4, shouldSkip, &uselessIPs, allowedCIDRv4)
+				v4, err = allocateOne(ipv4Pool, nil, skipV4, &uselessIPs)
 			}
 			if err != nil {
 				return err
 			}
 
 			// Same for v6
-			if prefV6 != nil && allowedCIDRv6.Contains(prefV6) {
-				if v6, err = allocateOne(ipv6, prefV6, makeShouldSkip(excludeIPs), &uselessIPs); err == nil {
-					// Successfully got preferred v6
-				} else {
-					// Fall back to range-based allocation
-					v6, err = allocateOneInRange(ipv6, nil, shouldSkipv6, &uselessIPs, allowedCIDRv6)
+			if prefV6 != nil && !skipV6(prefV6) {
+				if v6, err = allocateOne(ipv6Pool, prefV6, skipV6, &uselessIPs); err != nil {
+					v6, err = allocateOne(ipv6Pool, nil, skipV6, &uselessIPs)
 				}
 			} else {
-				v6, err = allocateOneInRange(ipv6, prefV6, shouldSkipv6, &uselessIPs, allowedCIDRv6)
+				v6, err = allocateOne(ipv6Pool, nil, skipV6, &uselessIPs)
 			}
 			return err
 		})
@@ -313,12 +370,28 @@ func (m *Manager) rentIP(ctx context.Context, prefV4, prefV6 net.IP, excludeIPs 
 // ReleaseIP returns the given IPv4 and IPv6 addresses back to the DHCP pool.
 func (m *Manager) ReleaseIP(ctx context.Context, v4, v6 net.IP) error {
 	plog.G(ctx).Debugf("Releasing IP: v4=%v v6=%v", v4, v6)
-	return m.retryUpdate(ctx, func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) error {
-		if err := ipv4.Release(v4); err != nil {
-			return err
+	return m.retryUpdate(ctx, func(ipv4, ipv6, ipv4Agent, ipv6Agent *ipallocator.Range) error {
+		allocFor := func(ip net.IP) *ipallocator.Range {
+			if m.inAgentSegment(ip) {
+				if ip.To4() != nil {
+					return ipv4Agent
+				}
+				return ipv6Agent
+			}
+			if ip.To4() != nil {
+				return ipv4
+			}
+			return ipv6
 		}
-		if err := ipv6.Release(v6); err != nil {
-			return err
+		if v4 != nil {
+			if err := allocFor(v4).Release(v4); err != nil {
+				return err
+			}
+		}
+		if v6 != nil {
+			if err := allocFor(v6).Release(v6); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
@@ -335,15 +408,23 @@ func (m *Manager) releaseIP(ctx context.Context, ips ...net.IP) error {
 	if len(ips) == 0 {
 		return nil
 	}
-	return m.retryUpdate(ctx, func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) error {
+	return m.retryUpdate(ctx, func(ipv4, ipv6, ipv4Agent, ipv6Agent *ipallocator.Range) error {
 		for _, ip := range ips {
-			var err error
-			if ip.To4() != nil {
-				err = ipv4.Release(ip)
+			var pool *ipallocator.Range
+			if m.inAgentSegment(ip) {
+				if ip.To4() != nil {
+					pool = ipv4Agent
+				} else {
+					pool = ipv6Agent
+				}
 			} else {
-				err = ipv6.Release(ip)
+				if ip.To4() != nil {
+					pool = ipv4
+				} else {
+					pool = ipv6
+				}
 			}
-			if err != nil {
+			if err := pool.Release(ip); err != nil {
 				return err
 			}
 		}
@@ -351,11 +432,48 @@ func (m *Manager) releaseIP(ctx context.Context, ips ...net.IP) error {
 	})
 }
 
-// retryUpdate runs f against the DHCP ConfigMap under RetryOnConflict.
-func (m *Manager) retryUpdate(ctx context.Context, f func(ipv4, ipv6 *ipallocator.Range) error) error {
+// retryUpdate runs f against the DHCP ConfigMap under RetryOnConflict. f
+// receives four allocators: the user pools (v4/v6) and the agent pools
+// (v4/v6). Callers route by connection type — user leases go to the user
+// pools, agent leases (KUBEVPN_AGENT_CONNECTION) to the agent pools. The
+// per-pool allocators are contiguous, so mixing types in one pool is not
+// possible; that is why the agent pools exist (see tunIPPool).
+func (m *Manager) retryUpdate(ctx context.Context, f func(ipv4, ipv6, ipv4Agent, ipv6Agent *ipallocator.Range) error) error {
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		return m.updateDHCPConfigMap(ctx, f)
 	})
+}
+
+// agentPoolCIDRs returns the CIDRs for the agent pool entries, preferring the
+// CIDR persisted in the ConfigMap entry (so a bitmap written by an older
+// manager keeps its segment) and falling back to the config defaults.
+func (m *Manager) agentPoolCIDRs(pool *tunIPPool) (v4, v6 *net.IPNet) {
+	v4, v6 = m.cidrAgent, m.cidr6Agent
+	if v4 == nil {
+		v4 = config.CIDRAgent
+	}
+	if v6 == nil {
+		v6 = config.CIDR6Agent
+	}
+	if pool.AgentIPv4.CIDR != "" {
+		if _, parsed, err := net.ParseCIDR(pool.AgentIPv4.CIDR); err == nil {
+			v4 = parsed
+		}
+	}
+	if pool.AgentIPv6.CIDR != "" {
+		if _, parsed, err := net.ParseCIDR(pool.AgentIPv6.CIDR); err == nil {
+			v6 = parsed
+		}
+	}
+	return v4, v6
+}
+
+// inAgentSegment reports whether ip belongs to the agent address segment.
+func (m *Manager) inAgentSegment(ip net.IP) bool {
+	if ip.To4() != nil {
+		return m.cidrAgent != nil && m.cidrAgent.Contains(ip)
+	}
+	return m.cidr6Agent != nil && m.cidr6Agent.Contains(ip)
 }
 
 // restoreAllocator creates a bitmap allocator for cidr and restores its state from the
@@ -397,7 +515,7 @@ func restoreAllocator(cidr *net.IPNet, bitmap string, strict bool) (*ipallocator
 	return r, nil
 }
 
-func (m *Manager) updateDHCPConfigMap(ctx context.Context, f func(ipv4 *ipallocator.Range, ipv6 *ipallocator.Range) error) error {
+func (m *Manager) updateDHCPConfigMap(ctx context.Context, f func(ipv4, ipv6, ipv4Agent, ipv6Agent *ipallocator.Range) error) error {
 	cm, err := m.clientset.CoreV1().ConfigMaps(m.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to get configmap DHCP server: %w", err)
@@ -420,7 +538,19 @@ func (m *Manager) updateDHCPConfigMap(ctx context.Context, f func(ipv4 *ipalloca
 		return err
 	}
 
-	if err = f(dhcp, dhcp6); err != nil {
+	// Agent pools: lazily initialized from the agent CIDRs when the ConfigMap
+	// predates the agent/user split (backward compatible with old managers).
+	agentCIDR4, agentCIDR6 := m.agentPoolCIDRs(pool)
+	dhcpAgent, err := restoreAllocator(agentCIDR4, pool.AgentIPv4.Bitmap, pool.AgentIPv4.Bitmap != "")
+	if err != nil {
+		return err
+	}
+	dhcpAgent6, err := restoreAllocator(agentCIDR6, pool.AgentIPv6.Bitmap, pool.AgentIPv6.Bitmap != "")
+	if err != nil {
+		return err
+	}
+
+	if err = f(dhcp, dhcp6, dhcpAgent, dhcpAgent6); err != nil {
 		return err
 	}
 
@@ -433,6 +563,14 @@ func (m *Manager) updateDHCPConfigMap(ctx context.Context, f func(ipv4 *ipalloca
 		return err
 	}
 	pool.IPv6 = poolEntry{CIDR: m.cidr6.String(), Bitmap: base64.StdEncoding.EncodeToString(bytes)}
+	if _, bytes, err = dhcpAgent.Snapshot(); err != nil {
+		return err
+	}
+	pool.AgentIPv4 = poolEntry{CIDR: agentCIDR4.String(), Bitmap: base64.StdEncoding.EncodeToString(bytes)}
+	if _, bytes, err = dhcpAgent6.Snapshot(); err != nil {
+		return err
+	}
+	pool.AgentIPv6 = poolEntry{CIDR: agentCIDR6.String(), Bitmap: base64.StdEncoding.EncodeToString(bytes)}
 
 	poolStr, err := marshalTunIPPool(pool)
 	if err != nil {
