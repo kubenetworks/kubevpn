@@ -101,3 +101,53 @@ func TestEnsureAgentJob_WaitsTerminatingThenRecreates(t *testing.T) {
 		t.Fatalf("EnsureAgentJob should recreate after terminating job disappears: %v", err)
 	}
 }
+
+func TestVPNScriptIsConvergent(t *testing.T) {
+	// We can't directly access vpnScript (it's inside GenAgentJobSpec),
+	// so we generate the job spec and extract it from the container command.
+	pod := &v1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "test-uid"}}
+	job := GenAgentJobSpec(testAgentJobInput(pod))
+	var vpnScript string
+	for _, c := range job.Spec.Template.Spec.Containers {
+		if c.Name == "vpn" && len(c.Command) >= 10 {
+			vpnScript = c.Command[9] // Command is ["kubevpn", "agent", "--pod-uid", uid, "--proc-root", "/host/proc", "--", "/bin/bash", "-c", vpnScript]
+			break
+		}
+	}
+	if vpnScript == "" {
+		t.Fatal("vpn script not found in job spec")
+	}
+
+	// Define the expected flush loops and -A lines
+	flushIPv4 := `while iptables -t nat -D PREROUTING -p tcp ! -s 127.0.0.1 ! -d ${CIDR4} -j DNAT --to :15006 -m comment --comment "kubevpn-nodeagent" 2>/dev/null; do :; done`
+	flushIPv6 := `while ip6tables -t nat -D PREROUTING -p tcp ! -s ::1 ! -d ${CIDR6} -j DNAT --to :15006 -m comment --comment "kubevpn-nodeagent" 2>/dev/null; do :; done`
+	addIPv4 := `iptables -t nat -A PREROUTING -p tcp ! -s 127.0.0.1 ! -d ${CIDR4} -j DNAT --to :15006 -m comment --comment "kubevpn-nodeagent"`
+	addIPv6 := `ip6tables -t nat -A PREROUTING -p tcp ! -s ::1 ! -d ${CIDR6} -j DNAT --to :15006 -m comment --comment "kubevpn-nodeagent"`
+
+	// Check that all expected strings are present
+	if !strings.Contains(vpnScript, flushIPv4) {
+		t.Error("vpn script missing IPv4 flush loop")
+	}
+	if !strings.Contains(vpnScript, flushIPv6) {
+		t.Error("vpn script missing IPv6 flush loop")
+	}
+	if !strings.Contains(vpnScript, addIPv4) {
+		t.Error("vpn script missing IPv4 -A line")
+	}
+	if !strings.Contains(vpnScript, addIPv6) {
+		t.Error("vpn script missing IPv6 -A line")
+	}
+
+	// Check that flush loops come before -A lines
+	flushIPv4Idx := strings.Index(vpnScript, flushIPv4)
+	addIPv4Idx := strings.Index(vpnScript, addIPv4)
+	if flushIPv4Idx >= addIPv4Idx {
+		t.Errorf("IPv4 flush loop must come before -A line, but %d >= %d", flushIPv4Idx, addIPv4Idx)
+	}
+
+	flushIPv6Idx := strings.Index(vpnScript, flushIPv6)
+	addIPv6Idx := strings.Index(vpnScript, addIPv6)
+	if flushIPv6Idx >= addIPv6Idx {
+		t.Errorf("IPv6 flush loop must come before -A line, but %d >= %d", flushIPv6Idx, addIPv6Idx)
+	}
+}

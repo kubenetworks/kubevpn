@@ -73,6 +73,8 @@ iptables -P INPUT ACCEPT
 ip6tables -P INPUT ACCEPT
 iptables -P FORWARD ACCEPT
 ip6tables -P FORWARD ACCEPT
+while iptables -t nat -D PREROUTING -p tcp ! -s 127.0.0.1 ! -d ${CIDR4} -j DNAT --to :15006 -m comment --comment "kubevpn-nodeagent" 2>/dev/null; do :; done
+while ip6tables -t nat -D PREROUTING -p tcp ! -s ::1 ! -d ${CIDR6} -j DNAT --to :15006 -m comment --comment "kubevpn-nodeagent" 2>/dev/null; do :; done
 iptables -t nat -A PREROUTING -p tcp ! -s 127.0.0.1 ! -d ${CIDR4} -j DNAT --to :15006 -m comment --comment "kubevpn-nodeagent"
 ip6tables -t nat -A PREROUTING -p tcp ! -s ::1 ! -d ${CIDR6} -j DNAT --to :15006 -m comment --comment "kubevpn-nodeagent"
 export KUBEVPN_AGENT_CLEANUP_IPTABLES=1
