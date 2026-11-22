@@ -3,9 +3,12 @@ package manager
 import (
 	"context"
 	"fmt"
+	"time"
 
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/util/wait"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/kubectl/pkg/polymorphichelpers"
@@ -41,6 +44,41 @@ func Ensure(ctx context.Context, cfg Config) error {
 	return nil
 }
 
+// managerRecreateGrace bounds how long createOutboundPod waits for an
+// installing manager pod to become fully running before recreating everything.
+const managerRecreateGrace = 10 * time.Second
+
+// waitForManagerPod polls until a manager pod has all containers running.
+// Returns nil as soon as one qualifies; error when the timeout expires first.
+func waitForManagerPod(ctx context.Context, clientset kubernetes.Interface, namespace string, timeout time.Duration) error {
+	label := fields.OneTermEqualSelector("app", config.ConfigMapPodTrafficManager).String()
+	return wait.PollUntilContextTimeout(ctx, time.Second, timeout, true, func(ctx context.Context) (bool, error) {
+		pods, err := clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{LabelSelector: label})
+		if err != nil {
+			return false, nil // transient read error: keep waiting
+		}
+		for i := range pods.Items {
+			pod := &pods.Items[i]
+			if pod.GetDeletionTimestamp() == nil && workload.AllContainersRunning(pod) {
+				return true, nil
+			}
+		}
+		return false, nil
+	})
+}
+
+// resolveAttachModeOnRecreate reads KUBEVPN_PROXY_ATTACH_MODE from the manager
+// Deployment about to be replaced, so a value set before connect (helm values,
+// kubevpn install) survives manager recreation. Falls back to the node-agent
+// default when the deployment is gone or the env is unset.
+func resolveAttachModeOnRecreate(ctx context.Context, clientset kubernetes.Interface, namespace string) string {
+	deploy, err := clientset.AppsV1().Deployments(namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		return config.AttachModeNodeAgent
+	}
+	return existingAttachMode(&deploy.Spec.Template.Spec)
+}
+
 // createOutboundPod reports whether this call created the traffic manager, rather
 // than reusing a running manager with an existing Deployment.
 func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, namespace, image, imagePullSecretName string) (created bool, err error) {
@@ -66,6 +104,25 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 			return false, fmt.Errorf("failed to get deployment %s: %w", config.ConfigMapPodTrafficManager, derr)
 		}
 	}
+
+	// The install's pod may still be pulling its image when connect runs
+	// (DetectPodExists requires AllContainersRunning). Give it a short grace
+	// period before deleting everything — recreating clobbers any pre-connect
+	// customization of the manager (e.g. helm proxy.attachMode=sidecar).
+	if werr := waitForManagerPod(ctx, clientset, namespace, managerRecreateGrace); werr == nil {
+		_, derr := clientset.AppsV1().Deployments(namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+		if derr == nil {
+			plog.StepDone(ctx, "Using traffic manager in namespace %q", namespace)
+			return false, nil
+		}
+		if !apierrors.IsNotFound(derr) {
+			return false, fmt.Errorf("failed to get deployment %s: %w", config.ConfigMapPodTrafficManager, derr)
+		}
+	}
+
+	// Inherit the attach mode from the deployment being replaced so a pin set
+	// before connect survives recreation (design doc §3).
+	attachMode := resolveAttachModeOnRecreate(ctx, clientset, namespace)
 
 	defer func() {
 		if err != nil {
@@ -147,7 +204,7 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 
 	// 8) create deployment
 	plog.StepStart(ctx, "Creating Deployment")
-	deploy := genDeploySpec(namespace, image, imagePullSecretName, config.AttachModeNodeAgent)
+	deploy := genDeploySpec(namespace, image, imagePullSecretName, attachMode)
 	deploy, err = clientset.AppsV1().Deployments(namespace).Create(ctx, deploy, metav1.CreateOptions{})
 	if err != nil {
 		return false, fmt.Errorf("failed to create deployment for %s: %w", config.ConfigMapPodTrafficManager, err)

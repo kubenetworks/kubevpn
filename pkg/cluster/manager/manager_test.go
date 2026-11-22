@@ -717,3 +717,46 @@ func TestCreateOutboundPod_CleansUpStaleNodeAgentJobs(t *testing.T) {
 	// (This is a sanity check to ensure the test matches where we added the fix)
 	// The fix is between createTLSSecret and creating the Deployment in createOutboundPod
 }
+
+func TestResolveAttachModeOnRecreate_PreservesPin(t *testing.T) {
+	ctx := context.Background()
+	// Simulate a manager installed with sidecar (helm values / kubevpn install pin).
+	deploy := genDeploySpec("kubevpn", "img:1", "", config.AttachModeSidecar)
+	clientset := fake.NewSimpleClientset(deploy)
+	if got := resolveAttachModeOnRecreate(ctx, clientset, "kubevpn"); got != config.AttachModeSidecar {
+		t.Fatalf("expected pinned sidecar preserved, got %q", got)
+	}
+}
+
+func TestResolveAttachModeOnRecreate_MissingDeployDefaultsNodeAgent(t *testing.T) {
+	ctx := context.Background()
+	clientset := fake.NewSimpleClientset()
+	if got := resolveAttachModeOnRecreate(ctx, clientset, "kubevpn"); got != config.AttachModeNodeAgent {
+		t.Fatalf("expected node-agent default, got %q", got)
+	}
+}
+
+func TestWaitForManagerPod_ReturnsOnceRunning(t *testing.T) {
+	ctx := context.Background()
+	deploy := genDeploySpec("kubevpn", "img:1", "", config.AttachModeNodeAgent)
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Name: "kubevpn-traffic-manager-x", Namespace: "kubevpn",
+		Labels: map[string]string{"app": config.ConfigMapPodTrafficManager},
+	}}
+	running := pod.DeepCopy()
+	running.Status.Phase = corev1.PodRunning
+	running.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}
+	running.Status.ContainerStatuses = []corev1.ContainerStatus{{Name: "vpn", Ready: true}}
+	clientset := fake.NewSimpleClientset(deploy, pod) // pod NOT running
+
+	// Pending pod within a short timeout must NOT report ready.
+	if err := waitForManagerPod(ctx, clientset, "kubevpn", 300*time.Millisecond); err == nil {
+		t.Fatal("expected timeout while pod is not running")
+	}
+
+	// Once containers are running, the wait returns immediately.
+	clientset2 := fake.NewSimpleClientset(deploy, running)
+	if err := waitForManagerPod(ctx, clientset2, "kubevpn", time.Second); err != nil {
+		t.Fatalf("expected nil once pod is running: %v", err)
+	}
+}
