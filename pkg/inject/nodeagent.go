@@ -14,6 +14,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	clusterworkload "github.com/wencaiwulue/kubevpn/v2/pkg/cluster/workload"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
@@ -77,6 +78,16 @@ func (n *nodeAgentInjector) Inject(ctx context.Context) error {
 	}
 	for i := range pods.Items {
 		pod := &pods.Items[i]
+		// One envoy per netns: a pod already carrying kubevpn sidecars (e.g.
+		// a fargate/service-mode injection in the same proxy command) is
+		// served by its own sidecar envoy — an agent Job here would run a
+		// second envoy in the same netns and fight over the admin/inbound
+		// ports.
+		if podHasKubevpnSidecar(pod) {
+			plog.G(ctx).Debugf("[node-agent] pod %s/%s already carries kubevpn sidecars, skipping agent attach",
+				pod.Namespace, pod.Name)
+			continue
+		}
 		if pod.Spec.HostUsers != nil && !*pod.Spec.HostUsers {
 			return fmt.Errorf("pod %s/%s uses hostUsers: false — node-agent attach is unsupported", pod.Namespace, pod.Name)
 		}
@@ -237,4 +248,17 @@ func ensureAgentJob(ctx context.Context, cs kubernetes.Interface, o InjectOption
 		Pod:              pod,
 	}
 	return EnsureAgentJob(ctx, cs, input)
+}
+
+// podHasKubevpnSidecar reports whether the pod already carries kubevpn
+// sidecar containers (mesh / fargate injection). Such pods are served by
+// their own sidecar envoy — exactly one envoy per netns.
+func podHasKubevpnSidecar(pod *v1.Pod) bool {
+	for i := range pod.Spec.Containers {
+		name := pod.Spec.Containers[i].Name
+		if name == config.ContainerSidecarVPN || name == config.ContainerSidecarEnvoy {
+			return true
+		}
+	}
+	return false
 }

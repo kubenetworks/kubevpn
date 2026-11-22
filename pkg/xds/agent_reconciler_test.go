@@ -302,3 +302,22 @@ func TestReconcileOnce_DeletesJobsWithBackgroundPropagation(t *testing.T) {
 		t.Fatalf("job delete must use Background propagation, got %v", policy)
 	}
 }
+
+func TestReconcileOnce_SkipsSidecarCarryingPods(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now()
+	pod := targetPod("p", "reviews", v1.PodRunning, now)
+	// Same pod carries kubevpn sidecars (fargate/service-mode injection).
+	pod.Spec.Containers = append(pod.Spec.Containers,
+		v1.Container{Name: config.ContainerSidecarVPN},
+		v1.Container{Name: config.ContainerSidecarEnvoy},
+	)
+	r, cs := newReconcilerTestEnv(t, pod)
+
+	if err := r.reconcileOnce(ctx); err != nil {
+		t.Fatalf("reconcileOnce: %v", err)
+	}
+	if _, err := cs.BatchV1().Jobs("kubevpn").Get(ctx, inject.AgentJobName(pod.UID), metav1.GetOptions{}); err == nil {
+		t.Fatal("sidecar-carrying pod must not get an agent job (one envoy per netns)")
+	}
+}

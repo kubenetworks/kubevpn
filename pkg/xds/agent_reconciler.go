@@ -48,6 +48,19 @@ func SetManagerStartTimeForTest(t time.Time) {
 // agentPodHealthy reports whether the agent Job's pod is on track: pending
 // (starting) or running counts; missing, terminating, succeeded or failed
 // does not.
+// podHasKubevpnSidecar reports whether the pod already carries kubevpn
+// sidecar containers (mesh / fargate injection). Such pods are served by
+// their own sidecar envoy — exactly one envoy per netns.
+func podHasKubevpnSidecar(pod *corev1.Pod) bool {
+	for i := range pod.Spec.Containers {
+		name := pod.Spec.Containers[i].Name
+		if name == config.ContainerSidecarVPN || name == config.ContainerSidecarEnvoy {
+			return true
+		}
+	}
+	return false
+}
+
 func agentPodHealthy(pod *corev1.Pod) bool {
 	if pod == nil || pod.DeletionTimestamp != nil {
 		return false
@@ -202,6 +215,16 @@ func (r *AgentReconciler) reconcileOnce(ctx context.Context) error {
 		}
 		for i := range pods.Items {
 			pod := &pods.Items[i]
+			// One envoy per netns: a pod already carrying kubevpn sidecars
+			// (e.g. a fargate/service-mode injection) is served by its own
+			// sidecar envoy — attaching an agent Job to the same netns would
+			// run a second envoy there and the two would fight over the
+			// admin/inbound ports (CI: envoy crash-loop on :9003).
+			if podHasKubevpnSidecar(pod) {
+				plog.G(ctx).Debugf("[AgentReconciler] pod %s/%s already carries kubevpn sidecars, skipping agent attach",
+					pod.Namespace, pod.Name)
+				continue
+			}
 			wantPods[pod.UID] = pod
 			wantOwners[pod.UID] = v.Rules[0].OwnerID
 			wantWorkloadNS[pod.UID] = v.Namespace
