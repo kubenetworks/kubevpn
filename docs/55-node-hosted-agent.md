@@ -328,7 +328,7 @@ Impact: Tests that rely on sidecar mode (like `TestSSHFunctions`) must explicitl
 
 **修复方案（取代 §19 的三级校验设计）**：
 - **原则**：netns 里的每一条状态都必须 (a) 启动即收敛、(b) 由存活 owner 周期性重申、(c) owner 退出即清除、(d) 通过 owner 的控制通道验证——绝不伸进数据面
-- **A. 收敛规则**：vpn iptables 脚本按 comment 清空旧规则后单条重建（幂等、接管即自愈）
+- **A. 收敛规则**：vpn iptables 脚本按 exact rule spec 循环 `-D PREROUTING <spec>` 清空旧规则后单条重建（幂等、接管即自愈）；Go flush path 按 comment 筛选后同样用 exact spec 删除
 - **B. 生命周期绑定**：`kubevpn server`（长驻进程）每 10s 重申 DNAT 规则；SIGTERM 时 flush；所有 agent Job 删除使用 Background propagation（确保子 pod 被级联删除）
 - **C. 控制通道验证**：
   - agent 隧道握手时携带 `?agent=<POD_UID>` URL 参数标识身份
@@ -345,7 +345,7 @@ Impact: Tests that rely on sidecar mode (like `TestSSHFunctions`) must explicitl
 
 **Agent 身份标识**：
 - agent 与 traffic manager 建立 gRPC 隧道时，在监听地址 URL 中携带 `?agent=<POD_UID>` 参数
-- 示例：`localhost:15002?agent=36a197bc-6510-443d-b926-fa0a09e91efd`
+- 真实示例：`tun:/tcp://${TrafficManagerService}:10801?route=${CIDR4}&agent=${POD_UID}`
 - traffic manager 通过该参数识别连接为 agent，并将 pod UID 绑定到 lease
 
 **心跳机制**：

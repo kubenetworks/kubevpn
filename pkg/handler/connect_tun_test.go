@@ -32,7 +32,7 @@ func TestAssertAgentIptablesArgs(t *testing.T) {
 	// Verify the comment token is present and correct
 	foundComment4 := false
 	for _, token := range actualSpecTokens4 {
-		if token == `"`+config.AgentIptablesComment+`"` {
+		if token == config.AgentIptablesComment {
 			foundComment4 = true
 			break
 		}
@@ -65,7 +65,7 @@ func TestAssertAgentIptablesArgs(t *testing.T) {
 	// Verify the comment token is present and correct
 	foundComment6 := false
 	for _, token := range actualSpecTokens6 {
-		if token == `"`+config.AgentIptablesComment+`"` {
+		if token == config.AgentIptablesComment {
 			foundComment6 = true
 			break
 		}

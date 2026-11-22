@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	corev1 "k8s.io/api/core/v1"
 	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -35,6 +35,15 @@ const agentPodStartupGrace = 2 * time.Minute
 // every 5s (keepAgentLeaseAlive), so 30s tolerates ~6 missed heartbeats while
 // still detecting a dead tunnel within one reconcile pass or two.
 const agentLeaseFreshness = 30 * time.Second
+
+// managerStartTime records when the agent reconciler (manager) started.
+// Used to avoid churning existing agent jobs on manager restart.
+var managerStartTime = time.Now()
+
+// SetManagerStartTimeForTest sets the managerStartTime for testing purposes.
+func SetManagerStartTimeForTest(t time.Time) {
+	managerStartTime = t
+}
 
 // agentPodHealthy reports whether the agent Job's pod is on track: pending
 // (starting) or running counts; missing, terminating, succeeded or failed
@@ -129,13 +138,21 @@ func (r *AgentReconciler) Start(ctx context.Context) error {
 // stale lease means the tunnel (and with it the DNAT data plane) is dead.
 // Nil hook means "assume alive" — the reconciler must never churn a Job it
 // cannot actually judge.
-func (r *AgentReconciler) verifyDataPlane(podUID types.UID) bool {
+//
+// Also skips verification for a grace period after manager startup: agents
+// need time to reconnect and renew leases after a manager restart.
+func (r *AgentReconciler) verifyDataPlane(ctx context.Context, podUID types.UID) bool {
 	if r.agentSessionAlive == nil {
+		return true
+	}
+	// Trust all existing jobs for a grace period after manager restart,
+	// giving agents time to reconnect and renew their leases
+	if time.Since(managerStartTime) <= agentPodStartupGrace {
 		return true
 	}
 	alive := r.agentSessionAlive(string(podUID))
 	if !alive {
-		plog.G(context.Background()).Debugf("[AgentReconciler] agent lease heartbeat stale for pod %s", podUID)
+		plog.G(ctx).Debugf("[AgentReconciler] agent lease heartbeat stale for pod %s", podUID)
 	}
 	return alive
 }
@@ -249,18 +266,15 @@ func (r *AgentReconciler) reconcileOnce(ctx context.Context) error {
 			} else if job.DeletionTimestamp != nil {
 				continue // terminating; recreate on a later pass
 			} else {
-				agentPod, found := r.findAgentPod(ctx, jobName)
+				_, found := r.findAgentPod(ctx, jobName)
 				dead := !found
-				if found {
-					dead = !agentPodHealthy(agentPod)
-				}
 				if !found && time.Since(job.CreationTimestamp.Time) <= agentPodStartupGrace {
 					dead = false // pod may still be scheduling
 				}
 				if dead {
 					plog.G(ctx).Infof("[AgentReconciler] job %s has no healthy agent pod, recreating", jobName)
-					if err := r.clientset.BatchV1().Jobs(r.managerNamespace).Delete(ctx, jobName, agentJobDeleteOptions); err != nil && !k8serrors.IsNotFound(err) {
-						plog.G(ctx).Warnf("[AgentReconciler] delete job %s failed: %v", jobName, err)
+					if err := r.clientset.BatchV1().Jobs(r.managerNamespace).Delete(ctx, job.Name, agentJobDeleteOptions); err != nil && !k8serrors.IsNotFound(err) {
+						plog.G(ctx).Warnf("[AgentReconciler] delete job %s failed: %v", job.Name, err)
 					}
 					jobExists[jobName] = false
 				}
@@ -272,9 +286,9 @@ func (r *AgentReconciler) reconcileOnce(ctx context.Context) error {
 			// payload has not completed its first lease renewal yet (TLS
 			// handshake + tunnel setup + first heartbeat), and churning it would
 			// flap. Before the grace, pod health is the only signal.
-			if time.Since(job.CreationTimestamp.Time) > agentPodStartupGrace && !r.verifyDataPlane(podUID) {
+			if time.Since(job.CreationTimestamp.Time) > agentPodStartupGrace && !r.verifyDataPlane(ctx, podUID) {
 				plog.G(ctx).Infof("[AgentReconciler] data-plane verification failed for job %s, recreating", jobName)
-				if err := r.clientset.BatchV1().Jobs(r.managerNamespace).Delete(ctx, jobName, agentJobDeleteOptions); err != nil && !k8serrors.IsNotFound(err) {
+				if err := r.clientset.BatchV1().Jobs(r.managerNamespace).Delete(ctx, job.Name, agentJobDeleteOptions); err != nil && !k8serrors.IsNotFound(err) {
 					plog.G(ctx).Warnf("[AgentReconciler] delete job %s after verify failure: %v", jobName, err)
 				}
 				jobExists[jobName] = false
@@ -287,6 +301,9 @@ func (r *AgentReconciler) reconcileOnce(ctx context.Context) error {
 		plog.G(ctx).Infof("[AgentReconciler] creating missing agent job %s for pod %s/%s",
 			jobName, pod.Namespace, pod.Name)
 
+		// Note: Recreate overlap transient: the old agent pod may still be terminating when
+		// the new one asserts rules; the dying pod's flush can land after the new pod's assert,
+		// leaving up to one 10s tick without rules — self-heals via the next re-assert.
 		input := inject.AgentJobInput{
 			ManagerNamespace: r.managerNamespace,
 			Namespace:        wantWorkloadNS[podUID],

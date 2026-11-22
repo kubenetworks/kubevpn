@@ -256,6 +256,7 @@ func TestReconcileOnce_TrustsFreshJobDespiteStaleLease(t *testing.T) {
 func TestReconcileOnce_RecreatesJobWhenLeaseStale(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now()
+	SetManagerStartTimeForTest(now.Add(-10 * time.Minute)) // manager started long enough ago that grace period is over
 	pod := targetPod("p", "reviews", v1.PodRunning, now)
 	job := agentJobFor(pod)
 	stale := job.DeepCopy()

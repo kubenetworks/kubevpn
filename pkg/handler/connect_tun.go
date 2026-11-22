@@ -195,13 +195,14 @@ func SplitRuleSpec(s string) []string {
 		case c == '"' || c == '\'':
 			if inQuote && c == quoteChar {
 				inQuote = false
-				buf = append(buf, c)
+				// Strip the surrounding quotes: we didn't add the opening quote to buf,
+				// so just use buf as-is (it contains only the content inside the quotes)
 				tokens = append(tokens, string(buf))
 				buf = buf[:0]
 			} else if !inQuote {
 				inQuote = true
 				quoteChar = c
-				buf = append(buf, c)
+				// Don't add the opening quote to buf
 			} else {
 				buf = append(buf, c)
 			}
