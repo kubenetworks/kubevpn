@@ -118,11 +118,11 @@ func TestVPNScriptIsConvergent(t *testing.T) {
 		t.Fatal("vpn script not found in job spec")
 	}
 
-	// Define the expected flush loops and -A lines
-	flushIPv4 := `while iptables -t nat -D PREROUTING -p tcp ! -s 127.0.0.1 ! -d ${CIDR4} -j DNAT --to :15006 -m comment --comment "kubevpn-nodeagent" 2>/dev/null; do :; done`
-	flushIPv6 := `while ip6tables -t nat -D PREROUTING -p tcp ! -s ::1 ! -d ${CIDR6} -j DNAT --to :15006 -m comment --comment "kubevpn-nodeagent" 2>/dev/null; do :; done`
-	addIPv4 := `iptables -t nat -A PREROUTING -p tcp ! -s 127.0.0.1 ! -d ${CIDR4} -j DNAT --to :15006 -m comment --comment "kubevpn-nodeagent"`
-	addIPv6 := `ip6tables -t nat -A PREROUTING -p tcp ! -s ::1 ! -d ${CIDR6} -j DNAT --to :15006 -m comment --comment "kubevpn-nodeagent"`
+	// Define the expected flush loops and -A lines using the shared config constants
+	flushIPv4 := `while iptables -t nat -D PREROUTING ` + config.AgentDNATRuleSpec4 + ` 2>/dev/null; do :; done`
+	flushIPv6 := `while ip6tables -t nat -D PREROUTING ` + config.AgentDNATRuleSpec6 + ` 2>/dev/null; do :; done`
+	addIPv4 := `iptables -t nat -A PREROUTING ` + config.AgentDNATRuleSpec4
+	addIPv6 := `ip6tables -t nat -A PREROUTING ` + config.AgentDNATRuleSpec6
 
 	// Check that all expected strings are present
 	if !strings.Contains(vpnScript, flushIPv4) {
@@ -149,5 +149,13 @@ func TestVPNScriptIsConvergent(t *testing.T) {
 	addIPv6Idx := strings.Index(vpnScript, addIPv6)
 	if flushIPv6Idx >= addIPv6Idx {
 		t.Errorf("IPv6 flush loop must come before -A line, but %d >= %d", flushIPv6Idx, addIPv6Idx)
+	}
+
+	// Check that both env vars are present
+	if !strings.Contains(vpnScript, "export KUBEVPN_AGENT_CLEANUP_IPTABLES=1") {
+		t.Error("vpn script missing KUBEVPN_AGENT_CLEANUP_IPTABLES export")
+	}
+	if !strings.Contains(vpnScript, "export KUBEVPN_AGENT_MAINTAIN_IPTABLES=1") {
+		t.Error("vpn script missing KUBEVPN_AGENT_MAINTAIN_IPTABLES export")
 	}
 }

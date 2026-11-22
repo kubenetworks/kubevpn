@@ -73,11 +73,12 @@ iptables -P INPUT ACCEPT
 ip6tables -P INPUT ACCEPT
 iptables -P FORWARD ACCEPT
 ip6tables -P FORWARD ACCEPT
-while iptables -t nat -D PREROUTING -p tcp ! -s 127.0.0.1 ! -d ${CIDR4} -j DNAT --to :15006 -m comment --comment "kubevpn-nodeagent" 2>/dev/null; do :; done
-while ip6tables -t nat -D PREROUTING -p tcp ! -s ::1 ! -d ${CIDR6} -j DNAT --to :15006 -m comment --comment "kubevpn-nodeagent" 2>/dev/null; do :; done
-iptables -t nat -A PREROUTING -p tcp ! -s 127.0.0.1 ! -d ${CIDR4} -j DNAT --to :15006 -m comment --comment "kubevpn-nodeagent"
-ip6tables -t nat -A PREROUTING -p tcp ! -s ::1 ! -d ${CIDR6} -j DNAT --to :15006 -m comment --comment "kubevpn-nodeagent"
+while iptables -t nat -D PREROUTING ` + config.AgentDNATRuleSpec4 + ` 2>/dev/null; do :; done
+while ip6tables -t nat -D PREROUTING ` + config.AgentDNATRuleSpec6 + ` 2>/dev/null; do :; done
+iptables -t nat -A PREROUTING ` + config.AgentDNATRuleSpec4 + `
+ip6tables -t nat -A PREROUTING ` + config.AgentDNATRuleSpec6 + `
 export KUBEVPN_AGENT_CLEANUP_IPTABLES=1
+export KUBEVPN_AGENT_MAINTAIN_IPTABLES=1
 # $$ here is the pid of the bash script that execs kubevpn server — a target-netns PID
 # recorded for the reconciler's DNAT probe. After exec, the same PID runs kubevpn server.
 echo $$ > /tmp/kubevpn-agent-target-pid

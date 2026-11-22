@@ -176,6 +176,15 @@ const (
 	HostsKeyword = "Added by KubeVPN"
 	// HostsDeviceKeyword is the per-device marker comment template for /etc/hosts entries.
 	HostsDeviceKeyword = "# For dev %s " + HostsKeyword
+
+	// AgentIptablesComment is the comment marker for node-agent iptables rules.
+	AgentIptablesComment = "kubevpn-nodeagent"
+	// AgentDNATRuleSpec4 is the IPv4 DNAT rule spec (without -t nat -A PREROUTING) for node-agent.
+	// Keep in sync with AgentDNATRuleSpec6 and the bash script in pkg/inject/nodeagent_job.go.
+	AgentDNATRuleSpec4 = "-p tcp ! -s 127.0.0.1 ! -d ${CIDR4} -j DNAT --to :15006 -m comment --comment \"kubevpn-nodeagent\""
+	// AgentDNATRuleSpec6 is the IPv6 DNAT rule spec (without -t nat -A PREROUTING) for node-agent.
+	// Keep in sync with AgentDNATRuleSpec4 and the bash script in pkg/inject/nodeagent_job.go.
+	AgentDNATRuleSpec6 = "-p tcp ! -s ::1 ! -d ${CIDR6} -j DNAT --to :15006 -m comment --comment \"kubevpn-nodeagent\""
 )
 
 var (
