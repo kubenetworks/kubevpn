@@ -120,3 +120,24 @@ pod 满足：① 有 agent Job；② agent pod Running/Ready；③ 目标 pod ne
 - **遗留不确定点**：D2 的微观竞态（leave 的 Job.Delete 与 inject 的 EnsureAgentJob
   之间哪一步吞掉了重建）不再单独排查——§2 同步等待 + §1 reconciler 校验将其结构性
   消灭；e2e 转绿即为验证。
+
+## 4. 架构升级（2026-11-22 第二轮，CI run 44996267829 后）
+
+CI 实锤暴露 netns 状态无生命周期绑定的结构性缺陷（K8s 警告 "child pods are
+preserved by default when jobs are deleted"）：僵尸 agent pod 累积 → 共享 DNAT
+规则被任一 pod 的 cleanup 全量拆除 → 拦截间歇性死亡；exec 实测 probe 经 5 轮
+审查仍不可用（镜像无 nsenter）。
+
+**原则（取代 §1 的三级校验设计）**：netns 里的每一条状态都必须 (a) 启动即收敛、
+(b) 由存活 owner 周期性重申、(c) owner 退出即清除、(d) 通过 owner 的控制通道
+验证——绝不伸进数据面。
+
+- **A 收敛规则**：vpn 脚本按 comment 清空旧规则后单条重建（幂等、接管即自愈）
+- **B 生命周期绑定**：`kubevpn server`（长驻）每 10s 重申规则；SIGTERM flush；
+  Job 删除 Background propagation（已落地）
+- **C 控制通道验证**：agent 隧道握手携带 pod UID + agent 标记 → lease store
+  记录（IsAgent/LastRenew 已有）；reconciler 验证 = "该 pod 的 agent lease
+  最近续租"，**删除整个 exec 机制**（agent_verify.go 的 nsenter/PID 文件/
+  退出码协议）与 pods/exec RBAC（genRole + chart 回退）
+
+Background propagation 与 reconciler Job/pod 对齐保留。
