@@ -32,10 +32,15 @@ type TunConfigServer struct {
 }
 
 // NewTunConfigServer initializes the mandatory allocator before serving RPCs.
-func NewTunConfigServer(ctx context.Context, clientset kubernetes.Interface, namespace string) (*TunConfigServer, error) {
+func NewTunConfigServer(ctx context.Context, clientset kubernetes.Interface, namespace string, factories ...cmdutil.Factory) (*TunConfigServer, error) {
+	var factory cmdutil.Factory
+	if len(factories) > 0 {
+		factory = factories[0]
+	}
 	s := &TunConfigServer{
 		clientset: clientset,
 		namespace: namespace,
+		factory:   factory,
 	}
 	rules := envoy.New(clientset, namespace)
 	manager, err := leases.New(ctx, clientset, namespace, leases.Callbacks{
@@ -53,7 +58,7 @@ func NewTunConfigServer(ctx context.Context, clientset kubernetes.Interface, nam
 	if err != nil {
 		plog.G(ctx).Warnf("[TunConfigServer] failed to load TLS secret, agent reconciler disabled: %v", err)
 	} else {
-		s.agentReconciler = NewAgentReconciler(clientset, namespace, secret)
+		s.agentReconciler = NewAgentReconciler(clientset, namespace, secret, factory)
 	}
 
 	return s, nil

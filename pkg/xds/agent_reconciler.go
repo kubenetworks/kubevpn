@@ -10,6 +10,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"sigs.k8s.io/yaml"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -48,6 +50,11 @@ type AgentReconciler struct {
 	virtuals         func(ctx context.Context) ([]*controlplane.Virtual, error)
 	secret           *corev1.Secret
 	interval         time.Duration
+	factory          cmdutil.Factory
+	restConfig       *rest.Config
+	// probe is injectable for tests; nil uses probeDNAT (real exec).
+	probe      func(ctx context.Context, agentPodName string) (string, error)
+	lastVerify map[types.UID]time.Time
 }
 
 // NewAgentReconciler creates an AgentReconciler that reads Virtuals from the
@@ -56,12 +63,18 @@ func NewAgentReconciler(
 	clientset kubernetes.Interface,
 	managerNamespace string,
 	secret *corev1.Secret,
+	factories ...cmdutil.Factory,
 ) *AgentReconciler {
+	var factory cmdutil.Factory
+	if len(factories) > 0 {
+		factory = factories[0]
+	}
 	return &AgentReconciler{
 		clientset:        clientset,
 		managerNamespace: managerNamespace,
 		secret:           secret,
 		interval:         5 * time.Second,
+		factory:          factory,
 		virtuals: func(ctx context.Context) ([]*controlplane.Virtual, error) {
 			cm, err := clientset.CoreV1().ConfigMaps(managerNamespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 			if err != nil {
@@ -219,6 +232,15 @@ func (r *AgentReconciler) reconcileOnce(ctx context.Context) error {
 					}
 					jobExists[jobName] = false
 				}
+			}
+		}
+		if jobExists[jobName] {
+			if !r.verifyDataPlane(ctx, podUID, jobName) {
+				plog.G(ctx).Infof("[AgentReconciler] data-plane verification failed for job %s, recreating", jobName)
+				if err := r.clientset.BatchV1().Jobs(r.managerNamespace).Delete(ctx, jobName, metav1.DeleteOptions{}); err != nil && !k8serrors.IsNotFound(err) {
+					plog.G(ctx).Warnf("[AgentReconciler] delete job %s after verify failure: %v", jobName, err)
+				}
+				jobExists[jobName] = false
 			}
 		}
 		if jobExists[jobName] {

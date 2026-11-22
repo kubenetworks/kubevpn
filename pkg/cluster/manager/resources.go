@@ -102,6 +102,14 @@ func genRole(namespace string) *rbacv1.Role {
 				APIGroups: []string{"batch"},
 				Resources: []string{"jobs"},
 			},
+			{
+				// AgentReconciler DNAT verification: exec into agent pods to read
+				// the target pod netns' iptables (docs/55). Manager-side grant
+				// only; the client kubeconfig shedding (docs/46) is unaffected.
+				Verbs:     []string{"create", "get"},
+				APIGroups: []string{""},
+				Resources: []string{"pods/exec"},
+			},
 		},
 	)
 }

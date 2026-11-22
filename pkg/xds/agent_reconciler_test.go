@@ -40,7 +40,7 @@ func newReconcilerTestEnv(t *testing.T, objects ...runtime.Object) (*AgentReconc
 	}
 	all := append([]runtime.Object{ns, cm}, objects...)
 	clientset := fake.NewSimpleClientset(all...)
-	r := NewAgentReconciler(clientset, "kubevpn", nil)
+	r := NewAgentReconciler(clientset, "kubevpn", nil, nil)
 	return r, clientset
 }
 
