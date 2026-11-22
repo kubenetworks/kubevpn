@@ -180,3 +180,46 @@ func TestReconcileOnce_SkipsFailingWorkloadWithoutStallingOthers(t *testing.T) {
 	}
 	getJob(t, cs, inject.AgentJobName(pod.UID)) // healthy workload still converged
 }
+
+func TestReconcileOnce_ToleratesZombiePodWhenHealthyExists(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now()
+	pod := targetPod("p", "reviews", v1.PodRunning, now)
+	job := agentJobFor(pod)
+	r, cs := newReconcilerTestEnv(t, pod, job)
+	zombie := agentPodFor(job, v1.PodRunning)
+	term := metav1.Now()
+	zombie.DeletionTimestamp = &term // orphaned pod from a previous job generation
+	_, _ = cs.CoreV1().Pods("kubevpn").Create(ctx, zombie, metav1.CreateOptions{})
+	healthy := agentPodFor(job, v1.PodRunning)
+	healthy.Name = job.Name + "-healthy"
+	_, _ = cs.CoreV1().Pods("kubevpn").Create(ctx, healthy, metav1.CreateOptions{})
+
+	if err := r.reconcileOnce(ctx); err != nil {
+		t.Fatalf("reconcileOnce: %v", err)
+	}
+	getJob(t, cs, job.Name) // healthy pod found among zombies → no recreate
+}
+
+func TestReconcileOnce_DeletesJobsWithBackgroundPropagation(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now()
+	oldPod := targetPod("old", "reviews-old", v1.PodRunning, now)
+	job := agentJobFor(oldPod)
+	r, cs := newReconcilerTestEnv(t, oldPod, job)
+	newPod := targetPod("new", "reviews-new", v1.PodRunning, now)
+	_ = cs.CoreV1().Pods("default").Delete(ctx, oldPod.Name, metav1.DeleteOptions{})
+	_, _ = cs.CoreV1().Pods("default").Create(ctx, newPod, metav1.CreateOptions{})
+
+	var policy *metav1.DeletionPropagation
+	cs.PrependReactor("delete", "jobs", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		da := action.(k8stesting.DeleteAction)
+		opts := da.GetDeleteOptions()
+		policy = opts.PropagationPolicy
+		return false, nil, nil // let the default reactor handle deletion
+	})
+	_ = r.reconcileOnce(ctx)
+	if policy == nil || *policy != metav1.DeletePropagationBackground {
+		t.Fatalf("job delete must use Background propagation, got %v", policy)
+	}
+}

@@ -16,6 +16,7 @@ import (
 	v12 "k8s.io/client-go/kubernetes/typed/core/v1"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/polymorphichelpers"
+	"k8s.io/utils/ptr"
 
 	clusterworkload "github.com/wencaiwulue/kubevpn/v2/pkg/cluster/workload"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -279,8 +280,9 @@ func deleteAgentJobs(ctx context.Context, cs kubernetes.Interface, managerNamesp
 	}
 
 	// Delete the jobs first
+	deleteOptions := metav1.DeleteOptions{PropagationPolicy: ptr.To(metav1.DeletePropagationBackground)}
 	for i := range jobs.Items {
-		if err := cs.BatchV1().Jobs(managerNamespace).Delete(ctx, jobs.Items[i].Name, metav1.DeleteOptions{}); err != nil && !errors.IsNotFound(err) {
+		if err := cs.BatchV1().Jobs(managerNamespace).Delete(ctx, jobs.Items[i].Name, deleteOptions); err != nil && !errors.IsNotFound(err) {
 			plog.G(ctx).Warnf("delete agent job %s: %v", jobs.Items[i].Name, err)
 			// Continue trying to delete other jobs even if one fails
 		}

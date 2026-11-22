@@ -12,6 +12,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/yaml"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -19,6 +20,11 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/inject"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
+
+// agentJobDeleteOptions forces Background propagation: on modern Kubernetes
+// the default orphaned-pod behavior would leave zombie agent pods running
+// (DNAT + tunnel still active, later cleanup tears the shared rules down).
+var agentJobDeleteOptions = metav1.DeleteOptions{PropagationPolicy: ptr.To(metav1.DeletePropagationBackground)}
 
 // agentPodStartupGrace: a freshly created Job may take a while to schedule its
 // pod; a missing/pending pod within this window is healthy, past it the Job is
@@ -125,7 +131,13 @@ func (r *AgentReconciler) findAgentPod(ctx context.Context, jobName string) (*co
 	if err != nil || len(pods.Items) == 0 {
 		return nil, false
 	}
-	return &pods.Items[0], true
+	for i := range pods.Items {
+		pod := &pods.Items[i]
+		if agentPodHealthy(pod) {
+			return pod, true
+		}
+	}
+	return nil, false
 }
 
 func (r *AgentReconciler) reconcileOnce(ctx context.Context) error {
@@ -182,7 +194,7 @@ func (r *AgentReconciler) reconcileOnce(ctx context.Context) error {
 		pod, stillExists := wantPods[podUID]
 		if !stillExists {
 			plog.G(ctx).Infof("[AgentReconciler] deleting orphan job %s for pod %s", job.Name, podUID)
-			if err := r.clientset.BatchV1().Jobs(r.managerNamespace).Delete(ctx, job.Name, metav1.DeleteOptions{}); err != nil && !k8serrors.IsNotFound(err) {
+			if err := r.clientset.BatchV1().Jobs(r.managerNamespace).Delete(ctx, job.Name, agentJobDeleteOptions); err != nil && !k8serrors.IsNotFound(err) {
 				plog.G(ctx).Warnf("[AgentReconciler] delete orphan job %s failed: %v", job.Name, err)
 			}
 			continue
@@ -192,7 +204,7 @@ func (r *AgentReconciler) reconcileOnce(ctx context.Context) error {
 		if currentNode != pod.Spec.NodeName {
 			plog.G(ctx).Infof("[AgentReconciler] pod %s moved from %s to %s, recreating job %s",
 				podUID, currentNode, pod.Spec.NodeName, job.Name)
-			if err := r.clientset.BatchV1().Jobs(r.managerNamespace).Delete(ctx, job.Name, metav1.DeleteOptions{}); err != nil && !k8serrors.IsNotFound(err) {
+			if err := r.clientset.BatchV1().Jobs(r.managerNamespace).Delete(ctx, job.Name, agentJobDeleteOptions); err != nil && !k8serrors.IsNotFound(err) {
 				plog.G(ctx).Warnf("[AgentReconciler] delete job %s for reschedule failed: %v", job.Name, err)
 			}
 			continue
@@ -227,7 +239,7 @@ func (r *AgentReconciler) reconcileOnce(ctx context.Context) error {
 				}
 				if dead {
 					plog.G(ctx).Infof("[AgentReconciler] job %s has no healthy agent pod, recreating", jobName)
-					if err := r.clientset.BatchV1().Jobs(r.managerNamespace).Delete(ctx, jobName, metav1.DeleteOptions{}); err != nil && !k8serrors.IsNotFound(err) {
+					if err := r.clientset.BatchV1().Jobs(r.managerNamespace).Delete(ctx, jobName, agentJobDeleteOptions); err != nil && !k8serrors.IsNotFound(err) {
 						plog.G(ctx).Warnf("[AgentReconciler] delete job %s failed: %v", jobName, err)
 					}
 					jobExists[jobName] = false
@@ -237,7 +249,7 @@ func (r *AgentReconciler) reconcileOnce(ctx context.Context) error {
 		if jobExists[jobName] {
 			if !r.verifyDataPlane(ctx, podUID, jobName) {
 				plog.G(ctx).Infof("[AgentReconciler] data-plane verification failed for job %s, recreating", jobName)
-				if err := r.clientset.BatchV1().Jobs(r.managerNamespace).Delete(ctx, jobName, metav1.DeleteOptions{}); err != nil && !k8serrors.IsNotFound(err) {
+				if err := r.clientset.BatchV1().Jobs(r.managerNamespace).Delete(ctx, jobName, agentJobDeleteOptions); err != nil && !k8serrors.IsNotFound(err) {
 					plog.G(ctx).Warnf("[AgentReconciler] delete job %s after verify failure: %v", jobName, err)
 				}
 				jobExists[jobName] = false

@@ -210,7 +210,7 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 	// Clean up stale node-agent jobs across all namespaces before starting the new manager.
 	// Stale agents from previous managers would reconnect to the new manager and compete for DHCP leases,
 	// causing 3-6 minutes of mesh traffic disruption (verified in CI TestFunctions 03/05).
-	cleanupAllNodeAgentJobs(ctx, clientset, metav1.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0)})
+	cleanupAllNodeAgentJobs(ctx, clientset, metav1.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0), PropagationPolicy: ptr.To(metav1.DeletePropagationBackground)})
 
 	// 8) create deployment
 	plog.StepStart(ctx, "Creating Deployment")
@@ -329,7 +329,9 @@ func CleanupTrafficManagerResources(ctx context.Context, clientset kubernetes.In
 		_ = clientset.RbacV1().ClusterRoles().Delete(ctx, proxyRBACName, options)
 	}
 	// Clean up all node-agent jobs across all namespaces
-	cleanupAllNodeAgentJobs(ctx, clientset, options)
+	nodeAgentOptions := options
+	nodeAgentOptions.PropagationPolicy = ptr.To(metav1.DeletePropagationBackground)
+	cleanupAllNodeAgentJobs(ctx, clientset, nodeAgentOptions)
 }
 
 // cleanupAllNodeAgentJobs deletes all jobs with label kubevpn/pod-uid across all namespaces
