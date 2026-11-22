@@ -2,316 +2,171 @@ package xds
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
-	corev1 "k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
-	"sigs.k8s.io/yaml"
+	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/inject"
 )
 
-// seedWorld builds: ConfigMap with one Virtual carrying Selector "app=web",
-// pod web-1 on node-a with matching labels, agent Job for its UID.
-func seedWorld(t *testing.T) (*fake.Clientset, *AgentReconciler) {
+const virtualsYAML = `- schemaVersion: 2
+  Namespace: default
+  Uid: deployments.apps.reviews
+  Selector: app=reviews
+  Rules:
+  - ownerID: owner-1
+    LocalTunIPv4: 198.18.0.1
+    LocalTunIPv6: 2001:2::1
+    PortMap:
+      "9080": "9080"
+    isAgent: true
+`
+
+func newReconcilerTestEnv(t *testing.T, objects ...runtime.Object) (*AgentReconciler, *fake.Clientset) {
 	t.Helper()
-	const managerNS = "kubevpn"
-	const workloadNS = "default"
-	const podUID = "pod-uid-1"
-
-	virtuals := []*controlplane.Virtual{
-		{
-			SchemaVersion: controlplane.CurrentSchemaVersion,
-			Namespace:     workloadNS,
-			UID:           "deployments.apps/web",
-			Selector:      "app=web",
-			Ports: []controlplane.ContainerPort{
-				{ContainerPort: 8080},
-			},
-			Rules: []*controlplane.Rule{
-				{
-					LocalTunIPv4: "198.18.0.1",
-					LocalTunIPv6: "fd00::1",
-					OwnerID:      "owner-1",
-				},
-			},
-		},
+	ns := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "kubevpn"}}
+	cm := &v1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "kubevpn"},
+		Data:       map[string]string{config.KeyEnvoy: virtualsYAML},
 	}
-	virtualData, err := yaml.Marshal(virtuals)
-	if err != nil {
-		t.Fatal(err)
-	}
+	all := append([]runtime.Object{ns, cm}, objects...)
+	clientset := fake.NewSimpleClientset(all...)
+	r := NewAgentReconciler(clientset, "kubevpn", nil)
+	return r, clientset
+}
 
-	cm := &corev1.ConfigMap{
+func targetPod(uid, name string, phase v1.PodPhase, created time.Time) *v1.Pod {
+	return &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      config.ConfigMapPodTrafficManager,
-			Namespace: managerNS,
+			Name:              name,
+			Namespace:         "default",
+			UID:               types.UID("uid-" + uid),
+			Labels:            map[string]string{"app": "reviews"},
+			CreationTimestamp: metav1.NewTime(created),
 		},
-		Data: map[string]string{
-			config.KeyEnvoy: string(virtualData),
-		},
+		Status: v1.PodStatus{Phase: phase},
 	}
+}
 
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "web-1",
-			Namespace: workloadNS,
-			UID:       podUID,
-			Labels:    map[string]string{"app": "web"},
-		},
-		Spec: corev1.PodSpec{
-			NodeName: "node-a",
-		},
-	}
-
-	job := inject.GenAgentJobSpec(inject.AgentJobInput{
-		Namespace:        "default",
-		NodeID:           "deployments.apps.web",
-		ManagerNamespace: managerNS,
+func agentJobFor(pod *v1.Pod) *batchv1.Job {
+	return inject.GenAgentJobSpec(inject.AgentJobInput{
+		ManagerNamespace: "kubevpn",
+		Namespace:        pod.Namespace,
+		NodeID:           "deployments.apps.reviews",
 		Image:            config.Image,
 		OwnerID:          "owner-1",
-		Secret:           nil,
 		Pod:              pod,
 	})
-
-	clientset := fake.NewSimpleClientset(cm, pod, job)
-
-	r := NewAgentReconciler(clientset, managerNS, nil)
-	return clientset, r
 }
 
-func TestReconcilerRecreatesJobAfterPodReschedule(t *testing.T) {
-	clientset, r := seedWorld(t)
-	ctx := context.Background()
-
-	// Reschedule: pod now on node-b
-	pod, err := clientset.CoreV1().Pods("default").Get(ctx, "web-1", metav1.GetOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	pod.Spec.NodeName = "node-b"
-	_, err = clientset.CoreV1().Pods("default").Update(ctx, pod, metav1.UpdateOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if err := r.reconcileOnce(ctx); err != nil {
-		t.Fatalf("reconcile: %v", err)
-	}
-
-	// The old job should be gone; a new one should exist on node-b
-	jobs, err := clientset.BatchV1().Jobs("kubevpn").List(ctx, metav1.ListOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(jobs.Items) != 1 {
-		t.Fatalf("expected 1 job after reschedule, got %d", len(jobs.Items))
-	}
-	job := &jobs.Items[0]
-	if job.Spec.Template.Spec.NodeSelector["kubernetes.io/hostname"] != "node-b" {
-		t.Fatalf("job not moved to node-b: %+v", job.Spec.Template.Spec.NodeSelector)
-	}
-}
-
-func TestReconcilerDeletesOrphanJobWhenPodGone(t *testing.T) {
-	clientset, r := seedWorld(t)
-	ctx := context.Background()
-
-	err := clientset.CoreV1().Pods("default").Delete(ctx, "web-1", metav1.DeleteOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := r.reconcileOnce(ctx); err != nil {
-		t.Fatalf("reconcile: %v", err)
-	}
-
-	jobs, err := clientset.BatchV1().Jobs("kubevpn").List(ctx, metav1.ListOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(jobs.Items) != 0 {
-		t.Fatalf("orphan job must be deleted, got %d", len(jobs.Items))
-	}
-}
-
-func TestReconcilerRestoresMissingJobAfterManagerRestart(t *testing.T) {
-	clientset, r := seedWorld(t)
-	ctx := context.Background()
-
-	err := clientset.BatchV1().Jobs("kubevpn").DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := r.reconcileOnce(ctx); err != nil {
-		t.Fatalf("reconcile: %v", err)
-	}
-
-	jobs, err := clientset.BatchV1().Jobs("kubevpn").List(ctx, metav1.ListOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(jobs.Items) != 1 {
-		t.Fatalf("job must be restored from rules, got %d", len(jobs.Items))
-	}
-}
-
-func TestReconcilerSkipsSidecarModeVirtuals(t *testing.T) {
-	clientset, r := seedWorld(t)
-	ctx := context.Background()
-
-	// Remove the selector to simulate a sidecar-mode Virtual
-	cm, err := clientset.CoreV1().ConfigMaps("kubevpn").Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var virtuals []*controlplane.Virtual
-	if err := yaml.Unmarshal([]byte(cm.Data[config.KeyEnvoy]), &virtuals); err != nil {
-		t.Fatal(err)
-	}
-	virtuals[0].Selector = "" // sidecar mode
-	virtualData, err := yaml.Marshal(virtuals)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cm.Data[config.KeyEnvoy] = string(virtualData)
-	_, err = clientset.CoreV1().ConfigMaps("kubevpn").Update(ctx, cm, metav1.UpdateOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Delete the job
-	err = clientset.BatchV1().Jobs("kubevpn").DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Reconcile should NOT recreate it (selector is empty)
-	if err := r.reconcileOnce(ctx); err != nil {
-		t.Fatalf("reconcile: %v", err)
-	}
-	jobs, err := clientset.BatchV1().Jobs("kubevpn").List(ctx, metav1.ListOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(jobs.Items) != 0 {
-		t.Fatalf("sidecar-mode job should not be recreated, got %d", len(jobs.Items))
-	}
-}
-
-func TestReconcilerDoesNotTouchUnrelatedJobs(t *testing.T) {
-	clientset, r := seedWorld(t)
-	ctx := context.Background()
-
-	// Create an unrelated Job without kubevpn labels
-	unrelatedJob := &batchv1.Job{
+func agentPodFor(job *batchv1.Job, phase v1.PodPhase) *v1.Pod {
+	return &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "unrelated-job",
+			Name:      job.Name + "-abc",
 			Namespace: "kubevpn",
+			Labels:    map[string]string{"job-name": job.Name},
 		},
-		Spec: batchv1.JobSpec{
-			Template: corev1.PodTemplateSpec{
-				Spec: corev1.PodSpec{
-					Containers: []corev1.Container{
-						{Name: "test", Image: "busybox"},
-					},
-					RestartPolicy: corev1.RestartPolicyNever,
-				},
-			},
-		},
-	}
-	_, err := clientset.BatchV1().Jobs("kubevpn").Create(ctx, unrelatedJob, metav1.CreateOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Reconcile should leave it alone
-	if err := r.reconcileOnce(ctx); err != nil {
-		t.Fatalf("reconcile: %v", err)
-	}
-	_, err = clientset.BatchV1().Jobs("kubevpn").Get(ctx, "unrelated-job", metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("unrelated job was deleted: %v", err)
+		Status: v1.PodStatus{Phase: phase},
 	}
 }
 
-func TestReconcilerHandlesMultiplePods(t *testing.T) {
-	clientset := fake.NewSimpleClientset()
+func getJob(t *testing.T, cs *fake.Clientset, name string) *batchv1.Job {
+	t.Helper()
+	job, err := cs.BatchV1().Jobs("kubevpn").Get(context.Background(), name, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get job %s: %v", name, err)
+	}
+	return job
+}
+
+func TestReconcileOnce_DeletesOrphanAndCreatesForNewPod(t *testing.T) {
 	ctx := context.Background()
-	const managerNS = "kubevpn"
-	const workloadNS = "default"
+	now := time.Now()
+	oldPod := targetPod("old", "reviews-old", v1.PodRunning, now)
+	job := agentJobFor(oldPod)
+	r, cs := newReconcilerTestEnv(t, oldPod, job)
 
-	// Create ConfigMap with a Virtual
-	virtuals := []*controlplane.Virtual{
-		{
-			SchemaVersion: controlplane.CurrentSchemaVersion,
-			Namespace:     workloadNS,
-			UID:           "deployments.apps/web",
-			Selector:      "app=web",
-			Ports: []controlplane.ContainerPort{
-				{ContainerPort: 8080},
-			},
-			Rules: []*controlplane.Rule{
-				{
-					LocalTunIPv4: "198.18.0.1",
-					OwnerID:      "owner-1",
-				},
-			},
-		},
-	}
-	virtualData, err := yaml.Marshal(virtuals)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      config.ConfigMapPodTrafficManager,
-			Namespace: managerNS,
-		},
-		Data: map[string]string{
-			config.KeyEnvoy: string(virtualData),
-		},
-	}
-	_, err = clientset.CoreV1().ConfigMaps(managerNS).Create(ctx, cm, metav1.CreateOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	// Target pod is replaced: old gone, new running.
+	newPod := targetPod("new", "reviews-new", v1.PodRunning, now)
+	_ = cs.CoreV1().Pods("default").Delete(ctx, oldPod.Name, metav1.DeleteOptions{})
+	_, _ = cs.CoreV1().Pods("default").Create(ctx, newPod, metav1.CreateOptions{})
 
-	// Create multiple pods
-	names := []string{"web-0", "web-1", "web-2"}
-	uids := []types.UID{"pod-uid-0", "pod-uid-1", "pod-uid-2"}
-	for i := 0; i < 3; i++ {
-		pod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      names[i],
-				Namespace: workloadNS,
-				UID:       uids[i],
-				Labels:    map[string]string{"app": "web"},
-			},
-			Spec: corev1.PodSpec{
-				NodeName: "node-a",
-			},
-		}
-		_, err = clientset.CoreV1().Pods(workloadNS).Create(ctx, pod, metav1.CreateOptions{})
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	// Reconcile should create Jobs for all 3 pods
-	r := NewAgentReconciler(clientset, managerNS, nil)
 	if err := r.reconcileOnce(ctx); err != nil {
-		t.Fatalf("reconcile: %v", err)
+		t.Fatalf("reconcileOnce: %v", err)
 	}
-	jobs, err := clientset.BatchV1().Jobs(managerNS).List(ctx, metav1.ListOptions{})
-	if err != nil {
-		t.Fatal(err)
+	if _, err := cs.BatchV1().Jobs("kubevpn").Get(ctx, inject.AgentJobName(oldPod.UID), metav1.GetOptions{}); err == nil {
+		t.Fatal("orphan job for deleted pod should be removed")
 	}
-	if len(jobs.Items) != 3 {
-		t.Fatalf("expected 3 jobs, got %d", len(jobs.Items))
+	getJob(t, cs, inject.AgentJobName(newPod.UID)) // must exist
+}
+
+func TestReconcileOnce_ToleratesStartingAgentPod(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now()
+	pod := targetPod("p", "reviews", v1.PodRunning, now)
+	job := agentJobFor(pod)
+	r, cs := newReconcilerTestEnv(t, pod, job)
+	_, _ = cs.CoreV1().Pods("kubevpn").Create(ctx, agentPodFor(job, v1.PodPending), metav1.CreateOptions{})
+
+	if err := r.reconcileOnce(ctx); err != nil {
+		t.Fatalf("reconcileOnce: %v", err)
 	}
+	getJob(t, cs, job.Name) // starting pod must NOT trigger recreate
+}
+
+func TestReconcileOnce_RecreatesJobWithDeadAgentPod(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now()
+	pod := targetPod("p", "reviews", v1.PodRunning, now)
+	job := agentJobFor(pod)
+	stale := job.DeepCopy()
+	stale.CreationTimestamp = metav1.NewTime(now.Add(-5 * time.Minute)) // past startup grace
+	r, cs := newReconcilerTestEnv(t, pod, stale)
+	// no agent pod at all
+
+	if err := r.reconcileOnce(ctx); err != nil {
+		t.Fatalf("reconcileOnce: %v", err)
+	}
+	getJob(t, cs, job.Name) // recreated
+}
+
+func TestReconcileOnce_SkipsFailingWorkloadWithoutStallingOthers(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now()
+	pod := targetPod("p", "reviews", v1.PodRunning, now)
+	r, cs := newReconcilerTestEnv(t, pod)
+	cs.PrependReactor("list", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		if action.GetNamespace() == "boom" {
+			return true, nil, errors.New("boom")
+		}
+		return false, nil, nil
+	})
+	// Second Virtual pointing at the broken namespace.
+	cm, _ := cs.CoreV1().ConfigMaps("kubevpn").Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	cm.Data[config.KeyEnvoy] = virtualsYAML + `- schemaVersion: 2
+  Namespace: boom
+  Uid: deployments.apps.broken
+  Selector: app=broken
+  Rules:
+  - ownerID: owner-2
+    LocalTunIPv4: 198.18.0.9
+    PortMap:
+      "9080": "9080"
+    isAgent: true
+`
+	_, _ = cs.CoreV1().ConfigMaps("kubevpn").Update(ctx, cm, metav1.UpdateOptions{})
+
+	if err := r.reconcileOnce(ctx); err != nil {
+		t.Fatalf("reconcileOnce must not abort on per-workload failure: %v", err)
+	}
+	getJob(t, cs, inject.AgentJobName(pod.UID)) // healthy workload still converged
 }

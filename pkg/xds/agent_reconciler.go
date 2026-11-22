@@ -6,7 +6,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
@@ -17,6 +17,26 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/inject"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
+
+// agentPodStartupGrace: a freshly created Job may take a while to schedule its
+// pod; a missing/pending pod within this window is healthy, past it the Job is
+// recreated.
+const agentPodStartupGrace = 2 * time.Minute
+
+// agentPodHealthy reports whether the agent Job's pod is on track: pending
+// (starting) or running counts; missing, terminating, succeeded or failed
+// does not.
+func agentPodHealthy(pod *corev1.Pod) bool {
+	if pod == nil || pod.DeletionTimestamp != nil {
+		return false
+	}
+	switch pod.Status.Phase {
+	case corev1.PodPending, corev1.PodRunning:
+		return true
+	default:
+		return false
+	}
+}
 
 // AgentReconciler keeps node-hosted agent Jobs aligned with the pods their
 // rules select (docs/55 §6): reschedule → re-pin; pod gone → delete; manager
@@ -41,7 +61,7 @@ func NewAgentReconciler(
 		clientset:        clientset,
 		managerNamespace: managerNamespace,
 		secret:           secret,
-		interval:         30 * time.Second,
+		interval:         5 * time.Second,
 		virtuals: func(ctx context.Context) ([]*controlplane.Virtual, error) {
 			cm, err := clientset.CoreV1().ConfigMaps(managerNamespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 			if err != nil {
@@ -62,7 +82,7 @@ func NewAgentReconciler(
 func (r *AgentReconciler) Start(ctx context.Context) error {
 	interval := r.interval
 	if interval == 0 {
-		interval = 30 * time.Second
+		interval = 5 * time.Second
 	}
 	t := time.NewTicker(interval)
 	defer t.Stop()
@@ -84,17 +104,30 @@ func (r *AgentReconciler) Start(ctx context.Context) error {
 	}
 }
 
+// findAgentPod returns the agent Job's pod, if any.
+func (r *AgentReconciler) findAgentPod(ctx context.Context, jobName string) (*corev1.Pod, bool) {
+	pods, err := r.clientset.CoreV1().Pods(r.managerNamespace).List(ctx, metav1.ListOptions{
+		LabelSelector: "job-name=" + jobName,
+	})
+	if err != nil || len(pods.Items) == 0 {
+		return nil, false
+	}
+	return &pods.Items[0], true
+}
+
 func (r *AgentReconciler) reconcileOnce(ctx context.Context) error {
 	virtuals, err := r.virtuals(ctx)
 	if err != nil {
 		return fmt.Errorf("read virtuals: %w", err)
 	}
 
-	// Collect all pods selected by any node-agent Virtual
+	// Collect all pods selected by any node-agent Virtual. A per-workload
+	// error is logged and skipped — one bad workload must not stall
+	// convergence for every other one.
 	wantPods := make(map[types.UID]*corev1.Pod)
 	wantOwners := make(map[types.UID]string)       // pod UID -> owner ID
-	wantWorkloadNS := make(map[types.UID]string)   // pod UID -> workload namespace
-	wantWorkloadID := make(map[types.UID]string)   // pod UID -> workload node ID (Virtual.UID)
+	wantWorkloadNS := make(map[types.UID]string) // pod UID -> workload namespace
+	wantWorkloadID := make(map[types.UID]string) // pod UID -> workload node ID (Virtual.UID)
 
 	for _, v := range virtuals {
 		if v.Selector == "" {
@@ -103,24 +136,21 @@ func (r *AgentReconciler) reconcileOnce(ctx context.Context) error {
 		if len(v.Rules) == 0 {
 			continue // no rules, nothing to do
 		}
-
 		pods, err := r.clientset.CoreV1().Pods(v.Namespace).List(ctx, metav1.ListOptions{LabelSelector: v.Selector})
 		if err != nil {
-			return fmt.Errorf("list pods for %s/%s: %w", v.Namespace, v.UID, err)
+			plog.G(ctx).Warnf("[AgentReconciler] list pods for %s/%s failed, skipping workload: %v", v.Namespace, v.UID, err)
+			continue
 		}
-
 		for i := range pods.Items {
 			pod := &pods.Items[i]
 			wantPods[pod.UID] = pod
-			// Use the first rule's owner ID for labeling; it doesn't matter
-			// which one we pick since the Job is shared across all owners.
 			wantOwners[pod.UID] = v.Rules[0].OwnerID
 			wantWorkloadNS[pod.UID] = v.Namespace
 			wantWorkloadID[pod.UID] = v.UID
 		}
 	}
 
-	// List all agent Jobs in the manager namespace
+	// Delete Jobs whose pod is gone or moved nodes.
 	jobs, err := r.clientset.BatchV1().Jobs(r.managerNamespace).List(ctx, metav1.ListOptions{
 		LabelSelector: "kubevpn/pod-uid", // presence: filter only agent Jobs
 	})
@@ -128,10 +158,7 @@ func (r *AgentReconciler) reconcileOnce(ctx context.Context) error {
 		return fmt.Errorf("list agent jobs: %w", err)
 	}
 
-	// Track which Jobs should exist
 	jobExists := make(map[string]bool)
-
-	// Delete Jobs whose pod is gone or moved nodes
 	for i := range jobs.Items {
 		job := &jobs.Items[i]
 		podUID := types.UID(job.Labels["kubevpn/pod-uid"])
@@ -141,32 +168,59 @@ func (r *AgentReconciler) reconcileOnce(ctx context.Context) error {
 
 		pod, stillExists := wantPods[podUID]
 		if !stillExists {
-			plog.G(ctx).Debugf("[AgentReconciler] deleting orphan job %s for pod %s", job.Name, podUID)
-			err := r.clientset.BatchV1().Jobs(r.managerNamespace).Delete(ctx, job.Name, metav1.DeleteOptions{})
-			if err != nil && !errors.IsNotFound(err) {
-				return fmt.Errorf("delete job %s: %w", job.Name, err)
+			plog.G(ctx).Infof("[AgentReconciler] deleting orphan job %s for pod %s", job.Name, podUID)
+			if err := r.clientset.BatchV1().Jobs(r.managerNamespace).Delete(ctx, job.Name, metav1.DeleteOptions{}); err != nil && !k8serrors.IsNotFound(err) {
+				plog.G(ctx).Warnf("[AgentReconciler] delete orphan job %s failed: %v", job.Name, err)
 			}
 			continue
 		}
 
-		// Check if Job is pinned to the correct node
 		currentNode := job.Spec.Template.Spec.NodeSelector["kubernetes.io/hostname"]
 		if currentNode != pod.Spec.NodeName {
 			plog.G(ctx).Infof("[AgentReconciler] pod %s moved from %s to %s, recreating job %s",
 				podUID, currentNode, pod.Spec.NodeName, job.Name)
-			err := r.clientset.BatchV1().Jobs(r.managerNamespace).Delete(ctx, job.Name, metav1.DeleteOptions{})
-			if err != nil && !errors.IsNotFound(err) {
-				return fmt.Errorf("delete job %s for reschedule: %w", job.Name, err)
+			if err := r.clientset.BatchV1().Jobs(r.managerNamespace).Delete(ctx, job.Name, metav1.DeleteOptions{}); err != nil && !k8serrors.IsNotFound(err) {
+				plog.G(ctx).Warnf("[AgentReconciler] delete job %s for reschedule failed: %v", job.Name, err)
 			}
 			continue
 		}
-
 		jobExists[job.Name] = true
 	}
 
-	// Ensure a Job for every live pod
+	// Converge every live pod: its Job must exist with a healthy agent pod;
+	// otherwise delete + recreate so the data plane comes back. (Task 5 adds
+	// the DNAT verification hook here.)
 	for podUID, pod := range wantPods {
 		jobName := inject.AgentJobName(podUID)
+		if jobExists[jobName] {
+			job, err := r.clientset.BatchV1().Jobs(r.managerNamespace).Get(ctx, jobName, metav1.GetOptions{})
+			if err != nil {
+				if k8serrors.IsNotFound(err) {
+					jobExists[jobName] = false // raced with deletion above
+				} else {
+					plog.G(ctx).Warnf("[AgentReconciler] get job %s failed, skipping: %v", jobName, err)
+					continue
+				}
+			} else if job.DeletionTimestamp != nil {
+				continue // terminating; recreate on a later pass
+			} else {
+				agentPod, found := r.findAgentPod(ctx, jobName)
+				dead := !found
+				if found {
+					dead = !agentPodHealthy(agentPod)
+				}
+				if !found && time.Since(job.CreationTimestamp.Time) <= agentPodStartupGrace {
+					dead = false // pod may still be scheduling
+				}
+				if dead {
+					plog.G(ctx).Infof("[AgentReconciler] job %s has no healthy agent pod, recreating", jobName)
+					if err := r.clientset.BatchV1().Jobs(r.managerNamespace).Delete(ctx, jobName, metav1.DeleteOptions{}); err != nil && !k8serrors.IsNotFound(err) {
+						plog.G(ctx).Warnf("[AgentReconciler] delete job %s failed: %v", jobName, err)
+					}
+					jobExists[jobName] = false
+				}
+			}
+		}
 		if jobExists[jobName] {
 			continue
 		}
@@ -183,14 +237,14 @@ func (r *AgentReconciler) reconcileOnce(ctx context.Context) error {
 			Secret:           r.secret,
 			Pod:              pod,
 		}
-
 		job := inject.GenAgentJobSpec(input)
 		_, err := r.clientset.BatchV1().Jobs(r.managerNamespace).Create(ctx, job, metav1.CreateOptions{})
-		if errors.IsAlreadyExists(err) {
+		if k8serrors.IsAlreadyExists(err) {
 			continue
 		}
 		if err != nil {
-			return fmt.Errorf("create agent job %s/%s: %w", r.managerNamespace, jobName, err)
+			plog.G(ctx).Warnf("[AgentReconciler] create agent job %s failed: %v", jobName, err)
+			continue
 		}
 	}
 
