@@ -3,6 +3,7 @@ package inject
 import (
 	"context"
 	"testing"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -14,6 +15,21 @@ func TestUnpatchContainerDeletesAgentJobsOnEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create pod: %v", err)
 	}
+
+	// Shorten timeouts for test
+	oldReady, oldTerm := ensureAgentJobReadyTimeout, ensureAgentJobTerminatingTimeout
+	ensureAgentJobReadyTimeout, ensureAgentJobTerminatingTimeout = 5*time.Second, 5*time.Second
+	t.Cleanup(func() {
+		ensureAgentJobReadyTimeout, ensureAgentJobTerminatingTimeout = oldReady, oldTerm
+	})
+
+	// Start goroutine to create ready pod
+	jobName := AgentJobName(pod.UID)
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		createReadyAgentPod(t, cs, opts.ManagerNamespace, jobName)
+	}()
+
 	_ = NewInjector(opts).Inject(context.Background())
 	// owner-1 leaves: remove its rule → job must be deleted
 	_, err = UnpatchContainer(context.Background(), opts.NodeID, opts.Factory,
@@ -35,10 +51,32 @@ func TestUnpatchContainerKeepsJobsWhileOtherOwnersRemain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create pod: %v", err)
 	}
+
+	// Shorten timeouts for test
+	oldReady, oldTerm := ensureAgentJobReadyTimeout, ensureAgentJobTerminatingTimeout
+	ensureAgentJobReadyTimeout, ensureAgentJobTerminatingTimeout = 5*time.Second, 5*time.Second
+	t.Cleanup(func() {
+		ensureAgentJobReadyTimeout, ensureAgentJobTerminatingTimeout = oldReady, oldTerm
+	})
+
+	// Start goroutine to create ready pod
+	jobName := AgentJobName(pod.UID)
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		createReadyAgentPod(t, cs, opts.ManagerNamespace, jobName)
+	}()
+
 	_ = NewInjector(opts).Inject(context.Background())
 	opts2 := opts
 	opts2.OwnerID = "owner-2"
 	opts2.Headers = map[string]string{"X-User": "b"}
+
+	// Start another goroutine for the second inject (in case it needs the pod too)
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		createReadyAgentPod(t, cs, opts.ManagerNamespace, jobName)
+	}()
+
 	_ = NewInjector(opts2).Inject(context.Background())
 	_, err = UnpatchContainer(context.Background(), opts.NodeID, opts.Factory,
 		cs.CoreV1().ConfigMaps(opts.ManagerNamespace), opts.Controller, opts.OwnerID,

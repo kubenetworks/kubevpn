@@ -26,9 +26,17 @@ import (
 
 func createReadyAgentPod(t *testing.T, clientset *fake.Clientset, namespace, jobName string) {
 	t.Helper()
+	podName := jobName + "-abc"
+	// Check if pod already exists
+	_, getErr := clientset.CoreV1().Pods(namespace).Get(context.Background(), podName, metav1.GetOptions{})
+	if getErr == nil {
+		// Pod already exists, nothing to do
+		return
+	}
+
 	pod := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      jobName + "-abc",
+			Name:      podName,
 			Namespace: namespace,
 			Labels:    map[string]string{"job-name": jobName},
 		},
@@ -42,7 +50,10 @@ func createReadyAgentPod(t *testing.T, clientset *fake.Clientset, namespace, job
 	}
 	_, err := clientset.CoreV1().Pods(namespace).Create(context.Background(), pod, metav1.CreateOptions{})
 	if err != nil {
-		t.Fatalf("create ready agent pod: %v", err)
+		// If it already exists, that's fine
+		if !strings.Contains(err.Error(), "already exists") {
+			t.Fatalf("create ready agent pod: %v", err)
+		}
 	}
 }
 
