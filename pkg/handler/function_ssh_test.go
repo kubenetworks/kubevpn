@@ -691,7 +691,7 @@ func (u *sshUt) centerCheckConnectStatus(t *testing.T) {
 	}
 
 	expect := connStatus{List: []*connection{{
-		Namespace: "default",
+		Namespace: "kubevpn",
 		Status:    "connected",
 		ProxyList: nil,
 	}}}
@@ -745,7 +745,7 @@ func (u *sshUt) centerCheckProxyStatus(t *testing.T) {
 	}
 
 	expect := connStatus{List: []*connection{{
-		Namespace: "default",
+		Namespace: "kubevpn",
 		Status:    "connected",
 		ProxyList: []*proxyItem{{
 			Namespace: "default",
@@ -807,7 +807,7 @@ func (u *sshUt) centerCheckProxyWithServiceMeshStatus(t *testing.T) {
 	}
 
 	expect := connStatus{List: []*connection{{
-		Namespace: "default",
+		Namespace: "kubevpn",
 		Status:    "connected",
 		ProxyList: []*proxyItem{{
 			Namespace: "default",
@@ -876,7 +876,7 @@ func (u *sshUt) centerCheckProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 	}
 
 	expect := connStatus{List: []*connection{{
-		Namespace: "default",
+		Namespace: "kubevpn",
 		Status:    "connected",
 		ProxyList: []*proxyItem{{
 			Namespace: "default",
