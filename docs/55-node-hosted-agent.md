@@ -310,7 +310,7 @@ Impact: Tests that rely on sidecar mode (like `TestSSHFunctions`) must explicitl
 2. **D2**：leave→re-inject 生命周期无仲裁器，`AgentReconciler` 仅校验 Job 存在性，不校验 agent pod Ready 与目标 netns 实际 DNAT 规则，造成"全绿但拦截已死"
 
 **修复方案**（2026-11-22 声明式收敛）：
-- **Reconciler 重构**：tick 30s → 5s；逐 pod 错误隔离；三级校验（Job 存在 → agent pod Ready → exec 进 agent pod 实测 iptables DNAT 规则）；任一失败即重建 Job
+- **Reconciler 重构**：tick 30s → 5s；逐 pod 错误隔离；三级校验（Job 存在 → agent pod Ready → agent TUN lease 心跳存活：agent 每 5s 以 OwnerID=<podUID> IsAgent=true 续租，LastRenew 超 30s 即判死）；任一失败即重建 Job（数据面校验为 lease 心跳，无需 pods/exec）
 - **Inject 同步就绪**：`EnsureAgentJob` Create 后等待 agent pod Running/Ready（上限 30s），超时返回错误给客户端
 - **Attach-mode 继承**：`createOutboundPod` 重建前 GET 现有 deploy 读出 `KUBEVPN_PROXY_ATTACH_MODE` 传入新 spec
 - **设计文档**：`docs/superpowers/specs/2026-11-22-nodeagent-dataplane-convergence-design.md`

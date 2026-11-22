@@ -22,9 +22,9 @@ func TestGenRole_Fields(t *testing.T) {
 		t.Errorf("Namespace: got %q, want %q", role.Namespace, ns)
 	}
 	// Rule 0: configmaps/secrets (resourceName-scoped); Rules 1-2: CIDR detection
-	// (pods/services, see genRole / docs/46); Rule 3: batch/jobs; Rule4: pods/exec.
-	if len(role.Rules) != 5 {
-		t.Fatalf("Rules len: got %d, want %d", len(role.Rules), 5)
+	// (pods/services, see genRole / docs/46); Rule 3: batch/jobs.
+	if len(role.Rules) != 4 {
+		t.Fatalf("Rules len: got %d, want %d", len(role.Rules), 4)
 	}
 	rule0 := role.Rules[0]
 	wantVerbs := []string{"get", "list", "watch", "create", "update", "patch", "delete"}
@@ -54,20 +54,19 @@ func TestGenRole_Fields(t *testing.T) {
 	if !stringSliceEqual(role.Rules[2].Verbs, []string{"create", "list"}) {
 		t.Errorf("Rules[2].Verbs: got %v, want [create list]", role.Rules[2].Verbs)
 	}
-	// Verify pods/exec rule is present (Rule4)
-	foundExec := false
+	// Rule 3 must be the batch/jobs grant (node-agent Jobs); no pods/exec.
+	if !stringSliceEqual(role.Rules[3].APIGroups, []string{"batch"}) {
+		t.Errorf("Rules[3].APIGroups: got %v, want [batch]", role.Rules[3].APIGroups)
+	}
+	if !stringSliceEqual(role.Rules[3].Resources, []string{"jobs"}) {
+		t.Errorf("Rules[3].Resources: got %v, want [jobs]", role.Rules[3].Resources)
+	}
 	for _, r := range role.Rules {
 		for _, res := range r.Resources {
 			if res == "pods/exec" {
-				foundExec = true
-				if !stringSliceEqual(r.Verbs, []string{"create", "get"}) {
-					t.Errorf("pods/exec verbs: got %v, want [create get]", r.Verbs)
-				}
+				t.Errorf("manager Role must not grant pods/exec (dataplane verification is lease-based)")
 			}
 		}
-	}
-	if !foundExec {
-		t.Errorf("manager Role must grant pods/exec for DNAT verification")
 	}
 }
 

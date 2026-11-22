@@ -201,6 +201,84 @@ func TestReconcileOnce_ToleratesZombiePodWhenHealthyExists(t *testing.T) {
 	getJob(t, cs, job.Name) // healthy pod found among zombies → no recreate
 }
 
+func TestReconcileOnce_KeepsJobWhileAgentLeaseAlive(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now()
+	pod := targetPod("p", "reviews", v1.PodRunning, now)
+	job := agentJobFor(pod)
+	stale := job.DeepCopy()
+	stale.CreationTimestamp = metav1.NewTime(now.Add(-5 * time.Minute)) // past startup grace: lease check engages
+	r, cs := newReconcilerTestEnv(t, pod, stale)
+	_, _ = cs.CoreV1().Pods("kubevpn").Create(ctx, agentPodFor(job, v1.PodRunning), metav1.CreateOptions{})
+	r.agentSessionAlive = func(podUID string) bool { return podUID == string(pod.UID) }
+
+	deleted := false
+	cs.PrependReactor("delete", "jobs", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		deleted = true
+		return false, nil, nil
+	})
+
+	if err := r.reconcileOnce(ctx); err != nil {
+		t.Fatalf("reconcileOnce: %v", err)
+	}
+	if deleted {
+		t.Fatal("fresh agent lease heartbeat must keep the job")
+	}
+	getJob(t, cs, job.Name)
+}
+
+func TestReconcileOnce_TrustsFreshJobDespiteStaleLease(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now()
+	pod := targetPod("p", "reviews", v1.PodRunning, now)
+	job := agentJobFor(pod)
+	fresh := job.DeepCopy()
+	fresh.CreationTimestamp = metav1.NewTime(now) // created "now": inside the startup grace
+	r, cs := newReconcilerTestEnv(t, pod, fresh)
+	_, _ = cs.CoreV1().Pods("kubevpn").Create(ctx, agentPodFor(job, v1.PodRunning), metav1.CreateOptions{})
+	r.agentSessionAlive = func(podUID string) bool { return false } // heartbeat not landed yet
+
+	deleted := false
+	cs.PrependReactor("delete", "jobs", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		deleted = true
+		return false, nil, nil
+	})
+
+	if err := r.reconcileOnce(ctx); err != nil {
+		t.Fatalf("reconcileOnce: %v", err)
+	}
+	if deleted {
+		t.Fatal("a job inside the startup grace must be trusted despite a stale lease")
+	}
+	getJob(t, cs, job.Name)
+}
+
+func TestReconcileOnce_RecreatesJobWhenLeaseStale(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now()
+	pod := targetPod("p", "reviews", v1.PodRunning, now)
+	job := agentJobFor(pod)
+	stale := job.DeepCopy()
+	stale.CreationTimestamp = metav1.NewTime(now.Add(-5 * time.Minute)) // past startup grace: lease check engages
+	r, cs := newReconcilerTestEnv(t, pod, stale)
+	_, _ = cs.CoreV1().Pods("kubevpn").Create(ctx, agentPodFor(job, v1.PodRunning), metav1.CreateOptions{})
+	r.agentSessionAlive = func(podUID string) bool { return false } // heartbeat stale
+
+	deleted := false
+	cs.PrependReactor("delete", "jobs", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		deleted = true
+		return false, nil, nil
+	})
+
+	if err := r.reconcileOnce(ctx); err != nil {
+		t.Fatalf("reconcileOnce: %v", err)
+	}
+	if !deleted {
+		t.Fatal("stale agent lease heartbeat must delete and recreate the job")
+	}
+	getJob(t, cs, job.Name) // recreated
+}
+
 func TestReconcileOnce_DeletesJobsWithBackgroundPropagation(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now()

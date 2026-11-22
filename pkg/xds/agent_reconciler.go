@@ -6,12 +6,11 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
-	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/yaml"
 
@@ -30,6 +29,12 @@ var agentJobDeleteOptions = metav1.DeleteOptions{PropagationPolicy: ptr.To(metav
 // pod; a missing/pending pod within this window is healthy, past it the Job is
 // recreated.
 const agentPodStartupGrace = 2 * time.Minute
+
+// agentLeaseFreshness bounds how stale an agent's TUN lease heartbeat may be
+// before its Job is judged dead and recreated. The agent renews its lease
+// every 5s (keepAgentLeaseAlive), so 30s tolerates ~6 missed heartbeats while
+// still detecting a dead tunnel within one reconcile pass or two.
+const agentLeaseFreshness = 30 * time.Second
 
 // agentPodHealthy reports whether the agent Job's pod is on track: pending
 // (starting) or running counts; missing, terminating, succeeded or failed
@@ -56,31 +61,27 @@ type AgentReconciler struct {
 	virtuals         func(ctx context.Context) ([]*controlplane.Virtual, error)
 	secret           *corev1.Secret
 	interval         time.Duration
-	factory          cmdutil.Factory
-	restConfig       *rest.Config
-	// probe is injectable for tests; nil uses probeDNAT (real exec).
-	probe      func(ctx context.Context, agentPodName string) (string, error)
-	lastVerify map[types.UID]time.Time
+	// agentSessionAlive reports whether the agent tunnel for a target pod UID
+	// is alive (lease heartbeat). Injected by TunConfigServer (in-process lease
+	// store read, no k8s API call); nil means "assume alive" (tests / no leases).
+	agentSessionAlive func(podUID string) bool
 }
 
 // NewAgentReconciler creates an AgentReconciler that reads Virtuals from the
-// traffic-manager ConfigMap.
+// traffic-manager ConfigMap. agentSessionAlive may be nil (data-plane
+// verification then always passes).
 func NewAgentReconciler(
 	clientset kubernetes.Interface,
 	managerNamespace string,
 	secret *corev1.Secret,
-	factories ...cmdutil.Factory,
+	agentSessionAlive func(podUID string) bool,
 ) *AgentReconciler {
-	var factory cmdutil.Factory
-	if len(factories) > 0 {
-		factory = factories[0]
-	}
 	return &AgentReconciler{
-		clientset:        clientset,
-		managerNamespace: managerNamespace,
-		secret:           secret,
-		interval:         5 * time.Second,
-		factory:          factory,
+		clientset:         clientset,
+		managerNamespace:  managerNamespace,
+		secret:            secret,
+		interval:          5 * time.Second,
+		agentSessionAlive: agentSessionAlive,
 		virtuals: func(ctx context.Context) ([]*controlplane.Virtual, error) {
 			cm, err := clientset.CoreV1().ConfigMaps(managerNamespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 			if err != nil {
@@ -121,6 +122,22 @@ func (r *AgentReconciler) Start(ctx context.Context) error {
 			}
 		}
 	}
+}
+
+// verifyDataPlane reports whether the target pod's agent tunnel is still alive,
+// judged by its lease heartbeat: the agent renews its TUN lease every 5s, so a
+// stale lease means the tunnel (and with it the DNAT data plane) is dead.
+// Nil hook means "assume alive" — the reconciler must never churn a Job it
+// cannot actually judge.
+func (r *AgentReconciler) verifyDataPlane(podUID types.UID) bool {
+	if r.agentSessionAlive == nil {
+		return true
+	}
+	alive := r.agentSessionAlive(string(podUID))
+	if !alive {
+		plog.G(context.Background()).Debugf("[AgentReconciler] agent lease heartbeat stale for pod %s", podUID)
+	}
+	return alive
 }
 
 // findAgentPod returns the agent Job's pod, if any.
@@ -212,14 +229,17 @@ func (r *AgentReconciler) reconcileOnce(ctx context.Context) error {
 		jobExists[job.Name] = true
 	}
 
-	// Converge every live pod: its Job must exist with a healthy agent pod;
-	// otherwise delete + recreate so the data plane comes back. (Task 5 adds
-	// the DNAT verification hook here.)
+	// Converge every live pod: its Job must exist with a healthy agent pod,
+	// and the agent tunnel's lease heartbeat must be fresh; otherwise delete +
+	// recreate so the data plane comes back.
 	for podUID, pod := range wantPods {
 		jobName := inject.AgentJobName(podUID)
+		var job *batchv1.Job
 		if jobExists[jobName] {
-			job, err := r.clientset.BatchV1().Jobs(r.managerNamespace).Get(ctx, jobName, metav1.GetOptions{})
+			var err error
+			job, err = r.clientset.BatchV1().Jobs(r.managerNamespace).Get(ctx, jobName, metav1.GetOptions{})
 			if err != nil {
+				job = nil
 				if k8serrors.IsNotFound(err) {
 					jobExists[jobName] = false // raced with deletion above
 				} else {
@@ -247,7 +267,12 @@ func (r *AgentReconciler) reconcileOnce(ctx context.Context) error {
 			}
 		}
 		if jobExists[jobName] {
-			if !r.verifyDataPlane(ctx, podUID, jobName) {
+			// Lease-based verification engages only after the startup grace: a
+			// job created seconds ago may have a Running agent pod whose vpn
+			// payload has not completed its first lease renewal yet (TLS
+			// handshake + tunnel setup + first heartbeat), and churning it would
+			// flap. Before the grace, pod health is the only signal.
+			if time.Since(job.CreationTimestamp.Time) > agentPodStartupGrace && !r.verifyDataPlane(podUID) {
 				plog.G(ctx).Infof("[AgentReconciler] data-plane verification failed for job %s, recreating", jobName)
 				if err := r.clientset.BatchV1().Jobs(r.managerNamespace).Delete(ctx, jobName, agentJobDeleteOptions); err != nil && !k8serrors.IsNotFound(err) {
 					plog.G(ctx).Warnf("[AgentReconciler] delete job %s after verify failure: %v", jobName, err)
@@ -271,7 +296,7 @@ func (r *AgentReconciler) reconcileOnce(ctx context.Context) error {
 			Secret:           r.secret,
 			Pod:              pod,
 		}
-		job := inject.GenAgentJobSpec(input)
+		job = inject.GenAgentJobSpec(input)
 		_, err := r.clientset.BatchV1().Jobs(r.managerNamespace).Create(ctx, job, metav1.CreateOptions{})
 		if k8serrors.IsAlreadyExists(err) {
 			continue
