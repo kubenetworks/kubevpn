@@ -159,3 +159,27 @@ func TestVPNScriptIsConvergent(t *testing.T) {
 		t.Error("vpn script missing KUBEVPN_AGENT_MAINTAIN_IPTABLES export")
 	}
 }
+
+// TestVPNScriptCarriesAgentIdentity guards the -l listener URL: it must carry
+// agent=${POD_UID} (so kubevpn server leases its TUN IP as the agent pod UID,
+// IsAgent=true) and must be quoted, because the & separator is a shell control
+// operator in an unquoted word.
+func TestVPNScriptCarriesAgentIdentity(t *testing.T) {
+	pod := &v1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "test-uid"}}
+	job := GenAgentJobSpec(testAgentJobInput(pod))
+	var vpnScript string
+	for _, c := range job.Spec.Template.Spec.Containers {
+		if c.Name == "vpn" && len(c.Command) >= 10 {
+			vpnScript = c.Command[9]
+			break
+		}
+	}
+	if vpnScript == "" {
+		t.Fatal("vpn script not found in job spec")
+	}
+
+	const wantListener = `kubevpn server --debug -l "tun:/tcp://${TrafficManagerService}:10801?route=${CIDR4}&agent=${POD_UID}"`
+	if !strings.Contains(vpnScript, wantListener) {
+		t.Errorf("vpn script missing agent-identity listener URL:\nwant: %s", wantListener)
+	}
+}

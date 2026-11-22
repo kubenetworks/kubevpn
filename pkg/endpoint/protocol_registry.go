@@ -52,10 +52,14 @@ func tunProtocolFactory(node *Node, hub *tunnel.Router) (net.Listener, Handler, 
 	addr := node.Get("net")
 	addr6 := node.Get("net6")
 
-	// Self-DHCP via xds: if net= is empty, request IP from TunConfigService
+	// Self-DHCP via xds: if net= is empty, request IP from TunConfigService.
+	// agent=<podUID> marks this tunnel as a node-agent connection: its lease is
+	// allocated from the agent pool and recorded with OwnerID=<podUID>
+	// IsAgent=true, so the traffic manager can tell agent tunnels apart.
+	// Without the param (mesh sidecar / user data plane) identity is unchanged.
 	if addr == "" {
 		var err error
-		addr, addr6, err = requestTunIPFromXDS()
+		addr, addr6, err = requestTunIPFromXDS(node.Get("agent"))
 		if err != nil {
 			return nil, nil, fmt.Errorf("request TUN IP from xds: %w", err)
 		}
@@ -77,17 +81,36 @@ func tunProtocolFactory(node *Node, hub *tunnel.Router) (net.Listener, Handler, 
 	return listener, handler, nil
 }
 
+// agentLeaseHeartbeatInterval is how often a node-agent's vpn container renews
+// its TUN lease (see keepAgentLeaseAlive). The traffic manager's agent
+// reconciler treats a lease as alive while LastRenew is recent (<30s), so the
+// heartbeat must be well under that window.
+const agentLeaseHeartbeatInterval = 5 * time.Second
+
+// resolveTunIPOwner maps the -l URL's agent= query param to the GetTunIP
+// identity. A non-empty param means "this is a node-agent tunnel": the pod UID
+// becomes the lease owner and IsAgent=true routes the lease to the agent pool.
+// An empty param keeps the legacy sidecar identity (POD_NAME env, else
+// "unknown") with IsAgent=false — user/mesh connections are unaffected.
+func resolveTunIPOwner(agentUID string) (ownerID string, isAgent bool) {
+	if agentUID != "" {
+		return agentUID, true
+	}
+	ownerID = os.Getenv(config.EnvPodName)
+	if ownerID == "" {
+		ownerID = "unknown"
+	}
+	return ownerID, false
+}
+
 // requestTunIPFromXDS connects to the traffic manager's TunConfigService
 // and allocates a TUN IP for this sidecar.
-func requestTunIPFromXDS() (ipv4, ipv6 string, err error) {
+func requestTunIPFromXDS(agentUID string) (ipv4, ipv6 string, err error) {
 	trafficManagerAddr := os.Getenv("TrafficManagerService")
 	if trafficManagerAddr == "" {
 		return "", "", fmt.Errorf("env TrafficManagerService not set")
 	}
-	ownerID := os.Getenv(config.EnvPodName)
-	if ownerID == "" {
-		ownerID = "unknown"
-	}
+	ownerID, isAgent := resolveTunIPOwner(agentUID)
 	namespace := os.Getenv(config.EnvPodNamespace)
 
 	const controlPlaneDialTimeout = 30 * time.Second
@@ -99,26 +122,54 @@ func requestTunIPFromXDS() (ipv4, ipv6 string, err error) {
 	if err != nil {
 		return "", "", fmt.Errorf("dial xds %s: %w", target, err)
 	}
-	defer conn.Close()
 
 	hostname, _ := os.Hostname() // sidecar pod hostname, for TUN_ALLOCS debugging
 	client := rpc.NewTunConfigServiceClient(conn)
-	resp, err := client.GetTunIP(ctx, &rpc.TunIPRequest{
+	req := &rpc.TunIPRequest{
 		OwnerID:   ownerID,
 		Namespace: namespace,
 		Hostname:  hostname,
-	})
+		IsAgent:   isAgent,
+	}
+	resp, err := client.GetTunIP(ctx, req)
 	if err != nil {
+		conn.Close()
 		return "", "", fmt.Errorf("get tun IP: %w", err)
 	}
 
-	plog.G(ctx).Debugf("[TUN] Got IP from xds: v4=%s v6=%s", resp.IPv4, resp.IPv6)
+	plog.G(ctx).Debugf("[TUN] Got IP from xds: v4=%s v6=%s (owner=%s isAgent=%v)", resp.IPv4, resp.IPv6, ownerID, isAgent)
 
 	// No explicit release needed — lease expiry (per DHCP protocol) handles IP reclaim.
-	// When this process exits, WatchTunIP stream disconnects, and after LeaseDuration
+	// When this process exits, the lease is no longer renewed and, after LeaseDuration
 	// without renewal, the IP is automatically reclaimed by the server's lease reaper.
+	if isAgent {
+		// A one-shot GetTunIP would let the lease lapse after LeaseDuration: the
+		// reaper would reclaim the agent's IP and the manager's agent reconciler
+		// (lease-heartbeat verification) would consider the dataplane dead. Renew
+		// periodically for the process lifetime; conn is deliberately left open.
+		go keepAgentLeaseAlive(client, req)
+	} else {
+		conn.Close()
+	}
 
 	return resp.IPv4, resp.IPv6, nil
+}
+
+// keepAgentLeaseAlive renews the agent's TUN lease by re-issuing the same
+// GetTunIP request (idempotent: an existing allocation is renewed in place,
+// keeping its IP). Runs until the process exits; a failed renewal is logged and
+// retried on the next tick — if the tunnel process is truly gone, the lease
+// goes stale and the manager's reconciler re-creates the agent Job.
+func keepAgentLeaseAlive(client rpc.TunConfigServiceClient, req *rpc.TunIPRequest) {
+	ticker := time.NewTicker(agentLeaseHeartbeatInterval)
+	defer ticker.Stop()
+	for range ticker.C {
+		ctx, cancel := context.WithTimeout(context.Background(), agentLeaseHeartbeatInterval)
+		if _, err := client.GetTunIP(ctx, req); err != nil {
+			plog.G(ctx).Warnf("[TUN] agent lease heartbeat failed: %v", err)
+		}
+		cancel()
+	}
 }
 
 func parseRoutes(str string) []types.Route {
