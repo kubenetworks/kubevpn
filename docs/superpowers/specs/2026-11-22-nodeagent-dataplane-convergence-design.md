@@ -1,7 +1,7 @@
 # Node-Agent 数据面声明式收敛 — 设计文档
 
 - **日期:** 2026-11-22
-- **状态:** approved（brainstorming 产出，进入 writing-plans）
+- **状态:** implemented
 - **证据基线:** PR #822 CI run [44899084723](https://github.com/kubenetworks/kubevpn/actions/runs/44899084723)（commit 292ae1822）日志取证
 - **关联文档:** docs/55-node-hosted-agent.md（§12 假设验证表、§16 修复记录将在实施时同步更新）
 
