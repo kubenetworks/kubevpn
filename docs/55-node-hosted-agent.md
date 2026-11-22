@@ -276,7 +276,7 @@ Impact: Tests that rely on sidecar mode (like `TestSSHFunctions`) must explicitl
 ## 18. Bug Fix: Stale Node-Agent Jobs Cause DHCP Lease Contention
 
 **Problem**: When the traffic manager was recreated (uninstall then install, or crash recovery), stale node-agent jobs from the previous manager would reconnect to the new manager and compete for DHCP leases. This caused 3-6 minutes of mesh traffic disruption (verified in CI TestFunctions 03/05) as:
-- Stale agents held leases in the 198.18.0.0/16 pool
+- Stale agents held leases in the agent pool 198.18.128.0/17
 - New agents and user clients had to wait for lease expiration or reclamation
 - Traffic routing was unstable during this period
 
@@ -318,3 +318,38 @@ Impact: Tests that rely on sidecar mode (like `TestSSHFunctions`) must explicitl
 **Verification**：
 - TestSSHFunctions 07-12 不再需要降级 sidecar
 - 新增集成测试覆盖 reconciler 收敛、同步就绪、attach-mode 继承场景
+
+## 20. 修复记录：2026-11-22 第二轮架构升级（收敛数据面 + 控制通道验证）
+
+**问题根因**（CI run 44996267829 实锤）：
+- K8s 默认 Job 删除策略会 orphan 子 pod（K8s 警告 "child pods are preserved by default when jobs are deleted"）
+- 僵尸 agent pod 累积后，任一 pod 的 cleanup 会全量拆除共享 DNAT 规则 → 拦截间歇性抖动
+- 此前设计的 exec 实测 probe 经 5 轮审查仍不可用（镜像无 nsenter）
+
+**修复方案（取代 §19 的三级校验设计）**：
+- **原则**：netns 里的每一条状态都必须 (a) 启动即收敛、(b) 由存活 owner 周期性重申、(c) owner 退出即清除、(d) 通过 owner 的控制通道验证——绝不伸进数据面
+- **A. 收敛规则**：vpn iptables 脚本按 comment 清空旧规则后单条重建（幂等、接管即自愈）
+- **B. 生命周期绑定**：`kubevpn server`（长驻进程）每 10s 重申 DNAT 规则；SIGTERM 时 flush；所有 agent Job 删除使用 Background propagation（确保子 pod 被级联删除）
+- **C. 控制通道验证**：
+  - agent 隧道握手时携带 `?agent=<POD_UID>` URL 参数标识身份
+  - agent 每 5s 以 OwnerID=<podUID> IsAgent=true 续租 TUN lease
+  - reconciler 验证改为："该 pod 的 agent lease 最近 30s 内有续租"（启动后首 2min 为 grace period）
+  - **移除**：整个 exec 机制（agent_verify.go 的 nsenter/PID 文件/退出码协议）与 pods/exec RBAC（genRole + chart 同步回退）
+- **D. Agent IP 池**：agent TUN IP 固定从 agent 池 198.18.128.0/17 分配
+
+**Verification**：
+- 拦截稳定性恢复：不再因僵尸 pod 导致 DNAT 规则被误删
+- CI 验证通过：无 exec probe 依赖，架构更简洁
+
+## 21. Agent 身份标识与心跳机制
+
+**Agent 身份标识**：
+- agent 与 traffic manager 建立 gRPC 隧道时，在监听地址 URL 中携带 `?agent=<POD_UID>` 参数
+- 示例：`localhost:15002?agent=36a197bc-6510-443d-b926-fa0a09e91efd`
+- traffic manager 通过该参数识别连接为 agent，并将 pod UID 绑定到 lease
+
+**心跳机制**：
+- agent 每 5s 向 traffic manager 发送 TUN lease 续租请求（OwnerID=<podUID> IsAgent=true）
+- lease store 记录 LastRenew 时间戳
+- reconciler 判断 agent 存活的条件：LastRenew 在最近 30s 内（启动后首 2min 为 grace period）
+- 若超时未收到心跳，reconciler 删除旧 Job 并重建

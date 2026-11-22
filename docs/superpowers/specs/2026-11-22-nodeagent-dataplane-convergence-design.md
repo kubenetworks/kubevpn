@@ -121,7 +121,7 @@ pod 满足：① 有 agent Job；② agent pod Running/Ready；③ 目标 pod ne
   之间哪一步吞掉了重建）不再单独排查——§2 同步等待 + §1 reconciler 校验将其结构性
   消灭；e2e 转绿即为验证。
 
-## 4. 架构升级（2026-11-22 第二轮，CI run 44996267829 后）
+## 4. 架构升级（2026-11-22 第二轮，CI run 44996267829 后）（已实施，commits a198a106e..0e482a327）
 
 CI 实锤暴露 netns 状态无生命周期绑定的结构性缺陷（K8s 警告 "child pods are
 preserved by default when jobs are deleted"）：僵尸 agent pod 累积 → 共享 DNAT
