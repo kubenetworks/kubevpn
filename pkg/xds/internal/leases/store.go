@@ -209,9 +209,17 @@ func (s *Manager) ReconcileDHCP(ctx context.Context) {
 	for ownerID, alloc := range owners {
 		if alloc.IPv4 != nil && !allocatedIPs[alloc.IPv4.IP.String()] {
 			plog.G(ctx).Warnf("[TunConfig] IP %s for owner %s lost, re-allocating", alloc.IPv4, ownerID)
-			newV4, newV6, err := s.dhcp.RentIP(ctx)
-			if err != nil {
-				plog.G(ctx).Errorf("[TunConfig] Failed to re-rent for %s: %v", ownerID, err)
+			// Re-rent from the same pool the owner was in: re-renting an agent
+			// from the user pool would silently strip its IsAgent identity.
+			var newV4, newV6 *net.IPNet
+			var rerr error
+			if alloc.IsAgent {
+				newV4, newV6, rerr = s.dhcp.RentIPForAgent(ctx)
+			} else {
+				newV4, newV6, rerr = s.dhcp.RentIP(ctx)
+			}
+			if rerr != nil {
+				plog.G(ctx).Errorf("[TunConfig] Failed to re-rent for %s: %v", ownerID, rerr)
 				continue
 			}
 			s.NotifyIPChange(ownerID, newV4, newV6)

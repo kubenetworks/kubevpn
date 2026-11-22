@@ -617,5 +617,22 @@ func (m *Manager) ForEach(ctx context.Context, fnv4 func(net.IP), fnv6 func(net.
 		return err
 	}
 	dhcp6.ForEach(fnv6)
+
+	// Agent pool allocations must be visible too: the lease store's periodic
+	// cross-check uses ForEach to decide whether an owner's IP still exists.
+	// Omitting the agent pools made every agent lease look "lost", re-renting
+	// agents into the user pool and destroying their IsAgent identity.
+	agentCIDR4, agentCIDR6 := m.agentPoolCIDRs(pool)
+	dhcpAgent, err := restoreAllocator(agentCIDR4, pool.AgentIPv4.Bitmap, pool.AgentIPv4.Bitmap != "")
+	if err != nil {
+		return err
+	}
+	dhcpAgent.ForEach(fnv4)
+
+	dhcpAgent6, err := restoreAllocator(agentCIDR6, pool.AgentIPv6.Bitmap, pool.AgentIPv6.Bitmap != "")
+	if err != nil {
+		return err
+	}
+	dhcpAgent6.ForEach(fnv6)
 	return nil
 }
