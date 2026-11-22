@@ -112,14 +112,63 @@ func listControllerPods(ctx context.Context, cs kubernetes.Interface, controller
 	})
 }
 
-// EnsureAgentJob creates the deterministic agent Job; AlreadyExists is handled
-// by checking if the job is terminating — if so, waits for it to disappear
-// before recreating.
+// Tunable so tests can shorten the waits; production values keep injection
+// synchronous but bounded.
+var (
+	ensureAgentJobReadyTimeout       = 30 * time.Second
+	ensureAgentJobReadyPollInterval  = 500 * time.Millisecond
+	ensureAgentJobTerminatingTimeout = 60 * time.Second
+)
+
+// waitForAgentJobPodReady blocks until the agent Job's pod is running with all
+// containers ready, so injection returns only once the data plane (DNAT rules
+// applied by the job script, envoy and tunnel payloads) is actually up.
+func waitForAgentJobPodReady(ctx context.Context, cs kubernetes.Interface, namespace, jobName string) error {
+	selector := labels.Set{"job-name": jobName}.AsSelector().String()
+	ctxTimeout, cancel := context.WithTimeout(ctx, ensureAgentJobReadyTimeout)
+	defer cancel()
+	ticker := time.NewTicker(ensureAgentJobReadyPollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctxTimeout.Done():
+			return fmt.Errorf("agent job %q pod not ready within %s: %w", jobName, ensureAgentJobReadyTimeout, ctxTimeout.Err())
+		case <-ticker.C:
+			pods, err := cs.CoreV1().Pods(namespace).List(ctxTimeout, metav1.ListOptions{LabelSelector: selector})
+			if err != nil {
+				return fmt.Errorf("list agent pods for job %s: %w", jobName, err)
+			}
+			for i := range pods.Items {
+				pod := &pods.Items[i]
+				if pod.GetDeletionTimestamp() != nil || pod.Status.Phase != v1.PodRunning {
+					continue
+				}
+				if agentPodAllReady(pod) {
+					return nil
+				}
+			}
+		}
+	}
+}
+
+// agentPodAllReady reports whether every container status of the pod is ready.
+func agentPodAllReady(pod *v1.Pod) bool {
+	if len(pod.Spec.Containers) == 0 || len(pod.Status.ContainerStatuses) < len(pod.Spec.Containers) {
+		return false
+	}
+	for _, cs := range pod.Status.ContainerStatuses {
+		if !cs.Ready {
+			return false
+		}
+	}
+	return true
+}
+
 func EnsureAgentJob(ctx context.Context, cs kubernetes.Interface, input AgentJobInput) error {
 	name := AgentJobName(input.Pod.UID)
 	_, err := cs.BatchV1().Jobs(input.ManagerNamespace).Create(ctx, GenAgentJobSpec(input), metav1.CreateOptions{})
 	if err == nil {
-		return nil
+		return waitForAgentJobPodReady(ctx, cs, input.ManagerNamespace, name)
 	}
 	if !errors.IsAlreadyExists(err) {
 		return err
@@ -131,18 +180,22 @@ func EnsureAgentJob(ctx context.Context, cs kubernetes.Interface, input AgentJob
 		if errors.IsNotFound(err) {
 			// Job disappeared between Create and Get: try again once
 			_, err = cs.BatchV1().Jobs(input.ManagerNamespace).Create(ctx, GenAgentJobSpec(input), metav1.CreateOptions{})
+			if err != nil {
+				return err
+			}
+			return waitForAgentJobPodReady(ctx, cs, input.ManagerNamespace, name)
 		}
 		return err
 	}
 
 	if job.DeletionTimestamp == nil {
-		// Job exists and is not terminating: no-op
-		return nil
+		// Job exists and is not terminating: wait for its pod to be ready
+		return waitForAgentJobPodReady(ctx, cs, input.ManagerNamespace, name)
 	}
 
 	// Job is terminating: wait for it to disappear
 	plog.G(ctx).Debugf("Agent job %q is terminating, waiting for it to disappear", name)
-	ctxWait, cancel := context.WithTimeout(ctx, 60*time.Second)
+	ctxWait, cancel := context.WithTimeout(ctx, ensureAgentJobTerminatingTimeout)
 	defer cancel()
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
@@ -157,7 +210,10 @@ func EnsureAgentJob(ctx context.Context, cs kubernetes.Interface, input AgentJob
 				// Job is gone: recreate it
 				plog.G(ctx).Debugf("Agent job %q disappeared, recreating", name)
 				_, err = cs.BatchV1().Jobs(input.ManagerNamespace).Create(ctx, GenAgentJobSpec(input), metav1.CreateOptions{})
-				return err
+				if err != nil {
+					return err
+				}
+				return waitForAgentJobPodReady(ctx, cs, input.ManagerNamespace, name)
 			}
 			if err != nil {
 				plog.G(ctx).Warnf("Failed to get agent job %q while waiting: %v", name, err)

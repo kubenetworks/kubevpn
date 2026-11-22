@@ -24,6 +24,28 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
+func createReadyAgentPod(t *testing.T, clientset *fake.Clientset, namespace, jobName string) {
+	t.Helper()
+	pod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      jobName + "-abc",
+			Namespace: namespace,
+			Labels:    map[string]string{"job-name": jobName},
+		},
+		Spec: v1.PodSpec{
+			Containers: []v1.Container{{Name: "vpn"}, {Name: "envoy"}},
+		},
+		Status: v1.PodStatus{
+			Phase:             v1.PodRunning,
+			ContainerStatuses: []v1.ContainerStatus{{Name: "vpn", Ready: true}, {Name: "envoy", Ready: true}},
+		},
+	}
+	_, err := clientset.CoreV1().Pods(namespace).Create(context.Background(), pod, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("create ready agent pod: %v", err)
+	}
+}
+
 // newFakeWorld builds: one Deployment controller, one pod on node-a, and the
 // manager ConfigMap backing addEnvoyConfig.
 func newFakeWorld(t *testing.T) (*fake.Clientset, InjectOptions, *v1.Pod) {
@@ -125,6 +147,20 @@ func TestNodeAgentInject_WritesRulesAndCreatesPinnedJob(t *testing.T) {
 		t.Fatalf("create pod: %v", err)
 	}
 
+	// Shorten timeouts for test
+	oldReady, oldTerm := ensureAgentJobReadyTimeout, ensureAgentJobTerminatingTimeout
+	ensureAgentJobReadyTimeout, ensureAgentJobTerminatingTimeout = 5*time.Second, 5*time.Second
+	t.Cleanup(func() {
+		ensureAgentJobReadyTimeout, ensureAgentJobTerminatingTimeout = oldReady, oldTerm
+	})
+
+	// Start a goroutine to create the ready agent pod after a short delay
+	jobName := AgentJobName(pod.UID)
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		createReadyAgentPod(t, clientset, opts.ManagerNamespace, jobName)
+	}()
+
 	injector := NewInjector(opts)
 	if err = injector.Inject(context.Background()); err != nil {
 		t.Fatalf("inject: %v", err)
@@ -219,7 +255,21 @@ func TestNodeAgentInject_IsIdempotentPerOwner(t *testing.T) {
 		t.Fatalf("create pod: %v", err)
 	}
 
+	// Shorten timeouts for test
+	oldReady, oldTerm := ensureAgentJobReadyTimeout, ensureAgentJobTerminatingTimeout
+	ensureAgentJobReadyTimeout, ensureAgentJobTerminatingTimeout = 5*time.Second, 5*time.Second
+	t.Cleanup(func() {
+		ensureAgentJobReadyTimeout, ensureAgentJobTerminatingTimeout = oldReady, oldTerm
+	})
+
+	jobName := AgentJobName(pod.UID)
+
 	// First inject creates job
+	// Start goroutine to create ready pod
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		createReadyAgentPod(t, clientset, opts.ManagerNamespace, jobName)
+	}()
 	err = NewInjector(opts).Inject(context.Background())
 	if err != nil {
 		t.Fatalf("first inject: %v", err)
@@ -269,6 +319,13 @@ func TestNodeAgentInject_RefusesUserNamespacedPods(t *testing.T) {
 		t.Fatalf("create pod: %v", err)
 	}
 
+	// Shorten timeouts for test just in case
+	oldReady, oldTerm := ensureAgentJobReadyTimeout, ensureAgentJobTerminatingTimeout
+	ensureAgentJobReadyTimeout, ensureAgentJobTerminatingTimeout = 5*time.Second, 5*time.Second
+	t.Cleanup(func() {
+		ensureAgentJobReadyTimeout, ensureAgentJobTerminatingTimeout = oldReady, oldTerm
+	})
+
 	err = NewInjector(opts).Inject(context.Background())
 	if err == nil {
 		t.Fatalf("expected hostUsers refusal, got nil")
@@ -290,14 +347,25 @@ func TestEnsureAgentJob_ExistingNotTerminating_NoOp(t *testing.T) {
 		Pod:              pod,
 	}
 
+	// Shorten timeouts for test
+	oldReady, oldTerm := ensureAgentJobReadyTimeout, ensureAgentJobTerminatingTimeout
+	ensureAgentJobReadyTimeout, ensureAgentJobTerminatingTimeout = 5*time.Second, 5*time.Second
+	t.Cleanup(func() {
+		ensureAgentJobReadyTimeout, ensureAgentJobTerminatingTimeout = oldReady, oldTerm
+	})
+
 	// Create the job first
 	job := GenAgentJobSpec(input)
+	jobName := AgentJobName(pod.UID)
 	_, err := clientset.BatchV1().Jobs(input.ManagerNamespace).Create(context.Background(), job, metav1.CreateOptions{})
 	if err != nil {
 		t.Fatalf("precreate job: %v", err)
 	}
 
-	// Call EnsureAgentJob again: should no-op
+	// Create the ready agent pod
+	createReadyAgentPod(t, clientset, opts.ManagerNamespace, jobName)
+
+	// Call EnsureAgentJob again: should no-op and return nil quickly
 	err = EnsureAgentJob(context.Background(), clientset, input)
 	if err != nil {
 		t.Fatalf("EnsureAgentJob on existing job: %v", err)
