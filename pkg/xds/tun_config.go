@@ -23,12 +23,12 @@ const LeaseDuration = leases.LeaseDuration
 // TunConfigServer adapts the RPC protocol to the lease and discovery domains.
 type TunConfigServer struct {
 	rpc.UnimplementedTunConfigServiceServer
-	clientset        kubernetes.Interface
-	namespace        string
-	factory          cmdutil.Factory
-	leases           *leases.Manager
-	routes           *discovery.Broadcaster
-	agentReconciler  *AgentReconciler
+	clientset       kubernetes.Interface
+	namespace       string
+	factory         cmdutil.Factory
+	leases          *leases.Manager
+	routes          *discovery.Broadcaster
+	agentReconciler *AgentReconciler
 }
 
 // NewTunConfigServer initializes the mandatory allocator before serving RPCs.

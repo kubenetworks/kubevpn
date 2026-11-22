@@ -7,9 +7,9 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/wait"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/kubectl/pkg/polymorphichelpers"
 	"k8s.io/utils/ptr"
@@ -50,8 +50,18 @@ const managerRecreateGrace = 10 * time.Second
 
 // waitForManagerPod polls until a manager pod has all containers running.
 // Returns nil as soon as one qualifies; error when the timeout expires first.
+// Skips the wait entirely if no manager pods exist at all.
 func waitForManagerPod(ctx context.Context, clientset kubernetes.Interface, namespace string, timeout time.Duration) error {
 	label := fields.OneTermEqualSelector("app", config.ConfigMapPodTrafficManager).String()
+	// First check if any pods exist at all
+	pods, err := clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{LabelSelector: label})
+	if err != nil {
+		return nil // don't wait on transient errors
+	}
+	if len(pods.Items) == 0 {
+		return nil // no pods to wait for
+	}
+	// At least one pod exists: wait for it to become ready
 	return wait.PollUntilContextTimeout(ctx, time.Second, timeout, true, func(ctx context.Context) (bool, error) {
 		pods, err := clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{LabelSelector: label})
 		if err != nil {

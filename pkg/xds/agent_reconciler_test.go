@@ -133,8 +133,18 @@ func TestReconcileOnce_RecreatesJobWithDeadAgentPod(t *testing.T) {
 	r, cs := newReconcilerTestEnv(t, pod, stale)
 	// no agent pod at all
 
+	// Track job deletions
+	deleted := false
+	cs.PrependReactor("delete", "jobs", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		deleted = true
+		return false, nil, nil
+	})
+
 	if err := r.reconcileOnce(ctx); err != nil {
 		t.Fatalf("reconcileOnce: %v", err)
+	}
+	if !deleted {
+		t.Fatal("expected job to be deleted and recreated, but no deletion occurred")
 	}
 	getJob(t, cs, job.Name) // recreated
 }

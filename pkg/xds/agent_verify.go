@@ -10,9 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
-	_ "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
-	_ "k8s.io/kubectl/pkg/cmd/util"
 
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
@@ -22,24 +20,52 @@ import (
 const verifyInterval = time.Minute
 
 // dnatProbeCommand reads the target pod netns' NAT table from inside the agent
-// container. The agent's main process (PID 1) has setns'd into the TARGET
-// pod's netns, so `nsenter -t 1 -n` re-enters it — the container's own netns
-// (the agent pod) does not carry the rules. `|| echo probe-unknown` keeps a
-// missing nsenter (exit 127) from looking like a transport error.
-const dnatProbeCommand = `nsenter -t 1 -n iptables -t nat -S 2>/dev/null | grep -c kubevpn-nodeagent || echo probe-unknown`
+// container. The vpn startup script records its own PID (a target-netns PID,
+// since the script runs after kubevpn agent setns) in /tmp/kubevpn-agent-target-pid;
+// we read that PID and nsenter its netns to check the NAT rules. Emits exactly
+// one token: a count (0 = missing, >0 = present) on success, or "probe-unknown"
+// on any failure (e.g., file missing/empty, nsenter/iptables fails).
+const dnatProbeCommand = `pid=$(cat /tmp/kubevpn-agent-target-pid 2>/dev/null)
+if [ -n "$pid" ] && out=$(nsenter -t "$pid" -n iptables -t nat -S 2>/dev/null); then
+  echo "$out" | grep -c kubevpn-nodeagent || true
+else
+  echo probe-unknown
+fi`
 
 // parseDNATCount classifies probe output: (present, known). known=false means
 // the probe could not tell — the caller must NOT churn the Job on unknown.
 func parseDNATCount(output string) (present bool, known bool) {
-	line := strings.TrimSpace(output)
+	// Handle legacy two-line output ("0\nprobe-unknown") from the buggy grep -c || echo pattern
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	var line string
+	for _, l := range lines {
+		trimmed := strings.TrimSpace(l)
+		if trimmed != "" {
+			line = trimmed
+			break
+		}
+	}
 	switch {
 	case line == "probe-unknown" || line == "":
 		return false, false
 	case line == "0":
 		return false, true
 	default:
-		return true, true
+		// If it's a positive number, present=true; otherwise (non-numeric) known=false
+		if strings.TrimSpace(line) != "" && isNumeric(line) {
+			return true, true
+		}
+		return false, false
 	}
+}
+
+func isNumeric(s string) bool {
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // probeDNAT execs the probe command in the agent Job's vpn container. The
@@ -65,11 +91,14 @@ func (r *AgentReconciler) probeDNAT(ctx context.Context, agentPodName string) (s
 	if err != nil {
 		return "", err
 	}
-	var out bytes.Buffer
-	if err = exec.Stream(remotecommand.StreamOptions{Stdout: &out, Stderr: &out}); err != nil {
+	var stdout, stderr bytes.Buffer
+	if err = exec.Stream(remotecommand.StreamOptions{Stdout: &stdout, Stderr: &stderr}); err != nil {
+		// Stderr is only for debugging; don't pollute the probe result
+		plog.G(ctx).Debugf("[AgentReconciler] DNAT probe stderr for %s: %q", agentPodName, stderr.String())
 		return "", err
 	}
-	return out.String(), nil
+	plog.G(ctx).Debugf("[AgentReconciler] DNAT probe stderr for %s: %q", agentPodName, stderr.String())
+	return stdout.String(), nil
 }
 
 // verifyDataPlane returns true when the target pod's netns still carries the

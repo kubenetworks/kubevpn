@@ -76,6 +76,9 @@ ip6tables -P FORWARD ACCEPT
 iptables -t nat -A PREROUTING -p tcp ! -s 127.0.0.1 ! -d ${CIDR4} -j DNAT --to :15006 -m comment --comment "kubevpn-nodeagent"
 ip6tables -t nat -A PREROUTING -p tcp ! -s ::1 ! -d ${CIDR6} -j DNAT --to :15006 -m comment --comment "kubevpn-nodeagent"
 export KUBEVPN_AGENT_CLEANUP_IPTABLES=1
+# $$ here is the pid of the bash script that execs kubevpn server — a target-netns PID
+# recorded for the reconciler's DNAT probe. After exec, the same PID runs kubevpn server.
+echo $$ > /tmp/kubevpn-agent-target-pid
 exec kubevpn server --debug -l tun:/tcp://${TrafficManagerService}:10801?route=${CIDR4}
 `
 	// The envoy payload renders the same embedded bootstrap template the mesh

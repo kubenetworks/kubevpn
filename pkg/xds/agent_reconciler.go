@@ -138,7 +138,7 @@ func (r *AgentReconciler) reconcileOnce(ctx context.Context) error {
 	// error is logged and skipped — one bad workload must not stall
 	// convergence for every other one.
 	wantPods := make(map[types.UID]*corev1.Pod)
-	wantOwners := make(map[types.UID]string)       // pod UID -> owner ID
+	wantOwners := make(map[types.UID]string)     // pod UID -> owner ID
 	wantWorkloadNS := make(map[types.UID]string) // pod UID -> workload namespace
 	wantWorkloadID := make(map[types.UID]string) // pod UID -> workload node ID (Virtual.UID)
 
