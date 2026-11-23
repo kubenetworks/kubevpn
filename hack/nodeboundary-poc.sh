@@ -286,9 +286,14 @@ EOF
 "$KUBECTL" -n "$NS" run "$SOCAT_POD" --image=alpine/socat:latest --restart=Never \
   --command -- sh -c 'sleep 3600' >/dev/null
 wait_ready "$NS" "$SOCAT_POD"
+DIRECT_REPLY="$("$KUBECTL" -n "$NS" exec "$SOCAT_POD" -- sh -c \
+  "echo poc-udp-direct | socat -T 10 - UDP4:$UDP_IP:9081")"
+log "direct UDP reply: <$DIRECT_REPLY>"
+test "$DIRECT_REPLY" = "poc-udp-direct"
 UDP_REPLY="$("$KUBECTL" -n "$NS" exec "$SOCAT_POD" -- sh -c \
-  "echo poc-udp | socat -T 10 - UDP4:$UDP_IP:9081")"
-test "$UDP_REPLY" = "poc-udp"
+  "echo poc-udp-via-agent | socat -T 10 - UDP4:$UDP_IP:9081")"
+log "proxied UDP reply: <$UDP_REPLY>"
+test "$UDP_REPLY" = "poc-udp-via-agent"
 log "PASS UDP original destination path: $UDP_REPLY"
 
 TARGET_UID_AFTER="$("$KUBECTL" -n "$WORKLOAD_NS" get pod -l app=reviews -o jsonpath='{.items[0].metadata.uid}')"
