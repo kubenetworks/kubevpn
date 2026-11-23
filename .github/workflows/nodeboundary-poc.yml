@@ -4,11 +4,6 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
   workflow_dispatch:
-    inputs:
-      image:
-        description: 'KubeVPN image to use (ghcr.io/kubenetworks/kubevpn:<full-sha>)'
-        required: false
-        type: string
 
 jobs:
   poc:
@@ -16,6 +11,11 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
 
       - name: Setup Minikube
         id: minikube
@@ -61,18 +61,17 @@ jobs:
           kubectl get pods -n default -o wide
           exit 1
 
-      - name: Pull and load test image
-        env:
-          IMAGE: ${{ inputs.image || format('ghcr.io/kubenetworks/kubevpn:{0}', github.sha) }}
+      - name: Build test image locally
         run: |
-          docker pull $IMAGE
-          minikube image load $IMAGE
+          make kubevpn-linux-amd64
+          docker build -f build/Dockerfile -t nodeboundary-poc:latest --build-arg TARGETARCH=amd64 .
+          minikube image load nodeboundary-poc:latest
           minikube image ls
 
       - name: Run Node-Boundary PoC
         id: poc
         env:
-          IMAGE: ${{ inputs.image || format('ghcr.io/kubenetworks/kubevpn:{0}', github.sha) }}
+          IMAGE: nodeboundary-poc:latest
         run: |
           hack/nodeboundary-poc.sh 2>&1 | tee /tmp/node-boundary-poc.log
 
