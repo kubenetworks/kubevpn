@@ -26,4 +26,5 @@
 - Run 45133203004 is a harness issue, not an architecture issue:
   - The PoC script accidentally rendered **two** `typed_config` entries for `envoy.filters.http.router`
   - This caused Envoy to fail parsing the config and never listen on port 20001
-- Decision: RETRY with fixed PoC script (remove duplicate typed_config)
+- The PoC script has been updated to remove the duplicate typed_config
+- Decision: RETRY with fixed PoC script
