@@ -237,7 +237,7 @@ assert_body "second workload origin" \
 # UDP uses a separate static UDP proxy and UDP echo backend; TCP success is not
 # treated as evidence for UDP.
 "$KUBECTL" -n "$NS" run "$UDP_POD" --image=alpine/socat:latest --restart=Never -- \
-  'UDP4-RECVFROM:9081,fork EXEC:/bin/cat' >/dev/null
+  'UDP4-RECVFROM:9081,fork' 'EXEC:/bin/cat' >/dev/null
 wait_ready "$NS" "$UDP_POD"
 UDP_IP="$("$KUBECTL" -n "$NS" get pod "$UDP_POD" -o jsonpath='{.status.podIP}')"
 cat >/tmp/poc-udp.yaml <<EOF
