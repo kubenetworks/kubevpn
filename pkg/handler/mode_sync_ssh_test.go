@@ -171,6 +171,8 @@ func (u *sshUt) checkSyncWithFullProxyStatus(t *testing.T) {
 			Workload:  "deployments.apps/authors",
 			RuleList: []*proxyRule{{
 				Headers:       nil,
+				LocalTunIPv4:  "198.18.0.1",
+				LocalTunIPv6:  "2001:2::1",
 				CurrentDevice: false,
 				PortMap:       map[int32]int32{9080: 9080, 80: 80},
 			}},
@@ -240,6 +242,8 @@ func (u *sshUt) checkSyncWithServiceMeshStatus(t *testing.T) {
 			Workload:  "deployments.apps/authors",
 			RuleList: []*proxyRule{{
 				Headers:       map[string]string{"env": "test"},
+				LocalTunIPv4:  "198.18.0.1",
+				LocalTunIPv6:  "2001:2::1",
 				CurrentDevice: false,
 				PortMap:       map[int32]int32{9080: 9080, 80: 80},
 			}},

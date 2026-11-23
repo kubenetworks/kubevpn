@@ -721,6 +721,8 @@ func (u *sshUt) checkProxyStatus(t *testing.T) {
 			Workload:  "deployments.apps/reviews",
 			RuleList: []*proxyRule{{
 				Headers:       nil,
+				LocalTunIPv4:  "198.18.0.1",
+				LocalTunIPv6:  "2001:2::1",
 				CurrentDevice: true,
 				PortMap:       map[int32]int32{9080: 9080, 9081: 9081},
 			}},
@@ -752,6 +754,8 @@ func (u *sshUt) centerCheckProxyStatus(t *testing.T) {
 			Workload:  "deployments.apps/reviews",
 			RuleList: []*proxyRule{{
 				Headers:       nil,
+				LocalTunIPv4:  "198.18.0.1",
+				LocalTunIPv6:  "2001:2::1",
 				CurrentDevice: true,
 				PortMap:       map[int32]int32{9080: 9080, 9081: 9081},
 			}},
@@ -783,6 +787,8 @@ func (u *sshUt) checkProxyWithServiceMeshStatus(t *testing.T) {
 			Workload:  "deployments.apps/reviews",
 			RuleList: []*proxyRule{{
 				Headers:       map[string]string{"env": "test"},
+				LocalTunIPv4:  "198.18.0.1",
+				LocalTunIPv6:  "2001:2::1",
 				CurrentDevice: true,
 				PortMap:       map[int32]int32{9080: 9080, 9081: 9081},
 			}},
@@ -814,6 +820,8 @@ func (u *sshUt) centerCheckProxyWithServiceMeshStatus(t *testing.T) {
 			Workload:  "deployments.apps/reviews",
 			RuleList: []*proxyRule{{
 				Headers:       map[string]string{"env": "test"},
+				LocalTunIPv4:  "198.18.0.1",
+				LocalTunIPv6:  "2001:2::1",
 				CurrentDevice: true,
 				PortMap:       map[int32]int32{9080: 9080, 9081: 9081},
 			}},
@@ -845,6 +853,8 @@ func (u *sshUt) checkProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 			Workload:  "services/reviews",
 			RuleList: []*proxyRule{{
 				Headers:       map[string]string{"env": "test"},
+				LocalTunIPv4:  "127.0.0.1",
+				LocalTunIPv6:  "::1",
 				CurrentDevice: true,
 				PortMap:       map[int32]int32{9080: 9080, 9081: 9081},
 			}},
