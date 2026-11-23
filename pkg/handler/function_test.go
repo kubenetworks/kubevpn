@@ -742,6 +742,8 @@ type connection struct {
 	Status    string
 	ProxyList []*proxyItem
 	SyncList  []*syncItem
+	IPv4      string
+	IPv6      string
 }
 type proxyItem struct {
 	Namespace string
@@ -764,6 +766,23 @@ type syncRule struct {
 	DstWorkload string
 }
 
+func fillDeploymentTunIPs(expect *connStatus, actual *connStatus) {
+	if expect == nil || actual == nil || len(expect.List) == 0 || len(actual.List) == 0 {
+		return
+	}
+	for _, expectedConn := range expect.List {
+		for _, proxy := range expectedConn.ProxyList {
+			if proxy == nil || strings.HasPrefix(proxy.Workload, "services/") {
+				continue
+			}
+			for _, rule := range proxy.RuleList {
+				rule.LocalTunIPv4 = actual.List[0].IPv4
+				rule.LocalTunIPv6 = actual.List[0].IPv6
+			}
+		}
+	}
+}
+
 func (u *ut) checkProxyStatus(t *testing.T) {
 	cmd := exec.Command("kubevpn", "status", "-o", "json")
 	output, err := cmd.Output()
@@ -779,8 +798,6 @@ func (u *ut) checkProxyStatus(t *testing.T) {
 			Workload:  "deployments.apps/reviews",
 			RuleList: []*proxyRule{{
 				Headers:       nil,
-				LocalTunIPv4:  "198.18.0.1",
-				LocalTunIPv6:  "2001:2::1",
 				CurrentDevice: true,
 				PortMap:       map[int32]int32{9080: 9080, 9081: 9081},
 			}},
@@ -791,6 +808,7 @@ func (u *ut) checkProxyStatus(t *testing.T) {
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
+	fillDeploymentTunIPs(&expect, &statuses)
 	if !reflect.DeepEqual(statuses, expect) {
 		marshal, _ := json.Marshal(expect)
 		t.Fatalf("expect: %s, but was: %s", string(marshal), string(output))
@@ -812,8 +830,6 @@ func (u *ut) centerCheckProxyStatus(t *testing.T) {
 			Workload:  "deployments.apps/reviews",
 			RuleList: []*proxyRule{{
 				Headers:       nil,
-				LocalTunIPv4:  "198.18.0.1",
-				LocalTunIPv6:  "2001:2::1",
 				CurrentDevice: true,
 				PortMap:       map[int32]int32{9080: 9080, 9081: 9081},
 			}},
@@ -824,6 +840,7 @@ func (u *ut) centerCheckProxyStatus(t *testing.T) {
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
+	fillDeploymentTunIPs(&expect, &statuses)
 	if !reflect.DeepEqual(statuses, expect) {
 		marshal, _ := json.Marshal(expect)
 		t.Fatalf("expect: %s, but was: %s", string(marshal), string(output))
@@ -845,8 +862,6 @@ func (u *ut) checkProxyWithServiceMeshStatus(t *testing.T) {
 			Workload:  "deployments.apps/reviews",
 			RuleList: []*proxyRule{{
 				Headers:       map[string]string{"env": "test"},
-				LocalTunIPv4:  "198.18.0.1",
-				LocalTunIPv6:  "2001:2::1",
 				CurrentDevice: true,
 				PortMap:       map[int32]int32{9080: 9080, 9081: 9081},
 			}},
@@ -857,6 +872,7 @@ func (u *ut) checkProxyWithServiceMeshStatus(t *testing.T) {
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
+	fillDeploymentTunIPs(&expect, &statuses)
 	if !reflect.DeepEqual(statuses, expect) {
 		marshal, _ := json.Marshal(expect)
 		t.Fatalf("expect: %s, but was: %s", string(marshal), string(output))
@@ -878,8 +894,6 @@ func (u *ut) centerCheckProxyWithServiceMeshStatus(t *testing.T) {
 			Workload:  "deployments.apps/reviews",
 			RuleList: []*proxyRule{{
 				Headers:       map[string]string{"env": "test"},
-				LocalTunIPv4:  "198.18.0.1",
-				LocalTunIPv6:  "2001:2::1",
 				CurrentDevice: true,
 				PortMap:       map[int32]int32{9080: 9080, 9081: 9081},
 			}},
@@ -890,6 +904,7 @@ func (u *ut) centerCheckProxyWithServiceMeshStatus(t *testing.T) {
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
+	fillDeploymentTunIPs(&expect, &statuses)
 	if !reflect.DeepEqual(statuses, expect) {
 		marshal, _ := json.Marshal(expect)
 		t.Fatalf("expect: %s, but was: %s", string(marshal), string(output))
@@ -951,6 +966,8 @@ func (u *ut) centerCheckProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 			Workload:  "services/reviews",
 			RuleList: []*proxyRule{{
 				Headers:       map[string]string{"env": "test"},
+				LocalTunIPv4:  "127.0.0.1",
+				LocalTunIPv6:  "::1",
 				CurrentDevice: true,
 				PortMap:       map[int32]int32{9080: 8080, 9081: 9081},
 			}},

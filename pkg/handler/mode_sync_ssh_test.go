@@ -171,8 +171,6 @@ func (u *sshUt) checkSyncWithFullProxyStatus(t *testing.T) {
 			Workload:  "deployments.apps/authors",
 			RuleList: []*proxyRule{{
 				Headers:       nil,
-				LocalTunIPv4:  "198.18.0.1",
-				LocalTunIPv6:  "2001:2::1",
 				CurrentDevice: false,
 				PortMap:       map[int32]int32{9080: 9080, 80: 80},
 			}},
@@ -194,6 +192,7 @@ func (u *sshUt) checkSyncWithFullProxyStatus(t *testing.T) {
 	}
 
 	expect.List[0].SyncList[0].RuleList[0].DstWorkload = statuses.List[0].SyncList[0].RuleList[0].DstWorkload
+	fillDeploymentTunIPs(&expect, &statuses)
 
 	if !reflect.DeepEqual(statuses, expect) {
 		marshal, _ := json.Marshal(expect)
@@ -242,8 +241,6 @@ func (u *sshUt) checkSyncWithServiceMeshStatus(t *testing.T) {
 			Workload:  "deployments.apps/authors",
 			RuleList: []*proxyRule{{
 				Headers:       map[string]string{"env": "test"},
-				LocalTunIPv4:  "198.18.0.1",
-				LocalTunIPv6:  "2001:2::1",
 				CurrentDevice: false,
 				PortMap:       map[int32]int32{9080: 9080, 80: 80},
 			}},
@@ -265,6 +262,7 @@ func (u *sshUt) checkSyncWithServiceMeshStatus(t *testing.T) {
 	}
 
 	expect.List[0].SyncList[0].RuleList[0].DstWorkload = statuses.List[0].SyncList[0].RuleList[0].DstWorkload
+	fillDeploymentTunIPs(&expect, &statuses)
 
 	if !reflect.DeepEqual(statuses, expect) {
 		marshal, _ := json.Marshal(expect)

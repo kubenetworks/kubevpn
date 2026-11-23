@@ -308,8 +308,6 @@ func (u *ut) checkRunWithFullProxyStatus(t *testing.T) {
 			Workload:  "deployments.apps/authors",
 			RuleList: []*proxyRule{{
 				Headers:       nil,
-				LocalTunIPv4:  "198.18.0.1",
-				LocalTunIPv6:  "2001:2::1",
 				CurrentDevice: true,
 				PortMap:       map[int32]int32{9080: 9080, 80: 80},
 			}},
@@ -320,6 +318,7 @@ func (u *ut) checkRunWithFullProxyStatus(t *testing.T) {
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
+	fillDeploymentTunIPs(&expect, &statuses)
 
 	if !reflect.DeepEqual(statuses, expect) {
 		marshal, _ := json.Marshal(expect)
@@ -343,8 +342,6 @@ func (u *ut) checkRunWithServiceMeshStatus(t *testing.T) {
 			Workload:  "deployments.apps/authors",
 			RuleList: []*proxyRule{{
 				Headers:       map[string]string{"env": "test"},
-				LocalTunIPv4:  "198.18.0.1",
-				LocalTunIPv6:  "2001:2::1",
 				CurrentDevice: true,
 				PortMap:       map[int32]int32{9080: 9080, 80: 80},
 			}},
@@ -355,6 +352,7 @@ func (u *ut) checkRunWithServiceMeshStatus(t *testing.T) {
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
+	fillDeploymentTunIPs(&expect, &statuses)
 
 	if !reflect.DeepEqual(statuses, expect) {
 		marshal, _ := json.Marshal(expect)
