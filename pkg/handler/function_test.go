@@ -778,17 +778,237 @@ func fillDeploymentTunIPs(expect *connStatus, actual *connStatus) {
 			expectedConn.IPv4 = actual.List[i].IPv4
 			expectedConn.IPv6 = actual.List[i].IPv6
 		}
-		// Set proxy rule-level LocalTunIPv4/LocalTunIPv6
+		// Build a map from actual workload name to its proxyItem
+		actualWorkloadMap := make(map[string]*proxyItem)
+		if i < len(actual.List) && actual.List[i] != nil {
+			for _, actualProxy := range actual.List[i].ProxyList {
+				if actualProxy != nil {
+					actualWorkloadMap[actualProxy.Workload] = actualProxy
+				}
+			}
+		}
+		// Set proxy rule-level LocalTunIPv4/LocalTunIPv6 from matching actual rules
 		for _, proxy := range expectedConn.ProxyList {
 			if proxy == nil || strings.HasPrefix(proxy.Workload, "services/") {
 				continue
 			}
-			for _, rule := range proxy.RuleList {
-				rule.LocalTunIPv4 = actual.List[0].IPv4
-				rule.LocalTunIPv6 = actual.List[0].IPv6
+			actualProxy, ok := actualWorkloadMap[proxy.Workload]
+			if !ok {
+				continue // no matching actual proxy, leave expected as-is
+			}
+			for ruleIdx, rule := range proxy.RuleList {
+				if ruleIdx < len(actualProxy.RuleList) && actualProxy.RuleList[ruleIdx] != nil {
+					rule.LocalTunIPv4 = actualProxy.RuleList[ruleIdx].LocalTunIPv4
+					rule.LocalTunIPv6 = actualProxy.RuleList[ruleIdx].LocalTunIPv6
+				}
+				// else leave expected as-is
 			}
 		}
 	}
+}
+
+func TestFillDeploymentTunIPs(t *testing.T) {
+	t.Run("deployment expectation filled from actual rule IP, not connection IP", func(t *testing.T) {
+		expect := &connStatus{
+			List: []*connection{
+				{
+					Namespace: "test-ns",
+					Status:    "connected",
+					ProxyList: []*proxyItem{
+						{
+							Namespace: "test-ns",
+							Workload:  "deployments.apps/reviews",
+							RuleList: []*proxyRule{
+								{
+									Headers:       map[string]string{"env": "test"},
+									CurrentDevice: true,
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		actual := &connStatus{
+			List: []*connection{
+				{
+					Namespace: "test-ns",
+					Status:    "connected",
+					IPv4:      "192.18.0.1",
+					IPv6:      "fd00::1",
+					ProxyList: []*proxyItem{
+						{
+							Namespace: "test-ns",
+							Workload:  "deployments.apps/reviews",
+							RuleList: []*proxyRule{
+								{
+									Headers:       map[string]string{"env": "test"},
+									LocalTunIPv4:  "192.18.0.4",
+									LocalTunIPv6:  "fd00::4",
+									CurrentDevice: true,
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		fillDeploymentTunIPs(expect, actual)
+
+		// Connection IP should be set from actual connection
+		if expect.List[0].IPv4 != "192.18.0.1" {
+			t.Errorf("expected connection IPv4 to be 192.18.0.1, got %s", expect.List[0].IPv4)
+		}
+		if expect.List[0].IPv6 != "fd00::1" {
+			t.Errorf("expected connection IPv6 to be fd00::1, got %s", expect.List[0].IPv6)
+		}
+
+		// Deployment rule IP should be set from actual rule, not actual connection
+		if expect.List[0].ProxyList[0].RuleList[0].LocalTunIPv4 != "192.18.0.4" {
+			t.Errorf("expected deployment rule LocalTunIPv4 to be 192.18.0.4, got %s", expect.List[0].ProxyList[0].RuleList[0].LocalTunIPv4)
+		}
+		if expect.List[0].ProxyList[0].RuleList[0].LocalTunIPv6 != "fd00::4" {
+			t.Errorf("expected deployment rule LocalTunIPv6 to be fd00::4, got %s", expect.List[0].ProxyList[0].RuleList[0].LocalTunIPv6)
+		}
+	})
+
+	t.Run("services expectation keeps original IP", func(t *testing.T) {
+		expect := &connStatus{
+			List: []*connection{
+				{
+					Namespace: "test-ns",
+					Status:    "connected",
+					ProxyList: []*proxyItem{
+						{
+							Namespace: "test-ns",
+							Workload:  "services/reviews",
+							RuleList: []*proxyRule{
+								{
+									Headers:       map[string]string{"env": "test"},
+									LocalTunIPv4:  "127.0.0.1",
+									LocalTunIPv6:  "::1",
+									CurrentDevice: true,
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		actual := &connStatus{
+			List: []*connection{
+				{
+					Namespace: "test-ns",
+					Status:    "connected",
+					IPv4:      "192.18.0.1",
+					IPv6:      "fd00::1",
+					ProxyList: []*proxyItem{
+						{
+							Namespace: "test-ns",
+							Workload:  "services/reviews",
+							RuleList: []*proxyRule{
+								{
+									Headers:       map[string]string{"env": "test"},
+									LocalTunIPv4:  "192.18.0.5", // different from expected
+									LocalTunIPv6:  "fd00::5",
+									CurrentDevice: true,
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		fillDeploymentTunIPs(expect, actual)
+
+		// Connection IP should still be set from actual connection
+		if expect.List[0].IPv4 != "192.18.0.1" {
+			t.Errorf("expected connection IPv4 to be 192.18.0.1, got %s", expect.List[0].IPv4)
+		}
+		if expect.List[0].IPv6 != "fd00::1" {
+			t.Errorf("expected connection IPv6 to be fd00::1, got %s", expect.List[0].IPv6)
+		}
+
+		// Services rule IP should remain as expected (127.0.0.1 and ::1)
+		if expect.List[0].ProxyList[0].RuleList[0].LocalTunIPv4 != "127.0.0.1" {
+			t.Errorf("expected services rule LocalTunIPv4 to be 127.0.0.1, got %s", expect.List[0].ProxyList[0].RuleList[0].LocalTunIPv4)
+		}
+		if expect.List[0].ProxyList[0].RuleList[0].LocalTunIPv6 != "::1" {
+			t.Errorf("expected services rule LocalTunIPv6 to be ::1, got %s", expect.List[0].ProxyList[0].RuleList[0].LocalTunIPv6)
+		}
+	})
+
+	t.Run("no matching actual proxy leaves expected as-is", func(t *testing.T) {
+		expect := &connStatus{
+			List: []*connection{
+				{
+					Namespace: "test-ns",
+					Status:    "connected",
+					ProxyList: []*proxyItem{
+						{
+							Namespace: "test-ns",
+							Workload:  "deployments.apps/other",
+							RuleList: []*proxyRule{
+								{
+									Headers:       map[string]string{"env": "test"},
+									LocalTunIPv4:  "192.18.0.9", // original expected value
+									LocalTunIPv6:  "fd00::9",
+									CurrentDevice: true,
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		actual := &connStatus{
+			List: []*connection{
+				{
+					Namespace: "test-ns",
+					Status:    "connected",
+					IPv4:      "192.18.0.1",
+					IPv6:      "fd00::1",
+					ProxyList: []*proxyItem{
+						{
+							Namespace: "test-ns",
+							Workload:  "deployments.apps/reviews", // different workload
+							RuleList: []*proxyRule{
+								{
+									Headers:       map[string]string{"env": "test"},
+									LocalTunIPv4:  "192.18.0.4",
+									LocalTunIPv6:  "fd00::4",
+									CurrentDevice: true,
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		fillDeploymentTunIPs(expect, actual)
+
+		// Connection IP should still be set from actual connection
+		if expect.List[0].IPv4 != "192.18.0.1" {
+			t.Errorf("expected connection IPv4 to be 192.18.0.1, got %s", expect.List[0].IPv4)
+		}
+		if expect.List[0].IPv6 != "fd00::1" {
+			t.Errorf("expected connection IPv6 to be fd00::1, got %s", expect.List[0].IPv6)
+		}
+
+		// Deployment rule IP should remain as expected (192.18.0.9 and fd00::9)
+		if expect.List[0].ProxyList[0].RuleList[0].LocalTunIPv4 != "192.18.0.9" {
+			t.Errorf("expected deployment rule LocalTunIPv4 to remain 192.18.0.9, got %s", expect.List[0].ProxyList[0].RuleList[0].LocalTunIPv4)
+		}
+		if expect.List[0].ProxyList[0].RuleList[0].LocalTunIPv6 != "fd00::9" {
+			t.Errorf("expected deployment rule LocalTunIPv6 to remain fd00::9, got %s", expect.List[0].ProxyList[0].RuleList[0].LocalTunIPv6)
+		}
+	})
 }
 
 func (u *ut) checkProxyStatus(t *testing.T) {
