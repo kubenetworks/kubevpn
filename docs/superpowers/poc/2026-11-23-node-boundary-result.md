@@ -1,11 +1,11 @@
 # Node-Boundary Agent PoC Result — 2026-11-23
 
-- Cluster: ACK `kubernetes-admin-cf2096c3e67fb41a0b0cfc3de9a72f027`
-- Image: `ghcr.io/kubenetworks/kubevpn:5acbb67f8376ccfd6f9a8c037c3978cb1d706541`
+- Cluster: Minikube (GitHub Actions)
+- Image: `ghcr.io/kubenetworks/kubevpn:e87729febc901c5425991232a62c4d8e7450fec3` (pending CI build)
 - hostNetwork: false
-- TCP header match: BLOCKED (test cluster not accessible)
-- TCP origin forwarding: BLOCKED (test cluster not accessible)
-- Second workload isolation: BLOCKED (test cluster not accessible)
-- UDP path: BLOCKED (test cluster not accessible)
-- Workload UID/generation unchanged: BLOCKED (test cluster not accessible)
-- Decision: BLOCKED (awaiting test cluster access and image availability)
+- TCP header match: IN_PROGRESS (waiting for CI image)
+- TCP origin forwarding: IN_PROGRESS (waiting for CI image)
+- Second workload isolation: IN_PROGRESS (waiting for CI image)
+- UDP path: IN_PROGRESS (waiting for CI image)
+- Workload UID/generation unchanged: IN_PROGRESS (waiting for CI image)
+- Decision: IN_PROGRESS (awaiting CI image build and manual workflow run)
