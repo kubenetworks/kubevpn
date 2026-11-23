@@ -64,6 +64,7 @@ jobs:
       - name: Build test image locally
         run: |
           make kubevpn-linux-amd64
+          cp ./bin/kubevpn ./bin/kubevpn-linux-amd64
           docker build -f build/Dockerfile -t nodeboundary-poc:latest --build-arg TARGETARCH=amd64 .
           minikube image load nodeboundary-poc:latest
           minikube image ls
