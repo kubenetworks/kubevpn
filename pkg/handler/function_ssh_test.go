@@ -876,13 +876,15 @@ func (u *sshUt) centerCheckProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 	}
 
 	expect := connStatus{List: []*connection{{
-		Namespace: "kubevpn",
+		Namespace: "default",
 		Status:    "connected",
 		ProxyList: []*proxyItem{{
 			Namespace: "default",
 			Workload:  "services/reviews",
 			RuleList: []*proxyRule{{
 				Headers:       map[string]string{"env": "test"},
+				LocalTunIPv4:  "127.0.0.1",
+				LocalTunIPv6:  "::1",
 				CurrentDevice: true,
 				PortMap:       map[int32]int32{9080: 8080, 9081: 9081},
 			}},

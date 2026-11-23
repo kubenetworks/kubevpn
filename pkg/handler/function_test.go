@@ -750,6 +750,8 @@ type proxyItem struct {
 }
 type proxyRule struct {
 	Headers       map[string]string
+	LocalTunIPv4  string
+	LocalTunIPv6  string
 	CurrentDevice bool
 	PortMap       map[int32]int32
 }
