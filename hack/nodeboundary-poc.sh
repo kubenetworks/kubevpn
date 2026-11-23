@@ -199,9 +199,9 @@ render_tcp_config /tmp/poc-details.yaml 20002 25002 "$DETAILS_IP" poc-details
 "$KUBECTL" -n "$NS" cp /tmp/poc-reviews.yaml "$AGENT:/tmp/poc-reviews.yaml"
 "$KUBECTL" -n "$NS" cp /tmp/poc-details.yaml "$AGENT:/tmp/poc-details.yaml"
 "$KUBECTL" -n "$NS" exec "$AGENT" -- sh -c \
-  'nohup envoy -c /tmp/poc-reviews.yaml --service-node poc-reviews --service-cluster poc-reviews >/tmp/poc-reviews.log 2>&1 &'
+  'nohup envoy -c /tmp/poc-reviews.yaml --base-id 1 --service-node poc-reviews --service-cluster poc-reviews >/tmp/poc-reviews.log 2>&1 &'
 "$KUBECTL" -n "$NS" exec "$AGENT" -- sh -c \
-  'nohup envoy -c /tmp/poc-details.yaml --service-node poc-details --service-cluster poc-details >/tmp/poc-details.log 2>&1 &'
+  'nohup envoy -c /tmp/poc-details.yaml --base-id 2 --service-node poc-details --service-cluster poc-details >/tmp/poc-details.log 2>&1 &'
 
 # Wait for Envoy listeners to be ready before test traffic
 wait_listener 20001
@@ -276,7 +276,7 @@ static_resources:
 EOF
 "$KUBECTL" -n "$NS" cp /tmp/poc-udp.yaml "$AGENT:/tmp/poc-udp.yaml"
 "$KUBECTL" -n "$NS" exec "$AGENT" -- sh -c \
-  'nohup envoy -c /tmp/poc-udp.yaml --service-node poc-udp --service-cluster poc-udp >/tmp/poc-udp.log 2>&1 &'
+  'nohup envoy -c /tmp/poc-udp.yaml --base-id 3 --service-node poc-udp --service-cluster poc-udp >/tmp/poc-udp.log 2>&1 &'
 "$KUBECTL" -n "$NS" exec "$AGENT" -- nsenter --net=/host/proc/1/ns/net \
   iptables -t nat -A PREROUTING -p udp -d "$UDP_IP" \
   -j DNAT --to "$AGENT_IP:20003" -m comment --comment "$COMMENT"
