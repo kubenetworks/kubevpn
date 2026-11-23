@@ -42,7 +42,7 @@
 
 ```text
 进入目标 pod 的流量
-  → 宿主机 PREROUTING：精确匹配 dst=<podIP>
+  → 宿主机 PREROUTING：精确匹配 dst=<podIP>，且排除 src=<agentPodIP>
   → DNAT 到 <agentPodIP>:<agentListenerPort>
   → agent pod 内该 workload 的 envoy
        ├─ 命中 header 规则 → 用户 TUN IP（经本节点唯一隧道）
@@ -51,6 +51,7 @@
 ```
 
 - TCP 使用上述 DNAT + envoy 路径；conntrack 保留 original destination，现有 origin_cluster 语义复用。
+- **必须排除 `src=<agentPodIP>`**：否则 agent 向原始 podIP 做 origin-forwarding 时会被同一条宿主机 DNAT 再次捕获，形成回环并返回 503（PoC 实测）。
 - UDP 使用 agent 的 TUN 数据面与现有 UDP 配置处理，**必须在 PoC 中单独验证，不能由 TCP 通过推断 UDP 可用**。
 - 已有 kubevpn sidecar 的 pod 跳过接管：一个 pod netns 只允许一个 kubevpn 接管者。
 - manager 自身 ClusterIP 不作为目标 pod，不会被这些精确 podIP 规则捕获。

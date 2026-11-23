@@ -19,7 +19,7 @@ delete_rule() {
     return 0
   fi
   "$KUBECTL" -n "$NS" exec "$AGENT" -- nsenter --net=/host/proc/1/ns/net \
-    iptables -t nat -D PREROUTING -p "$proto" -d "$dest_ip" \
+    iptables -t nat -D PREROUTING -p "$proto" ! -s "$to_ip" -d "$dest_ip" \
     -j DNAT --to "$to_ip:$to_port" -m comment --comment "$COMMENT" 2>/dev/null || true
 }
 
@@ -211,10 +211,10 @@ wait_listener 20002
 
 # The two host-side rules have exact podIP destinations and distinct agent ports.
 "$KUBECTL" -n "$NS" exec "$AGENT" -- nsenter --net=/host/proc/1/ns/net \
-  iptables -t nat -A PREROUTING -p tcp -d "$REVIEWS_IP" \
+  iptables -t nat -A PREROUTING -p tcp ! -s "$AGENT_IP" -d "$REVIEWS_IP" \
   -j DNAT --to "$AGENT_IP:20001" -m comment --comment "$COMMENT"
 "$KUBECTL" -n "$NS" exec "$AGENT" -- nsenter --net=/host/proc/1/ns/net \
-  iptables -t nat -A PREROUTING -p tcp -d "$DETAILS_IP" \
+  iptables -t nat -A PREROUTING -p tcp ! -s "$AGENT_IP" -d "$DETAILS_IP" \
   -j DNAT --to "$AGENT_IP:20002" -m comment --comment "$COMMENT"
 
 "$KUBECTL" -n "$NS" run "$CURL_POD" --image=curlimages/curl:8.10.1 --restart=Never \
@@ -280,7 +280,7 @@ EOF
 "$KUBECTL" -n "$NS" exec "$AGENT" -- sh -c \
   'nohup envoy -c /tmp/poc-udp.yaml --base-id 3 --service-node poc-udp --service-cluster poc-udp >/tmp/poc-udp.log 2>&1 &'
 "$KUBECTL" -n "$NS" exec "$AGENT" -- nsenter --net=/host/proc/1/ns/net \
-  iptables -t nat -A PREROUTING -p udp -d "$UDP_IP" \
+  iptables -t nat -A PREROUTING -p udp ! -s "$AGENT_IP" -d "$UDP_IP" \
   -j DNAT --to "$AGENT_IP:20003" -m comment --comment "$COMMENT"
 
 "$KUBECTL" -n "$NS" run "$SOCAT_POD" --image=alpine/socat:latest --restart=Never \
