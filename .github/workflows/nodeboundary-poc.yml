@@ -1,11 +1,13 @@
 name: Node-Boundary PoC
 
 on:
+  pull_request:
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
     inputs:
       image:
         description: 'KubeVPN image to use (ghcr.io/kubenetworks/kubevpn:<full-sha>)'
-        required: true
+        required: false
         type: string
 
 jobs:
@@ -59,15 +61,18 @@ jobs:
           exit 1
 
       - name: Pull and load test image
+        env:
+          IMAGE: ${{ inputs.image || format('ghcr.io/kubenetworks/kubevpn:{0}', github.sha) }}
         run: |
-          docker pull ${{ inputs.image }}
-          minikube image load ${{ inputs.image }}
+          docker pull $IMAGE
+          minikube image load $IMAGE
           minikube image ls
 
       - name: Run Node-Boundary PoC
         id: poc
+        env:
+          IMAGE: ${{ inputs.image || format('ghcr.io/kubenetworks/kubevpn:{0}', github.sha) }}
         run: |
-          export IMAGE=${{ inputs.image }}
           hack/nodeboundary-poc.sh 2>&1 | tee /tmp/node-boundary-poc.log
 
       - name: Always upload PoC log
