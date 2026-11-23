@@ -4,27 +4,23 @@
 |-------|--------|
 | Cluster | Minikube (GitHub Actions) |
 | Image | nodeboundary-poc:latest (built locally) |
-| Workflow run | https://github.com/kubenetworks/kubevpn/actions/runs/45128055486 (false positive, see notes) |
+| Workflow run | https://github.com/kubenetworks/kubevpn/actions/runs/45129878854 |
 | hostNetwork | false |
-| TCP header match | NOT_RUN (agent pod never became Ready) |
-| TCP origin forwarding | NOT_RUN (agent pod never became Ready) |
-| Second workload isolation | NOT_RUN (agent pod never became Ready) |
-| UDP path | NOT_RUN (agent pod never became Ready) |
-| Workload UID/generation unchanged | NOT_RUN (agent pod never became Ready) |
-| Decision | RETRY (false positive; adding pipefail and better diagnostics) |
+| TCP header match | NOT_RUN (agent pod stuck in ImagePullBackOff) |
+| TCP origin forwarding | NOT_RUN (agent pod stuck in ImagePullBackOff) |
+| Second workload isolation | NOT_RUN (agent pod stuck in ImagePullBackOff) |
+| UDP path | NOT_RUN (agent pod stuck in ImagePullBackOff) |
+| Workload UID/generation unchanged | NOT_RUN (agent pod stuck in ImagePullBackOff) |
+| Decision | NO-GO (architecture issue: image loading into minikube failed) |
 
 ## Notes
 
-- Multiple workflow runs triggered:
-  - 45122695559: failed at bookinfo readiness (wc -l issue)
-  - 45123710626: failed at image pull (GHCR tag not built)
-  - 45125808652: failed at Docker build (binary filename mismatch)
-  - 45128055486: **FALSE POSITIVE** (job green, but PoC script failed: agent pod never Ready)
-- Run 45128055486 is not considered a success:
-  - The agent pod was created but timed out becoming Ready
-  - `tee` swallowed the script failure, making the job appear green
-  - No datapath tests were actually executed
-- The workflow has been updated to:
-  - Add `set -o pipefail` to ensure PoC script failures propagate
-  - Add better diagnostics (pod describe, pod yaml) on failure
-- Decision: RETRY with updated workflow to get real diagnostics
+- Previous failures (harness issues):
+  - 45122695559: readiness check (wc -l)
+  - 45123710626: GHCR tag not built
+  - 45125808652: Dockerfile expects kubevpn-linux-amd64 binary
+  - 45128055486: false positive (tee swallowed failure)
+- This run (45129878854):
+  - Agent pod stuck in ImagePullBackOff
+  - Reason: image nodeboundary-poc:latest not available in minikube
+  - Next steps: fix image loading into minikube
