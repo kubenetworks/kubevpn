@@ -103,6 +103,7 @@ spec:
   containers:
   - name: agent
     image: $IMAGE
+    imagePullPolicy: IfNotPresent
     command: ["sh", "-c", "sleep 3600"]
     securityContext:
       capabilities:
