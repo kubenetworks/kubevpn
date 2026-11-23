@@ -106,8 +106,10 @@ spec:
     imagePullPolicy: IfNotPresent
     command: ["sh", "-c", "sleep 3600"]
     securityContext:
-      capabilities:
-        add: ["SYS_ADMIN", "NET_ADMIN"]
+      # SYS_ADMIN + NET_ADMIN alone could not open /host/proc/1/ns/net in
+      # minikube (nsenter: Permission denied). Match the existing node-agent
+      # privilege level for this datapath proof; hostNetwork stays false.
+      privileged: true
     volumeMounts:
     - name: host-proc
       mountPath: /host/proc
