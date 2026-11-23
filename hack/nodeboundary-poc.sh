@@ -300,7 +300,9 @@ TARGET_UID_AFTER="$("$KUBECTL" -n "$WORKLOAD_NS" get pod -l app=reviews -o jsonp
 GENERATION_AFTER="$("$KUBECTL" -n "$WORKLOAD_NS" get deploy reviews -o jsonpath='{.metadata.generation}')"
 test "$TARGET_UID_BEFORE" = "$TARGET_UID_AFTER"
 test "$GENERATION_BEFORE" = "$GENERATION_AFTER"
-test "$("$KUBECTL" -n "$NS" get pod "$AGENT" -o jsonpath='{.spec.hostNetwork}')" = "false"
+HOST_NETWORK="$("$KUBECTL" -n "$NS" get pod "$AGENT" -o jsonpath='{.spec.hostNetwork}')"
+# The API omits the default false value; empty and false both satisfy the constraint.
+test "$HOST_NETWORK" != "true"
 log "PASS no workload restart, no generation change, hostNetwork=false"
 
 echo NODE_BOUNDARY_POC_OK
