@@ -4,21 +4,27 @@
 |-------|--------|
 | Cluster | Minikube (GitHub Actions) |
 | Image | nodeboundary-poc:latest (built locally) |
-| Workflow run | https://github.com/kubenetworks/kubevpn/actions/runs/45128055486 |
+| Workflow run | https://github.com/kubenetworks/kubevpn/actions/runs/45128055486 (false positive, see notes) |
 | hostNetwork | false |
-| TCP header match | TIMEOUT (agent pod failed to become ready) |
-| TCP origin forwarding | TIMEOUT |
-| Second workload isolation | TIMEOUT |
-| UDP path | TIMEOUT |
-| Workload UID/generation unchanged | TIMEOUT |
-| Decision | FAIL (agent pod readiness timeout) |
+| TCP header match | NOT_RUN (agent pod never became Ready) |
+| TCP origin forwarding | NOT_RUN (agent pod never became Ready) |
+| Second workload isolation | NOT_RUN (agent pod never became Ready) |
+| UDP path | NOT_RUN (agent pod never became Ready) |
+| Workload UID/generation unchanged | NOT_RUN (agent pod never became Ready) |
+| Decision | RETRY (false positive; adding pipefail and better diagnostics) |
 
 ## Notes
 
-- Previous harness issues were fixed:
-  - 45122695559: readiness check (wc -l) fixed by using `app=` label correctly
-  - 45123710626: GHCR tag not built — switched to building image locally
-  - 45125808652: Dockerfile expects kubevpn-linux-amd64 binary — fixed by copying binary in Makefile step
-- Current failure: nodeagent-poc pod timed out waiting for condition (3 minutes)
-- Workflow file doesn't fail the job when hack/nodeboundary-poc.sh exits non-zero, so run shows "success" even though PoC failed
-- Artifact log is uploaded and available at https://github.com/kubenetworks/kubevpn/actions/runs/45128055486/artifacts/14797071599
+- Multiple workflow runs triggered:
+  - 45122695559: failed at bookinfo readiness (wc -l issue)
+  - 45123710626: failed at image pull (GHCR tag not built)
+  - 45125808652: failed at Docker build (binary filename mismatch)
+  - 45128055486: **FALSE POSITIVE** (job green, but PoC script failed: agent pod never Ready)
+- Run 45128055486 is not considered a success:
+  - The agent pod was created but timed out becoming Ready
+  - `tee` swallowed the script failure, making the job appear green
+  - No datapath tests were actually executed
+- The workflow has been updated to:
+  - Add `set -o pipefail` to ensure PoC script failures propagate
+  - Add better diagnostics (pod describe, pod yaml) on failure
+- Decision: RETRY with updated workflow to get real diagnostics
