@@ -4,14 +4,14 @@
 |-------|--------|
 | Cluster | Minikube (GitHub Actions) |
 | Image | nodeboundary-poc:latest (built locally) |
-| Workflow run | https://github.com/kubenetworks/kubevpn/actions/runs/45133052768 (harness issue) |
+| Workflow run | https://github.com/kubenetworks/kubevpn/actions/runs/45134423834 (timeout on port 20002) |
 | hostNetwork | false |
-| TCP header match | NOT_RUN (wait_listener timeout bug) |
-| TCP origin forwarding | NOT_RUN (wait_listener timeout bug) |
-| Second workload isolation | NOT_RUN (wait_listener timeout bug) |
-| UDP path | NOT_RUN (wait_listener timeout bug) |
-| Workload UID/generation unchanged | NOT_RUN (wait_listener timeout bug) |
-| Decision | RETRY (harness issue: wait_listener used cat instead of just opening socket) |
+| TCP header match | NOT_RUN (timeout waiting for port 20002) |
+| TCP origin forwarding | NOT_RUN (timeout waiting for port 20002) |
+| Second workload isolation | NOT_RUN (timeout waiting for port 20002) |
+| UDP path | NOT_RUN (timeout waiting for port 20002) |
+| Workload UID/generation unchanged | NOT_RUN (timeout waiting for port 20002) |
+| Decision | NO_GO (timeout waiting for Envoy listeners on 20001/20002) |
 
 ## Notes
 
@@ -24,8 +24,11 @@
   - 45131859595: Envoy startup failure (missing typed_config for router filter)
   - 45133203004: Envoy config parse failure (duplicate typed_config for router filter)
   - 45133052768: wait_listener timeout bug
-- Run 45133052768 is a harness issue, not an architecture issue:
-  - The wait_listener function used `timeout 1 bash -c 'cat < /dev/tcp/127.0.0.1/$port'`
-  - This waits for DATA on an open socket, so it returns 124 even when the listener is healthy
-- The PoC script has been updated to use `timeout 1 bash -c 'exec 3<>/dev/tcp/127.0.0.1/$port'` (just open and close socket)
-- Decision: RETRY with fixed PoC script
+  - 45134279801: cancelled
+  - 45134165759: cancelled
+  - 45134423834: timeout on port 20002 (both 20001 and 20002 timed out)
+- Run 45134423834 shows both ports 20001 and 20002 timed out:
+  - Wait_listener function now correctly uses `exec 3<>/dev/tcp/127.0.0.1/$port` (just open/close socket)
+  - This indicates Envoy itself is not starting successfully or listeners aren't binding
+  - Need to check Envoy logs from preserved namespace for diagnosis
+- Decision: NO_GO (timeout waiting for Envoy listeners; further investigation needed)
