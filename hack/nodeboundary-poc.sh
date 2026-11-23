@@ -55,7 +55,7 @@ wait_listener() {
   local start=$(date +%s)
   while true; do
     if "$KUBECTL" -n "$NS" exec "$AGENT" -- sh -c \
-      "timeout 1 bash -c 'cat < /dev/tcp/127.0.0.1/$port' 2>/dev/null" >/dev/null 2>&1; then
+      "timeout 1 bash -c 'exec 3<>/dev/tcp/127.0.0.1/$port' 2>/dev/null" >/dev/null 2>&1; then
       return 0
     fi
     if (( $(date +%s) - start >= timeout )); then
