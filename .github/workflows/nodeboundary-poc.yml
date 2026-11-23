@@ -46,14 +46,15 @@ jobs:
         run: |
           # Wait up to 5 minutes for reviews, authors, details pods
           for ((i=0; i<60; i++)); do
-            reviews_ready=$(kubectl -n default get pod -l app=reviews -o jsonpath='{.items[?(@.status.phase=="Running")].metadata.name}' | wc -l)
-            details_ready=$(kubectl -n default get pod -l app=details -o jsonpath='{.items[?(@.status.phase=="Running")].metadata.name}' | wc -l)
-            if [[ $reviews_ready -gt 0 && $details_ready -gt 0 ]]; then
+            reviews_ready=$(kubectl -n default get pod -l app=reviews -o jsonpath='{.items[?(@.status.phase=="Running")].metadata.name}' | wc -w)
+            details_ready=$(kubectl -n default get pod -l app=details -o jsonpath='{.items[?(@.status.phase=="Running")].metadata.name}' | wc -w)
+            authors_ready=$(kubectl -n default get pod -l app=authors -o jsonpath='{.items[?(@.status.phase=="Running")].metadata.name}' | wc -w)
+            if [[ $reviews_ready -gt 0 && $details_ready -gt 0 && $authors_ready -gt 0 ]]; then
               echo "Bookinfo pods are ready"
               kubectl get pods -n default -o wide
               exit 0
             fi
-            echo "Waiting for bookinfo pods to be ready... ($i/60)"
+            echo "Waiting for bookinfo pods to be ready... (reviews: $reviews_ready, details: $details_ready, authors: $authors_ready) ($i/60)"
             sleep 5
           done
           echo "Timed out waiting for bookinfo pods"
