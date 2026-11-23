@@ -74,6 +74,7 @@ jobs:
         env:
           IMAGE: nodeboundary-poc:latest
         run: |
+          set -o pipefail
           hack/nodeboundary-poc.sh 2>&1 | tee /tmp/node-boundary-poc.log
 
       - name: Always upload PoC log
@@ -86,6 +87,12 @@ jobs:
       - name: On failure, dump diagnostics
         if: failure()
         run: |
+          echo "=== Nodeagent pod describe ==="
+          kubectl -n kubevpn-nodeagent-poc describe pod nodeagent-poc || true
+          echo
+          echo "=== Nodeagent pod yaml ==="
+          kubectl -n kubevpn-nodeagent-poc get pod nodeagent-poc -o yaml || true
+          echo
           echo "=== Nodeagent pod logs ==="
           kubectl -n kubevpn-nodeagent-poc logs nodeagent-poc --tail=200 || true
           echo
