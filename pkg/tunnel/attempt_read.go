@@ -58,6 +58,21 @@ func (s *connAttempt) dispatchReadPacket(ctx context.Context, packet *packet, ge
 		logIPPacket(ctx, fmt.Sprintf("[Client-%d] INBOUND", s.id), ip)
 	}
 	if packet.kind() == packetKindToGvisor {
+		// Guard: only inject destinations that are this device's own TUN IPs into the
+		// inter-client stack. The stack is promiscuous and answers any destination from
+		// 127.0.0.1 with the destination as the source; feeding it a foreign
+		// destination (e.g. the traffic manager's ClusterIP bounced back by a poisoned
+		// server route) makes this client emit spoofed-source replies into the tunnel,
+		// which the server learns as routes and uses to keep the route-table
+		// self-registration loop alive. Foreign destinations belong on the TUN, where
+		// kernel routing deals with them.
+		if _, dst, _, err := netutil.ParseIPFast(ip); err == nil && dst != nil && s.ownedDst != nil && !s.ownedDst(dst) {
+			if !diagnosticEnqueue(ctx, s.tunOutbound, packet, enqueue) {
+				packet.release()
+				return false
+			}
+			return true
+		}
 		// Inject directly into the shared inter-client stack, mirroring the server's
 		// dispatch: no intermediate bounded queue, so TCP's receive window throttles
 		// the peer instead of a blind drop that forces sender retransmits.

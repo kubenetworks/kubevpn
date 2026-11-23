@@ -3,6 +3,7 @@ package tunnel
 import (
 	"context"
 	"math/rand/v2"
+	"net"
 	"time"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -42,6 +43,11 @@ type connSlot struct {
 	// type == packetTypeToGvisor packets directly into it (InjectIP) rather than into a per-slot
 	// stack, so the stack outlives any single slot. nil in tests that drive a slot in isolation.
 	interClient *interClientStack
+	// ownedDst reports whether dst is one of this device's own TUN IPs. Only owned
+	// destinations may be injected into the inter-client stack (see dispatchReadPacket);
+	// foreign destinations go to the TUN. nil in tests that drive a slot in isolation
+	// (treated as "no guard", the pre-guard behavior).
+	ownedDst func(net.IP) bool
 	// role is immutable after construction. Control slots send a packetTypeControl
 	// declaration so the server handles them separately (no Router registration).
 	role slotRole

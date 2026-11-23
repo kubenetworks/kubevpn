@@ -183,6 +183,10 @@ func parseRoutes(str string) []types.Route {
 }
 
 func gtcpProtocolFactory(node *Node, hub *tunnel.Router) (net.Listener, Handler, error) {
+	// This is the listener client data connections terminate on (the traffic manager's
+	// own data plane). Mark the manager's own ClusterIP hub-owned so the route table
+	// never learns a route for it — see reserveManagerServiceIP.
+	reserveManagerServiceIP(hub)
 	handler := tunnel.GvisorTCPHandler(hub)
 	listener, err := GvisorTCPListener(node.Addr)
 	if err != nil {

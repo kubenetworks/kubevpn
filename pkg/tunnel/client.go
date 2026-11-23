@@ -2,7 +2,9 @@ package tunnel
 
 import (
 	"context"
+	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -42,6 +44,42 @@ type clientTransport struct {
 	interClient *interClientStack
 	// stats records data-plane liveness from observed heartbeat echo replies; may be nil.
 	stats *HeartbeatStats
+	// owned caches the device's own TUN IPs (v4/v6/docker). The per-packet
+	// dispatchReadPacket guard consults it to decide whether an inbound toGvisor packet
+	// may enter the inter-client stack; caching keeps the hot path free of interface
+	// scans. Refreshed by the heartbeat loop, which already re-reads addrs every tick.
+	owned atomic.Pointer[ownedAddrs]
+}
+
+// ownedAddrs is one snapshot of the device's own TUN addresses (see clientTransport.owned).
+type ownedAddrs struct {
+	v4, v6, docker net.IP
+}
+
+// ownsDeviceIP reports whether ip is one of this device's current TUN addresses. When no
+// address snapshot is available (device addresses unknown — e.g. a TUN without an assigned
+// IP yet), the guard cannot classify destinations and must not gate injection, or
+// inter-client traffic would be silently diverted to the TUN.
+func (t *clientTransport) ownsDeviceIP(ip net.IP) bool {
+	snap := t.owned.Load()
+	if snap == nil || ip == nil {
+		return true
+	}
+	if snap.v4 == nil && snap.v6 == nil && snap.docker == nil {
+		return true
+	}
+	return snap.v4.Equal(ip) || snap.v6.Equal(ip) || snap.docker.Equal(ip)
+}
+
+// refreshOwned re-reads the device addresses into the owned snapshot. Best-effort: if all
+// addresses are unavailable right now, the previous snapshot is kept until a later
+// refresh observes them.
+func (t *clientTransport) refreshOwned() {
+	v4, v6, docker := t.dev.addrs()
+	if v4 == nil && v6 == nil && docker == nil {
+		return
+	}
+	t.owned.Store(&ownedAddrs{v4: v4, v6: v6, docker: docker})
 }
 
 func newClientTransport(dev *tunDevice, forward *DialConfig, stats *HeartbeatStats) *clientTransport {
@@ -59,6 +97,7 @@ func newClientTransport(dev *tunDevice, forward *DialConfig, stats *HeartbeatSta
 		tunOutbound: dev.tunOutbound,
 		forward:     forward,
 		stats:       stats,
+		ownedDst:    t.ownsDeviceIP,
 		role:        slotRoleControl,
 	}
 	return t
@@ -115,6 +154,9 @@ func (t *clientTransport) runConnPool(ctx context.Context) {
 	// inter-client packets directly into it. Its replies share the same data-slot queue.
 	t.interClient = newInterClientStack(ctx, t.dev.tunInbound, datagramHeaderLen)
 	defer func() { <-t.interClient.done; drainPacketChan(t.dev.tunInbound) }()
+	// Seed the owned-IP snapshot for the dispatchReadPacket guard; the heartbeat loop
+	// keeps it fresh (ChangeTunIP can reassign addresses at runtime).
+	t.refreshOwned()
 	t.slots = make([]*connSlot, ConnPoolSize)
 	var wg sync.WaitGroup
 	for i := range t.slots {
@@ -126,6 +168,7 @@ func (t *clientTransport) runConnPool(ctx context.Context) {
 			stats:         t.stats,
 			registrations: t.registrationPayloads,
 			interClient:   t.interClient,
+			ownedDst:      t.ownsDeviceIP,
 		}
 		t.slots[i] = slot
 		wg.Add(1)
@@ -223,6 +266,11 @@ func (t *clientTransport) heartbeats(ctx context.Context) {
 
 	sendAll := func(reason string) {
 		srcIPv4, srcIPv6, dockerSrcIPv4 := t.dev.addrs()
+		// Keep the owned-IP snapshot (used by the inter-client injection guard) in sync
+		// with the addresses this loop already re-reads every tick.
+		if srcIPv4 != nil || srcIPv6 != nil || dockerSrcIPv4 != nil {
+			t.owned.Store(&ownedAddrs{v4: srcIPv4, v6: srcIPv6, docker: dockerSrcIPv4})
+		}
 		plog.G(ctx).Debugf("[Client] Sending heartbeat (%s)", reason)
 		if srcIPv4 == nil && srcIPv6 == nil {
 			dataPlaneWarn.Load().Warnf(ctx, "hb-no-addr",
