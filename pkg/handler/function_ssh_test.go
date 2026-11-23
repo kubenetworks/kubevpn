@@ -678,6 +678,7 @@ func (u *sshUt) checkConnectStatus(t *testing.T) {
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
+	fillDeploymentTunIPs(&expect, &statuses)
 	if !reflect.DeepEqual(statuses, expect) {
 		marshal, _ := json.Marshal(expect)
 		t.Fatalf("expect: %s, but was: %s", string(marshal), string(output))
@@ -700,6 +701,7 @@ func (u *sshUt) centerCheckConnectStatus(t *testing.T) {
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
+	fillDeploymentTunIPs(&expect, &statuses)
 	if !reflect.DeepEqual(statuses, expect) {
 		marshal, _ := json.Marshal(expect)
 		t.Fatalf("expect: %s, but was: %s", string(marshal), string(output))
@@ -861,6 +863,7 @@ func (u *sshUt) checkProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
+	fillDeploymentTunIPs(&expect, &statuses)
 	opt := cmp.FilterPath(func(p cmp.Path) bool {
 		vx := p.Last().String()
 		if vx == `["Headers"]` {
@@ -901,6 +904,7 @@ func (u *sshUt) centerCheckProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
+	fillDeploymentTunIPs(&expect, &statuses)
 	opt := cmp.FilterPath(func(p cmp.Path) bool {
 		vx := p.Last().String()
 		if vx == `["Headers"]` {

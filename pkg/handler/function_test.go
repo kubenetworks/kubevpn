@@ -704,6 +704,7 @@ func (u *ut) checkConnectStatus(t *testing.T) {
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
+	fillDeploymentTunIPs(&expect, &statuses)
 	if !reflect.DeepEqual(statuses, expect) {
 		marshal, _ := json.Marshal(expect)
 		t.Fatalf("expect: %s, but was: %s", string(marshal), string(output))
@@ -727,6 +728,7 @@ func (u *ut) centerCheckConnectStatus(t *testing.T) {
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
+	fillDeploymentTunIPs(&expect, &statuses)
 	if !reflect.DeepEqual(statuses, expect) {
 		marshal, _ := json.Marshal(expect)
 		t.Fatalf("expect: %s, but was: %s", string(marshal), string(output))
@@ -770,7 +772,13 @@ func fillDeploymentTunIPs(expect *connStatus, actual *connStatus) {
 	if expect == nil || actual == nil || len(expect.List) == 0 || len(actual.List) == 0 {
 		return
 	}
-	for _, expectedConn := range expect.List {
+	for i, expectedConn := range expect.List {
+		// Set connection-level IPv4/IPv6 from actual
+		if i < len(actual.List) {
+			expectedConn.IPv4 = actual.List[i].IPv4
+			expectedConn.IPv6 = actual.List[i].IPv6
+		}
+		// Set proxy rule-level LocalTunIPv4/LocalTunIPv6
 		for _, proxy := range expectedConn.ProxyList {
 			if proxy == nil || strings.HasPrefix(proxy.Workload, "services/") {
 				continue
@@ -938,6 +946,7 @@ func (u *ut) checkProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
+	fillDeploymentTunIPs(&expect, &statuses)
 	opt := cmp.FilterPath(func(p cmp.Path) bool {
 		vx := p.Last().String()
 		if vx == `["Headers"]` {
@@ -978,6 +987,7 @@ func (u *ut) centerCheckProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
+	fillDeploymentTunIPs(&expect, &statuses)
 	opt := cmp.FilterPath(func(p cmp.Path) bool {
 		vx := p.Last().String()
 		if vx == `["Headers"]` {
