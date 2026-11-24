@@ -207,10 +207,9 @@ func getResolvers(searchList []string, nsList []string, serviceName []corev1.Ser
 		}
 		result.Insert(split...)
 	}
-	// authors.default, authors
+	// authors.default
 	for _, service := range serviceName {
 		result.Insert(fmt.Sprintf("%s.%s", service.Name, service.Namespace))
-		result.Insert(service.Name)
 	}
 
 	var resolvers []string
