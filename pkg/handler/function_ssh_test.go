@@ -1022,6 +1022,23 @@ func (u *sshUt) dumpCentralMeshDiagnostics(t *testing.T) {
 
 	t.Log("=== Central Mesh Diagnostics ===")
 
+	if runtime.GOOS == "darwin" {
+		// Capture the actual resolver state when bare service lookup fails; without
+		// this, adding /etc/resolver entries is guesswork (the no-such-host error
+		// does not tell us which suffix the macOS resolver selected).
+		cmd := exec.CommandContext(ctx, "sh", "-c", `
+			ls -la /etc/resolver 2>/dev/null || true
+			for f in /etc/resolver/*; do
+				[ -f "$f" ] || continue
+				echo "--- $f"
+				cat "$f"
+			done
+			scutil --dns | grep -A4 -B2 -E 'details|cluster.local|kubevpn' || true
+		`)
+		output, err := cmd.CombinedOutput()
+		t.Logf("--- macOS resolver state ---\n%s\nerror: %v", output, err)
+	}
+
 	// 1. List reviews pods with container statuses
 	t.Log("--- Reviews Pod Container Status ---")
 	pods, err := u.clientset.CoreV1().Pods(u.namespace).List(ctx, v1.ListOptions{
