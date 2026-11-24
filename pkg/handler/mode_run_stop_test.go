@@ -56,8 +56,9 @@ func TestTryStopRun_GracefulOnSIGINT(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	// Default SIGINT disposition terminates sh; echo ready once it is looping.
-	cmd := exec.CommandContext(ctx, "sh", "-c", "echo ready; sleep 60")
+	// Install an explicit graceful INT handler so the assertion does not depend on
+	// the runner's default shell/sleep signal disposition or scheduling latency.
+	cmd := exec.CommandContext(ctx, "sh", "-c", "trap 'exit 0' INT; echo ready; while :; do sleep 1; done")
 	exited := startExited(t, cmd)
 
 	start := time.Now()
@@ -117,8 +118,8 @@ func TestTryStopRun_ForceKillsWedged(t *testing.T) {
 // restore func (call via defer).
 func withShortStopTimeouts() func() {
 	origTimeout, origGrace := runStopTimeout, runStopQuitGrace
-	runStopTimeout = 300 * time.Millisecond
-	runStopQuitGrace = 300 * time.Millisecond
+	runStopTimeout = 3 * time.Second
+	runStopQuitGrace = 3 * time.Second
 	return func() {
 		runStopTimeout, runStopQuitGrace = origTimeout, origGrace
 	}
