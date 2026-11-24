@@ -129,3 +129,44 @@ func indexOf(s, substr string) int {
 	}
 	return -1
 }
+
+func TestAddServiceNameToHosts_ResolverServices(t *testing.T) {
+	var capturedContent string
+	c := &Config{
+		ResolverServices: []corev1.Service{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "details",
+					Namespace: "default",
+				},
+				Spec: corev1.ServiceSpec{
+					ClusterIP: "10.101.222.55",
+				},
+			},
+		},
+		Services: []corev1.Service{},
+		Lock:     &sync.Mutex{},
+		TunName:  "tun0",
+		readHosts: func() ([]byte, error) {
+			return []byte{}, nil
+		},
+		writeHosts: func(content string) error {
+			capturedContent = content
+			return nil
+		},
+	}
+
+	n, err := c.AddServiceNameToHosts(context.Background())
+	if err != nil {
+		t.Fatalf("AddServiceNameToHosts failed: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("AddServiceNameToHosts returned %d, expected 1", n)
+	}
+	if !contains(capturedContent, "10.101.222.55") {
+		t.Errorf("captured content missing IP 10.101.222.55: %q", capturedContent)
+	}
+	if !contains(capturedContent, "details") {
+		t.Errorf("captured content missing domain 'details': %q", capturedContent)
+	}
+}

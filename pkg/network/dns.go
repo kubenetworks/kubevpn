@@ -3,6 +3,7 @@ package network
 import (
 	"context"
 	"encoding/json"
+	"runtime"
 	"slices"
 	"strings"
 
@@ -69,12 +70,13 @@ func (nm *Runtime) setupDNS(ctx context.Context) error {
 
 	plog.G(ctx).Debugf("Listing namespace %s services...", nm.cfg.WorkloadNamespace)
 	nm.dns.dnsConfig = &dns.Config{
-		Config:   relovConf,
-		Ns:       ns,
-		Services: []v1.Service{},
-		TunName:  nm.device.tunName,
-		Hosts:    nm.dns.extraHost,
-		Lock:     nm.cfg.Lock,
+		Config:           relovConf,
+		Ns:               ns,
+		Services:         []v1.Service{},
+		ResolverServices: nm.listServicesForHosts(ctx, ns),
+		TunName:          nm.device.tunName,
+		Hosts:            nm.dns.extraHost,
+		Lock:             nm.cfg.Lock,
 		HowToGetExternalName: func(domain string) (string, error) {
 			ip, err := resolveDomainViaClusterDNS(ctx, relovConf.Servers, domain)
 			if err != nil {
@@ -117,6 +119,24 @@ func (nm *Runtime) listResolvableNamespaces(ctx context.Context) []string {
 		}
 	}
 	return ns
+}
+
+// listServicesForHosts lists services in the given namespaces for /etc/hosts population on macOS.
+// On other OSes it returns nil. Errors listing individual namespaces are logged at debug level and ignored.
+func (nm *Runtime) listServicesForHosts(ctx context.Context, namespaces []string) []v1.Service {
+	if runtime.GOOS != "darwin" {
+		return nil
+	}
+	var services []v1.Service
+	for _, ns := range namespaces {
+		list, err := nm.cfg.Clientset.CoreV1().Services(ns).List(ctx, metav1.ListOptions{Limit: 500})
+		if err != nil {
+			plog.G(ctx).Debugf("Failed to list services in namespace %q: %v", ns, err)
+			continue
+		}
+		services = append(services, list.Items...)
+	}
+	return services
 }
 
 // ExtendSearchDomains expands the search domain list to include suffixes for all known namespaces.
