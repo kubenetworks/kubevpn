@@ -62,6 +62,10 @@ func TestGetResolversWithExtendedSearchDomains(t *testing.T) {
 		"svc.cluster.local",
 		"default.svc.cluster.local",
 		"test.svc.cluster.local",
+		"reviews",
+		"reviews.default",
+		"details",
+		"details.test",
 	}
 
 	for _, want := range wantDomains {
