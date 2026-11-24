@@ -73,7 +73,8 @@ func (c *Config) AddServiceNameToHosts(ctx context.Context, hosts ...Entry) (int
 func (c *Config) UpdateServices(ctx context.Context, services []corev1.Service) {
 	c.Lock.Lock()
 	c.Services = services
-	appendHosts := c.generateAppendHosts(services, c.extra)
+	combinedServices := append(append([]corev1.Service{}, c.ResolverServices...), services...)
+	appendHosts := c.generateAppendHosts(combinedServices, c.extra)
 	plog.G(ctx).Debugf("UpdateServices: processing %d services, %d hosts entries to append", len(services), len(appendHosts))
 	err := c.appendHosts(appendHosts)
 	c.Lock.Unlock()
