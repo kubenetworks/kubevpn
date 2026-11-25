@@ -71,6 +71,7 @@ func NewKubeVPNCommand() *cobra.Command {
 				CmdOnce(factory),
 				CmdAgent(factory),
 				CmdAgentEnvoyConfig(factory),
+				CmdNodeAgent(),
 			},
 		},
 		{

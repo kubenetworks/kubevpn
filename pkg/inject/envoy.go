@@ -59,6 +59,19 @@ func RenderEnvoyBootstrap(_ context.Context, managerAddr string) ([]byte, error)
 	return []byte(configYaml), nil
 }
 
+// RenderEnvoyBootstrapWithAdmin is the node-boundary variant with an isolated
+// admin port; the legacy RenderEnvoyBootstrap keeps the existing 9003 behavior.
+func RenderEnvoyBootstrapWithAdmin(ctx context.Context, managerAddr string, adminPort int32) ([]byte, error) {
+	b, err := RenderEnvoyBootstrap(ctx, managerAddr)
+	if err != nil {
+		return nil, err
+	}
+	if adminPort == 9003 {
+		return b, nil
+	}
+	return []byte(strings.Replace(string(b), "port_value: 9003", fmt.Sprintf("port_value: %d", adminPort), 1)), nil
+}
+
 // envoyRuleSpec captures the parameters for adding a proxy rule to the Envoy config.
 // Avoids passing 10+ individual arguments through addEnvoyConfig → addVirtualRule.
 type envoyRuleSpec struct {
