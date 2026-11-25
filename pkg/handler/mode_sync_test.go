@@ -69,6 +69,7 @@ var kubeVPNSidecars = sets.New[string](
 	config.ContainerSidecarEnvoy,
 	config.ContainerSidecarXDS,
 	config.ContainerSidecarDNS,
+	"agent",
 )
 
 // dumpKubeVPNSidecarLogs prints, across all namespaces, the status and container logs
@@ -122,6 +123,22 @@ func dumpKubeVPNSidecarLogs(t *testing.T, clientset kubernetes.Interface) {
 						c.Name, which, pod.Namespace, pod.Name, string(data))
 				}
 			}
+		}
+		if pod.Labels["app"] != "kubevpn-nodeagent" {
+			continue
+		}
+		for _, c := range pod.Spec.Containers {
+			if c.Name != "agent" {
+				continue
+			}
+			cmd := exec.CommandContext(ctx, "kubectl", "-n", pod.Namespace, "exec", pod.Name, "-c", c.Name, "--",
+				"sh", "-c", `for f in /tmp/kubevpn-nodeagent-*.log; do echo "=== $f ==="; tail -100 "$f"; done`)
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Logf("dump node-agent file logs %s/%s: %v", pod.Namespace, pod.Name, err)
+				continue
+			}
+			t.Logf("===== node-agent file logs %s/%s =====\n%s", pod.Namespace, pod.Name, output)
 		}
 	}
 }
