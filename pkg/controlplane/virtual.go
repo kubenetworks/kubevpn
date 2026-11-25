@@ -43,8 +43,11 @@ type Virtual struct {
 	// inject time so the reconciler can match pods to rules. Zero value means
 	// the rule was written by sidecar mode; reconciler skips it.
 	Selector string `yaml:"selector,omitempty" json:"selector,omitempty"`
-	Ports    []ContainerPort
-	Rules    []*Rule
+	// AgentListenerPort is the unique per-workload listener used by the
+	// node-boundary agent. Zero means sidecar/legacy mode.
+	AgentListenerPort int32 `yaml:"agentListenerPort,omitempty" json:"agentListenerPort,omitempty"`
+	Ports             []ContainerPort
+	Rules             []*Rule
 }
 
 // ContainerPort describes a port on a container with optional envoy listener binding.

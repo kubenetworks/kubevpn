@@ -29,6 +29,8 @@ const (
 	KeyTunIPPool = "TUN_IP_POOL"
 	// KeyEnvoy is the ConfigMap key for the Envoy proxy configuration.
 	KeyEnvoy = "ENVOY_CONFIG"
+	// KeyNodeAttachments stores desired per-pod node-boundary attachments.
+	KeyNodeAttachments = "NODE_ATTACHMENTS"
 	// KeyClusterCIDRs is the ConfigMap key for cluster CIDR cache (IPv4 + IPv6).
 	KeyClusterCIDRs = "CLUSTER_CIDRS"
 	// KeyClusterCIDRsSchema is the ConfigMap key holding the schema version of the
