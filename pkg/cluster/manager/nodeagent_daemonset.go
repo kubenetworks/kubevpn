@@ -10,6 +10,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/utils/ptr"
+
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/inject"
 )
 
 const nodeAgentDaemonSetName = "kubevpn-nodeagent"
@@ -60,7 +63,12 @@ func genNodeAgentDaemonSet(namespace, image string) *appsv1.DaemonSet {
 
 // ensureNodeAgentDaemonSet creates or updates the single per-node agent.
 func ensureNodeAgentDaemonSet(ctx context.Context, clientset kubernetes.Interface, namespace, image string) error {
+	secret, err := clientset.CoreV1().Secrets(namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("load node-agent TLS secret: %w", err)
+	}
 	desired := genNodeAgentDaemonSet(namespace, image)
+	desired.Spec.Template.Spec.Containers[0].Env = append(desired.Spec.Template.Spec.Containers[0].Env, inject.TLSEnvVars(secret)...)
 	existing, err := clientset.AppsV1().DaemonSets(namespace).Get(ctx, nodeAgentDaemonSetName, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		_, err = clientset.AppsV1().DaemonSets(namespace).Create(ctx, desired, metav1.CreateOptions{})

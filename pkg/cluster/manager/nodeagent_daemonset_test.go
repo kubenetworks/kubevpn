@@ -38,7 +38,7 @@ func TestGenNodeAgentDaemonSet_SecurityContract(t *testing.T) {
 
 func TestEnsureNodeAgentDaemonSet_CreatesWhenMissing(t *testing.T) {
 	ctx := context.Background()
-	clientset := fake.NewSimpleClientset()
+	clientset := fake.NewSimpleClientset(&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "kubevpn-traffic-manager", Namespace: "kubevpn"}})
 	if err := ensureNodeAgentDaemonSet(ctx, clientset, "kubevpn", "test-image"); err != nil {
 		t.Fatal(err)
 	}

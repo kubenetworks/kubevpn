@@ -76,7 +76,7 @@ func commonEnvVars(managerNamespace string) []v1.EnvVar {
 	}
 }
 
-func tlsEnvVars(secret *v1.Secret) []v1.EnvVar {
+func TLSEnvVars(secret *v1.Secret) []v1.EnvVar {
 	vars := []v1.EnvVar{
 		{Name: config.TLSServerName, Value: string(secret.Data[config.TLSServerName])},
 		{Name: config.TLSCertKey, Value: string(secret.Data[config.TLSCertKey])},
@@ -129,7 +129,7 @@ func AddVPNAndEnvoyContainer(spec *v1.PodTemplateSpec, ns, nodeID string, ipv6 b
 
 	var envs []v1.EnvVar
 	envs = append(envs, commonEnvVars(managerNamespace)...)
-	envs = append(envs, tlsEnvVars(secret)...)
+	envs = append(envs, TLSEnvVars(secret)...)
 
 	spec.Spec.Containers = append(spec.Spec.Containers, v1.Container{
 		Name:    config.ContainerSidecarVPN,
