@@ -123,6 +123,12 @@ func TestManagerUpgrade_TLSDeploymentServiceLifecycle(t *testing.T) {
 				case "/apis/apps/v1":
 					writeJSON(w, metav1.APIResourceList{GroupVersion: "apps/v1", APIResources: []metav1.APIResource{{Name: "deployments", Namespaced: true, Kind: "Deployment"}, {Name: "replicasets", Namespaced: true, Kind: "ReplicaSet"}}})
 				default:
+					if strings.Contains(r.URL.Path, "/daemonsets") {
+						ds := genNodeAgentDaemonSet(ns, "new-image")
+						ds.APIVersion, ds.Kind = "apps/v1", "DaemonSet"
+						writeJSON(w, ds)
+						return
+					}
 					if strings.Contains(r.URL.Path, "/replicasets") {
 						undo = true
 						writeJSON(w, appsv1.ReplicaSetList{TypeMeta: metav1.TypeMeta{APIVersion: "apps/v1", Kind: "ReplicaSetList"}, ListMeta: metav1.ListMeta{ResourceVersion: "1"}})
@@ -375,6 +381,12 @@ func TestManagerUpgrade_PreservesAttachMode(t *testing.T) {
 				case "/apis/apps/v1":
 					writeJSON(w, metav1.APIResourceList{GroupVersion: "apps/v1", APIResources: []metav1.APIResource{{Name: "deployments", Namespaced: true, Kind: "Deployment"}, {Name: "replicasets", Namespaced: true, Kind: "ReplicaSet"}}})
 				default:
+					if strings.Contains(r.URL.Path, "/daemonsets") {
+						ds := genNodeAgentDaemonSet(ns, "new-image")
+						ds.APIVersion, ds.Kind = "apps/v1", "DaemonSet"
+						writeJSON(w, ds)
+						return
+					}
 					if strings.Contains(r.URL.Path, "/replicasets") {
 						writeJSON(w, appsv1.ReplicaSetList{TypeMeta: metav1.TypeMeta{APIVersion: "apps/v1", Kind: "ReplicaSetList"}, ListMeta: metav1.ListMeta{ResourceVersion: "1"}})
 						return
