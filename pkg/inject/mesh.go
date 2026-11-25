@@ -4,10 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -16,7 +14,6 @@ import (
 	v12 "k8s.io/client-go/kubernetes/typed/core/v1"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/polymorphichelpers"
-	"k8s.io/utils/ptr"
 
 	clusterworkload "github.com/wencaiwulue/kubevpn/v2/pkg/cluster/workload"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -75,9 +72,9 @@ func (m *meshInjector) Inject(ctx context.Context) error {
 	}
 
 	var enableIPv6 bool
-		if o.Factory != nil {
-			enableIPv6, _ = util.DetectPodSupportIPv6(ctx, o.Factory, o.ManagerNamespace)
-		}
+	if o.Factory != nil {
+		enableIPv6, _ = util.DetectPodSupportIPv6(ctx, o.Factory, o.ManagerNamespace)
+	}
 	AddVPNAndEnvoyContainer(templateSpec, o.Controller.Namespace, o.NodeID, enableIPv6, o.ManagerNamespace, o.Secret, o.Image)
 
 	// inject: undo on rollout failure to restore the working (pre-injection) revision.
@@ -256,78 +253,5 @@ func UnpatchContainer(ctx context.Context, nodeID string, factory cmdutil.Factor
 		}
 	}
 
-	// node-hosted agent Jobs are deleted when this owner's last rule is removed
-	// (docs/55 §6). For sidecar-mode workloads there are no such Jobs and this is
-	// a no-op; the workload patch above is likewise a no-op in node-agent mode.
-	if err := deleteAgentJobs(ctx, clientset, managerNamespace, ownerID); err != nil {
-		plog.G(ctx).Warnf("delete agent jobs for owner %s: %v", ownerID, err)
-	}
-
 	return empty, nil
-}
-
-// deleteAgentJobs removes every agent Job owned by ownerID. Best-effort by
-// callers; the manager lease reaper is the backstop (docs/55 §6).
-func deleteAgentJobs(ctx context.Context, cs kubernetes.Interface, managerNamespace, ownerID string) error {
-	jobs, err := cs.BatchV1().Jobs(managerNamespace).List(ctx, metav1.ListOptions{
-		LabelSelector: metav1.FormatLabelSelector(&metav1.LabelSelector{MatchLabels: map[string]string{"kubevpn/owner-id": ownerID}}),
-	})
-	if err != nil {
-		return fmt.Errorf("list agent jobs: %w", err)
-	}
-	if len(jobs.Items) == 0 {
-		return nil
-	}
-
-	// Delete the jobs first
-	deleteOptions := metav1.DeleteOptions{PropagationPolicy: ptr.To(metav1.DeletePropagationBackground)}
-	for i := range jobs.Items {
-		if err := cs.BatchV1().Jobs(managerNamespace).Delete(ctx, jobs.Items[i].Name, deleteOptions); err != nil && !errors.IsNotFound(err) {
-			plog.G(ctx).Warnf("delete agent job %s: %v", jobs.Items[i].Name, err)
-			// Continue trying to delete other jobs even if one fails
-		}
-	}
-
-	// Best-effort wait for pods to terminate (up to 10 seconds)
-	// This helps ensure old agent pods release their DHCP leases before returning
-	waitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
-	podSelector := metav1.FormatLabelSelector(&metav1.LabelSelector{
-		MatchLabels: map[string]string{"kubevpn/owner-id": ownerID},
-	})
-
-	for waitCtx.Err() == nil {
-		pods, err := cs.CoreV1().Pods(managerNamespace).List(waitCtx, metav1.ListOptions{
-			LabelSelector: podSelector,
-		})
-		if err != nil {
-			// If we can't list pods, just return early - this is best-effort
-			plog.G(ctx).Debugf("list agent pods for cleanup: %v", err)
-			return nil
-		}
-		if len(pods.Items) == 0 {
-			// All pods are gone
-			return nil
-		}
-		// Check if all remaining pods are terminating
-		allTerminating := true
-		for _, pod := range pods.Items {
-			if pod.DeletionTimestamp == nil {
-				allTerminating = false
-				break
-			}
-		}
-		if allTerminating {
-			plog.G(ctx).Debugf("all %d agent pods are terminating, returning early", len(pods.Items))
-			return nil
-		}
-		// Wait a bit before checking again
-		select {
-		case <-waitCtx.Done():
-		case <-time.After(500 * time.Millisecond):
-		}
-	}
-	plog.G(ctx).Debugf("timeout waiting for agent pods to terminate, returning anyway")
-	return nil
 }

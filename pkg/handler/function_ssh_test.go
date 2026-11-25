@@ -65,39 +65,27 @@ func runKubevpn(t *testing.T, args ...string) error {
 
 func TestSSHFunctions(t *testing.T) {
 	u := &sshUt{}
-	var originalAttachMode string
 	// 1) test connect
 	t.Run("01-connect/init", u.init)
 	t.Run("01-connect/kubevpnConnect", u.kubevpnConnect)
-	// Pin attach mode to sidecar for test compatibility (avoids node-agent + SSH jump mesh timeout issue)
-	t.Run("01-connect/pin-sidecar", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-		defer cancel()
-		var err error
-		originalAttachMode, err = u.getCurrentAttachMode(ctx)
-		if err != nil {
-			t.Logf("Warning: failed to get original attach mode: %v", err)
-			originalAttachMode = pkgconfig.AttachModeSidecar
-		}
-		if err := u.setManagerAttachMode(ctx, pkgconfig.AttachModeSidecar); err != nil {
-			t.Fatalf("Failed to set attach mode to sidecar: %v", err)
-		}
-		u.waitManagerReady(t)
-	})
-	t.Cleanup(func() {
-		// Restore original attach mode
-		if u.clientset != nil && originalAttachMode != "" {
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-			defer cancel()
-			_ = u.setManagerAttachMode(ctx, originalAttachMode)
-			_ = waitSSHManagerReadyWithContext(ctx, u.clientset, u.namespace)
-		}
-	})
 	t.Run("01-connect/commonTest", u.commonTest)
 	t.Run("01-connect/checkConnectStatus", u.checkConnectStatus)
 
 	// 2) test proxy mode
 	t.Run("02-proxy/kubevpnProxy", u.kubevpnProxy)
+	t.Run("02-proxy/no-sidecar", func(t *testing.T) {
+		pods, err := u.clientset.CoreV1().Pods(u.namespace).List(context.Background(), metav1.ListOptions{LabelSelector: "app=reviews"})
+		if err != nil || len(pods.Items) == 0 {
+			t.Fatalf("list reviews pods: %v", err)
+		}
+		for _, pod := range pods.Items {
+			for _, container := range pod.Spec.Containers {
+				if container.Name == pkgconfig.ContainerSidecarVPN || container.Name == pkgconfig.ContainerSidecarEnvoy {
+					t.Fatalf("sidecar container %s found in %s/%s", container.Name, pod.Namespace, pod.Name)
+				}
+			}
+		}
+	})
 	t.Run("02-proxy/commonTest", u.commonTest)
 	t.Run("02-proxy/testUDP", u.testUDP)
 	t.Run("02-proxy/proxyServiceReviewsServiceIP", u.proxyServiceReviewsServiceIP)
@@ -149,17 +137,6 @@ func TestSSHFunctions(t *testing.T) {
 	t.Run("07-central-connect/disconnectDefault", u.kubevpnDisconnect)
 	t.Run("07-central-connect/centerKubevpnUninstall", u.kubevpnUninstall(""))
 	t.Run("07-central-connect/centerKubevpnInstallInNsKubevpn", u.kubevpnConnectToNsKubevpn)
-	t.Run("07-central-connect/pin-sidecar-in-kubevpn-ns", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-		defer cancel()
-		if err := u.setManagerAttachModeInNamespace(ctx, pkgconfig.AttachModeSidecar, "kubevpn"); err != nil {
-			t.Fatalf("Failed to pin attach mode to sidecar in kubevpn ns: %v", err)
-		}
-		// Wait for manager in kubevpn ns to be ready
-		if err := waitSSHManagerReadyWithContext(ctx, u.clientset, "kubevpn"); err != nil {
-			t.Logf("Warning: failed to wait for manager in kubevpn ns to be ready: %v", err)
-		}
-	})
 	// The central connect MUST target ns kubevpn: a bare connect would resolve
 	// the kubeconfig's (possibly drifted) namespace and re-create the
 	// default-ns manager that disconnectDefault/centerKubevpnUninstall removed.

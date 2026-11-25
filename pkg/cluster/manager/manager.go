@@ -207,11 +207,6 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 		return false, err
 	}
 
-	// Clean up stale node-agent jobs across all namespaces before starting the new manager.
-	// Stale agents from previous managers would reconnect to the new manager and compete for DHCP leases,
-	// causing 3-6 minutes of mesh traffic disruption (verified in CI TestFunctions 03/05).
-	cleanupAllNodeAgentJobs(ctx, clientset, metav1.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0), PropagationPolicy: ptr.To(metav1.DeletePropagationBackground)})
-
 	// 8) create deployment
 	plog.StepStart(ctx, "Creating Deployment")
 	deploy := genDeploySpec(namespace, image, imagePullSecretName, attachMode)
@@ -332,32 +327,6 @@ func CleanupTrafficManagerResources(ctx context.Context, clientset kubernetes.In
 	if namespace == config.DefaultNamespaceKubevpn {
 		_ = clientset.RbacV1().ClusterRoleBindings().Delete(ctx, proxyRBACName, options)
 		_ = clientset.RbacV1().ClusterRoles().Delete(ctx, proxyRBACName, options)
-	}
-	// Clean up all node-agent jobs across all namespaces
-	nodeAgentOptions := options
-	nodeAgentOptions.PropagationPolicy = ptr.To(metav1.DeletePropagationBackground)
-	cleanupAllNodeAgentJobs(ctx, clientset, nodeAgentOptions)
-}
-
-// cleanupAllNodeAgentJobs deletes all jobs with label kubevpn/pod-uid across all namespaces
-func cleanupAllNodeAgentJobs(ctx context.Context, clientset kubernetes.Interface, options metav1.DeleteOptions) {
-	// List all namespaces first
-	namespaces, err := clientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return
-	}
-	for _, ns := range namespaces.Items {
-		// List node-agent jobs in this namespace
-		jobs, err := clientset.BatchV1().Jobs(ns.Name).List(ctx, metav1.ListOptions{
-			LabelSelector: "kubevpn/pod-uid",
-		})
-		if err != nil {
-			continue
-		}
-		// Delete each job
-		for _, job := range jobs.Items {
-			_ = clientset.BatchV1().Jobs(ns.Name).Delete(ctx, job.Name, options)
-		}
 	}
 }
 
