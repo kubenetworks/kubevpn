@@ -182,6 +182,8 @@ func To(a *Virtual, enableIPv6 bool, logger *log.Entry) (
 		listenPort := port.ContainerPort
 		if fargate {
 			listenPort = port.EnvoyListenerPort
+		} else if a.AgentListenerPort != 0 {
+			listenPort = a.AgentListenerPort
 		}
 		logger.Debugf("[xDS] %s/%s port %d/%s -> listen on %d", a.Namespace, a.UID, port.ContainerPort, port.Protocol, listenPort)
 		if port.Protocol == corev1.ProtocolUDP {
@@ -200,9 +202,13 @@ func To(a *Virtual, enableIPv6 bool, logger *log.Entry) (
 	// Fargate binds each listener directly and routes to explicit per-IP clusters, so it
 	// needs neither.
 	if !fargate {
-		res.listeners = append(res.listeners, toInboundCaptureListener(fmt.Sprintf("%s_%s_inbound", a.Namespace, a.UID)))
+		inboundPort := config.PortEnvoyInbound
+		if a.AgentListenerPort != 0 {
+			inboundPort = int(a.AgentListenerPort)
+		}
+		res.listeners = append(res.listeners, toInboundCaptureListener(fmt.Sprintf("%s_%s_inbound", a.Namespace, a.UID), int32(inboundPort)))
 		res.clusters = append(res.clusters, originCluster())
-		logger.Debugf("[xDS] %s/%s added mesh inbound capture listener :%d + origin_cluster", a.Namespace, a.UID, config.PortEnvoyInbound)
+		logger.Debugf("[xDS] %s/%s added mesh inbound capture listener :%d + origin_cluster", a.Namespace, a.UID, inboundPort)
 	}
 	// Info-level rule-set summary so the actual generated rules are visible in the
 	// traffic-manager sidecar log even when it does not run at debug level. Reveals, per
@@ -701,7 +707,7 @@ func toListener(listenerName string, routeName string, port int32, p corev1.Prot
 // listener (BindToPort=false) that matches the original port. Connections whose original
 // port has no per-port listener fall through to this listener's passthrough filter chain,
 // which TCP-proxies to origin_cluster (ORIGINAL_DST) so the app still receives them.
-func toInboundCaptureListener(name string) *listener.Listener {
+func toInboundCaptureListener(name string, port int32) *listener.Listener {
 	passthrough := &tcpproxy.TcpProxy{
 		StatPrefix:       "inbound_passthrough",
 		ClusterSpecifier: &tcpproxy.TcpProxy_Cluster{Cluster: originClusterName},
@@ -717,7 +723,7 @@ func toInboundCaptureListener(name string) *listener.Listener {
 					Protocol: core.SocketAddress_TCP,
 					Address:  "0.0.0.0",
 					PortSpecifier: &core.SocketAddress_PortValue{
-						PortValue: uint32(config.PortEnvoyInbound),
+						PortValue: uint32(port),
 					},
 				},
 			},

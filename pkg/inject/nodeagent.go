@@ -37,7 +37,7 @@ func (n *nodeAgentInjector) Inject(ctx context.Context) error {
 	} else {
 		enforceLevel := ns.Labels["pod-security.kubernetes.io/enforce"]
 		if enforceLevel == "restricted" || enforceLevel == "baseline" {
-			return fmt.Errorf("cluster disallows privileged pods (PSA enforce=%q): set proxy.attachMode=sidecar (helm) to use sidecar injection", enforceLevel)
+			return fmt.Errorf("cluster disallows privileged pods (PSA enforce=%q): enable privileged node-agent pods", enforceLevel)
 		}
 	}
 
@@ -72,37 +72,6 @@ func (n *nodeAgentInjector) Inject(ctx context.Context) error {
 		return fmt.Errorf("add envoy config: %w", err)
 	}
 
-	pods, err := listControllerPods(ctx, o.Clientset, o.Controller)
-	if err != nil {
-		return fmt.Errorf("list controller pods: %w", err)
-	}
-	for i := range pods.Items {
-		pod := &pods.Items[i]
-		// One envoy per netns: a pod already carrying kubevpn sidecars (e.g.
-		// a fargate/service-mode injection in the same proxy command) is
-		// served by its own sidecar envoy — an agent Job here would run a
-		// second envoy in the same netns and fight over the admin/inbound
-		// ports.
-		if podHasKubevpnSidecar(pod) {
-			plog.G(ctx).Debugf("[node-agent] pod %s/%s already carries kubevpn sidecars, skipping agent attach",
-				pod.Namespace, pod.Name)
-			continue
-		}
-		if pod.Spec.HostUsers != nil && !*pod.Spec.HostUsers {
-			return fmt.Errorf("pod %s/%s uses hostUsers: false — node-agent attach is unsupported", pod.Namespace, pod.Name)
-		}
-		if err = EnsureAgentJob(ctx, o.Clientset, AgentJobInput{
-			ManagerNamespace: o.ManagerNamespace,
-			Namespace:        o.Controller.Namespace,
-			NodeID:           o.NodeID,
-			Image:            o.Image,
-			OwnerID:          o.OwnerID,
-			Secret:           o.Secret,
-			Pod:              pod,
-		}); err != nil {
-			return fmt.Errorf("ensure agent job for pod %s/%s: %w", pod.Namespace, pod.Name, err)
-		}
-	}
 	return nil
 }
 

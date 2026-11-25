@@ -60,16 +60,16 @@ func isServiceTarget(object *resource.Info) bool {
 
 // NewInjector returns the appropriate Injector for the given workload and options.
 //   - Service targets use Fargate mode (SSH + Envoy).
-//   - Non-Service targets use the cluster-configured attach mode: node-hosted
-//     agent Jobs or mesh sidecars. Empty headers remain full-proxy inside either mode.
+//   - Non-Service targets always use the node-boundary agent. The legacy
+//     sidecar value is accepted only as a deprecated warning, never as a fallback.
 func NewInjector(opts InjectOptions) Injector {
 	if isServiceTarget(opts.Object) {
 		return &fargateInjector{opts: opts}
 	}
-	if opts.AttachMode == config.AttachModeNodeAgent {
-		return &nodeAgentInjector{opts: opts}
+	if opts.AttachMode == config.AttachModeSidecar {
+		plog.G(context.Background()).Warn("[node-agent] sidecar mode is deprecated for ordinary workloads; using node-boundary agent instead")
 	}
-	return &meshInjector{opts: opts}
+	return &nodeAgentInjector{opts: opts}
 }
 
 type JSONPatchOp struct {

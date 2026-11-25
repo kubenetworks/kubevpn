@@ -21,11 +21,20 @@ func TestNewInjectorSelectsNodeAgentForNonService(t *testing.T) {
 	}
 }
 
-func TestNewInjectorSelectsMeshByDefault(t *testing.T) {
+func TestNewInjectorSelectsNodeAgentByDefault(t *testing.T) {
 	opts := minimalInjectOptionsForTest()
 	inj := NewInjector(opts)
-	if _, ok := inj.(*meshInjector); !ok {
-		t.Fatalf("want meshInjector by default, got %T", inj)
+	if _, ok := inj.(*nodeAgentInjector); !ok {
+		t.Fatalf("want nodeAgentInjector by default, got %T", inj)
+	}
+}
+
+func TestNewInjectorSelectsNodeAgentEvenWhenSidecarRequested(t *testing.T) {
+	opts := minimalInjectOptionsForTest()
+	opts.AttachMode = config.AttachModeSidecar
+	inj := NewInjector(opts)
+	if _, ok := inj.(*nodeAgentInjector); !ok {
+		t.Fatalf("sidecar value must not fall back to mesh, got %T", inj)
 	}
 }
 
