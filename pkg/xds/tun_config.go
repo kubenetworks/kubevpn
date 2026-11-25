@@ -28,7 +28,7 @@ type TunConfigServer struct {
 	factory         cmdutil.Factory
 	leases          *leases.Manager
 	routes          *discovery.Broadcaster
-	agentReconciler *AgentReconciler
+	attachmentPublisher *AttachmentPublisher
 }
 
 // NewTunConfigServer initializes the mandatory allocator before serving RPCs.
@@ -54,17 +54,11 @@ func NewTunConfigServer(ctx context.Context, clientset kubernetes.Interface, nam
 	s.routes = discovery.New(ctx, clientset)
 
 	// Best-effort load TLS secret for agent reconciler
-	secret, err := clientset.CoreV1().Secrets(namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	_, err = clientset.CoreV1().Secrets(namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
 		plog.G(ctx).Warnf("[TunConfigServer] failed to load TLS secret, agent reconciler disabled: %v", err)
 	} else {
-		// In-process lease lookup: the reconciler judges the agent tunnel alive
-		// by its heartbeat (IsAgent + LastRenew within agentLeaseFreshness) —
-		// no k8s API call, no exec.
-		leaseMgr := s.leases
-		s.agentReconciler = NewAgentReconciler(clientset, namespace, secret, func(podUID string) bool {
-			return leaseMgr.AgentSessionAlive(podUID, agentLeaseFreshness)
-		})
+		s.attachmentPublisher = NewAttachmentPublisher(clientset, namespace)
 	}
 
 	return s, nil
