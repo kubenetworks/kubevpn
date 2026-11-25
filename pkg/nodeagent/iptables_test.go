@@ -1,0 +1,63 @@
+package nodeagent
+
+import (
+	"context"
+	"strings"
+	"testing"
+
+	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
+)
+
+type fakeRunner struct {
+	listOutput string
+	calls      []string
+}
+
+func (f *fakeRunner) Run(_ context.Context, name string, args ...string) (string, error) {
+	f.calls = append(f.calls, name+" "+strings.Join(args, " "))
+	return f.listOutput, nil
+}
+
+func (f *fakeRunner) commands() string { return strings.Join(f.calls, "\n") }
+
+func TestConvergeHostDNAT_ConvergesAndExcludesAgent(t *testing.T) {
+	runner := &fakeRunner{listOutput: "-A PREROUTING -p tcp ! -s 10.244.0.8 -d 10.244.0.5 -j DNAT --to 10.244.0.8:20001 -m comment --comment \"kubevpn-nodeagent\"\n"}
+	attachments := []controlplane.NodeAttachment{{
+		PodIP: "10.244.0.5", AgentListenerPort: 20001,
+	}}
+	if err := ConvergeHostDNAT(context.Background(), runner, "10.244.0.8", attachments); err != nil {
+		t.Fatal(err)
+	}
+	joined := runner.commands()
+	if !strings.Contains(joined, "-D PREROUTING") {
+		t.Fatal("old marked rule was not flushed")
+	}
+	if !strings.Contains(joined, "! -s 10.244.0.8 -d 10.244.0.5") {
+		t.Fatal("agent source exclusion or exact podIP match missing")
+	}
+	if !strings.Contains(joined, "-p udp") {
+		t.Fatal("UDP DNAT rule missing")
+	}
+	if !strings.HasPrefix(joined, "nsenter --net=/host/proc/1/ns/net") {
+		t.Fatal("rule was not applied in host netns")
+	}
+	if !strings.Contains(joined, "-A PREROUTING -p tcp ! -s 10.244.0.8 -d 10.244.0.5 -j DNAT --to 10.244.0.8:20001") {
+		t.Fatal("expected DNAT rule not installed")
+	}
+	if strings.Count(joined, "-A PREROUTING") != 2 {
+		t.Fatalf("expected one TCP and one UDP add operation, got:\n%s", joined)
+	}
+}
+
+func TestConvergeHostDNAT_EmptyAttachmentsFlushesMarkedRules(t *testing.T) {
+	runner := &fakeRunner{listOutput: "-A PREROUTING -p tcp -d 10.244.0.5 -j DNAT --to 10.244.0.8:20001 -m comment --comment \"kubevpn-nodeagent\"\n"}
+	if err := ConvergeHostDNAT(context.Background(), runner, "10.244.0.8", nil); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(runner.commands(), "-A PREROUTING") {
+		t.Fatal("must not add rules for empty attachments")
+	}
+	if !strings.Contains(runner.commands(), "-D PREROUTING") {
+		t.Fatal("old marked rule was not flushed")
+	}
+}
