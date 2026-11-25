@@ -229,6 +229,11 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 		return false, err
 	}
 	plog.StepDone(ctx, "Traffic manager ready in namespace %q", namespace)
+	if attachMode == config.AttachModeNodeAgent {
+		if err = ensureNodeAgentDaemonSet(ctx, clientset, namespace, image); err != nil {
+			return false, fmt.Errorf("ensure node-agent daemonset: %w", err)
+		}
+	}
 	return true, nil
 }
 

@@ -50,7 +50,21 @@ func Upgrade(ctx context.Context, f cmdutil.Factory, namespace, image string) er
 	if err := upgradeDeploySpec(ctx, f, namespace, config.ConfigMapPodTrafficManager, image); err != nil {
 		return err
 	}
-	return upgradeServiceSpec(ctx, f, namespace)
+	if err := upgradeServiceSpec(ctx, f, namespace); err != nil {
+		return err
+	}
+	clientset, err := f.KubernetesClientSet()
+	if err != nil {
+		return fmt.Errorf("get kubernetes client: %w", err)
+	}
+	deploy, err := clientset.AppsV1().Deployments(namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("get traffic manager deployment: %w", err)
+	}
+	if existingAttachMode(&deploy.Spec.Template.Spec) == config.AttachModeNodeAgent {
+		return ensureNodeAgentDaemonSet(ctx, clientset, namespace, image)
+	}
+	return nil
 }
 
 // existingAttachMode reads KUBEVPN_PROXY_ATTACH_MODE from the pod spec's containers.
