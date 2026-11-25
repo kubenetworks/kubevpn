@@ -623,6 +623,7 @@ Expected: FAIL — 函数不存在。
 - [ ] **Step 3: 实现并接线**
 
 DaemonSet 必须包含：
+- `metadata.name=kubevpn-nodeagent`、`metadata.namespace=<manager namespace>`。
 - `hostNetwork:false`、`hostPID:true`、`privileged:true`、只读 `/proc` 挂载。
 - Downward API env：`NODE_NAME=spec.nodeName`、`POD_IP=status.podIP`、`MANAGER_NAMESPACE=<namespace>`、`IMAGE=<image>`。
 - 容器执行 `kubevpn node-agent`，`imagePullPolicy: IfNotPresent`。
@@ -750,17 +751,71 @@ Co-Authored-By: Kimi <noreply@moonshot.ai>"
 
 - [ ] **Step 1: 补齐真集群生命周期测试**
 
-集成测试必须是多阶段故事，不是单函数调用：
+集成测试必须是多阶段故事，不是单函数调用。文件以 `//go:build integration` 开头，使用现有 `sshUt` 辅助方法；不允许新建只调用单个内部函数的单元测试：
 
-1. connect 普通 default 管理器。
-2. full-proxy：命中规则到本地，未命中到远端；ServiceIP/PodIP/UDP 均验证。
-3. mesh + portmap + leave→re-proxy。
-4. 记录 attach 前后 Deployment generation 与 pod UID，必须不变。
-5. 删除 agent pod，60 秒内恢复。
-6. 删除目标 pod，附件与流量恢复。
-7. 重启 manager，保留配置并恢复。
-8. 同节点第二 workload 不冲突；已有 sidecar 的 pod 不被重复接管。
-9. 检查无 per-pod Job、无 `Address already in use`、无 churn。
+```go
+func TestIntegration_NodeBoundaryFunction(t *testing.T) {
+	u := &sshUt{}
+	t.Run("01-connect/init", u.init)
+	t.Run("01-connect/connect", u.kubevpnConnect)
+
+	t.Run("02-full-proxy/nonintrusive", func(t *testing.T) {
+		podsBefore, err := u.clientset.CoreV1().Pods("default").List(context.Background(), metav1.ListOptions{LabelSelector: "app=reviews"})
+		if err != nil || len(podsBefore.Items) == 0 {
+			t.Fatalf("list reviews before attach: %v", err)
+		}
+		uid := podsBefore.Items[0].UID
+		generation, err := u.clientset.AppsV1().Deployments("default").Get(context.Background(), "reviews", metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		u.kubevpnProxy(t)
+		podsAfter, err := u.clientset.CoreV1().Pods("default").List(context.Background(), metav1.ListOptions{LabelSelector: "app=reviews"})
+		if err != nil || len(podsAfter.Items) == 0 {
+			t.Fatalf("list reviews after attach: %v", err)
+		}
+		if podsAfter.Items[0].UID != uid {
+			t.Fatal("attach restarted the target pod")
+		}
+		deployAfter, err := u.clientset.AppsV1().Deployments("default").Get(context.Background(), "reviews", metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if deployAfter.Generation != generation.Generation {
+			t.Fatal("attach changed the workload generation")
+		}
+		for _, c := range podsAfter.Items[0].Spec.Containers {
+			if c.Name == pkgconfig.ContainerSidecarVPN || c.Name == pkgconfig.ContainerSidecarEnvoy {
+				t.Fatalf("sidecar found in ordinary proxy pod: %s", c.Name)
+			}
+		}
+	})
+	t.Run("03-mesh/portmap/leave-reproxy", func(t *testing.T) {
+		u.kubevpnProxyWithServiceMesh(t)
+		u.serviceMeshReviewsServiceIP(t)
+		u.kubevpnLeave(t)
+		u.kubevpnProxyWithServiceMeshAndK8sServicePortMap(t)
+		u.serviceMeshReviewsServiceIPPortMap(t)
+	})
+	t.Run("04-agent-restart", func(t *testing.T) {
+		cmd := exec.Command("kubectl", "delete", "pod", "-n", "kubevpn", "-l", "app=kubevpn-nodeagent", "--wait=true")
+		if output, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("delete node agent: %v: %s", err, output)
+		}
+		u.healthCheckServiceDetails(t)
+	})
+	t.Run("05-target-pod-restart", func(t *testing.T) {
+		cmd := exec.Command("kubectl", "delete", "pod", "-n", "default", "-l", "app=reviews", "--wait=true")
+		if output, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("delete target pod: %v: %s", err, output)
+		}
+		u.healthCheckServiceDetails(t)
+	})
+	t.Run("06-quit", u.kubevpnQuit)
+}
+```
+
+以上测试通过后再运行完整 `TestFunctions` 与 `TestSSHFunctions`；不能在只有单一辅助检查通过时宣布阶段完成。
 
 Linux CI 超过 40 分钟按失败处理；失败时输出 NODE_ATTACHMENTS、宿主机 PREROUTING 和 agent/Envoy 日志。
 
