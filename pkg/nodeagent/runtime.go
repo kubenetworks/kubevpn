@@ -2,6 +2,7 @@ package nodeagent
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"os/exec"
@@ -53,21 +54,42 @@ func Run(ctx context.Context, opts Options) error {
 	defer supervisor.Stop()
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
+	var lastSignature string
+	reconcile := func() {
+		signature, err := attachmentSignature(ctx, opts)
+		if err != nil {
+			plog.G(ctx).Warnf("[node-agent] compute attachment signature: %v", err)
+			return
+		}
+		if signature == lastSignature {
+			return
+		}
+		if err := reconcileAttachments(ctx, opts, supervisor); err != nil {
+			plog.G(ctx).Warnf("[node-agent] reconcile attachments failed: %v", err)
+			lastSignature = ""
+			return
+		}
+		lastSignature = signature
+	}
 	trigger(changes)
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-changes:
-			if err := reconcileAttachments(ctx, opts, supervisor); err != nil {
-				plog.G(ctx).Warnf("[node-agent] reconcile attachments failed: %v", err)
-			}
+			reconcile()
 		case <-ticker.C:
-			if err := reconcileAttachments(ctx, opts, supervisor); err != nil {
-				plog.G(ctx).Warnf("[node-agent] reconcile attachments failed: %v", err)
-			}
+			reconcile()
 		}
 	}
+}
+
+func attachmentSignature(ctx context.Context, opts Options) (string, error) {
+	cm, err := opts.Clientset.CoreV1().ConfigMaps(opts.ManagerNamespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		return "", fmt.Errorf("read traffic manager configmap: %w", err)
+	}
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(cm.Data[config.KeyNodeAttachments]))), nil
 }
 
 func trigger(changes chan struct{}) {
