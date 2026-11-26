@@ -230,18 +230,18 @@ assert_body "header match goes to authors" \
 assert_body "no header goes to original reviews" \
   "$KUBECTL -n $NS exec $CURL_POD -- curl -fsS --max-time 15 http://$REVIEWS_IP:9080/health" \
   "Reviews is healthy"
-assert_body "second workload header match" \
-  "$KUBECTL -n $NS exec $CURL_POD -- curl -fsS --max-time 15 -H 'env: test' http://$DETAILS_IP:9080/health" \
-  "Authors is healthy"
-assert_body "second workload origin" \
-  "$KUBECTL -n $NS exec $CURL_POD -- curl -fsS --max-time 15 http://$DETAILS_IP:9080/health" \
-  "Details is healthy"
 assert_body "ServiceIP header match goes to authors" \
   "$KUBECTL -n $NS exec $CURL_POD -- curl -fsS --max-time 15 -H 'env: test' http://$REVIEWS_SVC_IP:9080/health" \
   "Authors is healthy"
 assert_body "ServiceIP no header goes to original reviews" \
   "$KUBECTL -n $NS exec $CURL_POD -- curl -fsS --max-time 15 http://$REVIEWS_SVC_IP:9080/health" \
   "Reviews is healthy"
+assert_body "second workload header match" \
+  "$KUBECTL -n $NS exec $CURL_POD -- curl -fsS --max-time 15 -H 'env: test' http://$DETAILS_IP:9080/health" \
+  "Authors is healthy"
+assert_body "second workload origin" \
+  "$KUBECTL -n $NS exec $CURL_POD -- curl -fsS --max-time 15 http://$DETAILS_IP:9080/health" \
+  "Details is healthy"
 
 # UDP uses a separate static UDP proxy and UDP echo backend; TCP success is not
 # treated as evidence for UDP.
