@@ -119,6 +119,7 @@ agent 不需要 batch/jobs、`pods/exec` 或全集群 pod list/watch 权限。
 ## 5. 生命周期与故障语义
 
 - **目标 pod 创建/重建：** manager 更新附件；agent 按新 podIP 替换规则。无 per-pod 隧道或租约迁移。
+- **attach 就绪：** 注入方必须等待节点 agent admin `/listeners` 中实际出现所有 pod/Service 直连 listener，避免客户端在 agent 尚未就绪时建立远端 keep-alive 连接。不能只等待 ConfigMap 发布。
 - **leave：** manager 删除附件；agent 删除对应规则；该节点最后一个附件消失时停止对应 workload envoy。
 - **sidecar 共存：** manager 不发布附件，旧附件若存在则删除。
 - **agent 重启：** 启动时先清理本机带 `kubevpn-nodeagent` comment 的旧规则，再按当前附件重建。agent Pod IP 变化时旧规则不得残留。允许短暂中断，验收要求 60 秒内恢复。

@@ -6,11 +6,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/cli-runtime/pkg/resource"
 	restfake "k8s.io/client-go/rest/fake"
@@ -122,6 +126,52 @@ func readRuleOwners(t *testing.T, s *TunConfigServer, ns string) []string {
 	return owners
 }
 
+func prepareNodeAgentReady(t *testing.T, env *testEnv, ns, workloadUID string) {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, portText, err := net.SplitHostPort(r.Host)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		_, _ = w.Write([]byte(fmt.Sprintf("%s_%s.nodes.node-a_%s_TCP", ns, workloadUID, portText)))
+	}))
+	t.Cleanup(server.Close)
+	_, portText, err := net.SplitHostPort(server.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attachment := controlplane.NodeAttachment{
+		Namespace: ns, WorkloadUID: workloadUID, NodeName: "node-a", PodIP: "10.244.0.5",
+		NodeID: workloadUID + ".nodes.node-a", AgentListenerPort: int32(port - 5000),
+		Ports: []controlplane.AgentOriginPort{{ContainerPort: 9080, Protocol: corev1.ProtocolTCP, AgentListenerPort: int32(port)}},
+	}
+	data, err := yaml.Marshal([]controlplane.NodeAttachment{attachment})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cm, err := env.server.clientset.CoreV1().ConfigMaps(ns).Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cm.Data[config.KeyNodeAttachments] = string(data)
+	if _, err := env.server.clientset.CoreV1().ConfigMaps(ns).Update(context.Background(), cm, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "agent-a", Namespace: ns, Labels: map[string]string{"app": "kubevpn-nodeagent"}},
+		Spec:       corev1.PodSpec{NodeName: "node-a"},
+		Status:     corev1.PodStatus{Phase: corev1.PodRunning, PodIP: "127.0.0.1"},
+	}
+	if _, err := env.server.clientset.CoreV1().Pods(ns).Create(context.Background(), pod, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
+		t.Fatal(err)
+	}
+}
+
 // TestInject_MultiUser_ProxyLeave drives the server-side inject/leave RPCs end to end
 // through the real gRPC server with a fully faked factory (no cluster): two owners proxy
 // the same workload with different headers -> two envoy rules coexist; one leaves -> the
@@ -138,6 +188,7 @@ func TestInject_MultiUser_ProxyLeave(t *testing.T) {
 	env.server.factory = newInjectTestFactory(t, injectedDeployment(ns))
 
 	proxy := func(owner string, headers map[string]string) {
+		prepareNodeAgentReady(t, env, ns, "deployments.apps.foo")
 		stream, err := env.client.ProxyInject(context.Background(), &rpc.InjectRequest{
 			Namespace:    ns,
 			Workloads:    []string{"deployments.apps/foo"},

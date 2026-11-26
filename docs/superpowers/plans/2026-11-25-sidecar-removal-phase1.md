@@ -23,6 +23,8 @@
 > rules are inserted with `-I PREROUTING 1`, before KUBE-SERVICES. Run/sync use
 > the explicit `legacy-sidecar` request mode and hidden `legacy-proxy` command,
 > preserving their existing sidecar path without enabling a public fallback.
+> Attach returns only after the node agent's admin `/listeners` confirms every
+> direct listener is active, preventing premature remote keep-alive connections.
 
 ## Global Constraints
 

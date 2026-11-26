@@ -66,5 +66,5 @@ func (n *nodeAgentInjector) Inject(ctx context.Context) error {
 		return fmt.Errorf("add envoy config: %w", err)
 	}
 
-	return nil
+	return waitNodeAgentReady(ctx, o)
 }
