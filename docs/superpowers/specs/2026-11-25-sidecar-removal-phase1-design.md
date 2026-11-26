@@ -1,7 +1,7 @@
 # Sidecar Removal Phase 1 — 普通 Proxy 脱离 Sidecar
 
 - **日期:** 2026-11-25
-- **状态:** approved（待实施）
+- **状态:** implemented（真实集群矩阵全绿，run 45846188202）
 - **上游架构:** `docs/superpowers/specs/2026-11-23-node-boundary-agent-redesign.md`
 - **PoC 证据:** `docs/superpowers/poc/2026-11-23-node-boundary-result.md`
 

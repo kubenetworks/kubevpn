@@ -1,207 +1,209 @@
 # Node-hosted Traffic Agent (Non-intrusive Proxy Attachment)
 
-> Status: **implemented (P1-P3)** — node-agent is now the default mode. Sidecar injection
-> remains available as an opt-in for restricted clusters and SSH users.
+> Status: **implemented (Phase 1)** — the node-boundary DaemonSet is the default for
+> ordinary non-Service proxy/connect. Run, sync, and Fargate/Service retain their legacy
+> sidecar paths pending later migration phases. The legacy per-pod Job architecture is
+> described only as historical context in §14–§21.
 
 ## 1. The Question
 
-`kubevpn proxy` today patches the workload's PodSpec (VPN + Envoy sidecars) and the pods
-restart during rollout. Field complaints cluster around exactly this: image overrides
-(#634), fighting an operator that reconciles the pod spec, Istio coexistence (#562, #568),
-and workloads where a restart is expensive or disallowed.
+The original node-agent proposal attached a privileged Job to every target pod and entered
+that pod's network namespace. It avoided a rollout, but still created one Job and one TUN
+lease per replica and coupled correctness to pod-local netns and `ORIGINAL_DST` behavior.
+The production design is now a **node-boundary agent** with these properties:
 
-Telepresence answers the same demand with a **node-hosted traffic agent**: the
-traffic-manager creates a privileged Job on the target pod's node that attaches to the
-pod's Linux namespaces from the outside — no workload modification, no pod restart.
-Their documented tradeoff: it requires `hostPID`, `SYS_ADMIN/SYS_PTRACE/NET_ADMIN/NET_RAW`,
-a read-only container-runtime socket mount, a namespace permitting PSA privileged, and it
-does not support user-namespaced pods (`hostUsers: false`).
+- no workload spec mutation and no rolling restart;
+- one DaemonSet agent per node and one tunnel/DHCP lease per node;
+- no per-pod Job, per-pod TUN lease, or per-pod Envoy network namespace dependency;
+- declarative desired state: the manager publishes attachments, the agent converges host
+  iptables and local Envoy processes;
+- `hostNetwork=false`, `hostPID=true`, read-only host `/proc`, and the existing privileged
+  agent level.
 
-Should KubeVPN build the equivalent? This document says **yes, as the default mode**, and
-defines it. It deliberately does NOT follow [53-ebpf-feasibility.md](53-ebpf-feasibility.md)'s
-"do not own the node" reflex — that principle governs eBPF datapath work; a node-hosted
-agent is an attachment mechanism that still reuses every routing decision KubeVPN already
-makes in userspace. The node is rented (one scoped Job per target pod), not owned
-(no DaemonSet, no CNI territory, nothing that outlives the session).
+Sidecar is not a fallback for ordinary workloads. Run, sync, and Fargate/Service mode keep
+their existing paths during Phase 1 and will be migrated separately.
 
 ## 2. Requirements
 
 | # | Requirement |
 |---|---|
 | R1 | Zero workload modification: PodSpec and controller templates untouched, no rollout, no pod restart |
-| R2 | Routing semantics identical to mesh mode: header splitting, multi-user OwnerID rules, TUN IP hot-update via xDS |
-| R3 | Node-agent is the default at cluster level; sidecar remains available as opt-in (no CLI flag, `cmd` stays frozen) |
-| R4 | Sidecar mode remains available as opt-in; node-agent mode is the default, not the only path |
-| R5 | Session-scoped: nothing persists on the node after the last rule for the session is removed |
+| R2 | Routing semantics identical to mesh: OwnerID rules, header splitting, multi-user merge, TUN IP hot update |
+| R3 | Ordinary non-Service proxy/connect uses only node-boundary; no silent sidecar fallback |
+| R4 | Declarative desired state with stable allocation and convergence, not per-pod imperative job reconciliation |
+| R5 | One tunnel and one agent lease per node; no per-pod jobs or leases |
+| R6 | Correct podIP **and Service ClusterIP** interception without relying on `ORIGINAL_DST` across netns |
+| R7 | Attach returns only after the actual listeners are ready; uninstall leaves no agent or host DNAT state |
 
 ## 3. Mechanism
 
-Everything downstream of packet capture is reused unchanged. Only the delivery of the
-capture stack changes — from "patch sidecars into the pod" to "run the same two processes
-outside the pod, with the pod's network namespace".
-
-```
-traffic-manager ProxyInject (server-side, existing path — pkg/xds/inject_service.go)
+```text
+ProxyInject (server-side)
   │
-  ├─ resolve target pods (pod selector, same as today)
-  ├─ addEnvoyConfig → ENVOY_CONFIG Virtual/Rule (OwnerID, headers, ports)  ← ZERO CHANGES
+  ├─ write base Virtual/Rule (OwnerID, headers, ports, selector, IsAgent)
   │
-  └─ NEW: for each target pod:
-      create kubevpn-nodeagent Job in the manager namespace, pinned to the pod's node
-        nodeSelector: kubernetes.io/hostname = pod.Spec.NodeName
-        one Job per pod replica
-      Job container (kubevpn image, two processes, both in the POD's netns):
-        1. locate the target pod's netns:
-            hostPID + hostPath /proc → scan for the cgroup path containing the pod UID
-            (cgroupfs .../kubepods/pod<pod-uid>/...), read /proc/<pid>/ns/net
-            (fallback: CRI runtime socket, read-only mount — same as Telepresence)
-        2. unix.Setns(fd, CLONE_NEWNET) — pure Go, no reexec (golang.org/x/sys/unix)
-        3. write iptables rules INTO pod netns PREROUTING — identical bootstrap to the
-            sidecar's (pkg/inject/container.go): DNAT tcp/udp non-cluster → :15006
-        4. kubevpn server (TUN tunnel) — self-allocates its TUN IP from the control
-            plane over gRPC+TLS, exactly like the VPN sidecar does today
-        5. envoy — xDS to the traffic manager, capture listener on :15006,
-            routes by OwnerID/headers → TUN IP
+  ├─ AttachmentPublisher (every 5s)
+  │   ├─ allocate a stable admin base port for each workload
+  │   ├─ list target pods and matching Services
+  │   ├─ allocate stable direct listeners per pod/Service/original port
+  │   ├─ publish NODE_ATTACHMENTS
+  │   ├─ publish a derived Virtual per (namespace, workload, node)
+  │   └─ persist AGENT_PORT_ALLOCATIONS tombstones
+  │
+  └─ node-boundary DaemonSet agent (one per node)
+      ├─ one kubevpn server tunnel: OwnerID=<nodeName>, IsAgent=true
+      ├─ watch the manager ConfigMap through a metadata.name-filtered informer
+      ├─ filter attachments to this node
+      ├─ insert marked host-netns PREROUTING rules BEFORE KUBE-SERVICES:
+      │    dst podIP/ServiceIP + original dport → agentPodIP:listenerPort
+      │    exclude src=<agentPodIP> to prevent origin-forwarding loops
+      └─ one Envoy per workload on this node:
+           direct listener per pod/Service/original port
+           header match → user TUN IP through the node tunnel
+           no match     → explicit podIP:containerPort or ClusterIP:ServicePort
 ```
 
-The DNS exemption (`! -s 127.0.0.1`, cluster-CIDR exclusions) and the `:15006`
-capture-listener contract are the same bytes as the sidecar bootstrap. Envoy bootstrap
-templates (`envoy.yaml` family, docs/17 §8) are reused as-is.
+`ORIGINAL_DST` is deliberately **not** used: the host and agent run in different network
+namespaces, so the sidecar capture/restore assumption is invalid. Direct listeners and
+explicit return endpoints are required. This was proven by real-cluster errors
+`original_dst_load_balancer: No downstream connection or no original_dst`.
 
-## 4. Agent Job Spec
+## 4. DaemonSet spec
 
 | Field | Value | Why |
 |---|---|---|
-| `nodeName` / `nodeSelector` | target pod's node | the netns is only reachable from its own host |
-| `hostPID: true` | required | to read other containers' `/proc` and nsenter |
-| capabilities | `SYS_ADMIN`, `SYS_PTRACE`, `NET_ADMIN`, `NET_RAW` (or `privileged: true`) | `setns` + iptables + TUN creation inside a foreign netns |
-| `hostPath` mounts | `/proc` (read-only); optional CRI socket (read-only) | PID discovery; fallback path only |
-| env | `CIDR4`, `CIDR6`, `TrafficManagerService`, TLS secret refs | same contract as sidecars (docs/17 §4) |
-| labels | `kubevpn/owner-id`, `kubevpn/pod-uid` | reconcile + leave deletion keys |
-| name | `kubevpn-nodeagent-<podUID>` (deterministic, ≤63 chars) | idempotent create-or-skip in reconcile |
-| restartPolicy | `OnFailure` | Job survives transient crashes; pod loss handled by reconcile |
+| name | `kubevpn-nodeagent` | one DaemonSet per manager namespace |
+| `hostNetwork` | `false` | the agent uses its own Pod IP as the DNAT target |
+| `hostPID` | `true` | required to enter the host network namespace with nsenter |
+| privilege | `privileged: true` | required in the PoC environment for host netns and TUN |
+| hostPath | `/proc` mounted read-only at `/host/proc` | access to `/host/proc/1/ns/net` |
+| service account | traffic-manager SA | get/list/watch only the manager ConfigMap |
+| pod identity | Downward API `NODE_NAME`, `POD_IP` | node filtering and DNAT target |
+| TLS env | manager Secret cert/key/server/obfuscation | same tunnel contract as sidecars |
+| SA UID annotation | `kubevpn.io/service-account-uid` | forces a rollout after manager reinstall |
+| imagePullPolicy | `IfNotPresent` | supports CI-loaded images |
 
-Image: the existing kubevpn traffic-manager image family. The VPN and Envoy sidecars
-already ship as containers of that image with different commands — the agent Job runs
-both command entrypoints as child processes of one container. Verify at implementation
-time that one image contains both binaries (expected yes; both sidecars use
-`config.Image` today).
+The agent image contains both `kubevpn server` and `envoy`; each workload's Envoy gets a
+unique admin port (`adminBase+5000`) and `--base-id`.
 
-## 5. Injector Strategy Integration
+## 5. Control-plane model
 
-`pkg/inject` already selects an `Injector` strategy in `NewInjector`.
+- **`Virtual.agentListenerPort`** — stable per-workload admin/base-id port. It is not the
+  complete data-listener allocation.
+- **`Virtual.agentOrigins`** — manager-derived per-node desired state. Each origin records
+  a real pod or a Service, its return IP, and direct listener mappings.
+- **`NodeAttachment`** — includes `podUID`, `serviceName`, `nodeName`, `nodeID`, target
+  `podIP`, optional `originIP`, and per-port `containerPort`, `originPort`,
+  `agentListenerPort`.
+- **`AGENT_PORT_ALLOCATIONS`** — workload/origin assignments and tombstones. Leave removes
+  attachments, not allocation history, so another workload cannot immediately reuse a port
+  whose old Envoy may still be exiting. Re-proxy restores the original assignment.
+- **Derived UID** — `<workloadUID>.nodes.<nodeName>`, used only by xDS. Status and leave-all
+  filter derived Virtuals and operate on the base workload.
 
-| Condition | Strategy | Containers |
-|---|---|---|
-| Target is a K8s Service | `fargateInjector` | SSH + Envoy (sidecar) |
-| attachMode = "sidecar" | `meshInjector` | VPN + Envoy (sidecar) |
-| attachMode = "node-agent" (default) | `nodeAgentInjector` (new) | none — launches node-hosted Jobs |
+A Service is not collapsed into a pod origin. `originIP=ClusterIP` and
+`originPort=ServicePort` preserve kube-proxy/IPVS load balancing. Host rules are inserted at
+PREROUTING position 1 because a Service can otherwise be consumed before a podIP-only rule.
 
-`nodeAgentInjector.Inject` reuses `addEnvoyConfig/VirtualStore.AddRule` verbatim, then
-delegates Job creation to the traffic-manager's own namespace (injection already runs
-server-side inside the manager pod — docs/17 §7 — so the Job API calls are local to the
-manager, no client-side path).
+## 6. Lifecycle and readiness
 
-`envoyRuleSpec` gains nothing; `FargateMode` stays false and the xDS side sees mesh-mode
-listeners (`BindToPort=false`, iptables capture). No control-plane changes.
-
-`nodeAgentInjector.Inject` first checks the manager namespace's PSA label: if enforce is
-`restricted` or `baseline`, returns a clean error telling users to set
-`proxy.attachMode=sidecar` explicitly instead of creating a Job that will fail.
-
-## 6. Lifecycle
-
-| Event | Action |
+| Event | Behavior |
 |---|---|
-| Proxy inject | create-or-skip deterministic Job per target pod |
-| Pod reschedules to another node | reconcile (manager pod informer over namespaces holding rules): old Job deleted, new Job created on the new node |
-| Pod deleted | reconcile deletes the orphaned Job (cross-namespace ownerRef is forbidden — labels, not ownerRefs) |
-| Second user proxies the same workload | Job already exists (deterministic name); only a new Rule is appended — rules merge as today (docs/17 §5) |
-| Last rule removed (leave/disconnect) | `UnpatchContainer`'s "empty" branch additionally deletes the Jobs by owner-id label |
-| Manager lease reaper reclaims a dead client's rules | same deletion path as leave — nothing lingers |
+| Attach | Publisher creates attachments; the injector waits for every direct listener to appear in the node agent's admin `/listeners` output before returning |
+| Pod reschedules/restarts | Publisher replaces attachment state; agent converges host rules and Envoy listeners without creating a job or lease |
+| Agent restarts | Marked rules are flushed and rebuilt; a new agent Pod IP replaces the old DNAT target |
+| Manager restarts | ConfigMap state and allocation tombstones persist; tunnel and xDS reconnect |
+| Manager uninstall/reinstall | New ServiceAccount UID annotation rolls the DaemonSet, preventing permanent `Unauthorized` from an old token |
+| TLS rotation | Env changes trigger a DaemonSet spec update instead of the image/SA early return |
+| Leave | Attachments and derived Virtuals are removed; allocation tombstones remain to prevent conflicts |
+| Uninstall | DaemonSet is deleted; agent termination flushes all marked host DNAT rules |
 
-## 7. RBAC & Configuration
+## 7. RBAC & configuration
 
-- **RBAC additions** (manager SA, both the Helm ClusterRole and the lazy namespaced Role
-  where applicable): `batch/jobs` create/get/list/watch/delete in the manager namespace.
-  Pod read access already exists for injection.
-- **Configuration**: Helm value on the traffic manager, e.g.
-  `proxy.attachMode: node-agent (default) | sidecar`, mirrored in the
-  `genDeploySpec` code path — the chart and code must stay in sync (docs/24 §8). The mode
-  travels into `ProxyInject`'s strategy selection; the client sends no mode.
-  No `cmd` change.
-- Namespace requirement (documented for users): the manager namespace must permit PSA
-  privileged (default mode). Sidecar mode exists as opt-in for restricted clusters.
+- Agent list/watch of the manager ConfigMap is restricted with
+  `metadata.name=kubevpn-traffic-manager`, matching the manager Role's `resourceNames`
+  constraint.
+- The manager lists target pods and Services for attachment generation. No per-pod Job,
+  `pods/exec`, or host CRI socket is required.
+- The manager can create/update/delete the node-agent DaemonSet and read the traffic-manager
+  ServiceAccount/Secret.
+- The manager namespace must permit privileged pods. Sidecar remains a separate legacy path
+  for run/sync/Fargate, not a fallback for ordinary proxy.
 
-## 8. Limitations (recorded honestly)
+## 8. Limitations
 
 | Limitation | Notes |
 |---|---|
-| GKE Autopilot and hard-restricted clusters | privileged Jobs rejected — use sidecar mode explicitly via `proxy.attachMode=sidecar` |
-| `hostUsers: false` (user-namespaced pods) | unsupported initially — same gap as Telepresence |
-| Mesh-internal DNS | header-intercepted traffic resolves fine; mesh-only names (Istio ServiceEntry) do not resolve during attachment — accepted, matches Telepresence |
-| New privileged attack surface | mitigated in §9 |
-| Per-replica Jobs | one privileged Job per replica of the target workload; acceptable for dev clusters, called out for large clusters |
-| SSH jump hosts + node-agent mesh | 已验证可用（agent envoy → TUN → manager → SSH 中继 → 用户，2026-11-21 CI run 44899084723 access log 证据）。此前失败根因：① createOutboundPod 重建 manager 时覆盖 attach-mode 配置；② leave/re-inject 生命周期无仲裁器。两者均已修复。 |
+| Privileged node access | `hostPID` and privileged containers remain a significant trust requirement; restricted clusters need the existing sidecar path outside Phase 1 |
+| `ORIGINAL_DST` | Not supported across host/agent netns; direct listeners are mandatory, not optional |
+| run/sync/Fargate migration | These modes intentionally retain legacy sidecar behavior in Phase 1 via the internal `legacy-sidecar` request mode and hidden `legacy-proxy` command |
+| Global sidecar removal | Only starts after sync, run, and Fargate/Service have independent migrations; it is not part of this phase |
+| Allocation capacity | Tombstones are retained until the manager ConfigMap is deleted, trading eventual range exhaustion for correctness during leave/re-proxy races |
 
-## 9. Security Analysis
+## 9. Security analysis
 
-- Image reuse: no new artifact in the supply chain — the agent Job is the already-audited
-  traffic-manager image.
-- Scoping: Job lives in the manager namespace, labeled by owner/pod, deleted when the
-  session ends; it holds no credentials beyond the TLS secret contract sidecars already get.
-- CRI socket, when used, is read-only and only the fallback path (default is `/proc` scan).
-- The Job cannot outlive its rules: the reaper path deletes it even after client crashes.
-- Residual risk, stated: `SYS_ADMIN` in the host PID namespace ≈ root on the node while
-  the Job lives. This is the price of non-intrusiveness and the reason sidecar mode remains
-  available as an opt-in for restricted clusters.
+- No new image or third-party data-plane dependency is introduced.
+- The agent holds the manager's namespaced SA and TLS secret, not a cluster-admin credential.
+- Host `/proc` is read-only; host mutation is limited to marked iptables rules and local
+  processes.
+- The DaemonSet does not use `hostNetwork`, reducing exposure to host services.
+- The remaining privileged attack surface is the price of non-intrusiveness. It must not be
+  hidden behind a fallback that silently changes the security model.
 
-## 10. Integration Tests (mandatory per repo rules)
+## 10. Integration tests (mandatory per repo rules)
 
-Wire real components against `fake.NewSimpleClientset`, structured as multi-phase stories:
+Fake-clientset and process-level coverage includes:
 
-1. inject → assert ENVOY_CONFIG rule written AND Job created with correct `nodeSelector`,
-   deterministic name, labels (pod UID + OwnerID)
-2. second user, different headers → same workload: Job NOT duplicated, two rules present
-3. pod rescheduled (simulate pod update changing `spec.nodeName`) → reconcile creates the
-   new Job and deletes the old one; rules untouched
-4. last user leaves → Jobs deleted, ENVOY_CONFIG Virtual removed, workload never patched
-5. PSA-restricted simulation → clean, explanatory error (R4)
-6. crash recovery: manager restarts → reconcile restores missing Jobs from existing rules
+1. stable unique admin and per-origin allocations, including removal/re-add and exhaustion;
+2. publisher creates/removes attachments and derived Virtuals, skips sidecar pods, and keeps
+   state identical on an identical reconcile;
+3. Service discovery maps ServicePort to targetPort and publishes a Service origin per node;
+4. host DNAT inserts marked rules before KUBE-SERVICES, matches exact IP/port, excludes the
+   agent source, and flushes on empty attachments;
+5. direct xDS listeners avoid `ORIGINAL_DST`, use explicit podIP/ClusterIP return endpoints,
+   and deduplicate clusters/endpoints;
+6. readiness checks reject missing agents and missing listeners, using `httptest` and fake
+   pods/ConfigMaps;
+7. DaemonSet security contract, SA UID rollout, TLS env refresh, and core-resource cleanup;
+8. status/leave-all hide derived Virtuals; legacy run/sync mode is preserved;
+9. real-cluster lifecycle: attach, mesh, portmap, leave/re-proxy, agent/target/manager
+   restarts, no per-pod Jobs, no workload generation or UID change.
+
+The PoC additionally verifies ServiceIP header/origin, multiple workloads, UDP, and
+`hostNetwork=false`.
 
 ## 11. Phasing
 
-1. **P1 — Job plumbing**: agent Job template + creator in `pkg/cluster/manager` (or
-   `pkg/inject`), nsenter bootstrap, iptables parity, TUN self-allocation verified against
-   a real cluster (`-tags=integration`).
-2. **P2 — Strategy + config**: `nodeAgentInjector`, Helm value + code-path sync, clean
-   refusal on restricted clusters (PSA label check).
-3. **P3 — Reconcile**: pod-node drift, orphan cleanup, crash recovery; docs for the
-   kubevpn.dev user guide.
+1. **Phase 1 — ordinary proxy/connect:** replace sidecar with the node-boundary DaemonSet,
+   keep run/sync/Fargate on their existing paths, and require the full real-cluster matrix.
+2. **Phase 2 — sync migration.**
+3. **Phase 3 — run migration.**
+4. **Phase 4 — Fargate/Service migration.**
+5. **Final:** delete sidecar code and configuration globally only after all migrations pass.
 
 ## 12. Measured vs Reasoned
 
 | Claim | Basis |
 |---|---|
-| Telepresence node-agent mechanism, privileges, pros/cons | Measured (their docs, 2026-11: `/docs/howtos/agent-modes`, `/docs/concepts/architecture`) |
-| Sidecar bootstrap rules to replicate | Measured (`pkg/inject/container.go`, docs/17) |
-| Injection runs server-side in manager | Measured (`pkg/xds/inject_service.go`, docs/17 §7) |
-| One image contains both vpn-server and envoy binaries | **Measured** — `config.Image` contains all binaries, invoked via subcommands |
-| `/proc` cgroup scan finds pod netns | **Implemented** (`pkg/agent/netns.go`); integration test written (`pkg/inject/nodeagent_e2e_integration_test.go`); real-cluster verification pending due to test cluster unavailability |
-| Managed-cluster PSA rejection behavior | **Implemented** — clean error path with user-facing message on privileged job rejection (tested in fake-cluster integration tests) |
+| host-to-agent cross-netns DNAT works for podIP and ServiceIP | **Measured** by the node-boundary PoC, including header and origin paths |
+| `ORIGINAL_DST` cannot replace explicit origins | **Measured** by real-cluster `No downstream connection or no original_dst` errors |
+| Early attach can create stale remote keep-alive connections | **Measured** by direct listener success alongside remote test responses; readiness gate added |
+| ServiceAccount recreation breaks old agent credentials | **Measured** by repeated `Unauthorized` after manager reinstall; UID annotation added |
+| Full ordinary proxy is non-intrusive | **Measured** by integration assertions on unchanged Deployment generation and pod UID |
+| Full matrix is green | **Measured** — GitHub Actions run `45846188202`: Test, Coverage, Node-Boundary PoC, and both macOS jobs passed |
 
 ## 13. Related Files
 
 | File | Purpose |
 |---|---|
-| `pkg/inject/injector.go` | `Injector` interface + `NewInjector` factory |
-| `pkg/inject/mesh.go` | mesh strategy — reference for `nodeAgentInjector` |
-| `pkg/inject/container.go` | sidecar bootstrap iptables rules to replicate |
-| `pkg/inject/envoy.go` / `virtual_store.go` | rule CRUD reused verbatim |
-| `pkg/xds/inject_service.go` | server-side `ProxyInject` — Job creation site |
-| `pkg/cluster/manager/resources.go` | resource generator patterns for Job spec |
-| `charts/kubevpn/` | Helm value `proxy.attachMode` (defaults to node-agent) |
-| docs/17-sidecar-injection.md | sidecar mode docs |
+| `pkg/controlplane/virtual.go`, `node_attachment.go` | attachment/origin model and stable allocators |
+| `pkg/xds/attachment_publisher.go`, `service_attachments.go` | desired-state publication and Service mapping |
+| `pkg/xds/cache.go` | direct listener/route/cluster generation |
+| `pkg/nodeagent/runtime.go`, `supervisor.go`, `iptables.go` | node tunnel, reconciliation, Envoy supervision, host DNAT |
+| `pkg/cluster/manager/nodeagent_daemonset.go` | DaemonSet security and lifecycle contract |
+| `pkg/inject/nodeagent_ready.go` | actual listener readiness gate |
+| `pkg/daemon/action/status.go`, `pkg/xds/inject_service.go` | status/leave filtering and per-request attach mode |
+| `cmd/kubevpn/cmds/legacy_proxy.go` | hidden run/sync compatibility command |
 
 ## 14. Bug Fix: Shim Process Filtering
 
