@@ -236,6 +236,13 @@ assert_body "ServiceIP header match goes to authors" \
 assert_body "ServiceIP no header goes to original reviews" \
   "$KUBECTL -n $NS exec $CURL_POD -- curl -fsS --max-time 15 http://$REVIEWS_SVC_IP:9080/health" \
   "Reviews is healthy"
+log "details Envoy config"
+"$KUBECTL" -n "$NS" exec "$AGENT" -- cat /tmp/poc-details.yaml
+log "current host PREROUTING rules"
+"$KUBECTL" -n "$NS" exec "$AGENT" -- nsenter --net=/host/proc/1/ns/net iptables -t nat -S PREROUTING
+log "details Envoy log"
+"$KUBECTL" -n "$NS" exec "$AGENT" -- cat /tmp/poc-details.log
+
 assert_body "second workload header match" \
   "$KUBECTL -n $NS exec $CURL_POD -- curl -fsS --max-time 15 -H 'env: test' http://$DETAILS_IP:9080/health" \
   "Authors is healthy"
