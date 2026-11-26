@@ -22,8 +22,9 @@ func (execRunner) Run(ctx context.Context, name string, args ...string) (string,
 	return string(output), err
 }
 
-// ConvergeHostDNAT flushes only kubevpn-marked rules, then installs exact
-// podIP → agentIP:port rules for TCP and UDP. The agent-source exclusion is
+// ConvergeHostDNAT flushes only kubevpn-marked rules, then inserts exact
+// destination IP/port → agentIP:port rules at the head of PREROUTING, before
+// kube-proxy can consume Service traffic. The agent-source exclusion is
 // mandatory: otherwise the agent's origin-forwarding is captured again.
 func ConvergeHostDNAT(ctx context.Context, runner CommandRunner, agentIP string, attachments []controlplane.NodeAttachment) error {
 	if runner == nil || agentIP == "" {
@@ -57,7 +58,7 @@ func ConvergeHostDNAT(ctx context.Context, runner CommandRunner, agentIP string,
 			if protocol != "tcp" && protocol != "udp" {
 				continue
 			}
-			args := []string{hostNet, "iptables", "-t", "nat", "-A", "PREROUTING",
+			args := []string{hostNet, "iptables", "-t", "nat", "-I", "PREROUTING", "1",
 				"-p", protocol, "!", "-s", agentIP, "-d", attachment.PodIP,
 				"--dport", fmt.Sprintf("%d", port.DestinationPort()),
 				"-j", "DNAT", "--to", fmt.Sprintf("%s:%d", agentIP, port.AgentListenerPort),

@@ -50,13 +50,13 @@ func TestConvergeHostDNAT_ConvergesAndExcludesAgent(t *testing.T) {
 	if !strings.HasPrefix(joined, "nsenter --net=/host/proc/1/ns/net") {
 		t.Fatal("rule was not applied in host netns")
 	}
-	if !strings.Contains(joined, "-A PREROUTING -p tcp ! -s 10.244.0.8 -d 10.244.0.5 --dport 9080 -j DNAT --to 10.244.0.8:20001") {
+	if !strings.Contains(joined, "-I PREROUTING 1 -p tcp ! -s 10.244.0.8 -d 10.244.0.5 --dport 9080 -j DNAT --to 10.244.0.8:20001") {
 		t.Fatal("expected TCP original-port DNAT rule not installed")
 	}
-	if !strings.Contains(joined, "-A PREROUTING -p tcp ! -s 10.244.0.8 -d 10.96.0.10 --dport 80 -j DNAT --to 10.244.0.8:20003") {
+	if !strings.Contains(joined, "-I PREROUTING 1 -p tcp ! -s 10.244.0.8 -d 10.96.0.10 --dport 80 -j DNAT --to 10.244.0.8:20003") {
 		t.Fatal("expected Service ClusterIP DNAT rule not installed")
 	}
-	if strings.Count(joined, "-A PREROUTING") != 3 {
+	if strings.Count(joined, "-I PREROUTING 1") != 3 {
 		t.Fatalf("expected pod TCP/UDP and service TCP add operations, got:\n%s", joined)
 	}
 }
@@ -66,7 +66,7 @@ func TestConvergeHostDNAT_EmptyAttachmentsFlushesMarkedRules(t *testing.T) {
 	if err := ConvergeHostDNAT(context.Background(), runner, "10.244.0.8", nil); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(runner.commands(), "-A PREROUTING") {
+	if strings.Contains(runner.commands(), "-I PREROUTING 1") {
 		t.Fatal("must not add rules for empty attachments")
 	}
 	if !strings.Contains(runner.commands(), "-D PREROUTING") {

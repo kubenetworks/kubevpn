@@ -22,7 +22,7 @@
 - `NewInjector` 对非 Service 目标只返回 node-boundary 实现；Service 目标仍走 fargateInjector。
 - `proxy.attachMode=sidecar` 对普通工作负载只产生 deprecated warning，不再回退为 sidecar；最终阶段删除该配置。
 - manager 发布 `Virtual.agentListenerPort` 与 `NODE_ATTACHMENTS`，不为普通 proxy 创建或对齐 per-pod Job。
-- 节点 agent 使用每节点单隧道；按 pod IP 与 Service ClusterIP/ServicePort 做宿主机 DNAT；规则排除 `src=<agentPodIP>`，避免 agent origin-forwarding 被再次捕获。
+- 节点 agent 使用每节点单隧道；按 pod IP 与 Service ClusterIP/ServicePort 做宿主机 DNAT；规则插入 PREROUTING 链首并排除 `src=<agentPodIP>`，避免 agent origin-forwarding 被再次捕获。
 - `hostNetwork=false`；hostPID/只读 `/proc` 与现有 node-agent 权限级别保持一致，PoC 已证明需要 `privileged: true`。
 - OwnerID、header 路由和 leave 语义保持不变；回源使用显式 podIP cluster，不跨 netns 使用 `ORIGINAL_DST`。
 - 接管失败直接报错，不允许自动降级 sidecar。

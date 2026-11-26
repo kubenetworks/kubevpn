@@ -19,7 +19,8 @@
 > derives per-node `agentOrigins`, allocates direct per-pod/port listeners, and
 > uses explicit podIP return clusters. Service ClusterIPs are separate origins
 > with their ServicePort preserved, because kube-proxy/IPVS may forward only in
-> the host INPUT phase and bypass podIP-only PREROUTING rules.
+> the host INPUT phase and bypass podIP-only PREROUTING rules. All takeover
+> rules are inserted with `-I PREROUTING 1`, before KUBE-SERVICES.
 
 ## Global Constraints
 
