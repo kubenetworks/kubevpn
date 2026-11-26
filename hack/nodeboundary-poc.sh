@@ -27,6 +27,7 @@ cleanup() {
   local status=$?
   # Clean up host-side DNAT rules first, tolerate any errors
   delete_rule tcp "${REVIEWS_IP:-}" "${AGENT_IP:-}" 20001
+  delete_rule tcp "${REVIEWS_SVC_IP:-}" "${AGENT_IP:-}" 20001
   delete_rule tcp "${DETAILS_IP:-}" "${AGENT_IP:-}" 20002
   delete_rule udp "${UDP_IP:-}" "${AGENT_IP:-}" 20003
   # Success cleans up. Failure preserves the namespace for the diagnostic
@@ -122,7 +123,9 @@ spec:
 EOF
 wait_ready "$NS" "$AGENT"
 AGENT_IP="$("$KUBECTL" -n "$NS" get pod "$AGENT" -o jsonpath='{.status.podIP}')"
+REVIEWS_SVC_IP="$("$KUBECTL" -n "$WORKLOAD_NS" get service reviews -o jsonpath='{.spec.clusterIP}')"
 test -n "$AGENT_IP"
+test -n "$REVIEWS_SVC_IP"
 log "agentPodIP=$AGENT_IP reviews=$REVIEWS_IP authors=$AUTHORS_IP details=$DETAILS_IP"
 
 render_tcp_config() {
@@ -214,8 +217,8 @@ wait_listener 20002
   iptables -t nat -A PREROUTING -p tcp ! -s "$AGENT_IP" -d "$REVIEWS_IP" \
   -j DNAT --to "$AGENT_IP:20001" -m comment --comment "$COMMENT"
 "$KUBECTL" -n "$NS" exec "$AGENT" -- nsenter --net=/host/proc/1/ns/net \
-  iptables -t nat -A PREROUTING -p tcp ! -s "$AGENT_IP" -d "$DETAILS_IP" \
-  -j DNAT --to "$AGENT_IP:20002" -m comment --comment "$COMMENT"
+  iptables -t nat -I PREROUTING 1 -p tcp ! -s "$AGENT_IP" -d "$REVIEWS_SVC_IP" --dport 9080 \
+  -j DNAT --to "$AGENT_IP:20001" -m comment --comment "$COMMENT"
 
 "$KUBECTL" -n "$NS" run "$CURL_POD" --image=curlimages/curl:8.10.1 --restart=Never \
   --command -- sh -c 'sleep 3600' >/dev/null
@@ -233,6 +236,12 @@ assert_body "second workload header match" \
 assert_body "second workload origin" \
   "$KUBECTL -n $NS exec $CURL_POD -- curl -fsS --max-time 15 http://$DETAILS_IP:9080/health" \
   "Details is healthy"
+assert_body "ServiceIP header match goes to authors" \
+  "$KUBECTL -n $NS exec $CURL_POD -- curl -fsS --max-time 15 -H 'env: test' http://$REVIEWS_SVC_IP:9080/health" \
+  "Authors is healthy"
+assert_body "ServiceIP no header goes to original reviews" \
+  "$KUBECTL -n $NS exec $CURL_POD -- curl -fsS --max-time 15 http://$REVIEWS_SVC_IP:9080/health" \
+  "Reviews is healthy"
 
 # UDP uses a separate static UDP proxy and UDP echo backend; TCP success is not
 # treated as evidence for UDP.
