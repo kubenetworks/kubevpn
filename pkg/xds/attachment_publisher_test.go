@@ -6,6 +6,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes/fake"
 	"sigs.k8s.io/yaml"
 
@@ -118,6 +119,83 @@ func TestAttachmentPublisher_PublishesAndRemoves(t *testing.T) {
 	_ = yaml.Unmarshal([]byte(got.Data[config.KeyEnvoy]), &virtuals)
 	if len(virtuals) != 1 || len(virtuals[0].AgentOrigins) != 0 {
 		t.Fatalf("stale derived virtuals: %+v", virtuals)
+	}
+}
+
+func TestAttachmentPublisher_PublishesServiceOriginsPerNode(t *testing.T) {
+	ctx := context.Background()
+	podA := newPublisherTestPod()
+	podB := newPublisherTestPod()
+	podB.Name = "reviews-y"
+	podB.UID = "uid-2"
+	podB.Spec.NodeName = "node-b"
+	podB.Status.PodIP = "10.244.0.6"
+	service := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "reviews", Namespace: "default"},
+		Spec: corev1.ServiceSpec{
+			Selector:  map[string]string{"app": "reviews"},
+			ClusterIP: "10.96.0.10",
+			Ports: []corev1.ServicePort{{
+				Protocol: corev1.ProtocolTCP, Port: 80, TargetPort: intstr.FromInt(9080),
+			}},
+		},
+	}
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "kubevpn"},
+		Data:       map[string]string{config.KeyEnvoy: publisherVirtualsYAML},
+	}
+	clientset := fake.NewSimpleClientset(cm, podA, podB, service)
+	p := NewAttachmentPublisher(clientset, "kubevpn")
+	if err := p.reconcileOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got, err := clientset.CoreV1().ConfigMaps("kubevpn").Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var attachments []controlplane.NodeAttachment
+	if err := yaml.Unmarshal([]byte(got.Data[config.KeyNodeAttachments]), &attachments); err != nil {
+		t.Fatal(err)
+	}
+	if len(attachments) != 4 {
+		t.Fatalf("expected two pod and two per-node service attachments: %+v", attachments)
+	}
+	serviceAttachments := 0
+	for _, attachment := range attachments {
+		if attachment.ServiceName == "" {
+			continue
+		}
+		serviceAttachments++
+		if attachment.PodIP != "10.96.0.10" || attachment.OriginIP != "10.96.0.10" {
+			t.Fatalf("service destination/origin mismatch: %+v", attachment)
+		}
+		if len(attachment.Ports) != 1 || attachment.Ports[0].ContainerPort != 9080 || attachment.Ports[0].OriginPort != 80 {
+			t.Fatalf("service port was not mapped to the workload port: %+v", attachment.Ports)
+		}
+	}
+	if serviceAttachments != 2 {
+		t.Fatalf("expected one service attachment per node, got %d", serviceAttachments)
+	}
+	var virtuals []*controlplane.Virtual
+	if err := yaml.Unmarshal([]byte(got.Data[config.KeyEnvoy]), &virtuals); err != nil {
+		t.Fatal(err)
+	}
+	if len(virtuals) != 3 {
+		t.Fatalf("expected base plus two node virtuals: %+v", virtuals)
+	}
+	serviceOrigins := 0
+	for _, derived := range virtuals[1:] {
+		for _, origin := range derived.AgentOrigins {
+			if origin.ServiceName != "" {
+				serviceOrigins++
+				if origin.OriginIP != "10.96.0.10" || origin.PodIP != "10.96.0.10" {
+					t.Fatalf("derived service origin lost ClusterIP: %+v", origin)
+				}
+			}
+		}
+	}
+	if serviceOrigins != 2 {
+		t.Fatalf("expected derived service origin on both nodes, got %d", serviceOrigins)
 	}
 }
 

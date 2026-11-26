@@ -18,6 +18,10 @@ type NodeAttachment struct {
 	NodeName    string `json:"nodeName" yaml:"nodeName"`
 	PodIP       string `json:"podIP" yaml:"podIP"`
 	WorkloadUID string `json:"workloadUID" yaml:"workloadUID"`
+	// ServiceName marks a ClusterIP attachment; empty means a real pod attachment.
+	ServiceName string `json:"serviceName,omitempty" yaml:"serviceName,omitempty"`
+	// OriginIP is the explicit return destination. Empty means PodIP.
+	OriginIP string `json:"originIP,omitempty" yaml:"originIP,omitempty"`
 	// NodeID identifies the manager-derived Virtual for this workload on this node.
 	NodeID            string            `json:"nodeID" yaml:"nodeID"`
 	AgentListenerPort int32             `json:"agentListenerPort" yaml:"agentListenerPort"`

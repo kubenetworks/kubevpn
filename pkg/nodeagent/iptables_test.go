@@ -28,6 +28,11 @@ func TestConvergeHostDNAT_ConvergesAndExcludesAgent(t *testing.T) {
 			{ContainerPort: 9080, Protocol: "TCP", AgentListenerPort: 20001},
 			{ContainerPort: 9081, Protocol: "UDP", AgentListenerPort: 20002},
 		},
+	}, {
+		PodIP: "10.96.0.10", OriginIP: "10.96.0.10", ServiceName: "reviews", AgentListenerPort: 20000,
+		Ports: []controlplane.AgentOriginPort{
+			{ContainerPort: 9080, Protocol: "TCP", OriginPort: 80, AgentListenerPort: 20003},
+		},
 	}}
 	if err := ConvergeHostDNAT(context.Background(), runner, "10.244.0.8", attachments); err != nil {
 		t.Fatal(err)
@@ -48,8 +53,11 @@ func TestConvergeHostDNAT_ConvergesAndExcludesAgent(t *testing.T) {
 	if !strings.Contains(joined, "-A PREROUTING -p tcp ! -s 10.244.0.8 -d 10.244.0.5 --dport 9080 -j DNAT --to 10.244.0.8:20001") {
 		t.Fatal("expected TCP original-port DNAT rule not installed")
 	}
-	if strings.Count(joined, "-A PREROUTING") != 2 {
-		t.Fatalf("expected one TCP and one UDP add operation, got:\n%s", joined)
+	if !strings.Contains(joined, "-A PREROUTING -p tcp ! -s 10.244.0.8 -d 10.96.0.10 --dport 80 -j DNAT --to 10.244.0.8:20003") {
+		t.Fatal("expected Service ClusterIP DNAT rule not installed")
+	}
+	if strings.Count(joined, "-A PREROUTING") != 3 {
+		t.Fatalf("expected pod TCP/UDP and service TCP add operations, got:\n%s", joined)
 	}
 }
 

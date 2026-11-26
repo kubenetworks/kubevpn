@@ -29,6 +29,9 @@ func TestAgentOrigins_DirectListenersAndExplicitPodRoutes(t *testing.T) {
 				{ContainerPort: 9080, Protocol: "TCP", AgentListenerPort: 20003},
 				{ContainerPort: 9081, Protocol: "UDP", AgentListenerPort: 20004},
 			}},
+			{PodUID: "service-reviews", ServiceName: "reviews", PodIP: "10.96.0.10", OriginIP: "10.96.0.10", Ports: []AgentOriginPort{
+				{ContainerPort: 9080, Protocol: "TCP", OriginPort: 80, AgentListenerPort: 20005},
+			}},
 		},
 		Rules: []*Rule{{
 			OwnerID:      "owner-1",
@@ -40,7 +43,7 @@ func TestAgentOrigins_DirectListenersAndExplicitPodRoutes(t *testing.T) {
 	}
 	listeners, clusters, routes, endpoints := To(virtual, true, logrus.NewEntry(logrus.New()))
 
-	wantTCP := map[string]int32{"10.244.0.5": 20001, "10.244.0.6": 20003}
+	wantTCP := map[string]int32{"10.244.0.5": 20001, "10.244.0.6": 20003, "10.96.0.10": 20005}
 	wantUDP := map[uint32]bool{20002: true, 20004: true}
 	for _, resource := range listeners {
 		l := resource.(*listener.Listener)
@@ -49,7 +52,7 @@ func TestAgentOrigins_DirectListenersAndExplicitPodRoutes(t *testing.T) {
 		}
 		port := l.Address.GetSocketAddress().GetPortSpecifier().(*core.SocketAddress_PortValue).PortValue
 		switch port {
-		case 20001, 20003:
+		case 20001, 20003, 20005:
 			if !l.BindToPort.Value || l.UseOriginalDst.Value {
 				t.Fatalf("TCP listener %s is not direct: bind=%v originalDst=%v", l.Name, l.BindToPort.Value, l.UseOriginalDst.Value)
 			}
@@ -72,12 +75,17 @@ func TestAgentOrigins_DirectListenersAndExplicitPodRoutes(t *testing.T) {
 			originIP = "10.244.0.5"
 		case "default_deployments.apps.reviews.nodes.node-a_20003_TCP":
 			originIP = "10.244.0.6"
+		case "default_deployments.apps.reviews.nodes.node-a_20005_TCP":
+			originIP = "10.96.0.10"
 		default:
 			continue
 		}
 		routeList := rc.VirtualHosts[0].Routes
 		gotCluster := routeList[len(routeList)-1].GetRoute().GetCluster()
 		wantCluster := originIP + "_9080"
+		if originIP == "10.96.0.10" {
+			wantCluster = originIP + "_80"
+		}
 		if gotCluster != wantCluster {
 			t.Fatalf("default route cluster = %q, want explicit pod origin %q", gotCluster, wantCluster)
 		}
@@ -96,7 +104,7 @@ func TestAgentOrigins_DirectListenersAndExplicitPodRoutes(t *testing.T) {
 		clusterNames[name] = true
 	}
 
-	wantEndpoints := map[string]bool{"10.244.0.5_9080": true, "10.244.0.6_9080": true}
+	wantEndpoints := map[string]bool{"10.244.0.5_9080": true, "10.244.0.6_9080": true, "10.96.0.10_80": true}
 	endpointNames := map[string]bool{}
 	for _, resource := range endpoints {
 		cla := resource.(*endpoint.ClusterLoadAssignment)
@@ -108,6 +116,13 @@ func TestAgentOrigins_DirectListenersAndExplicitPodRoutes(t *testing.T) {
 			continue
 		}
 		address := cla.Endpoints[0].LbEndpoints[0].GetEndpoint().Address.GetSocketAddress()
+		if cla.ClusterName == "10.96.0.10_80" {
+			if address.Address != "10.96.0.10" || address.GetPortValue() != 80 {
+				t.Fatalf("service endpoint does not preserve ClusterIP:port: %s:%d", address.Address, address.GetPortValue())
+			}
+			delete(wantEndpoints, cla.ClusterName)
+			continue
+		}
 		if address.Address+"_9080" != cla.ClusterName || address.GetPortValue() != 9080 {
 			t.Fatalf("origin endpoint does not target the real pod: %s", cla.ClusterName)
 		}

@@ -59,7 +59,7 @@ func ConvergeHostDNAT(ctx context.Context, runner CommandRunner, agentIP string,
 			}
 			args := []string{hostNet, "iptables", "-t", "nat", "-A", "PREROUTING",
 				"-p", protocol, "!", "-s", agentIP, "-d", attachment.PodIP,
-				"--dport", fmt.Sprintf("%d", port.ContainerPort),
+				"--dport", fmt.Sprintf("%d", port.DestinationPort()),
 				"-j", "DNAT", "--to", fmt.Sprintf("%s:%d", agentIP, port.AgentListenerPort),
 				"-m", "comment", "--comment", config.AgentIptablesComment,
 			}

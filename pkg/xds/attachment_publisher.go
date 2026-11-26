@@ -97,11 +97,15 @@ func (p *AttachmentPublisher) reconcileOnce(ctx context.Context) error {
 			plog.G(ctx).Warnf("[AttachmentPublisher] list pods for %s/%s failed, skipping workload: %v", virtual.Namespace, virtual.UID, err)
 			continue
 		}
+		matchedPods := make([]corev1.Pod, 0, len(pods.Items))
+		nodes := make(map[string]struct{})
 		for i := range pods.Items {
 			pod := &pods.Items[i]
 			if pod.Status.Phase != corev1.PodRunning || pod.DeletionTimestamp != nil || pod.Status.PodIP == "" || pod.Spec.NodeName == "" || podHasKubevpnSidecar(pod) {
 				continue
 			}
+			matchedPods = append(matchedPods, *pod)
+			nodes[pod.Spec.NodeName] = struct{}{}
 			ports := make([]controlplane.AgentOriginPort, 0, len(virtual.Ports))
 			for _, port := range virtual.Ports {
 				ports = append(ports, controlplane.AgentOriginPort{ContainerPort: port.ContainerPort, Protocol: port.Protocol})
@@ -115,6 +119,11 @@ func (p *AttachmentPublisher) reconcileOnce(ctx context.Context) error {
 				Ports:       ports,
 			})
 		}
+		serviceAttachments, err := buildServiceAttachments(ctx, p.clientset, virtual, matchedPods, nodes)
+		if err != nil {
+			return err
+		}
+		attachments = append(attachments, serviceAttachments...)
 	}
 	if err := controlplane.EnsureNodeAttachmentPorts(virtuals, previous, attachments); err != nil {
 		return fmt.Errorf("allocate per-pod agent listeners: %w", err)
@@ -136,9 +145,11 @@ func (p *AttachmentPublisher) reconcileOnce(ctx context.Context) error {
 			derivedByNodeID[attachment.NodeID] = derived
 		}
 		derived.AgentOrigins = append(derived.AgentOrigins, &controlplane.AgentOrigin{
-			PodUID: attachment.PodUID,
-			PodIP:  attachment.PodIP,
-			Ports:  attachment.Ports,
+			PodUID:      attachment.PodUID,
+			ServiceName: attachment.ServiceName,
+			PodIP:       attachment.PodIP,
+			OriginIP:    attachment.OriginIP,
+			Ports:       attachment.Ports,
 		})
 	}
 	nodeIDs := make([]string, 0, len(derivedByNodeID))

@@ -290,7 +290,14 @@ func addTCPPort(a *Virtual, res *xdsResources, port ContainerPort, listenPort in
 	routeName := listenerName
 	originCluster := ""
 	if origin != nil {
-		originCluster = res.addTunCluster(origin.PodIP, port.ContainerPort)
+		destinationPort := port.ContainerPort
+		for _, originPort := range origin.Ports {
+			if originPort.AgentListenerPort == listenPort {
+				destinationPort = originPort.DestinationPort()
+				break
+			}
+		}
+		originCluster = res.addTunCluster(origin.ReturnIP(), destinationPort)
 	}
 	res.listeners = append(res.listeners, toListener(listenerName, routeName, listenPort, port.Protocol, fargate, originCluster))
 

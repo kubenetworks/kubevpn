@@ -42,7 +42,7 @@
 
 ```text
 进入目标 pod 的流量
-  → 宿主机 PREROUTING：精确匹配 dst=<podIP>，且排除 src=<agentPodIP>
+  → 宿主机 PREROUTING：精确匹配 dst=<podIP|ServiceClusterIP> 与原始端口，且排除 src=<agentPodIP>
   → DNAT 到 <agentPodIP>:<agentListenerPort>
   → agent pod 内该 workload 的 envoy
        ├─ 命中 header 规则 → 用户 TUN IP（经本节点唯一隧道）
@@ -51,6 +51,7 @@
 ```
 
 - TCP 使用上述 DNAT + 每 pod/原始端口独立直连 listener；manager 为每个 listener 配置显式 `<podIP>:<containerPort>` 回源 cluster。宿主机与 agent 分属不同 netns，不能依赖 `ORIGINAL_DST` 或 sidecar capture listener 还原原始目的地址。
+- Service ClusterIP 是独立 origin：kube-proxy/IPVS 可在宿主机 `INPUT` 阶段才转发 Service，因此只匹配 podIP 会漏掉 Service 流量。Service attachment 按节点发布，`originIP=ClusterIP`、`originPort=ServicePort`，未命中时回源 ClusterIP，由 kube-proxy 继续负载均衡；不能用固定 podIP 替代。
 - **必须排除 `src=<agentPodIP>`**：否则 agent 向原始 podIP 做 origin-forwarding 时会被同一条宿主机 DNAT 再次捕获，形成回环并返回 503（PoC 实测）。
 - UDP 使用 agent 的 TUN 数据面与现有 UDP 配置处理，**必须在 PoC 中单独验证，不能由 TCP 通过推断 UDP 可用**。
 - 已有 kubevpn sidecar 的 pod 跳过接管：一个 pod netns 只允许一个 kubevpn 接管者。

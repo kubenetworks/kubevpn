@@ -57,16 +57,39 @@ type Virtual struct {
 
 // AgentOrigin identifies one real pod behind a node-boundary listener set.
 type AgentOrigin struct {
-	PodUID string            `json:"podUID" yaml:"podUID"`
-	PodIP  string            `json:"podIP" yaml:"podIP"`
-	Ports  []AgentOriginPort `json:"ports" yaml:"ports"`
+	PodUID      string `json:"podUID" yaml:"podUID"`
+	ServiceName string `json:"serviceName,omitempty" yaml:"serviceName,omitempty"`
+	PodIP       string `json:"podIP" yaml:"podIP"`
+	// OriginIP is the explicit return destination. Empty means PodIP.
+	OriginIP string            `json:"originIP,omitempty" yaml:"originIP,omitempty"`
+	Ports    []AgentOriginPort `json:"ports" yaml:"ports"`
+}
+
+// ReturnIP returns the address used for unmatched traffic.
+func (o *AgentOrigin) ReturnIP() string {
+	if o.OriginIP != "" {
+		return o.OriginIP
+	}
+	return o.PodIP
 }
 
 // AgentOriginPort maps one original container port to its direct agent listener.
 type AgentOriginPort struct {
-	ContainerPort     int32           `json:"containerPort" yaml:"containerPort"`
+	ContainerPort int32 `json:"containerPort" yaml:"containerPort"`
+	// OriginPort is the destination port seen by clients. Empty means
+	// ContainerPort; for Services it is the ServicePort, not the target port.
+	OriginPort        int32           `json:"originPort,omitempty" yaml:"originPort,omitempty"`
 	Protocol          corev1.Protocol `json:"protocol" yaml:"protocol"`
 	AgentListenerPort int32           `json:"agentListenerPort" yaml:"agentListenerPort"`
+}
+
+// DestinationPort returns the port clients dial before DNAT and the port used
+// for unmatched traffic after it leaves the agent.
+func (p AgentOriginPort) DestinationPort() int32 {
+	if p.OriginPort != 0 {
+		return p.OriginPort
+	}
+	return p.ContainerPort
 }
 
 // ContainerPort describes a port on a container with optional envoy listener binding.

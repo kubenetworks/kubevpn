@@ -22,7 +22,7 @@
 - `NewInjector` 对非 Service 目标只返回 node-boundary 实现；Service 目标仍走 fargateInjector。
 - `proxy.attachMode=sidecar` 对普通工作负载只产生 deprecated warning，不再回退为 sidecar；最终阶段删除该配置。
 - manager 发布 `Virtual.agentListenerPort` 与 `NODE_ATTACHMENTS`，不为普通 proxy 创建或对齐 per-pod Job。
-- 节点 agent 使用每节点单隧道；按 pod IP 做宿主机 DNAT；规则排除 `src=<agentPodIP>`，避免 agent origin-forwarding 被再次捕获。
+- 节点 agent 使用每节点单隧道；按 pod IP 与 Service ClusterIP/ServicePort 做宿主机 DNAT；规则排除 `src=<agentPodIP>`，避免 agent origin-forwarding 被再次捕获。
 - `hostNetwork=false`；hostPID/只读 `/proc` 与现有 node-agent 权限级别保持一致，PoC 已证明需要 `privileged: true`。
 - OwnerID、header 路由和 leave 语义保持不变；回源使用显式 podIP cluster，不跨 netns 使用 `ORIGINAL_DST`。
 - 接管失败直接报错，不允许自动降级 sidecar。
@@ -35,7 +35,7 @@
 - 为每个 Virtual/workload 分配并持久化唯一 `agentListenerPort`（`20000-24999`）作为 admin/base-id 基准。
 - admin 端口固定为 `agentListenerPort + 5000`。
 - 根据 Virtual.Selector 和实际 pods 发布 NodeAttachment；为每个 pod/容器端口分配稳定唯一的直连 listener。
-- 按“节点 + workload”派生包含 `agentOrigins` 的 Virtual，每个 origin 显式记录 podIP 与端口映射。
+- 按“节点 + workload”派生包含 `agentOrigins` 的 Virtual，每个 origin 显式记录 podIP 与端口映射；Service origin 额外保留 `originIP=ClusterIP`、`originPort=ServicePort`，未命中时继续由 kube-proxy 负载均衡。
 - 不创建 batch Job，不管理 agent pod 健康，不使用 `pods/exec`。
 
 ### 节点 agent

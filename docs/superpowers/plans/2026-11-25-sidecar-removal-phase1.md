@@ -17,7 +17,9 @@
 > `ORIGINAL_DST` is unavailable after host-to-agent cross-netns DNAT. Task 6's
 > original capture-listener text is superseded by the updated specs: manager
 > derives per-node `agentOrigins`, allocates direct per-pod/port listeners, and
-> uses explicit podIP return clusters.
+> uses explicit podIP return clusters. Service ClusterIPs are separate origins
+> with their ServicePort preserved, because kube-proxy/IPVS may forward only in
+> the host INPUT phase and bypass podIP-only PREROUTING rules.
 
 ## Global Constraints
 
