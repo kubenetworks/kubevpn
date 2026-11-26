@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"fmt"
+	"reflect"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -90,7 +91,8 @@ func ensureNodeAgentDaemonSet(ctx context.Context, clientset kubernetes.Interfac
 	if len(existing.Spec.Template.Spec.Containers) == 1 &&
 		existing.Spec.Template.Spec.Containers[0].Image == image &&
 		existing.Spec.Template.Spec.ServiceAccountName == config.ConfigMapPodTrafficManager &&
-		existing.Spec.Template.Annotations[nodeAgentServiceAccountUIDAnnotation] == string(serviceAccount.UID) {
+		existing.Spec.Template.Annotations[nodeAgentServiceAccountUIDAnnotation] == string(serviceAccount.UID) &&
+		reflect.DeepEqual(existing.Spec.Template.Spec.Containers[0].Env, desired.Spec.Template.Spec.Containers[0].Env) {
 		return nil
 	}
 	existing.Spec = desired.Spec

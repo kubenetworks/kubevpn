@@ -76,6 +76,32 @@ func TestEnsureNodeAgentDaemonSet_UpdatesLegacyServiceAccount(t *testing.T) {
 	}
 }
 
+func TestEnsureNodeAgentDaemonSet_UpdatesTLSSecret(t *testing.T) {
+	ctx := context.Background()
+	existing := genNodeAgentDaemonSet("kubevpn", "test-image")
+	existing.Spec.Template.Annotations = map[string]string{nodeAgentServiceAccountUIDAnnotation: "sa-1"}
+	clientset := fake.NewSimpleClientset(
+		existing,
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "kubevpn"}, Data: map[string][]byte{config.TLSCertKey: []byte("new-cert"), config.TLSPrivateKeyKey: []byte("new-key"), config.TLSServerName: []byte("new-server")}},
+		&corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "kubevpn", UID: "sa-1"}},
+	)
+	if err := ensureNodeAgentDaemonSet(ctx, clientset, "kubevpn", "test-image"); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := clientset.AppsV1().DaemonSets("kubevpn").Get(ctx, nodeAgentDaemonSetName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := updated.Spec.Template.Spec.Containers[0].Env
+	var values = map[string]string{}
+	for _, item := range env {
+		values[item.Name] = item.Value
+	}
+	if values[config.TLSCertKey] != "new-cert" || values[config.TLSPrivateKeyKey] != "new-key" || values[config.TLSServerName] != "new-server" {
+		t.Fatalf("TLS env was not refreshed: %+v", values)
+	}
+}
+
 func TestEnsureNodeAgentDaemonSet_RestartsWhenServiceAccountIsRecreated(t *testing.T) {
 	ctx := context.Background()
 	existing := genNodeAgentDaemonSet("kubevpn", "test-image")
