@@ -140,7 +140,7 @@ func dumpKubeVPNSidecarLogs(t *testing.T, clientset kubernetes.Interface) {
 			}
 			t.Logf("===== node-agent file logs %s/%s =====\n%s", pod.Namespace, pod.Name, output)
 			cmd = exec.CommandContext(ctx, "kubectl", "-n", pod.Namespace, "exec", pod.Name, "-c", c.Name, "--",
-				"sh", "-c", `nsenter --net=/host/proc/1/ns/net iptables -t nat -S PREROUTING; nsenter --net=/host/proc/1/ns/net sh -c 'command -v ipvsadm >/dev/null && ipvsadm -Ln || true'`)
+				"sh", "-c", `nsenter --net=/host/proc/1/ns/net iptables -t nat -nvL PREROUTING; nsenter --net=/host/proc/1/ns/net sh -c 'command -v ipvsadm >/dev/null && ipvsadm -Ln || true'`)
 			output, err = cmd.CombinedOutput()
 			if err != nil {
 				t.Logf("dump node-agent host rules %s/%s: %v", pod.Namespace, pod.Name, err)
