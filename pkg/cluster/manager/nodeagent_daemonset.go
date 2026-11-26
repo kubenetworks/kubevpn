@@ -16,6 +16,7 @@ import (
 )
 
 const nodeAgentDaemonSetName = "kubevpn-nodeagent"
+const nodeAgentServiceAccountUIDAnnotation = "kubevpn.io/service-account-uid"
 
 // genNodeAgentDaemonSet returns one node-local agent per node. hostNetwork is
 // deliberately disabled: the agent uses its own Pod IP as the DNAT target.
@@ -69,6 +70,11 @@ func ensureNodeAgentDaemonSet(ctx context.Context, clientset kubernetes.Interfac
 		return fmt.Errorf("load node-agent TLS secret: %w", err)
 	}
 	desired := genNodeAgentDaemonSet(namespace, image)
+	serviceAccount, err := clientset.CoreV1().ServiceAccounts(namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("load node-agent service account: %w", err)
+	}
+	desired.Spec.Template.Annotations = map[string]string{nodeAgentServiceAccountUIDAnnotation: string(serviceAccount.UID)}
 	desired.Spec.Template.Spec.Containers[0].Env = append(desired.Spec.Template.Spec.Containers[0].Env, inject.TLSEnvVars(secret)...)
 	existing, err := clientset.AppsV1().DaemonSets(namespace).Get(ctx, nodeAgentDaemonSetName, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
@@ -83,7 +89,8 @@ func ensureNodeAgentDaemonSet(ctx context.Context, clientset kubernetes.Interfac
 	}
 	if len(existing.Spec.Template.Spec.Containers) == 1 &&
 		existing.Spec.Template.Spec.Containers[0].Image == image &&
-		existing.Spec.Template.Spec.ServiceAccountName == config.ConfigMapPodTrafficManager {
+		existing.Spec.Template.Spec.ServiceAccountName == config.ConfigMapPodTrafficManager &&
+		existing.Spec.Template.Annotations[nodeAgentServiceAccountUIDAnnotation] == string(serviceAccount.UID) {
 		return nil
 	}
 	existing.Spec = desired.Spec

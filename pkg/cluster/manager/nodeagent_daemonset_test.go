@@ -43,7 +43,10 @@ func TestGenNodeAgentDaemonSet_SecurityContract(t *testing.T) {
 
 func TestEnsureNodeAgentDaemonSet_CreatesWhenMissing(t *testing.T) {
 	ctx := context.Background()
-	clientset := fake.NewSimpleClientset(&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "kubevpn"}})
+	clientset := fake.NewSimpleClientset(
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "kubevpn"}},
+		&corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "kubevpn", UID: "sa-1"}},
+	)
 	if err := ensureNodeAgentDaemonSet(ctx, clientset, "kubevpn", "test-image"); err != nil {
 		t.Fatal(err)
 	}
@@ -59,6 +62,7 @@ func TestEnsureNodeAgentDaemonSet_UpdatesLegacyServiceAccount(t *testing.T) {
 	clientset := fake.NewSimpleClientset(
 		existing,
 		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "kubevpn"}},
+		&corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "kubevpn", UID: "sa-1"}},
 	)
 	if err := ensureNodeAgentDaemonSet(ctx, clientset, "kubevpn", "test-image"); err != nil {
 		t.Fatal(err)
@@ -69,5 +73,26 @@ func TestEnsureNodeAgentDaemonSet_UpdatesLegacyServiceAccount(t *testing.T) {
 	}
 	if got := updated.Spec.Template.Spec.ServiceAccountName; got != config.ConfigMapPodTrafficManager {
 		t.Fatalf("serviceAccountName = %q, want %q", got, config.ConfigMapPodTrafficManager)
+	}
+}
+
+func TestEnsureNodeAgentDaemonSet_RestartsWhenServiceAccountIsRecreated(t *testing.T) {
+	ctx := context.Background()
+	existing := genNodeAgentDaemonSet("kubevpn", "test-image")
+	existing.Spec.Template.Annotations = map[string]string{nodeAgentServiceAccountUIDAnnotation: "old-sa-uid"}
+	clientset := fake.NewSimpleClientset(
+		existing,
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "kubevpn"}},
+		&corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "kubevpn", UID: "new-sa-uid"}},
+	)
+	if err := ensureNodeAgentDaemonSet(ctx, clientset, "kubevpn", "test-image"); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := clientset.AppsV1().DaemonSets("kubevpn").Get(ctx, nodeAgentDaemonSetName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := updated.Spec.Template.Annotations[nodeAgentServiceAccountUIDAnnotation]; got != "new-sa-uid" {
+		t.Fatalf("service account UID annotation = %q, want new-sa-uid", got)
 	}
 }

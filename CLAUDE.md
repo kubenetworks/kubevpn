@@ -192,7 +192,7 @@ pkg/
 | `svr.registry.takeAll()` | `daemon/action` | Removes/returns all connections (quit path); `svr.registry.use(id)` selects the connection as current |
 | `svr.getSudoTunIPs(ctx)` | `daemon/action` | Queries sudo daemon Status, returns `map[ConnectionID]tunIP` — use for IP lookup in user daemon |
 | `resolveTunIP(connect, ips)` | `daemon/action` | Resolves TUN IP for a connection: from map (user daemon) or `GetLocalTunIP` fallback (sudo daemon) |
-| `handler.DeleteTrafficManagerCoreResources(ctx, clientset, ns, name, opts)` | `pkg/handler` | Deletes the 8 namespaced traffic-manager resources (deploy/job/svc/configmap/secret/sa/role/rolebinding) — shared by `cleanupTrafficManagerResources` (handler) and `Uninstall` (daemon/action); do NOT re-list these resources in either caller |
+| `handler.DeleteTrafficManagerCoreResources(ctx, clientset, ns, name, opts)` | `pkg/handler` | Deletes the 9 namespaced traffic-manager resources (deploy/job/svc/configmap/secret/sa/role/rolebinding/nodeagent-daemonset) — shared by `cleanupTrafficManagerResources` (handler) and `Uninstall` (daemon/action); do NOT re-list these resources in either caller |
 
 ### Envoy Config Types
 

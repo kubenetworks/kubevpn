@@ -52,7 +52,7 @@
 
 - **pod 重建：** 只更新对应 NodeAttachment，不重启或替换业务 pod。
 - **agent 重启：** 按 comment 清理并重建本机规则；验收要求 60 秒内恢复。
-- **manager 重启：** ConfigMap 保留，agent 保留配置并重连隧道。
+- **manager 重启/卸载：** ConfigMap 保留时 agent 保留配置并重连隧道；卸载后重装以 ServiceAccount UID annotation 触发 DaemonSet 滚动，卸载时删除 DaemonSet 并由 agent 清空宿主机接管规则。
 - **leave：** 删除附件与规则；没有 per-pod 隧道或租约需要清理。
 - **配置失败/端口冲突/agent 未就绪：** 明确报错，不降级 sidecar。
 - **旧 per-pod Job reconciler：** 在同一阶段切换时禁用，禁止双轨接管。

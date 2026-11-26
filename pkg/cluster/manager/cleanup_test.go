@@ -15,17 +15,18 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
-// TestDeleteTrafficManagerCoreResources_RemovesAllEightResources verifies the shared
-// teardown helper deletes every one of the eight namespaced resources that make up a
+// TestDeleteTrafficManagerCoreResources_RemovesAllNineResources verifies the shared
+// teardown helper deletes every one of the nine namespaced resources that make up a
 // traffic-manager instance, when they exist. This is the contract both
 // cleanupTrafficManagerResources (handler) and Uninstall (daemon/action) rely on, so it
 // is pinned here rather than in either caller.
-func TestDeleteTrafficManagerCoreResources_RemovesAllEightResources(t *testing.T) {
+func TestDeleteTrafficManagerCoreResources_RemovesAllNineResources(t *testing.T) {
 	ctx := context.Background()
 	ns := "default"
 	name := config.ConfigMapPodTrafficManager
 
 	cs := fake.NewSimpleClientset(
+		&appsv1.DaemonSet{ObjectMeta: metav1.ObjectMeta{Name: nodeAgentDaemonSetName, Namespace: ns}},
 		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns}},
 		&batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns}},
 		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns}},
@@ -42,6 +43,10 @@ func TestDeleteTrafficManagerCoreResources_RemovesAllEightResources(t *testing.T
 		group string
 		get   func() error
 	}{
+		{"nodeagent daemonset", func() error {
+			_, e := cs.AppsV1().DaemonSets(ns).Get(ctx, nodeAgentDaemonSetName, metav1.GetOptions{})
+			return e
+		}},
 		{"deployments", func() error { _, e := cs.AppsV1().Deployments(ns).Get(ctx, name, metav1.GetOptions{}); return e }},
 		{"jobs", func() error { _, e := cs.BatchV1().Jobs(ns).Get(ctx, name, metav1.GetOptions{}); return e }},
 		{"services", func() error { _, e := cs.CoreV1().Services(ns).Get(ctx, name, metav1.GetOptions{}); return e }},

@@ -305,7 +305,7 @@ func ensureProxyRBAC(ctx context.Context, clientset kubernetes.Interface, worklo
 
 // CleanupTrafficManagerResources removes every traffic-manager resource KubeVPN creates
 // in the given namespace: the route-discovery and proxy-inject RBAC (-route, -proxy),
-// the eight core resources named config.ConfigMapPodTrafficManager, and — when the
+// the nine core resources named config.ConfigMapPodTrafficManager, and — when the
 // namespace is the central kubevpn namespace — the cluster-scoped proxy
 // ClusterRole/ClusterRoleBinding. It also removes all node-agent jobs across all
 // namespaces. It is the shared teardown for both the handler-layer connect cleanup and
@@ -330,9 +330,9 @@ func CleanupTrafficManagerResources(ctx context.Context, clientset kubernetes.In
 	}
 }
 
-// DeleteTrafficManagerCoreResources deletes the eight namespaced resources that make up
+// DeleteTrafficManagerCoreResources deletes the nine namespaced resources that make up
 // a traffic-manager instance under the given name: Deployment, Job, Service, ConfigMap,
-// Secret, ServiceAccount, Role, RoleBinding. It is the inner teardown primitive invoked by
+// Secret, ServiceAccount, Role, RoleBinding and the node-agent DaemonSet. It is the inner teardown primitive invoked by
 // CleanupTrafficManagerResources, which is itself the shared teardown for both the
 // handler-layer connect cleanup and the daemon-layer Uninstall RPC (pkg/daemon/action),
 // which previously triplicated this deletion list.
@@ -350,4 +350,5 @@ func DeleteTrafficManagerCoreResources(ctx context.Context, clientset kubernetes
 	_ = clientset.CoreV1().Secrets(namespace).Delete(ctx, name, options)
 	_ = clientset.BatchV1().Jobs(namespace).Delete(ctx, name, options)
 	_ = clientset.AppsV1().Deployments(namespace).Delete(ctx, name, options)
+	_ = clientset.AppsV1().DaemonSets(namespace).Delete(ctx, nodeAgentDaemonSetName, options)
 }

@@ -16,7 +16,7 @@ import (
 
 // TestUninstall_RemovesProxyAndRouteRBAC is the regression test for issue #797:
 // kubevpn uninstall leaked the -route and -proxy Role/RoleBinding because the
-// daemon-layer Uninstall only deleted the eight core resources named
+// daemon-layer Uninstall only deleted the nine core resources named
 // kubevpn-traffic-manager. It must remove the full set.
 func TestUninstall_RemovesProxyAndRouteRBAC(t *testing.T) {
 	ctx := context.Background()

@@ -57,7 +57,8 @@ func TestManagerUpgrade_TLSDeploymentServiceLifecycle(t *testing.T) {
 			svc := genService(ns)
 			svc.Spec.Ports = svc.Spec.Ports[:1]
 			svc.ResourceVersion = "9"
-			cs := fake.NewSimpleClientset(secret, svc)
+			sa := &v1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: ns, UID: "sa-1"}}
+			cs := fake.NewSimpleClientset(secret, svc, sa)
 			var mu sync.Mutex
 			var patched, undo bool
 			writeJSON := func(w http.ResponseWriter, value any) {
@@ -91,6 +92,15 @@ func TestManagerUpgrade_TLSDeploymentServiceLifecycle(t *testing.T) {
 						return
 					}
 					value.APIVersion, value.Kind = "v1", "Secret"
+					writeJSON(w, value)
+				case "/api/v1/namespaces/team/serviceaccounts/" + config.ConfigMapPodTrafficManager:
+					value, err := cs.CoreV1().ServiceAccounts(ns).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+					if err != nil {
+						t.Error(err)
+						w.WriteHeader(500)
+						return
+					}
+					value.APIVersion, value.Kind = "v1", "ServiceAccount"
 					writeJSON(w, value)
 				case "/api/v1/namespaces/team/services/" + config.ConfigMapPodTrafficManager:
 					if r.Method == http.MethodPut {
@@ -283,9 +293,9 @@ func TestManagerUpgrade_PreservesAttachMode(t *testing.T) {
 	const ns = "team"
 
 	tests := []struct {
-		name         string
-		existingEnv  string
-		expectedEnv  string
+		name        string
+		existingEnv string
+		expectedEnv string
 	}{
 		{
 			name:        "preserve existing node-agent mode",
@@ -342,7 +352,8 @@ func TestManagerUpgrade_PreservesAttachMode(t *testing.T) {
 			secret.ResourceVersion = "7"
 			svc := genService(ns)
 			svc.ResourceVersion = "9"
-			cs := fake.NewSimpleClientset(secret, svc)
+			sa := &v1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: ns, UID: "sa-1"}}
+			cs := fake.NewSimpleClientset(secret, svc, sa)
 			var mu sync.Mutex
 			writeJSON := func(w http.ResponseWriter, value any) {
 				w.Header().Set("Content-Type", "application/json")
@@ -362,6 +373,15 @@ func TestManagerUpgrade_PreservesAttachMode(t *testing.T) {
 						return
 					}
 					value.APIVersion, value.Kind = "v1", "Secret"
+					writeJSON(w, value)
+				case "/api/v1/namespaces/team/serviceaccounts/" + config.ConfigMapPodTrafficManager:
+					value, err := cs.CoreV1().ServiceAccounts(ns).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+					if err != nil {
+						t.Error(err)
+						w.WriteHeader(500)
+						return
+					}
+					value.APIVersion, value.Kind = "v1", "ServiceAccount"
 					writeJSON(w, value)
 				case "/api/v1/namespaces/team/services/" + config.ConfigMapPodTrafficManager:
 					value, err := cs.CoreV1().Services(ns).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
