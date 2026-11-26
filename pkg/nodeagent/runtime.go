@@ -129,6 +129,7 @@ func reconcileAttachments(ctx context.Context, opts Options, supervisor *Supervi
 	for _, attachment := range attachments {
 		if attachment.NodeName == opts.NodeName && attachment.PodIP != "" {
 			filtered = append(filtered, attachment)
+			plog.G(ctx).Infof("[node-agent] reconcile %s/%s nodeID=%s podIP=%s admin=%d ports=%v", attachment.Namespace, attachment.WorkloadUID, attachment.NodeID, attachment.PodIP, attachment.AgentListenerPort, attachment.Ports)
 		}
 	}
 	if err := ConvergeHostDNAT(ctx, execRunner{}, opts.PodIP, filtered); err != nil {

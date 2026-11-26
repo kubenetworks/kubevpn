@@ -101,8 +101,9 @@ func (s *Supervisor) start(ctx context.Context, managerAddr, namespace, derivedN
 		"--service-node", nodeID,
 		"--service-cluster", nodeID,
 		"--base-id", fmt.Sprintf("%d", spec.baseID),
-		"--log-level", "warning",
+		"--log-level", "info",
 	)
+	plog.G(ctx).Infof("[node-agent] starting envoy nodeID=%s admin=%d", nodeID, spec.adminPort)
 	logPath := filepath.Join("/tmp", fmt.Sprintf("kubevpn-nodeagent-%s.log", strings.NewReplacer("/", "_", ".", "_").Replace(spec.workloadUID)))
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {

@@ -139,6 +139,21 @@ func dumpKubeVPNSidecarLogs(t *testing.T, clientset kubernetes.Interface) {
 				continue
 			}
 			t.Logf("===== node-agent file logs %s/%s =====\n%s", pod.Namespace, pod.Name, output)
+			cmd = exec.CommandContext(ctx, "kubectl", "-n", pod.Namespace, "exec", pod.Name, "-c", c.Name, "--",
+				"sh", "-c", `nsenter --net=/host/proc/1/ns/net iptables -t nat -S PREROUTING | grep kubevpn-nodeagent || true`)
+			output, err = cmd.CombinedOutput()
+			if err != nil {
+				t.Logf("dump node-agent host rules %s/%s: %v", pod.Namespace, pod.Name, err)
+			} else {
+				t.Logf("===== node-agent host DNAT %s/%s =====\n%s", pod.Namespace, pod.Name, output)
+			}
+			cm, cmErr := clientset.CoreV1().ConfigMaps(pod.Namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+			if cmErr != nil {
+				t.Logf("dump node-agent desired state %s/%s: %v", pod.Namespace, pod.Name, cmErr)
+			} else {
+				t.Logf("===== NODE_ATTACHMENTS %s/%s =====\n%s", pod.Namespace, pod.Name, cm.Data[config.KeyNodeAttachments])
+				t.Logf("===== ENVOY_CONFIG %s/%s =====\n%s", pod.Namespace, pod.Name, cm.Data[config.KeyEnvoy])
+			}
 		}
 	}
 }
