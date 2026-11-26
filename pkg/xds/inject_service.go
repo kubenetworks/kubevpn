@@ -217,7 +217,7 @@ func (s *TunConfigServer) workloadsOwnedBy(ctx context.Context, namespace, owner
 	}
 	var workloads []string
 	for _, v := range virtuals {
-		if v.Namespace != namespace {
+		if v.Namespace != namespace || len(v.AgentOrigins) != 0 {
 			continue
 		}
 		for _, r := range v.Rules {

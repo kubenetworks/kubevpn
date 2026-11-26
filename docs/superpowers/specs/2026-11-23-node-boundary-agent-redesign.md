@@ -78,7 +78,7 @@ agentOrigins:
 - `agentOrigins` 是 manager 按“节点 + workload”派生的配置；每个 pod/容器端口分配独立且稳定的直连 listener，回源 endpoint 显式指向对应 podIP。
 - sidecar 继续使用 `15006` 与 `ORIGINAL_DST`；node-boundary 不使用 sidecar capture listener。
 - envoy admin 端口固定为 `agentListenerPort + 5000`（范围 `25000-29999`），避免多个 envoy 共享 `9003`，且无需第二次独立分配。
-- `Namespace/UID/Selector/Rules/OwnerID` 保持现有语义；派生 Virtual 的 UID 为 `<workloadUID>.nodes.<nodeName>`。
+- `Namespace/UID/Selector/Rules/OwnerID` 保持现有语义；派生 Virtual 的 UID 为 `<workloadUID>.nodes.<nodeName>`。派生项仅供数据面使用，status 与 leave-all 必须过滤它们，只展示/解析 base workload。
 
 ### 4.2 NodeAttachment
 
