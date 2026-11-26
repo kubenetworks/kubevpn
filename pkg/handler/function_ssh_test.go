@@ -323,8 +323,26 @@ func (u *sshUt) healthCheckWithBackoff(t *testing.T, file string, line int, ok b
 	)
 	if err != nil {
 		t.Log(fmt.Sprintf("%s:%d", file, line), err)
+		dumpClientDataPlaneLogs(t)
 		u.kubectl(t)
 		t.FailNow()
+	}
+}
+
+func dumpClientDataPlaneLogs(t *testing.T) {
+	t.Helper()
+	for _, sudo := range []bool{true, false} {
+		path := pkgconfig.GetDaemonLogPath(sudo)
+		output, err := exec.Command("grep", "-E", `\[Gvisor-TCP\]\[local\]|198\.18\.128\.1`, path).CombinedOutput()
+		if err != nil {
+			t.Logf("dump client data-plane logs (sudo=%v): %v", sudo, err)
+			continue
+		}
+		lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+		if len(lines) > 200 {
+			lines = lines[len(lines)-200:]
+		}
+		t.Logf("===== client data-plane logs (sudo=%v) =====\n%s", sudo, strings.Join(lines, "\n"))
 	}
 }
 
