@@ -217,6 +217,9 @@ wait_listener 20002
   iptables -t nat -A PREROUTING -p tcp ! -s "$AGENT_IP" -d "$REVIEWS_IP" \
   -j DNAT --to "$AGENT_IP:20001" -m comment --comment "$COMMENT"
 "$KUBECTL" -n "$NS" exec "$AGENT" -- nsenter --net=/host/proc/1/ns/net \
+  iptables -t nat -A PREROUTING -p tcp ! -s "$AGENT_IP" -d "$DETAILS_IP" \
+  -j DNAT --to "$AGENT_IP:20002" -m comment --comment "$COMMENT"
+"$KUBECTL" -n "$NS" exec "$AGENT" -- nsenter --net=/host/proc/1/ns/net \
   iptables -t nat -I PREROUTING 1 -p tcp ! -s "$AGENT_IP" -d "$REVIEWS_SVC_IP" --dport 9080 \
   -j DNAT --to "$AGENT_IP:20001" -m comment --comment "$COMMENT"
 
