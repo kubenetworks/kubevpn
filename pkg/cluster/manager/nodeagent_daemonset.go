@@ -31,8 +31,9 @@ func genNodeAgentDaemonSet(namespace, image string) *appsv1.DaemonSet {
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": nodeAgentDaemonSetName}},
 				Spec: corev1.PodSpec{
-					HostNetwork: false,
-					HostPID:     true,
+					HostNetwork:        false,
+					HostPID:            true,
+					ServiceAccountName: config.ConfigMapPodTrafficManager,
 					Containers: []corev1.Container{{
 						Name:            "agent",
 						Image:           image,
@@ -80,7 +81,9 @@ func ensureNodeAgentDaemonSet(ctx context.Context, clientset kubernetes.Interfac
 	if err != nil {
 		return fmt.Errorf("get node-agent daemonset: %w", err)
 	}
-	if len(existing.Spec.Template.Spec.Containers) == 1 && existing.Spec.Template.Spec.Containers[0].Image == image {
+	if len(existing.Spec.Template.Spec.Containers) == 1 &&
+		existing.Spec.Template.Spec.Containers[0].Image == image &&
+		existing.Spec.Template.Spec.ServiceAccountName == config.ConfigMapPodTrafficManager {
 		return nil
 	}
 	existing.Spec = desired.Spec

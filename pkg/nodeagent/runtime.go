@@ -9,6 +9,7 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
@@ -28,6 +29,20 @@ type Options struct {
 	Image            string
 }
 
+// newConfigMapInformerFactory scopes list/watch to the manager ConfigMap. The
+// manager Role uses resourceNames, which Kubernetes only honors for list/watch
+// when the request includes this metadata.name field selector.
+func newConfigMapInformerFactory(clientset kubernetes.Interface, namespace string) informers.SharedInformerFactory {
+	return informers.NewSharedInformerFactoryWithOptions(
+		clientset,
+		0,
+		informers.WithNamespace(namespace),
+		informers.WithTweakListOptions(func(options *metav1.ListOptions) {
+			options.FieldSelector = fields.OneTermEqualSelector("metadata.name", config.ConfigMapPodTrafficManager).String()
+		}),
+	)
+}
+
 // Run starts the single node tunnel and converges local DNAT rules and Envoy
 // processes from the manager's desired attachments.
 func Run(ctx context.Context, opts Options) error {
@@ -39,7 +54,7 @@ func Run(ctx context.Context, opts Options) error {
 	go maintainTunnel(tunnelCtx, opts)
 
 	changes := make(chan struct{}, 1)
-	factory := informers.NewSharedInformerFactoryWithOptions(opts.Clientset, 0, informers.WithNamespace(opts.ManagerNamespace))
+	factory := newConfigMapInformerFactory(opts.Clientset, opts.ManagerNamespace)
 	informer := factory.Core().V1().ConfigMaps().Informer()
 	_, err := informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    func(any) { trigger(changes) },
@@ -123,10 +138,11 @@ func reconcileAttachments(ctx context.Context, opts Options, supervisor *Supervi
 	return supervisor.Sync(ctx, managerAddr, filtered)
 }
 
-func buildTunnelCommand(ctx context.Context, executable, managerAddr, nodeName string) *exec.Cmd {
+func buildTunnelCommand(ctx context.Context, executable, managerService, nodeName string) *exec.Cmd {
+	managerAddr := fmt.Sprintf("%s:%d", managerService, config.PortTCP)
 	url := fmt.Sprintf("tun:/tcp://%s?route=%s&agent=%s", managerAddr, config.CIDR.String(), nodeName)
 	cmd := exec.CommandContext(ctx, executable, "server", "--debug", "-l", url)
-	cmd.Env = append(os.Environ(), "TrafficManagerService="+managerAddr)
+	cmd.Env = append(os.Environ(), "TrafficManagerService="+managerService)
 	return cmd
 }
 
@@ -138,8 +154,8 @@ func maintainTunnel(ctx context.Context, opts Options) {
 			plog.G(ctx).Errorf("[node-agent] locate executable: %v", err)
 			return
 		}
-		managerAddr := fmt.Sprintf("%s.%s:%d", config.ConfigMapPodTrafficManager, opts.ManagerNamespace, config.PortTCP)
-		cmd := buildTunnelCommand(ctx, executable, managerAddr, opts.NodeName)
+		managerService := fmt.Sprintf("%s.%s", config.ConfigMapPodTrafficManager, opts.ManagerNamespace)
+		cmd := buildTunnelCommand(ctx, executable, managerService, opts.NodeName)
 		logPath := "/tmp/kubevpn-nodeagent-tunnel.log"
 		logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 		if err != nil {
@@ -150,7 +166,7 @@ func maintainTunnel(ctx context.Context, opts Options) {
 		cmd.Stderr = logFile
 		err = cmd.Start()
 		if err == nil {
-			plog.G(ctx).Infof("[node-agent] tunnel to %s started", managerAddr)
+			plog.G(ctx).Infof("[node-agent] tunnel to %s started", managerService)
 			err = cmd.Wait()
 		}
 		_ = logFile.Close()

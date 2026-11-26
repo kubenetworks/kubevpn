@@ -7,6 +7,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
+
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
 func TestGenNodeAgentDaemonSet_SecurityContract(t *testing.T) {
@@ -17,6 +19,9 @@ func TestGenNodeAgentDaemonSet_SecurityContract(t *testing.T) {
 	}
 	if !podSpec.HostPID {
 		t.Fatal("hostPID is required to reach host netns")
+	}
+	if podSpec.ServiceAccountName != config.ConfigMapPodTrafficManager {
+		t.Fatalf("serviceAccountName = %q, want %q", podSpec.ServiceAccountName, config.ConfigMapPodTrafficManager)
 	}
 	if len(podSpec.Containers) != 1 {
 		t.Fatal("expected one node-agent container")
@@ -38,11 +43,31 @@ func TestGenNodeAgentDaemonSet_SecurityContract(t *testing.T) {
 
 func TestEnsureNodeAgentDaemonSet_CreatesWhenMissing(t *testing.T) {
 	ctx := context.Background()
-	clientset := fake.NewSimpleClientset(&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "kubevpn-traffic-manager", Namespace: "kubevpn"}})
+	clientset := fake.NewSimpleClientset(&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "kubevpn"}})
 	if err := ensureNodeAgentDaemonSet(ctx, clientset, "kubevpn", "test-image"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := clientset.AppsV1().DaemonSets("kubevpn").Get(ctx, nodeAgentDaemonSetName, metav1.GetOptions{}); err != nil {
 		t.Fatalf("daemonset was not created: %v", err)
+	}
+}
+
+func TestEnsureNodeAgentDaemonSet_UpdatesLegacyServiceAccount(t *testing.T) {
+	ctx := context.Background()
+	existing := genNodeAgentDaemonSet("kubevpn", "test-image")
+	existing.Spec.Template.Spec.ServiceAccountName = "default"
+	clientset := fake.NewSimpleClientset(
+		existing,
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "kubevpn"}},
+	)
+	if err := ensureNodeAgentDaemonSet(ctx, clientset, "kubevpn", "test-image"); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := clientset.AppsV1().DaemonSets("kubevpn").Get(ctx, nodeAgentDaemonSetName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := updated.Spec.Template.Spec.ServiceAccountName; got != config.ConfigMapPodTrafficManager {
+		t.Fatalf("serviceAccountName = %q, want %q", got, config.ConfigMapPodTrafficManager)
 	}
 }
