@@ -135,7 +135,7 @@ func (svr *Server) Proxy(resp rpc.Daemon_ProxyServer) (err error) {
 		return err
 	}
 	image := podList[0].Spec.Containers[0].Image
-	err = pc.CreateRemoteInboundPod(plog.WithLogger(cancel, logger), req.Namespace, workloads, req.Headers, req.PortMap, image, tunV4, tunV6)
+	err = pc.CreateRemoteInboundPod(plog.WithLogger(cancel, logger), req.Namespace, workloads, req.Headers, req.PortMap, image, tunV4, tunV6, req.GetAttachMode())
 	if err != nil {
 		plog.G(ctx).Errorf("Failed to inject inbound sidecar: %v", err)
 		return err

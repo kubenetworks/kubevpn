@@ -259,11 +259,11 @@ func (c *ConnectOptions) SetSync(s *SyncOptions) {
 // patches workloads and writes envoy rules with its own ServiceAccount over the VPN); the
 // client only starts the local port Mapper for K8s Service workloads. There is no local
 // fallback — a manager/RBAC failure is returned to the caller.
-func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace string, workloads []string, headers map[string]string, portMap []string, image string, localTunIPv4, localTunIPv6 string) error {
+func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace string, workloads []string, headers map[string]string, portMap []string, image string, localTunIPv4, localTunIPv6, attachMode string) error {
 	if localTunIPv4 == "" {
 		return fmt.Errorf("local tun IPv4 is empty")
 	}
-	if err := c.createRemoteInboundViaManager(ctx, namespace, headers, portMap, image, localTunIPv4, localTunIPv6, workloads); err != nil {
+	if err := c.createRemoteInboundViaManager(ctx, namespace, headers, portMap, image, localTunIPv4, localTunIPv6, attachMode, workloads); err != nil {
 		return fmt.Errorf("%w: %w", err, config.ErrEnvoyInject)
 	}
 	// The server-side inject just wrote envoy rules to the ConfigMap. Refresh the

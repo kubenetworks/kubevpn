@@ -104,6 +104,10 @@ func (s *TunConfigServer) ProxyInject(req *rpc.InjectRequest, stream rpc.TunConf
 			})
 		}
 
+		attachMode := req.GetAttachMode()
+		if attachMode == "" {
+			attachMode = s.ResolveAttachMode(ctx)
+		}
 		injector := inject.NewInjector(inject.InjectOptions{
 			Factory:          s.factory,
 			Clientset:        s.clientset,
@@ -118,7 +122,7 @@ func (s *TunConfigServer) ProxyInject(req *rpc.InjectRequest, stream rpc.TunConf
 			Secret:           tlsSecret,
 			Image:            req.GetImage(),
 			OwnerID:          req.GetOwnerID(),
-			AttachMode:       s.ResolveAttachMode(ctx),
+			AttachMode:       attachMode,
 		})
 		if err := injector.Inject(ctx); err != nil {
 			return status.Errorf(codes.Internal, "inject sidecar into %s: %v", workload, err)

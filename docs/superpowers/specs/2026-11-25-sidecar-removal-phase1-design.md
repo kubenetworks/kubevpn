@@ -27,6 +27,7 @@
 - OwnerID、header 路由和 leave 语义保持不变；回源使用显式 podIP cluster，不跨 netns 使用 `ORIGINAL_DST`。
 - 接管失败直接报错，不允许自动降级 sidecar。
 - 已被 sync/run/Fargate sidecar 接管的 pod 不重复附加普通 node-agent。
+- run/sync 通过显式 `legacy-sidecar` 请求模式和隐藏 `legacy-proxy` 子命令保留原 sidecar 路径；该内部值不代表普通 proxy 可降级 sidecar。
 
 ## 3. 组件与配置
 

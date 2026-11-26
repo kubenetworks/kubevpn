@@ -14,6 +14,9 @@ const (
 	AttachModeSidecar = "sidecar"
 	// AttachModeNodeAgent is the attach mode where the proxy runs as a node agent (default).
 	AttachModeNodeAgent = "node-agent"
+	// AttachModeLegacySidecar preserves the run/sync sidecar path during the
+	// ordinary-proxy node-boundary migration. It is not a user fallback mode.
+	AttachModeLegacySidecar = "legacy-sidecar"
 
 	// ConfigMapPodTrafficManager is the name of the ConfigMap used by the traffic manager.
 	ConfigMapPodTrafficManager = "kubevpn-traffic-manager"

@@ -131,6 +131,10 @@ message ProxyRequest {
   // 2. detect which namespace helm installed by (helm list -A), match app name==kubevpn and status is deployed
   // 3. otherwise, use options '-n' or '--namespace'
   string ManagerNamespace = 16;
+
+  // Optional per-request attach mode. Empty uses the manager default;
+  // legacy-sidecar is reserved for run/sync compatibility.
+  string AttachMode = 17;
 }
 
 message ProxyResponse {
@@ -487,6 +491,7 @@ message InjectRequest {
   string LocalTunIPv4 = 6;             // client's TUN IPv4 (envoy routes here)
   string LocalTunIPv6 = 7;             // client's TUN IPv6 (optional)
   string Image = 8;                    // sidecar image
+  string AttachMode = 9;               // optional per-request attach mode
 }
 
 // ServiceWorkload identifies a K8s Service workload that was injected, so the client

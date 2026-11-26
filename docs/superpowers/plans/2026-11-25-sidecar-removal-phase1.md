@@ -20,7 +20,9 @@
 > uses explicit podIP return clusters. Service ClusterIPs are separate origins
 > with their ServicePort preserved, because kube-proxy/IPVS may forward only in
 > the host INPUT phase and bypass podIP-only PREROUTING rules. All takeover
-> rules are inserted with `-I PREROUTING 1`, before KUBE-SERVICES.
+> rules are inserted with `-I PREROUTING 1`, before KUBE-SERVICES. Run/sync use
+> the explicit `legacy-sidecar` request mode and hidden `legacy-proxy` command,
+> preserving their existing sidecar path without enabling a public fallback.
 
 ## Global Constraints
 

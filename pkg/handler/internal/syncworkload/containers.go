@@ -65,7 +65,7 @@ func genSyncthingContainer(remoteDir string, syncDataDirName string, image strin
 func genVPNContainer(workload string, namespace string, managerNamespace string, image string, args []string) *v1.Container {
 	command := []string{
 		"kubevpn",
-		"proxy",
+		"legacy-proxy",
 		workload,
 		"--kubeconfig", "/tmp/.kube/" + config.KUBECONFIG,
 		"--namespace", namespace,

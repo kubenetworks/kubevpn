@@ -27,12 +27,12 @@ func TestGenVPNContainer(t *testing.T) {
 		t.Fatalf("image = %q, want %q", c.Image, image)
 	}
 
-	// Command must start with "kubevpn proxy <workload>"
+	// Command must start with the legacy sidecar proxy used by sync mode.
 	if len(c.Command) < 3 {
 		t.Fatalf("command too short: %v", c.Command)
 	}
-	if c.Command[0] != "kubevpn" || c.Command[1] != "proxy" || c.Command[2] != workload {
-		t.Fatalf("command prefix = %v, want [kubevpn proxy %s ...]", c.Command[:3], workload)
+	if c.Command[0] != "kubevpn" || c.Command[1] != "legacy-proxy" || c.Command[2] != workload {
+		t.Fatalf("command prefix = %v, want [kubevpn legacy-proxy %s ...]", c.Command[:3], workload)
 	}
 
 	// Must contain --namespace flag with correct value
