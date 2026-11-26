@@ -2,6 +2,7 @@ package nodeagent
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -10,6 +11,21 @@ import (
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
+
+func TestBuildTunnelCommand_SetsManagerServiceAndAgent(t *testing.T) {
+	const managerAddr = "kubevpn-traffic-manager.kubevpn:10801"
+	cmd := buildTunnelCommand(context.Background(), "kubevpn", managerAddr, "node-a")
+	if args := strings.Join(cmd.Args, " "); !strings.Contains(args, "agent=node-a") {
+		t.Fatalf("tunnel URL does not identify the node agent: %s", args)
+	}
+	wantEnv := "TrafficManagerService=" + managerAddr
+	for _, env := range cmd.Env {
+		if env == wantEnv {
+			return
+		}
+	}
+	t.Fatalf("tunnel environment is missing %s", wantEnv)
+}
 
 func TestAttachmentSignature_ChangesWithConfig(t *testing.T) {
 	ctx := context.Background()

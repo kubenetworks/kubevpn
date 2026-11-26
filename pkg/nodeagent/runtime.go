@@ -123,6 +123,13 @@ func reconcileAttachments(ctx context.Context, opts Options, supervisor *Supervi
 	return supervisor.Sync(ctx, managerAddr, filtered)
 }
 
+func buildTunnelCommand(ctx context.Context, executable, managerAddr, nodeName string) *exec.Cmd {
+	url := fmt.Sprintf("tun:/tcp://%s?route=%s&agent=%s", managerAddr, config.CIDR.String(), nodeName)
+	cmd := exec.CommandContext(ctx, executable, "server", "--debug", "-l", url)
+	cmd.Env = append(os.Environ(), "TrafficManagerService="+managerAddr)
+	return cmd
+}
+
 func maintainTunnel(ctx context.Context, opts Options) {
 	backoff := time.Second
 	for ctx.Err() == nil {
@@ -132,8 +139,7 @@ func maintainTunnel(ctx context.Context, opts Options) {
 			return
 		}
 		managerAddr := fmt.Sprintf("%s.%s:%d", config.ConfigMapPodTrafficManager, opts.ManagerNamespace, config.PortTCP)
-		url := fmt.Sprintf("tun:/tcp://%s?route=%s&agent=%s", managerAddr, config.CIDR.String(), opts.NodeName)
-		cmd := exec.CommandContext(ctx, executable, "server", "--debug", "-l", url)
+		cmd := buildTunnelCommand(ctx, executable, managerAddr, opts.NodeName)
 		logPath := "/tmp/kubevpn-nodeagent-tunnel.log"
 		logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 		if err != nil {
