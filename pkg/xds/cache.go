@@ -178,11 +178,13 @@ func To(a *Virtual, enableIPv6 bool, logger *log.Entry) (
 	logger.Debugf("[xDS] convert %s/%s: fargate=%v ipv6=%v ports=%d rules=%d (filtered from %d)",
 		a.Namespace, a.UID, fargate, enableIPv6, len(a.Ports), len(validRules), len(a.Rules))
 	for _, port := range a.Ports {
-		// Mesh binds the container port; fargate binds the dedicated envoy listener port.
+		// Mesh TCP keeps the original container port so the capture listener can
+		// dispatch by original destination. Agent UDP has no capture listener and
+		// binds the node-boundary port directly.
 		listenPort := port.ContainerPort
 		if fargate {
 			listenPort = port.EnvoyListenerPort
-		} else if a.AgentListenerPort != 0 {
+		} else if port.Protocol == corev1.ProtocolUDP && a.AgentListenerPort != 0 {
 			listenPort = a.AgentListenerPort
 		}
 		logger.Debugf("[xDS] %s/%s port %d/%s -> listen on %d", a.Namespace, a.UID, port.ContainerPort, port.Protocol, listenPort)

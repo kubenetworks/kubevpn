@@ -3,12 +3,12 @@ package xds
 import (
 	"testing"
 
-	listener "github.com/envoyproxy/go-control-plane/envoy/config/listener/v3"
 	core "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
+	listener "github.com/envoyproxy/go-control-plane/envoy/config/listener/v3"
 	"github.com/sirupsen/logrus"
 )
 
-func TestAgentListenerPort_UsedByInboundAndUDP(t *testing.T) {
+func TestAgentListenerPort_UsedByInboundAndUDPOnly(t *testing.T) {
 	virtual := &Virtual{
 		Namespace:         "default",
 		UID:               "deployments.apps.reviews",
@@ -26,7 +26,7 @@ func TestAgentListenerPort_UsedByInboundAndUDP(t *testing.T) {
 		}},
 	}
 	listeners, _, _, _ := To(virtual, true, logrus.NewEntry(logrus.New()))
-	var sawInbound, sawUDP bool
+	var sawInbound, sawUDP, sawTCP bool
 	for _, resource := range listeners {
 		l := resource.(*listener.Listener)
 		port := l.Address.GetSocketAddress().GetPortSpecifier().(*core.SocketAddress_PortValue).PortValue
@@ -42,8 +42,17 @@ func TestAgentListenerPort_UsedByInboundAndUDP(t *testing.T) {
 				t.Fatalf("UDP listener port = %d, want 20001", port)
 			}
 		}
+		if l.Name == "default_deployments.apps.reviews_9080_TCP" {
+			sawTCP = true
+			if port != 9080 {
+				t.Fatalf("TCP original-port listener port = %d, want 9080", port)
+			}
+		}
+		if l.Name == "default_deployments.apps.reviews_20001_TCP" {
+			t.Fatal("TCP original-port listener must not share the inbound capture port")
+		}
 	}
-	if !sawInbound || !sawUDP {
-		t.Fatalf("missing inbound or UDP listener: inbound=%v udp=%v", sawInbound, sawUDP)
+	if !sawInbound || !sawUDP || !sawTCP {
+		t.Fatalf("missing listener: inbound=%v udp=%v tcp=%v", sawInbound, sawUDP, sawTCP)
 	}
 }
