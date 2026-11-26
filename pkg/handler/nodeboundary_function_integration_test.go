@@ -66,7 +66,7 @@ func TestIntegration_NodeBoundaryFunction(t *testing.T) {
 		if output, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("delete node agent: %v: %s", err, output)
 		}
-		u.serviceMeshReviewsServiceIP(t)
+		u.serviceMeshReviewsServiceIPPortMap(t)
 	})
 
 	t.Run("05-target-pod-restart", func(t *testing.T) {
@@ -74,7 +74,7 @@ func TestIntegration_NodeBoundaryFunction(t *testing.T) {
 		if output, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("delete target pod: %v: %s", err, output)
 		}
-		u.serviceMeshReviewsServiceIP(t)
+		u.serviceMeshReviewsServiceIPPortMap(t)
 	})
 
 	t.Run("06-manager-restart", func(t *testing.T) {
@@ -82,7 +82,7 @@ func TestIntegration_NodeBoundaryFunction(t *testing.T) {
 		if output, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("delete traffic manager: %v: %s", err, output)
 		}
-		u.serviceMeshReviewsServiceIP(t)
+		u.serviceMeshReviewsServiceIPPortMap(t)
 	})
 
 	t.Run("07-no-per-pod-jobs", func(t *testing.T) {
