@@ -31,6 +31,9 @@ const (
 	KeyEnvoy = "ENVOY_CONFIG"
 	// KeyNodeAttachments stores desired per-pod node-boundary attachments.
 	KeyNodeAttachments = "NODE_ATTACHMENTS"
+	// KeyAgentPortAllocations persists listener assignments and tombstones so
+	// leave/re-proxy cannot reuse a port whose old Envoy is still exiting.
+	KeyAgentPortAllocations = "AGENT_PORT_ALLOCATIONS"
 	// KeyClusterCIDRs is the ConfigMap key for cluster CIDR cache (IPv4 + IPv6).
 	KeyClusterCIDRs = "CLUSTER_CIDRS"
 	// KeyClusterCIDRsSchema is the ConfigMap key holding the schema version of the

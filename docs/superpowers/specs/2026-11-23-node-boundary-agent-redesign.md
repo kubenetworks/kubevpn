@@ -101,6 +101,7 @@ ports:
 
 - manager 根据 Virtual.Selector 找到目标 pod，生成/更新/删除附件。
 - 同一节点、同一 workload 的多个 pod 共用一个 Envoy 和派生 nodeID；每个 pod/容器端口使用独立 listener port。
+- `AGENT_PORT_ALLOCATIONS` 持久化 workload/origin 的分配与 tombstone；leave 只移除附件，不立即把端口分给另一 workload，re-proxy 恢复原端口，避免与尚未退出的 Envoy 冲突。
 - 中央 reconciler 是配置事实源，不再承担 agent pod 健康检查和 Job 重建。
 
 ### 4.3 节点 agent

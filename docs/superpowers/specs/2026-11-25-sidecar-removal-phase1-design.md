@@ -34,7 +34,7 @@
 
 - 为每个 Virtual/workload 分配并持久化唯一 `agentListenerPort`（`20000-24999`）作为 admin/base-id 基准。
 - admin 端口固定为 `agentListenerPort + 5000`。
-- 根据 Virtual.Selector 和实际 pods 发布 NodeAttachment；为每个 pod/容器端口分配稳定唯一的直连 listener。
+- 根据 Virtual.Selector 和实际 pods 发布 NodeAttachment；为每个 pod/容器端口分配稳定唯一的直连 listener，并在 `AGENT_PORT_ALLOCATIONS` 保留 tombstone，防止 leave 后端口被其他 workload 立即复用。
 - 按“节点 + workload”派生包含 `agentOrigins` 的 Virtual，每个 origin 显式记录 podIP 与端口映射；Service origin 额外保留 `originIP=ClusterIP`、`originPort=ServicePort`，未命中时继续由 kube-proxy 负载均衡。
 - 不创建 batch Job，不管理 agent pod 健康，不使用 `pods/exec`。
 

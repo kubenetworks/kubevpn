@@ -68,7 +68,14 @@ func (p *AttachmentPublisher) reconcileOnce(ctx context.Context) error {
 		}
 	}
 
-	portsChanged, err := controlplane.EnsureAgentListenerPorts(virtuals)
+	allocations := make(map[string]int32)
+	if data := cm.Data[config.KeyAgentPortAllocations]; data != "" {
+		if err := yaml.Unmarshal([]byte(data), &allocations); err != nil {
+			return fmt.Errorf("parse agent port allocations: %w", err)
+		}
+	}
+
+	portsChanged, err := controlplane.EnsureAgentListenerPortsWithState(virtuals, allocations)
 	if err != nil {
 		return fmt.Errorf("allocate agent listener ports: %w", err)
 	}
@@ -125,7 +132,7 @@ func (p *AttachmentPublisher) reconcileOnce(ctx context.Context) error {
 		}
 		attachments = append(attachments, serviceAttachments...)
 	}
-	if err := controlplane.EnsureNodeAttachmentPorts(virtuals, previous, attachments); err != nil {
+	if err := controlplane.EnsureNodeAttachmentPortsWithState(virtuals, previous, attachments, allocations); err != nil {
 		return fmt.Errorf("allocate per-pod agent listeners: %w", err)
 	}
 
@@ -170,12 +177,18 @@ func (p *AttachmentPublisher) reconcileOnce(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("marshal node attachments: %w", err)
 	}
-	if (portsChanged || cm.Data[config.KeyEnvoy] != string(envoyYAML)) || cm.Data[config.KeyNodeAttachments] != string(attachmentsYAML) {
+	allocationsYAML, err := yaml.Marshal(allocations)
+	if err != nil {
+		return fmt.Errorf("marshal agent port allocations: %w", err)
+	}
+	if (portsChanged || cm.Data[config.KeyEnvoy] != string(envoyYAML)) ||
+		(cm.Data[config.KeyNodeAttachments] != string(attachmentsYAML) || cm.Data[config.KeyAgentPortAllocations] != string(allocationsYAML)) {
 		if cm.Data == nil {
 			cm.Data = make(map[string]string)
 		}
 		cm.Data[config.KeyEnvoy] = string(envoyYAML)
 		cm.Data[config.KeyNodeAttachments] = string(attachmentsYAML)
+		cm.Data[config.KeyAgentPortAllocations] = string(allocationsYAML)
 		if _, err := p.clientset.CoreV1().ConfigMaps(p.managerNamespace).Update(ctx, cm, metav1.UpdateOptions{}); err != nil {
 			return fmt.Errorf("write node attachments: %w", err)
 		}

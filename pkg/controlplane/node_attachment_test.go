@@ -96,6 +96,60 @@ func TestEnsureNodeAttachmentPorts_UniqueAndStable(t *testing.T) {
 	}
 }
 
+func TestEnsureAgentListenerPortsWithState_DoesNotReuseRemovedWorkload(t *testing.T) {
+	allocations := map[string]int32{}
+	reviews := &Virtual{Namespace: "default", UID: "reviews", Selector: "app=reviews", Rules: []*Rule{{IsAgent: true}}}
+	changed, err := EnsureAgentListenerPortsWithState([]*Virtual{reviews}, allocations)
+	if err != nil || !changed {
+		t.Fatalf("initial allocation failed: changed=%v err=%v", changed, err)
+	}
+	authors := &Virtual{Namespace: "default", UID: "authors", Selector: "app=authors", Rules: []*Rule{{IsAgent: true}}}
+	if _, err := EnsureAgentListenerPortsWithState([]*Virtual{authors}, allocations); err != nil {
+		t.Fatal(err)
+	}
+	if authors.AgentListenerPort == reviews.AgentListenerPort {
+		t.Fatalf("removed workload port was reused while its Envoy may still run: %d", authors.AgentListenerPort)
+	}
+	readded := &Virtual{Namespace: "default", UID: "reviews", Selector: "app=reviews", Rules: []*Rule{{IsAgent: true}}}
+	if _, err := EnsureAgentListenerPortsWithState([]*Virtual{readded}, allocations); err != nil {
+		t.Fatal(err)
+	}
+	if readded.AgentListenerPort != reviews.AgentListenerPort {
+		t.Fatalf("re-added workload did not recover its stable port: got %d want %d", readded.AgentListenerPort, reviews.AgentListenerPort)
+	}
+}
+
+func TestEnsureNodeAttachmentPortsWithState_DoesNotReuseRemovedOrigin(t *testing.T) {
+	allocations := map[string]int32{}
+	virtuals := []*Virtual{
+		{Namespace: "default", UID: "reviews", AgentListenerPort: 20000},
+		{Namespace: "default", UID: "authors", AgentListenerPort: 20001},
+	}
+	ports := func() []AgentOriginPort {
+		{
+			return []AgentOriginPort{{ContainerPort: 9080, Protocol: corev1.ProtocolTCP}}
+		}
+	}
+	reviews := []NodeAttachment{{Namespace: "default", WorkloadUID: "reviews", NodeName: "node-a", PodUID: "reviews-pod", PodIP: "10.244.0.5", Ports: ports()}}
+	if err := EnsureNodeAttachmentPortsWithState(virtuals, nil, reviews, allocations); err != nil {
+		t.Fatal(err)
+	}
+	authors := []NodeAttachment{{Namespace: "default", WorkloadUID: "authors", NodeName: "node-a", PodUID: "authors-pod", PodIP: "10.244.0.7", Ports: ports()}}
+	if err := EnsureNodeAttachmentPortsWithState(virtuals, reviews, authors, allocations); err != nil {
+		t.Fatal(err)
+	}
+	if authors[0].Ports[0].AgentListenerPort == reviews[0].Ports[0].AgentListenerPort {
+		t.Fatal("removed pod listener was reused by another workload")
+	}
+	readded := []NodeAttachment{{Namespace: "default", WorkloadUID: "reviews", NodeName: "node-a", PodUID: "reviews-pod", PodIP: "10.244.0.5", Ports: ports()}}
+	if err := EnsureNodeAttachmentPortsWithState(virtuals, reviews, readded, allocations); err != nil {
+		t.Fatal(err)
+	}
+	if readded[0].Ports[0].AgentListenerPort != reviews[0].Ports[0].AgentListenerPort {
+		t.Fatalf("re-added pod did not recover its listener: got %d want %d", readded[0].Ports[0].AgentListenerPort, reviews[0].Ports[0].AgentListenerPort)
+	}
+}
+
 func TestEnsureAgentListenerPorts_Exhaustion(t *testing.T) {
 	var virtuals []*Virtual
 	for i := AgentListenerPortMin; i <= AgentListenerPortMax; i++ {

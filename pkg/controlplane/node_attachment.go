@@ -34,25 +34,46 @@ func NodeBoundaryNodeID(workloadUID, nodeName string) string {
 	return fmt.Sprintf("%s.nodes.%s", workloadUID, nodeName)
 }
 
-// EnsureNodeAttachmentPorts assigns a stable, globally unique direct listener
-// to every pod/container port. The workload base port is reserved for the
-// Envoy admin listener and is never reused as a data listener.
+// EnsureNodeAttachmentPorts assigns stable direct listeners without
+// persisting tombstones. New control-plane callers should use
+// EnsureNodeAttachmentPortsWithState so removed origins cannot be reused by a
+// different workload while their old Envoy is still running.
 func EnsureNodeAttachmentPorts(virtuals []*Virtual, previous, attachments []NodeAttachment) error {
+	return EnsureNodeAttachmentPortsWithState(virtuals, previous, attachments, nil)
+}
+
+func agentWorkloadPortKey(virtual *Virtual) string {
+	return "workload/" + virtual.Namespace + "/" + virtual.UID
+}
+
+func agentOriginPortKey(attachment NodeAttachment, port AgentOriginPort) string {
+	return fmt.Sprintf("origin/%s/%s/%s/%s/%d", attachment.Namespace, attachment.WorkloadUID, attachment.PodUID, port.Protocol, port.ContainerPort)
+}
+
+// EnsureNodeAttachmentPortsWithState assigns stable, globally unique direct
+// listeners and preserves historical assignments in allocations. A removed
+// origin keeps its tombstone until the manager ConfigMap itself is deleted.
+func EnsureNodeAttachmentPortsWithState(virtuals []*Virtual, previous, attachments []NodeAttachment, allocations map[string]int32) error {
 	virtualByKey := make(map[string]*Virtual, len(virtuals))
-	used := make(map[int32]bool)
+	used := make(map[int32]string)
+	for key, port := range allocations {
+		used[port] = key
+	}
 	for _, virtual := range virtuals {
 		virtualByKey[virtual.Namespace+"/"+virtual.UID] = virtual
 		if virtual.AgentListenerPort != 0 {
-			used[virtual.AgentListenerPort] = true
+			used[virtual.AgentListenerPort] = agentWorkloadPortKey(virtual)
 		}
-	}
-	portKey := func(attachment NodeAttachment, port AgentOriginPort) string {
-		return fmt.Sprintf("%s/%s/%s/%s/%d", attachment.Namespace, attachment.WorkloadUID, attachment.PodUID, port.Protocol, port.ContainerPort)
 	}
 	previousPorts := make(map[string]int32)
 	for _, attachment := range previous {
 		for _, port := range attachment.Ports {
-			previousPorts[portKey(attachment, port)] = port.AgentListenerPort
+			key := agentOriginPortKey(attachment, port)
+			previousPorts[key] = port.AgentListenerPort
+			used[port.AgentListenerPort] = key
+			if allocations != nil {
+				allocations[key] = port.AgentListenerPort
+			}
 		}
 	}
 	sort.Slice(attachments, func(i, j int) bool {
@@ -71,7 +92,7 @@ func EnsureNodeAttachmentPorts(virtuals []*Virtual, previous, attachments []Node
 	next := AgentListenerPortMin
 	allocate := func() (int32, error) {
 		for ; next <= AgentListenerPortMax; next++ {
-			if !used[next] {
+			if used[next] == "" {
 				port := next
 				next++
 				return port, nil
@@ -89,8 +110,13 @@ func EnsureNodeAttachmentPorts(virtuals []*Virtual, previous, attachments []Node
 		attachment.AgentListenerPort = virtual.AgentListenerPort
 		for j := range attachment.Ports {
 			port := &attachment.Ports[j]
-			assigned := previousPorts[portKey(*attachment, *port)]
-			if assigned < AgentListenerPortMin || assigned > AgentListenerPortMax || used[assigned] {
+			key := agentOriginPortKey(*attachment, *port)
+			assigned := previousPorts[key]
+			if assigned == 0 {
+				assigned = allocations[key]
+			}
+			owner := used[assigned]
+			if assigned < AgentListenerPortMin || assigned > AgentListenerPortMax || (owner != "" && owner != key) {
 				var err error
 				assigned, err = allocate()
 				if err != nil {
@@ -98,47 +124,76 @@ func EnsureNodeAttachmentPorts(virtuals []*Virtual, previous, attachments []Node
 				}
 			}
 			port.AgentListenerPort = assigned
-			used[assigned] = true
+			used[assigned] = key
+			if allocations != nil {
+				allocations[key] = assigned
+			}
 		}
 	}
 	return nil
 }
 
 // EnsureAgentListenerPorts assigns stable, unique listener ports to agent
-// Virtuals. It never changes a valid existing assignment.
+// Virtuals without persisting tombstones.
 func EnsureAgentListenerPorts(virtuals []*Virtual) (bool, error) {
-	used := make(map[int32]bool)
-	for _, v := range virtuals {
-		if v.AgentListenerPort != 0 {
-			used[v.AgentListenerPort] = true
+	return EnsureAgentListenerPortsWithState(virtuals, nil)
+}
+
+// EnsureAgentListenerPortsWithState assigns stable, unique base ports and
+// preserves historical assignments so a removed workload cannot donate its
+// admin port to another live Envoy.
+func EnsureAgentListenerPortsWithState(virtuals []*Virtual, allocations map[string]int32) (bool, error) {
+	used := make(map[int32]string)
+	for key, port := range allocations {
+		used[port] = key
+	}
+	next := AgentListenerPortMin
+	allocate := func() (int32, error) {
+		for ; next <= AgentListenerPortMax; next++ {
+			if used[next] == "" {
+				port := next
+				next++
+				return port, nil
+			}
 		}
+		return 0, fmt.Errorf("no available agent listener ports")
 	}
 	changed := false
-	for _, v := range virtuals {
+	for _, virtual := range virtuals {
 		agent := false
-		for _, rule := range v.Rules {
+		for _, rule := range virtual.Rules {
 			if rule != nil && rule.IsAgent {
 				agent = true
 				break
 			}
 		}
-		if v.Selector == "" || !agent {
+		if virtual.Selector == "" || !agent {
 			continue
 		}
-		if v.AgentListenerPort != 0 {
-			continue
+		key := agentWorkloadPortKey(virtual)
+		if virtual.AgentListenerPort == 0 && allocations[key] != 0 {
+			virtual.AgentListenerPort = allocations[key]
+			changed = true
 		}
-		var port int32
-		for port = AgentListenerPortMin; port <= AgentListenerPortMax; port++ {
-			if !used[port] {
-				break
+		if virtual.AgentListenerPort != 0 {
+			owner := used[virtual.AgentListenerPort]
+			if owner == "" || owner == key {
+				used[virtual.AgentListenerPort] = key
+				if allocations != nil {
+					allocations[key] = virtual.AgentListenerPort
+				}
+				continue
 			}
 		}
-		if port > AgentListenerPortMax {
-			return changed, fmt.Errorf("no available agent listener ports")
+		port, err := allocate()
+		if err != nil {
+			return changed, err
 		}
-		v.AgentListenerPort = port
-		used[port] = true
+		virtual.AgentListenerPort = port
+		used[port] = key
+		if allocations != nil {
+			allocations[key] = port
+		}
 		changed = true
 	}
 	return changed, nil

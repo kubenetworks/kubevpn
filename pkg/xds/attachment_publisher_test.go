@@ -104,6 +104,10 @@ func TestAttachmentPublisher_PublishesAndRemoves(t *testing.T) {
 	if virtualsAgain[0].AgentListenerPort != virtuals[0].AgentListenerPort {
 		t.Fatal("port changed on second reconcile")
 	}
+	allocationState := gotAgain.Data[config.KeyAgentPortAllocations]
+	if allocationState == "" {
+		t.Fatal("listener allocation state was not persisted")
+	}
 
 	_ = clientset.CoreV1().Pods("default").Delete(ctx, pod.Name, metav1.DeleteOptions{})
 	if err := p.reconcileOnce(ctx); err != nil {
@@ -119,6 +123,9 @@ func TestAttachmentPublisher_PublishesAndRemoves(t *testing.T) {
 	_ = yaml.Unmarshal([]byte(got.Data[config.KeyEnvoy]), &virtuals)
 	if len(virtuals) != 1 || len(virtuals[0].AgentOrigins) != 0 {
 		t.Fatalf("stale derived virtuals: %+v", virtuals)
+	}
+	if got.Data[config.KeyAgentPortAllocations] != allocationState {
+		t.Fatal("listener allocation state was discarded with the attachment")
 	}
 }
 
