@@ -13,6 +13,12 @@
 - `docs/superpowers/specs/2026-11-23-node-boundary-agent-redesign.md`
 - `docs/superpowers/poc/2026-11-23-node-boundary-result.md`
 
+> Implementation correction (2026-11-26): real-cluster logs showed that
+> `ORIGINAL_DST` is unavailable after host-to-agent cross-netns DNAT. Task 6's
+> original capture-listener text is superseded by the updated specs: manager
+> derives per-node `agentOrigins`, allocates direct per-pod/port listeners, and
+> uses explicit podIP return clusters.
+
 ## Global Constraints
 
 - 非 Service 工作负载不得使用 sidecar，也不得在失败时自动降级 sidecar。

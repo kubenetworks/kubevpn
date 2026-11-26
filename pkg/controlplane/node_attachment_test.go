@@ -1,6 +1,11 @@
 package controlplane
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+
+	corev1 "k8s.io/api/core/v1"
+)
 
 func TestEnsureAgentListenerPorts_UniqueAndStable(t *testing.T) {
 	virtuals := []*Virtual{
@@ -39,6 +44,55 @@ func TestEnsureAgentListenerPorts_SkipsSidecar(t *testing.T) {
 	changed, err := EnsureAgentListenerPorts([]*Virtual{v})
 	if err != nil || changed || v.AgentListenerPort != 0 {
 		t.Fatalf("sidecar virtual changed: changed=%v err=%v port=%d", changed, err, v.AgentListenerPort)
+	}
+}
+
+func TestEnsureNodeAttachmentPorts_UniqueAndStable(t *testing.T) {
+	virtuals := []*Virtual{{
+		Namespace: "default", UID: "deployments.apps.reviews", AgentListenerPort: 20000,
+	}}
+	ports := func() []AgentOriginPort {
+		return []AgentOriginPort{
+			{ContainerPort: 9080, Protocol: corev1.ProtocolTCP},
+			{ContainerPort: 9081, Protocol: corev1.ProtocolUDP},
+		}
+	}
+	attachments := []NodeAttachment{
+		{Namespace: "default", WorkloadUID: "deployments.apps.reviews", NodeName: "node-a", PodUID: "pod-b", PodIP: "10.244.0.6", Ports: ports()},
+		{Namespace: "default", WorkloadUID: "deployments.apps.reviews", NodeName: "node-a", PodUID: "pod-a", PodIP: "10.244.0.5", Ports: ports()},
+	}
+	if err := EnsureNodeAttachmentPorts(virtuals, nil, attachments); err != nil {
+		t.Fatal(err)
+	}
+	used := map[int32]string{20000: "workload-admin"}
+	previous := make(map[string]int32)
+	for _, attachment := range attachments {
+		if attachment.NodeID != NodeBoundaryNodeID(attachment.WorkloadUID, "node-a") {
+			t.Fatalf("unexpected derived node ID: %s", attachment.NodeID)
+		}
+		if attachment.AgentListenerPort != 20000 {
+			t.Fatalf("admin base port changed: %d", attachment.AgentListenerPort)
+		}
+		for _, port := range attachment.Ports {
+			if owner, exists := used[port.AgentListenerPort]; exists {
+				t.Fatalf("port %d shared by %s and %s", port.AgentListenerPort, owner, attachment.PodUID)
+			}
+			used[port.AgentListenerPort] = attachment.PodUID
+			previous[fmt.Sprintf("%s/%s/%d", attachment.PodUID, port.Protocol, port.ContainerPort)] = port.AgentListenerPort
+		}
+	}
+
+	reordered := []NodeAttachment{attachments[1], attachments[0]}
+	if err := EnsureNodeAttachmentPorts(virtuals, attachments, reordered); err != nil {
+		t.Fatal(err)
+	}
+	for _, attachment := range reordered {
+		for _, port := range attachment.Ports {
+			key := fmt.Sprintf("%s/%s/%d", attachment.PodUID, port.Protocol, port.ContainerPort)
+			if previous[key] != port.AgentListenerPort {
+				t.Fatalf("port changed for %s: got %d want %d", key, port.AgentListenerPort, previous[key])
+			}
+		}
 	}
 }
 

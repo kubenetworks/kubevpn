@@ -50,7 +50,7 @@
   → 回程经 agent pod 的 TUN/路由返回
 ```
 
-- TCP 使用上述 DNAT + envoy 路径；conntrack 保留 original destination，现有 origin_cluster 语义复用。
+- TCP 使用上述 DNAT + 每 pod/原始端口独立直连 listener；manager 为每个 listener 配置显式 `<podIP>:<containerPort>` 回源 cluster。宿主机与 agent 分属不同 netns，不能依赖 `ORIGINAL_DST` 或 sidecar capture listener 还原原始目的地址。
 - **必须排除 `src=<agentPodIP>`**：否则 agent 向原始 podIP 做 origin-forwarding 时会被同一条宿主机 DNAT 再次捕获，形成回环并返回 503（PoC 实测）。
 - UDP 使用 agent 的 TUN 数据面与现有 UDP 配置处理，**必须在 PoC 中单独验证，不能由 TCP 通过推断 UDP 可用**。
 - 已有 kubevpn sidecar 的 pod 跳过接管：一个 pod netns 只允许一个 kubevpn 接管者。
@@ -63,13 +63,21 @@
 在现有 `controlplane.Virtual` 增加：
 
 ```yaml
-agentListenerPort: 20001
+agentListenerPort: 20000
+agentOrigins:
+- podUID: 8e02efad-8dd9-452d-bdcc-6e76b5c5480f
+  podIP: 10.244.0.42
+  ports:
+  - containerPort: 9080
+    protocol: TCP
+    agentListenerPort: 20001
 ```
 
-- listener 端口范围：`20000-24999`；每 Virtual/workload 唯一，由 manager 分配并持久化。
-- sidecar 继续使用 `15006`；node-boundary agent 使用 `agentListenerPort`。
+- 端口范围：`20000-24999`；每 Virtual/workload 的唯一 `agentListenerPort` 作为 Envoy admin/base-id 基准，由 manager 分配并持久化。
+- `agentOrigins` 是 manager 按“节点 + workload”派生的配置；每个 pod/容器端口分配独立且稳定的直连 listener，回源 endpoint 显式指向对应 podIP。
+- sidecar 继续使用 `15006` 与 `ORIGINAL_DST`；node-boundary 不使用 sidecar capture listener。
 - envoy admin 端口固定为 `agentListenerPort + 5000`（范围 `25000-29999`），避免多个 envoy 共享 `9003`，且无需第二次独立分配。
-- `Namespace/UID/Selector/Rules/OwnerID` 保持现有语义。
+- `Namespace/UID/Selector/Rules/OwnerID` 保持现有语义；派生 Virtual 的 UID 为 `<workloadUID>.nodes.<nodeName>`。
 
 ### 4.2 NodeAttachment
 
@@ -80,13 +88,18 @@ podUID: 8e02efad-8dd9-452d-bdcc-6e76b5c5480f
 nodeName: minikube
 podIP: 10.244.0.42
 workloadUID: deployments.apps.reviews
-agentListenerPort: 20001
+nodeID: deployments.apps.reviews.nodes.minikube
+agentListenerPort: 20000
+ports:
+- containerPort: 9080
+  protocol: TCP
+  agentListenerPort: 20001
 ```
 
 记录写入 traffic-manager ConfigMap 的新 key `NODE_ATTACHMENTS`。
 
 - manager 根据 Virtual.Selector 找到目标 pod，生成/更新/删除附件。
-- 同一 workload 多 pod 共用 listener port；不同 workload 不共用。
+- 同一节点、同一 workload 的多个 pod 共用一个 Envoy 和派生 nodeID；每个 pod/容器端口使用独立 listener port。
 - 中央 reconciler 是配置事实源，不再承担 agent pod 健康检查和 Job 重建。
 
 ### 4.3 节点 agent
@@ -96,7 +109,7 @@ DaemonSet agent 仅执行本地动作：
 1. 通过 Downward API 获得 `nodeName`、`podIP`。
 2. watch `NODE_ATTACHMENTS`，筛选本节点记录。
 3. 在宿主机 netns 收敛精确 podIP DNAT 规则。
-4. 按 workload 启停 envoy，xDS nodeID 继续使用现有 `GenEnvoyUID`。
+4. 按 workload 启停 envoy，xDS nodeID 使用 `GenEnvoyUID(namespace, <workloadUID>.nodes.<nodeName>)`，订阅 manager 派生的本节点直连配置。
 5. 维持本节点唯一隧道和 lease。
 
 agent 不需要 batch/jobs、`pods/exec` 或全集群 pod list/watch 权限。

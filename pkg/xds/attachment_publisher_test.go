@@ -17,6 +17,11 @@ const publisherVirtualsYAML = `- schemaVersion: 2
   Namespace: default
   Uid: deployments.apps.reviews
   selector: app=reviews
+  Ports:
+  - containerPort: 9080
+    protocol: TCP
+  - containerPort: 9081
+    protocol: UDP
   Rules:
   - ownerID: owner-1
     LocalTunIPv4: 198.18.0.1
@@ -56,20 +61,43 @@ func TestAttachmentPublisher_PublishesAndRemoves(t *testing.T) {
 		t.Fatalf("unexpected attachments: %+v", attachments)
 	}
 	if attachments[0].AgentListenerPort == 0 {
-		t.Fatal("listener port not allocated")
+		t.Fatal("admin base port not allocated")
+	}
+	if attachments[0].NodeID == "" || len(attachments[0].Ports) != 2 {
+		t.Fatalf("derived node or port mappings missing: %+v", attachments[0])
+	}
+	seenPorts := map[int32]bool{}
+	for _, port := range attachments[0].Ports {
+		if port.AgentListenerPort == 0 || seenPorts[port.AgentListenerPort] {
+			t.Fatalf("invalid per-pod listener allocation: %+v", attachments[0].Ports)
+		}
+		seenPorts[port.AgentListenerPort] = true
 	}
 	var virtuals []*controlplane.Virtual
 	if err := yaml.Unmarshal([]byte(got.Data[config.KeyEnvoy]), &virtuals); err != nil {
 		t.Fatal(err)
 	}
+	if len(virtuals) != 2 {
+		t.Fatalf("expected base and per-node derived virtuals: %+v", virtuals)
+	}
 	if virtuals[0].AgentListenerPort != attachments[0].AgentListenerPort {
-		t.Fatal("attachment port differs from Virtual port")
+		t.Fatal("attachment admin port differs from Virtual port")
+	}
+	derived := virtuals[1]
+	if derived.UID != attachments[0].NodeID || len(derived.AgentOrigins) != 1 {
+		t.Fatalf("unexpected derived virtual: %+v", derived)
+	}
+	if derived.AgentOrigins[0].PodIP != pod.Status.PodIP || len(derived.AgentOrigins[0].Ports) != 2 {
+		t.Fatalf("derived origin does not identify the real pod: %+v", derived.AgentOrigins[0])
 	}
 
 	if err := p.reconcileOnce(ctx); err != nil {
 		t.Fatal(err)
 	}
 	gotAgain, _ := clientset.CoreV1().ConfigMaps("kubevpn").Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if gotAgain.Data[config.KeyNodeAttachments] != got.Data[config.KeyNodeAttachments] || gotAgain.Data[config.KeyEnvoy] != got.Data[config.KeyEnvoy] {
+		t.Fatal("attachments or derived virtuals changed on an identical reconcile")
+	}
 	var virtualsAgain []*controlplane.Virtual
 	_ = yaml.Unmarshal([]byte(gotAgain.Data[config.KeyEnvoy]), &virtualsAgain)
 	if virtualsAgain[0].AgentListenerPort != virtuals[0].AgentListenerPort {
@@ -85,6 +113,11 @@ func TestAttachmentPublisher_PublishesAndRemoves(t *testing.T) {
 	_ = yaml.Unmarshal([]byte(got.Data[config.KeyNodeAttachments]), &attachments)
 	if len(attachments) != 0 {
 		t.Fatalf("stale attachments: %+v", attachments)
+	}
+	virtuals = nil
+	_ = yaml.Unmarshal([]byte(got.Data[config.KeyEnvoy]), &virtuals)
+	if len(virtuals) != 1 || len(virtuals[0].AgentOrigins) != 0 {
+		t.Fatalf("stale derived virtuals: %+v", virtuals)
 	}
 }
 

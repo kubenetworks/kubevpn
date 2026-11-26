@@ -63,8 +63,10 @@ func (s *Supervisor) Sync(ctx context.Context, managerAddr string, attachments [
 		}
 	}
 	namespaces := make(map[string]string, len(attachments))
+	nodeIDs := make(map[string]string, len(attachments))
 	for _, attachment := range attachments {
 		namespaces[attachment.WorkloadUID] = attachment.Namespace
+		nodeIDs[attachment.WorkloadUID] = attachment.NodeID
 	}
 	for uid, spec := range desired {
 		if process, ok := s.processes[uid]; ok {
@@ -75,7 +77,7 @@ func (s *Supervisor) Sync(ctx context.Context, managerAddr string, attachments [
 				continue
 			}
 		}
-		process, err := s.start(ctx, managerAddr, namespaces[uid], spec)
+		process, err := s.start(ctx, managerAddr, namespaces[uid], nodeIDs[uid], spec)
 		if err != nil {
 			plog.G(ctx).Errorf("[node-agent] start envoy for %s failed: %v", uid, err)
 			continue
@@ -85,7 +87,7 @@ func (s *Supervisor) Sync(ctx context.Context, managerAddr string, attachments [
 	return nil
 }
 
-func (s *Supervisor) start(ctx context.Context, managerAddr, namespace string, spec launchSpec) (*envoyProcess, error) {
+func (s *Supervisor) start(ctx context.Context, managerAddr, namespace, derivedNodeID string, spec launchSpec) (*envoyProcess, error) {
 	bootstrap, err := inject.RenderEnvoyBootstrapWithAdmin(ctx, managerAddr, spec.adminPort)
 	if err != nil {
 		return nil, fmt.Errorf("render envoy bootstrap: %w", err)
@@ -94,7 +96,7 @@ func (s *Supervisor) start(ctx context.Context, managerAddr, namespace string, s
 	if err := os.WriteFile(configPath, bootstrap, 0o600); err != nil {
 		return nil, fmt.Errorf("write envoy bootstrap: %w", err)
 	}
-	nodeID := util.GenEnvoyUID(namespace, spec.workloadUID)
+	nodeID := util.GenEnvoyUID(namespace, derivedNodeID)
 	cmd := exec.CommandContext(ctx, "envoy", "-c", configPath,
 		"--service-node", nodeID,
 		"--service-cluster", nodeID,

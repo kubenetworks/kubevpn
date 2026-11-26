@@ -23,7 +23,11 @@ func (f *fakeRunner) commands() string { return strings.Join(f.calls, "\n") }
 func TestConvergeHostDNAT_ConvergesAndExcludesAgent(t *testing.T) {
 	runner := &fakeRunner{listOutput: "-A PREROUTING -p tcp ! -s 10.244.0.8 -d 10.244.0.5 -j DNAT --to 10.244.0.8:20001 -m comment --comment \"kubevpn-nodeagent\"\n"}
 	attachments := []controlplane.NodeAttachment{{
-		PodIP: "10.244.0.5", AgentListenerPort: 20001,
+		PodIP: "10.244.0.5", AgentListenerPort: 20000,
+		Ports: []controlplane.AgentOriginPort{
+			{ContainerPort: 9080, Protocol: "TCP", AgentListenerPort: 20001},
+			{ContainerPort: 9081, Protocol: "UDP", AgentListenerPort: 20002},
+		},
 	}}
 	if err := ConvergeHostDNAT(context.Background(), runner, "10.244.0.8", attachments); err != nil {
 		t.Fatal(err)
@@ -35,14 +39,14 @@ func TestConvergeHostDNAT_ConvergesAndExcludesAgent(t *testing.T) {
 	if !strings.Contains(joined, "! -s 10.244.0.8 -d 10.244.0.5") {
 		t.Fatal("agent source exclusion or exact podIP match missing")
 	}
-	if !strings.Contains(joined, "-p udp") {
-		t.Fatal("UDP DNAT rule missing")
+	if !strings.Contains(joined, "-p udp ! -s 10.244.0.8 -d 10.244.0.5 --dport 9081 -j DNAT --to 10.244.0.8:20002") {
+		t.Fatal("UDP DNAT rule with original-port mapping missing")
 	}
 	if !strings.HasPrefix(joined, "nsenter --net=/host/proc/1/ns/net") {
 		t.Fatal("rule was not applied in host netns")
 	}
-	if !strings.Contains(joined, "-A PREROUTING -p tcp ! -s 10.244.0.8 -d 10.244.0.5 -j DNAT --to 10.244.0.8:20001") {
-		t.Fatal("expected DNAT rule not installed")
+	if !strings.Contains(joined, "-A PREROUTING -p tcp ! -s 10.244.0.8 -d 10.244.0.5 --dport 9080 -j DNAT --to 10.244.0.8:20001") {
+		t.Fatal("expected TCP original-port DNAT rule not installed")
 	}
 	if strings.Count(joined, "-A PREROUTING") != 2 {
 		t.Fatalf("expected one TCP and one UDP add operation, got:\n%s", joined)

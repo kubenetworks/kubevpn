@@ -37,17 +37,36 @@ type Virtual struct {
 	// and the on-disk key is determined solely by the json tag. Existing ConfigMap
 	// data in production clusters uses the key "Uid"; changing this tag would make
 	// all stored configs unreadable. The yaml tag is kept for documentation only.
-	UID string `yaml:"Uid" json:"Uid"` // group.resource.name
+	UID         string `yaml:"Uid" json:"Uid"` // group.resource.name
 	FargateMode bool   `yaml:"fargateMode,omitempty" json:"fargateMode,omitempty"`
 	// Selector is the workload's pod label selector, recorded at node-agent
 	// inject time so the reconciler can match pods to rules. Zero value means
 	// the rule was written by sidecar mode; reconciler skips it.
 	Selector string `yaml:"selector,omitempty" json:"selector,omitempty"`
-	// AgentListenerPort is the unique per-workload listener used by the
-	// node-boundary agent. Zero means sidecar/legacy mode.
+	// AgentListenerPort is the unique per-workload base port used for the
+	// node-boundary Envoy admin listener and process identity. Zero means
+	// sidecar/legacy mode. Per-pod data listeners are allocated in AgentOrigins.
 	AgentListenerPort int32 `yaml:"agentListenerPort,omitempty" json:"agentListenerPort,omitempty"`
-	Ports             []ContainerPort
-	Rules             []*Rule
+	// AgentOrigins is manager-derived, per-node desired state. Each origin gets
+	// direct listeners and an explicit podIP return path, avoiding ORIGINAL_DST
+	// across the host/agent network-namespace boundary.
+	AgentOrigins []*AgentOrigin `yaml:"agentOrigins,omitempty" json:"agentOrigins,omitempty"`
+	Ports        []ContainerPort
+	Rules        []*Rule
+}
+
+// AgentOrigin identifies one real pod behind a node-boundary listener set.
+type AgentOrigin struct {
+	PodUID string            `json:"podUID" yaml:"podUID"`
+	PodIP  string            `json:"podIP" yaml:"podIP"`
+	Ports  []AgentOriginPort `json:"ports" yaml:"ports"`
+}
+
+// AgentOriginPort maps one original container port to its direct agent listener.
+type AgentOriginPort struct {
+	ContainerPort     int32           `json:"containerPort" yaml:"containerPort"`
+	Protocol          corev1.Protocol `json:"protocol" yaml:"protocol"`
+	AgentListenerPort int32           `json:"agentListenerPort" yaml:"agentListenerPort"`
 }
 
 // ContainerPort describes a port on a container with optional envoy listener binding.

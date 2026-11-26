@@ -52,10 +52,15 @@ func ConvergeHostDNAT(ctx context.Context, runner CommandRunner, agentIP string,
 		}
 	}
 	for _, attachment := range attachments {
-		for _, protocol := range []string{"tcp", "udp"} {
+		for _, port := range attachment.Ports {
+			protocol := strings.ToLower(string(port.Protocol))
+			if protocol != "tcp" && protocol != "udp" {
+				continue
+			}
 			args := []string{hostNet, "iptables", "-t", "nat", "-A", "PREROUTING",
 				"-p", protocol, "!", "-s", agentIP, "-d", attachment.PodIP,
-				"-j", "DNAT", "--to", fmt.Sprintf("%s:%d", agentIP, attachment.AgentListenerPort),
+				"--dport", fmt.Sprintf("%d", port.ContainerPort),
+				"-j", "DNAT", "--to", fmt.Sprintf("%s:%d", agentIP, port.AgentListenerPort),
 				"-m", "comment", "--comment", config.AgentIptablesComment,
 			}
 			if _, err := runner.Run(ctx, prefix, args...); err != nil {

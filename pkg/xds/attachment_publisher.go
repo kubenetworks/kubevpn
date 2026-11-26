@@ -3,6 +3,7 @@ package xds
 import (
 	"context"
 	"fmt"
+	"sort"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -47,16 +48,33 @@ func (p *AttachmentPublisher) reconcileOnce(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("read traffic manager configmap: %w", err)
 	}
-	var virtuals []*controlplane.Virtual
+	var storedVirtuals []*controlplane.Virtual
 	if data := cm.Data[config.KeyEnvoy]; data != "" {
-		if err := yaml.Unmarshal([]byte(data), &virtuals); err != nil {
+		if err := yaml.Unmarshal([]byte(data), &storedVirtuals); err != nil {
 			return fmt.Errorf("parse envoy config: %w", err)
+		}
+	}
+	// Derived per-node Virtuals are regenerated below, never treated as input.
+	virtuals := make([]*controlplane.Virtual, 0, len(storedVirtuals))
+	for _, virtual := range storedVirtuals {
+		if len(virtual.AgentOrigins) == 0 {
+			virtuals = append(virtuals, virtual)
+		}
+	}
+	var previous []controlplane.NodeAttachment
+	if data := cm.Data[config.KeyNodeAttachments]; data != "" {
+		if err := yaml.Unmarshal([]byte(data), &previous); err != nil {
+			return fmt.Errorf("parse previous node attachments: %w", err)
 		}
 	}
 
 	portsChanged, err := controlplane.EnsureAgentListenerPorts(virtuals)
 	if err != nil {
 		return fmt.Errorf("allocate agent listener ports: %w", err)
+	}
+	virtualByKey := make(map[string]*controlplane.Virtual, len(virtuals))
+	for _, virtual := range virtuals {
+		virtualByKey[virtual.Namespace+"/"+virtual.UID] = virtual
 	}
 
 	attachments := make([]controlplane.NodeAttachment, 0)
@@ -84,18 +102,56 @@ func (p *AttachmentPublisher) reconcileOnce(ctx context.Context) error {
 			if pod.Status.Phase != corev1.PodRunning || pod.DeletionTimestamp != nil || pod.Status.PodIP == "" || pod.Spec.NodeName == "" || podHasKubevpnSidecar(pod) {
 				continue
 			}
+			ports := make([]controlplane.AgentOriginPort, 0, len(virtual.Ports))
+			for _, port := range virtual.Ports {
+				ports = append(ports, controlplane.AgentOriginPort{ContainerPort: port.ContainerPort, Protocol: port.Protocol})
+			}
 			attachments = append(attachments, controlplane.NodeAttachment{
-				PodUID:            string(pod.UID),
-				Namespace:         pod.Namespace,
-				NodeName:          pod.Spec.NodeName,
-				PodIP:             pod.Status.PodIP,
-				WorkloadUID:       virtual.UID,
-				AgentListenerPort: virtual.AgentListenerPort,
+				PodUID:      string(pod.UID),
+				Namespace:   pod.Namespace,
+				NodeName:    pod.Spec.NodeName,
+				PodIP:       pod.Status.PodIP,
+				WorkloadUID: virtual.UID,
+				Ports:       ports,
 			})
 		}
 	}
+	if err := controlplane.EnsureNodeAttachmentPorts(virtuals, previous, attachments); err != nil {
+		return fmt.Errorf("allocate per-pod agent listeners: %w", err)
+	}
 
-	envoyYAML, err := yaml.Marshal(virtuals)
+	derivedByNodeID := make(map[string]*controlplane.Virtual)
+	for _, attachment := range attachments {
+		virtual := virtualByKey[attachment.Namespace+"/"+attachment.WorkloadUID]
+		derived := derivedByNodeID[attachment.NodeID]
+		if derived == nil {
+			derived = &controlplane.Virtual{
+				SchemaVersion:     virtual.SchemaVersion,
+				Namespace:         virtual.Namespace,
+				UID:               attachment.NodeID,
+				AgentListenerPort: virtual.AgentListenerPort,
+				Ports:             virtual.Ports,
+				Rules:             virtual.Rules,
+			}
+			derivedByNodeID[attachment.NodeID] = derived
+		}
+		derived.AgentOrigins = append(derived.AgentOrigins, &controlplane.AgentOrigin{
+			PodUID: attachment.PodUID,
+			PodIP:  attachment.PodIP,
+			Ports:  attachment.Ports,
+		})
+	}
+	nodeIDs := make([]string, 0, len(derivedByNodeID))
+	for nodeID := range derivedByNodeID {
+		nodeIDs = append(nodeIDs, nodeID)
+	}
+	sort.Strings(nodeIDs)
+	updatedVirtuals := append([]*controlplane.Virtual{}, virtuals...)
+	for _, nodeID := range nodeIDs {
+		updatedVirtuals = append(updatedVirtuals, derivedByNodeID[nodeID])
+	}
+
+	envoyYAML, err := yaml.Marshal(updatedVirtuals)
 	if err != nil {
 		return fmt.Errorf("marshal envoy config: %w", err)
 	}
