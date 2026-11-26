@@ -147,6 +147,14 @@ func dumpKubeVPNSidecarLogs(t *testing.T, clientset kubernetes.Interface) {
 			} else {
 				t.Logf("===== node-agent host DNAT %s/%s =====\n%s", pod.Namespace, pod.Name, output)
 			}
+			cmd = exec.CommandContext(ctx, "kubectl", "-n", pod.Namespace, "exec", pod.Name, "-c", c.Name, "--",
+				"sh", "-c", `for p in 20001 20003; do echo "=== direct listener $p ==="; curl -sS --max-time 10 -H 'env: test' "http://127.0.0.1:$p/health" || true; done`)
+			output, err = cmd.CombinedOutput()
+			if err != nil {
+				t.Logf("probe node-agent direct listeners %s/%s: %v", pod.Namespace, pod.Name, err)
+			} else {
+				t.Logf("===== node-agent direct listeners %s/%s =====\n%s", pod.Namespace, pod.Name, output)
+			}
 			cm, cmErr := clientset.CoreV1().ConfigMaps(pod.Namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 			if cmErr != nil {
 				t.Logf("dump node-agent desired state %s/%s: %v", pod.Namespace, pod.Name, cmErr)
