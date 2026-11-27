@@ -43,6 +43,9 @@ type Virtual struct {
 	// inject time so the reconciler can match pods to rules. Zero value means
 	// the rule was written by sidecar mode; reconciler skips it.
 	Selector string `yaml:"selector,omitempty" json:"selector,omitempty"`
+	// ServiceName is set only when the user explicitly proxies a Service. The
+	// publisher then creates only that Service's ClusterIP origins.
+	ServiceName string `yaml:"serviceName,omitempty" json:"serviceName,omitempty"`
 	// AgentListenerPort is the unique per-workload base port used for the
 	// node-boundary Envoy admin listener and process identity. Zero means
 	// sidecar/legacy mode. Per-pod data listeners are allocated in AgentOrigins.

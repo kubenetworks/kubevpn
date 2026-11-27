@@ -87,6 +87,12 @@ func (p *AttachmentPublisher) reconcileOnce(ctx context.Context) error {
 	}
 
 	attachments := make([]controlplane.NodeAttachment, 0)
+	explicitServices := make(map[string]struct{})
+	for _, virtual := range virtuals {
+		if virtual.ServiceName != "" {
+			explicitServices[virtual.Namespace+"/"+virtual.ServiceName] = struct{}{}
+		}
+	}
 	syncEndpoints := make(map[*controlplane.Rule]syncEndpoint)
 	for _, virtual := range virtuals {
 		for _, rule := range virtual.Rules {
@@ -132,16 +138,18 @@ func (p *AttachmentPublisher) reconcileOnce(ctx context.Context) error {
 			for _, port := range virtual.Ports {
 				ports = append(ports, controlplane.AgentOriginPort{ContainerPort: port.ContainerPort, Protocol: port.Protocol})
 			}
-			attachments = append(attachments, controlplane.NodeAttachment{
-				PodUID:      string(pod.UID),
-				Namespace:   pod.Namespace,
-				NodeName:    pod.Spec.NodeName,
-				PodIP:       pod.Status.PodIP,
-				WorkloadUID: virtual.UID,
-				Ports:       ports,
-			})
+			if virtual.ServiceName == "" {
+				attachments = append(attachments, controlplane.NodeAttachment{
+					PodUID:      string(pod.UID),
+					Namespace:   pod.Namespace,
+					NodeName:    pod.Spec.NodeName,
+					PodIP:       pod.Status.PodIP,
+					WorkloadUID: virtual.UID,
+					Ports:       ports,
+				})
+			}
 		}
-		serviceAttachments, err := buildServiceAttachments(ctx, p.clientset, virtual, matchedPods, nodes)
+		serviceAttachments, err := buildServiceAttachments(ctx, p.clientset, virtual, matchedPods, nodes, explicitServices)
 		if err != nil {
 			return err
 		}

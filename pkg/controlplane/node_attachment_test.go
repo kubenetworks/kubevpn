@@ -96,6 +96,34 @@ func TestEnsureNodeAttachmentPorts_UniqueAndStable(t *testing.T) {
 	}
 }
 
+func TestEnsureNodeAttachmentPorts_ServicePortsSharingTargetStayDistinct(t *testing.T) {
+	virtuals := []*Virtual{{Namespace: "default", UID: "services.reviews", AgentListenerPort: 20000}}
+	newAttachments := func() []NodeAttachment {
+		return []NodeAttachment{{
+			Namespace: "default", WorkloadUID: "services.reviews", NodeName: "node-a", PodUID: "service/default/reviews", PodIP: "10.96.0.10", ServiceName: "reviews",
+			Ports: []AgentOriginPort{
+				{ContainerPort: 9080, OriginPort: 80, Protocol: corev1.ProtocolTCP},
+				{ContainerPort: 9080, OriginPort: 8080, Protocol: corev1.ProtocolTCP},
+			},
+		}}
+	}
+	attachments := newAttachments()
+	if err := EnsureNodeAttachmentPorts(virtuals, nil, attachments); err != nil {
+		t.Fatal(err)
+	}
+	first := []int32{attachments[0].Ports[0].AgentListenerPort, attachments[0].Ports[1].AgentListenerPort}
+	reordered := newAttachments()
+	if err := EnsureNodeAttachmentPorts(virtuals, attachments, reordered); err != nil {
+		t.Fatal(err)
+	}
+	if reordered[0].Ports[0].AgentListenerPort == reordered[0].Ports[1].AgentListenerPort {
+		t.Fatalf("service ports sharing a target collapsed onto listener %d", reordered[0].Ports[0].AgentListenerPort)
+	}
+	if reordered[0].Ports[0].AgentListenerPort != first[0] || reordered[0].Ports[1].AgentListenerPort != first[1] {
+		t.Fatalf("service listener allocation is not stable: first=%v reordered=%v", first, reordered[0].Ports)
+	}
+}
+
 func TestEnsureAgentListenerPortsWithState_DoesNotReuseRemovedWorkload(t *testing.T) {
 	allocations := map[string]int32{}
 	reviews := &Virtual{Namespace: "default", UID: "reviews", Selector: "app=reviews", Rules: []*Rule{{IsAgent: true}}}

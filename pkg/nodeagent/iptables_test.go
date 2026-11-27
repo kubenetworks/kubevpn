@@ -34,7 +34,7 @@ func TestConvergeHostDNAT_ConvergesAndExcludesAgent(t *testing.T) {
 			{ContainerPort: 9080, Protocol: "TCP", OriginPort: 80, AgentListenerPort: 20003},
 		},
 	}}
-	if err := ConvergeHostDNAT(context.Background(), runner, "10.244.0.8", attachments); err != nil {
+	if err := ConvergeHostDNAT(context.Background(), runner, "10.244.0.8", []string{"10.244.0.8", "10.244.0.9"}, attachments); err != nil {
 		t.Fatal(err)
 	}
 	joined := runner.commands()
@@ -56,14 +56,31 @@ func TestConvergeHostDNAT_ConvergesAndExcludesAgent(t *testing.T) {
 	if !strings.Contains(joined, "-I PREROUTING 1 -p tcp ! -s 10.244.0.8 -d 10.96.0.10 --dport 80 -j DNAT --to 10.244.0.8:20003") {
 		t.Fatal("expected Service ClusterIP DNAT rule not installed")
 	}
-	if strings.Count(joined, "-I PREROUTING 1") != 3 {
+	if strings.Count(joined, "-I PREROUTING 1 -p") != 3 {
 		t.Fatalf("expected pod TCP/UDP and service TCP add operations, got:\n%s", joined)
+	}
+	if !strings.Contains(joined, "-s 10.244.0.9 -j RETURN") {
+		t.Fatalf("remote node-agent source must bypass recapture:\n%s", joined)
+	}
+}
+
+func TestConvergeHostDNAT_RejectsDuplicateDestination(t *testing.T) {
+	runner := &fakeRunner{}
+	attachments := []controlplane.NodeAttachment{
+		{PodIP: "10.96.0.10", Ports: []controlplane.AgentOriginPort{{ContainerPort: 9080, OriginPort: 80, Protocol: "TCP", AgentListenerPort: 20001}}},
+		{PodIP: "10.96.0.10", Ports: []controlplane.AgentOriginPort{{ContainerPort: 9080, OriginPort: 80, Protocol: "TCP", AgentListenerPort: 20002}}},
+	}
+	if err := ConvergeHostDNAT(context.Background(), runner, "10.244.0.8", nil, attachments); err == nil {
+		t.Fatal("expected duplicate Service destination to be rejected")
+	}
+	if len(runner.calls) != 0 {
+		t.Fatalf("invalid attachments must be rejected before flushing working rules: %v", runner.calls)
 	}
 }
 
 func TestConvergeHostDNAT_EmptyAttachmentsFlushesMarkedRules(t *testing.T) {
 	runner := &fakeRunner{listOutput: "-A PREROUTING -p tcp -d 10.244.0.5 -j DNAT --to 10.244.0.8:20001 -m comment --comment \"kubevpn-nodeagent\"\n"}
-	if err := ConvergeHostDNAT(context.Background(), runner, "10.244.0.8", nil); err != nil {
+	if err := ConvergeHostDNAT(context.Background(), runner, "10.244.0.8", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(runner.commands(), "-I PREROUTING 1") {

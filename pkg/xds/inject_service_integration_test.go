@@ -20,6 +20,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/cli-runtime/pkg/resource"
 	restfake "k8s.io/client-go/rest/fake"
 	cmdtesting "k8s.io/kubectl/pkg/cmd/testing"
@@ -99,6 +100,51 @@ func newInjectTestFactory(t *testing.T, deployments ...*appsv1.Deployment) *cmdt
 				}, nil
 			}
 			return nil, fmt.Errorf("unexpected request %s %s", req.Method, req.URL.Path)
+		}),
+	}
+	tf.Client = fakeClient
+	tf.UnstructuredClient = fakeClient
+	return tf
+}
+
+func newInjectServiceTestFactory(t *testing.T, service *corev1.Service, deploy *appsv1.Deployment) *cmdtesting.TestFactory {
+	t.Helper()
+	tf := cmdtesting.NewTestFactory().WithNamespace(service.Namespace)
+	t.Cleanup(tf.Cleanup)
+	marshal := func(obj any) []byte {
+		data, err := json.Marshal(obj)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return data
+	}
+	serviceBody := marshal(service)
+	deploymentBody := marshal(deploy)
+	pod := &corev1.Pod{
+		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Pod"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "foo-pod", Namespace: service.Namespace, Labels: map[string]string{"app": "foo"},
+			OwnerReferences: []metav1.OwnerReference{{APIVersion: "apps/v1", Kind: "Deployment", Name: deploy.Name, Controller: ptr.To(true)}},
+		},
+	}
+	podBody := marshal(pod)
+	podListBody := marshal(&corev1.PodList{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "PodList"}, Items: []corev1.Pod{*pod}})
+	responses := map[string][]byte{
+		"/namespaces/" + service.Namespace + "/services/" + service.Name:               serviceBody,
+		"/api/v1/namespaces/" + service.Namespace + "/services/" + service.Name:        serviceBody,
+		"/api/v1/namespaces/" + service.Namespace + "/pods":                            podListBody,
+		"/namespaces/" + service.Namespace + "/pods/" + pod.Name:                       podBody,
+		"/namespaces/" + deploy.Namespace + "/deployments/" + deploy.Name:              deploymentBody,
+		"/apis/apps/v1/namespaces/" + deploy.Namespace + "/deployments/" + deploy.Name: deploymentBody,
+	}
+	fakeClient := &restfake.RESTClient{
+		NegotiatedSerializer: resource.UnstructuredPlusDefaultContentConfig().NegotiatedSerializer,
+		GroupVersion:         appsv1.SchemeGroupVersion,
+		Client: restfake.CreateHTTPClient(func(req *http.Request) (*http.Response, error) {
+			if body, ok := responses[req.URL.Path]; ok && req.Method == http.MethodGet {
+				return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(bytes.NewReader(body))}, nil
+			}
+			return nil, fmt.Errorf("unexpected request %s %s", req.Method, req.URL.String())
 		}),
 	}
 	tf.Client = fakeClient
@@ -390,4 +436,58 @@ func TestProxyInject_SyncRouteWritesDeclarativeTarget(t *testing.T) {
 		return
 	}
 	t.Fatal("base sync Virtual not found")
+}
+
+func TestProxyInject_ServiceUsesNodeAgentWithoutSSHMapper(t *testing.T) {
+	const ns = "test-ns"
+	env := newTestEnv(t)
+	if _, err := env.server.clientset.CoreV1().Secrets(ns).Create(context.Background(), &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: ns},
+		Data:       map[string][]byte{config.TLSCertKey: {}, config.TLSPrivateKeyKey: {}, config.TLSServerName: []byte("kubevpn")},
+	}, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	deploy := plainDeployment(ns)
+	service := &corev1.Service{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Service"},
+		ObjectMeta: metav1.ObjectMeta{Name: "reviews", Namespace: ns},
+		Spec: corev1.ServiceSpec{
+			Selector: map[string]string{"app": "foo"}, ClusterIP: "10.96.0.10",
+			Ports: []corev1.ServicePort{{Port: 80, TargetPort: intstr.FromInt(8080), Protocol: corev1.ProtocolTCP}},
+		},
+	}
+	env.server.factory = newInjectServiceTestFactory(t, service, deploy)
+	prepareNodeAgentReady(t, env, ns, "services.reviews")
+	stream, err := env.client.ProxyInject(context.Background(), &rpc.InjectRequest{
+		Namespace: ns, Workloads: []string{"services/reviews"}, OwnerID: "owner-a", LocalTunIPv4: "198.18.0.10",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for {
+		resp, recvErr := stream.Recv()
+		if recvErr == io.EOF {
+			break
+		}
+		if recvErr != nil {
+			t.Fatal(recvErr)
+		}
+		if len(resp.GetServices()) != 0 {
+			t.Fatalf("node-agent Service must not start an SSH Mapper: %+v", resp.GetServices())
+		}
+	}
+	cm, err := env.server.clientset.CoreV1().ConfigMaps(ns).Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var virtuals []*controlplane.Virtual
+	if err := yaml.Unmarshal([]byte(cm.Data[config.KeyEnvoy]), &virtuals); err != nil {
+		t.Fatal(err)
+	}
+	for _, virtual := range virtuals {
+		if virtual.UID == "services.reviews" && virtual.ServiceName == "reviews" && virtual.Rules[0].LocalTunIPv4 == "198.18.0.10" {
+			return
+		}
+	}
+	t.Fatalf("explicit Service Virtual missing: %+v", virtuals)
 }

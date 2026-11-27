@@ -210,6 +210,79 @@ func TestAttachmentPublisher_PublishesServiceOriginsPerNode(t *testing.T) {
 	}
 }
 
+func TestAttachmentPublisher_ExplicitServiceUsesOnlyRequestedClusterIP(t *testing.T) {
+	base := &controlplane.Virtual{
+		SchemaVersion: controlplane.CurrentSchemaVersion, Namespace: "default", UID: "services.reviews", ServiceName: "reviews", Selector: "app=reviews",
+		Ports: []controlplane.ContainerPort{{ContainerPort: 9080, Protocol: corev1.ProtocolTCP}},
+		Rules: []*controlplane.Rule{{OwnerID: "owner-a", LocalTunIPv4: "198.18.0.1", IsAgent: true}},
+	}
+	data, err := yaml.Marshal([]*controlplane.Virtual{base})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "kubevpn"}, Data: map[string]string{config.KeyEnvoy: string(data)}}
+	reviews := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "reviews", Namespace: "default"}, Spec: corev1.ServiceSpec{
+		Selector: map[string]string{"app": "reviews"}, ClusterIP: "10.96.0.10",
+		Ports: []corev1.ServicePort{{Port: 80, TargetPort: intstr.FromInt(9080), Protocol: corev1.ProtocolTCP}},
+	}}
+	other := reviews.DeepCopy()
+	other.Name = "reviews-other"
+	other.Spec.ClusterIP = "10.96.0.20"
+	clientset := fake.NewSimpleClientset(cm, newPublisherTestPod(), reviews, other)
+	p := NewAttachmentPublisher(clientset, "kubevpn")
+	if err := p.reconcileOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got, err := clientset.CoreV1().ConfigMaps("kubevpn").Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var attachments []controlplane.NodeAttachment
+	if err := yaml.Unmarshal([]byte(got.Data[config.KeyNodeAttachments]), &attachments); err != nil {
+		t.Fatal(err)
+	}
+	if len(attachments) != 1 || attachments[0].ServiceName != "reviews" || attachments[0].PodIP != "10.96.0.10" || attachments[0].OriginIP != "10.96.0.10" {
+		t.Fatalf("explicit Service must produce only its own ClusterIP attachment: %+v", attachments)
+	}
+	if len(attachments[0].Ports) != 1 || attachments[0].Ports[0].OriginPort != 80 {
+		t.Fatalf("service port mapping missing: %+v", attachments[0].Ports)
+	}
+}
+
+func TestAttachmentPublisher_ExplicitServiceSuppressesInferredDuplicate(t *testing.T) {
+	explicit := &controlplane.Virtual{Namespace: "default", UID: "services.reviews", ServiceName: "reviews", Selector: "app=reviews", Ports: []controlplane.ContainerPort{{ContainerPort: 9080, Protocol: corev1.ProtocolTCP}}, Rules: []*controlplane.Rule{{OwnerID: "owner-a", LocalTunIPv4: "198.18.0.1", IsAgent: true}}}
+	backend := &controlplane.Virtual{Namespace: "default", UID: "deployments.apps.reviews", Selector: "app=reviews", Ports: []controlplane.ContainerPort{{ContainerPort: 9080, Protocol: corev1.ProtocolTCP}}, Rules: []*controlplane.Rule{{OwnerID: "owner-b", LocalTunIPv4: "198.18.0.2", IsAgent: true}}}
+	data, err := yaml.Marshal([]*controlplane.Virtual{explicit, backend})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "kubevpn"}, Data: map[string]string{config.KeyEnvoy: string(data)}}
+	service := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "reviews", Namespace: "default"}, Spec: corev1.ServiceSpec{
+		Selector: map[string]string{"app": "reviews"}, ClusterIP: "10.96.0.10",
+		Ports: []corev1.ServicePort{{Port: 80, TargetPort: intstr.FromInt(9080), Protocol: corev1.ProtocolTCP}},
+	}}
+	clientset := fake.NewSimpleClientset(cm, newPublisherTestPod(), service)
+	if err := NewAttachmentPublisher(clientset, "kubevpn").reconcileOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got, err := clientset.CoreV1().ConfigMaps("kubevpn").Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var attachments []controlplane.NodeAttachment
+	if err := yaml.Unmarshal([]byte(got.Data[config.KeyNodeAttachments]), &attachments); err != nil {
+		t.Fatal(err)
+	}
+	if len(attachments) != 2 {
+		t.Fatalf("expected one explicit Service and one backend pod, got %+v", attachments)
+	}
+	for _, attachment := range attachments {
+		if attachment.ServiceName == "reviews" && attachment.WorkloadUID != "services.reviews" {
+			t.Fatalf("inferred duplicate Service attachment was not suppressed: %+v", attachment)
+		}
+	}
+}
+
 func TestAttachmentPublisher_SkipsSidecarPod(t *testing.T) {
 	ctx := context.Background()
 	pod := newPublisherTestPod()

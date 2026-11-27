@@ -49,6 +49,7 @@ type InjectOptions struct {
 	OwnerID          string
 	AttachMode       string
 	SyncTarget       *controlplane.SyncTarget
+	ServiceName      string
 }
 
 // isServiceTarget reports whether the given resource.Info represents a Kubernetes Service.
@@ -59,15 +60,9 @@ func isServiceTarget(object *resource.Info) bool {
 	return clusterworkload.IsK8sService(object)
 }
 
-// NewInjector returns the appropriate Injector for the given workload and options.
-//   - Service targets use Fargate mode (SSH + Envoy).
-//   - Non-Service targets use the node-boundary agent except for the explicit
-//     sync legacy-sidecar compatibility path. The public sidecar value is
-//     accepted only as a deprecated warning, never as a fallback.
+// NewInjector returns the node-boundary implementation for workload and Service
+// targets. The sync legacy-sidecar path remains temporarily for compatibility.
 func NewInjector(opts InjectOptions) Injector {
-	if isServiceTarget(opts.Object) {
-		return &fargateInjector{opts: opts}
-	}
 	if opts.AttachMode == config.AttachModeLegacySidecar {
 		return &meshInjector{opts: opts}
 	}

@@ -47,13 +47,13 @@ func TestNewInjectorSelectsMeshOnlyForLegacySync(t *testing.T) {
 	}
 }
 
-func TestNewInjectorSelectsFargateForServiceEvenInNodeAgentMode(t *testing.T) {
+func TestNewInjectorSelectsNodeAgentForService(t *testing.T) {
 	opts := minimalInjectOptionsForTest()
 	opts.AttachMode = config.AttachModeNodeAgent
 	opts.Object = serviceObjectForTest()
 	inj := NewInjector(opts)
-	if _, ok := inj.(*fargateInjector); !ok {
-		t.Fatalf("Service target must keep fargateInjector regardless of mode, got %T", inj)
+	if _, ok := inj.(*nodeAgentInjector); !ok {
+		t.Fatalf("Service target must use nodeAgentInjector, got %T", inj)
 	}
 }
 

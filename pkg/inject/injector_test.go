@@ -21,8 +21,8 @@ func TestNewInjector_Service(t *testing.T) {
 		},
 	}
 	injector := NewInjector(opts)
-	if _, ok := injector.(*fargateInjector); !ok {
-		t.Fatalf("expected *fargateInjector, got %T", injector)
+	if _, ok := injector.(*nodeAgentInjector); !ok {
+		t.Fatalf("expected *nodeAgentInjector, got %T", injector)
 	}
 }
 

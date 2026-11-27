@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
+	"strings"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/client-go/informers"
@@ -70,7 +73,7 @@ func Run(ctx context.Context, opts Options) error {
 	defer func() {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := ConvergeHostDNAT(cleanupCtx, execRunner{}, opts.PodIP, nil); err != nil {
+		if err := ConvergeHostDNAT(cleanupCtx, execRunner{}, opts.PodIP, nil, nil); err != nil {
 			plog.G(cleanupCtx).Warnf("[node-agent] cleanup host DNAT rules: %v", err)
 		}
 	}()
@@ -111,7 +114,31 @@ func attachmentSignature(ctx context.Context, opts Options) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("read traffic manager configmap: %w", err)
 	}
-	return fmt.Sprintf("%x", sha256.Sum256([]byte(cm.Data[config.KeyNodeAttachments]))), nil
+	sources, err := nodeAgentSourceIPs(ctx, opts)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(cm.Data[config.KeyNodeAttachments]+"\n"+strings.Join(sources, ",")))), nil
+}
+
+func nodeAgentSourceIPs(ctx context.Context, opts Options) ([]string, error) {
+	pods, err := opts.Clientset.CoreV1().Pods(opts.ManagerNamespace).List(ctx, metav1.ListOptions{LabelSelector: "app=kubevpn-nodeagent"})
+	if err != nil {
+		return nil, fmt.Errorf("list node-agent pods: %w", err)
+	}
+	set := map[string]struct{}{opts.PodIP: {}}
+	for i := range pods.Items {
+		pod := &pods.Items[i]
+		if pod.Status.Phase == corev1.PodRunning && pod.Status.PodIP != "" {
+			set[pod.Status.PodIP] = struct{}{}
+		}
+	}
+	sources := make([]string, 0, len(set))
+	for source := range set {
+		sources = append(sources, source)
+	}
+	sort.Strings(sources)
+	return sources, nil
 }
 
 func trigger(changes chan struct{}) {
@@ -139,7 +166,11 @@ func reconcileAttachments(ctx context.Context, opts Options, supervisor *Supervi
 			plog.G(ctx).Infof("[node-agent] reconcile %s/%s nodeID=%s podIP=%s admin=%d ports=%v", attachment.Namespace, attachment.WorkloadUID, attachment.NodeID, attachment.PodIP, attachment.AgentListenerPort, attachment.Ports)
 		}
 	}
-	if err := ConvergeHostDNAT(ctx, execRunner{}, opts.PodIP, filtered); err != nil {
+	sources, err := nodeAgentSourceIPs(ctx, opts)
+	if err != nil {
+		return err
+	}
+	if err := ConvergeHostDNAT(ctx, execRunner{}, opts.PodIP, sources, filtered); err != nil {
 		return err
 	}
 	managerAddr := fmt.Sprintf("%s.%s", config.ConfigMapPodTrafficManager, opts.ManagerNamespace)

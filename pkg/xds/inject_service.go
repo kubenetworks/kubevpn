@@ -118,20 +118,6 @@ func (s *TunConfigServer) ProxyInject(req *rpc.InjectRequest, stream rpc.TunConf
 		if err != nil {
 			return err
 		}
-		templateSpec, _, err := clusterworkload.GetPodTemplateSpecPath(controller.Object.(*unstructured.Unstructured))
-		if err != nil {
-			return status.Errorf(codes.Internal, "pod template spec of %s: %v", workload, err)
-		}
-		// A K8s Service workload needs a client-side port Mapper (SSH reverse tunnels
-		// back to the developer's machine). That cannot run in the pod, so report the
-		// workload + its pod selector back and let the client start the Mapper.
-		if target.syncTarget == nil && clusterworkload.IsK8sService(object) {
-			services = append(services, &rpc.ServiceWorkload{
-				Workload: workload,
-				Selector: labels.SelectorFromSet(templateSpec.Labels).String(),
-			})
-		}
-
 		attachMode := req.GetAttachMode()
 		if attachMode == "" {
 			attachMode = s.ResolveAttachMode(ctx)
@@ -152,6 +138,7 @@ func (s *TunConfigServer) ProxyInject(req *rpc.InjectRequest, stream rpc.TunConf
 			OwnerID:          req.GetOwnerID(),
 			AttachMode:       attachMode,
 			SyncTarget:       target.syncTarget,
+			ServiceName:      util.If(clusterworkload.IsK8sService(object), object.Name, ""),
 		})
 		if err := injector.Inject(ctx); err != nil {
 			return status.Errorf(codes.Internal, "inject sidecar into %s: %v", workload, err)

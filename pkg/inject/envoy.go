@@ -87,6 +87,8 @@ type envoyRuleSpec struct {
 	// Selector is the pod label selector for the workload, used by the agent
 	// reconciler to match pods to rules. Only set in node-agent mode.
 	Selector string
+	// ServiceName restricts an explicit Service Virtual to its own ClusterIP.
+	ServiceName string
 	// IsAgent indicates that this rule comes from a node-agent connection, not a direct user connection.
 	IsAgent    bool
 	SyncTarget *controlplane.SyncTarget
@@ -158,6 +160,7 @@ func addVirtualRule(ctx context.Context, v []*controlplane.Virtual, spec envoyRu
 			Namespace:     spec.Namespace,
 			FargateMode:   spec.FargateMode,
 			Selector:      spec.Selector,
+			ServiceName:   spec.ServiceName,
 			Ports:         spec.Ports,
 			Rules:         []*controlplane.Rule{newRule},
 		})
@@ -166,6 +169,9 @@ func addVirtualRule(ctx context.Context, v []*controlplane.Virtual, spec envoyRu
 	// If we have a selector and the existing Virtual doesn't, set it
 	if spec.Selector != "" && v[index].Selector == "" {
 		v[index].Selector = spec.Selector
+	}
+	if spec.ServiceName != "" && v[index].ServiceName == "" {
+		v[index].ServiceName = spec.ServiceName
 	}
 
 	// 2) same owner updating their own rule (matched by OwnerID, non-fargate)

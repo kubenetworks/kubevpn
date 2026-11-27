@@ -47,7 +47,7 @@ func agentWorkloadPortKey(virtual *Virtual) string {
 }
 
 func agentOriginPortKey(attachment NodeAttachment, port AgentOriginPort) string {
-	return fmt.Sprintf("origin/%s/%s/%s/%s/%d", attachment.Namespace, attachment.WorkloadUID, attachment.PodUID, port.Protocol, port.ContainerPort)
+	return fmt.Sprintf("origin/%s/%s/%s/%s/%d/%d", attachment.Namespace, attachment.WorkloadUID, attachment.PodUID, port.Protocol, port.ContainerPort, port.DestinationPort())
 }
 
 // EnsureNodeAttachmentPortsWithState assigns stable, globally unique direct
