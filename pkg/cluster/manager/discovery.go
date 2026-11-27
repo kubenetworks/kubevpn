@@ -34,7 +34,7 @@ func DetectManagerNamespace(ctx context.Context, f cmdutil.Factory, namespace st
 	} else if err != nil {
 		plog.G(ctx).Debugf("Failed to detect if kubevpn exists in namespace %s: %v", namespace, err)
 	}
-	if exists {
+	if exists && !managerConfigMapMissing(ctx, clientSet, namespace) {
 		plog.G(ctx).Debugf("Find exists kubevpn in namespace %s", namespace)
 		return namespace, nil
 	}
@@ -45,12 +45,17 @@ func DetectManagerNamespace(ctx context.Context, f cmdutil.Factory, namespace st
 	} else if err != nil {
 		plog.G(ctx).Debugf("Failed to detect if kubevpn exists in namespace %s: %v", config.DefaultNamespaceKubevpn, err)
 	}
-	if exists {
+	if exists && !managerConfigMapMissing(ctx, clientSet, config.DefaultNamespaceKubevpn) {
 		plog.G(ctx).Debugf("Find exists kubevpn in namespace %s", config.DefaultNamespaceKubevpn)
 		return config.DefaultNamespaceKubevpn, nil
 	}
 
 	return GetHelmInstalledNamespace(ctx, f)
+}
+
+func managerConfigMapMissing(ctx context.Context, clientset kubernetes.Interface, namespace string) bool {
+	_, err := clientset.CoreV1().ConfigMaps(namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	return k8serrors.IsNotFound(err)
 }
 
 // GetHelmInstalledNamespace searches Helm releases for the kubevpn app and returns its deployed namespace.

@@ -169,9 +169,10 @@ kubevpn connect -n default    (no --manager-namespace)
         connect.ManagerNamespace = detected result
 ```
 
-Detection runs in the **User Daemon only** (`detectAndSetManagerNamespace`). The resolved
-namespace is written to both `connect.ManagerNamespace` (User Daemon) and `req.ManagerNamespace`
-(forwarded to the Root Daemon) by the same assignment, so the two daemons can never disagree.
+Detection runs in the **User Daemon only** (`detectAndSetManagerNamespace`). A manager Pod
+without its ConfigMap is treated as stale and skipped. The resolved namespace is written to both
+`connect.ManagerNamespace` (User Daemon) and `req.ManagerNamespace` (forwarded to the Root Daemon)
+by the same assignment, so the two daemons can never disagree.
 See [02-dual-daemon.md](02-dual-daemon.md) §2.3 for the lock-step invariant.
 
 ## Sync Mode Propagation
