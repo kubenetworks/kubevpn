@@ -924,10 +924,14 @@ func (u *sshUt) centerCheckProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 	})
 	if err != nil {
 		marshal, _ := json.Marshal(expect)
-		if cm, getErr := u.clientset.CoreV1().ConfigMaps(u.namespace).Get(context.Background(), pkgconfig.ConfigMapPodTrafficManager, v1.GetOptions{}); getErr == nil {
-			t.Logf("ENVOY_CONFIG for portmap status mismatch:\n%s", cm.Data[pkgconfig.KeyEnvoy])
+		if list, listErr := u.clientset.CoreV1().ConfigMaps("").List(context.Background(), v1.ListOptions{}); listErr == nil {
+			for _, cm := range list.Items {
+				if cm.Name == pkgconfig.ConfigMapPodTrafficManager {
+					t.Logf("ENVOY_CONFIG for portmap status mismatch (%s):\n%s", cm.Namespace, cm.Data[pkgconfig.KeyEnvoy])
+				}
+			}
 		} else {
-			t.Logf("get traffic-manager ConfigMap failed: %v", getErr)
+			t.Logf("list traffic-manager ConfigMaps failed: %v", listErr)
 		}
 		t.Fatalf("expect: %s, but was: %s", string(marshal), string(output))
 	}

@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [ master ]
   workflow_dispatch:
+    inputs:
+      suite:
+        description: E2E_RUN regular expression
+        required: false
+        default: '.'
 
 jobs:
   image:
@@ -44,6 +49,7 @@ jobs:
       # match the pushed image tag, so the version-compat gate passes and in-process
       # deploy paths reference an image that actually exists.
       VERSION: ${{ github.event.pull_request.head.sha || github.sha }}
+      E2E_RUN: ${{ inputs.suite || '.' }}
     steps:
       - uses: actions/checkout@v4
 
