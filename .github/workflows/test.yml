@@ -159,6 +159,8 @@ jobs:
           check-latest: true
 
       - uses: azure/setup-kubectl@v4
+        with:
+          version: v1.35.0
 
       # Docker daemon in a colima VM, started as the runner (lima forbids root).
       # --mount "<workspace>:w" makes the checkout writable inside the VM so the
