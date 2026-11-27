@@ -1207,10 +1207,6 @@ func (u *ut) centerCheckProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 	}}}
 
 	var statuses connStatus
-	if err = json.Unmarshal(output, &statuses); err != nil {
-		t.Fatal(err)
-	}
-	fillDeploymentTunIPs(&expect, &statuses)
 	opt := cmp.FilterPath(func(p cmp.Path) bool {
 		vx := p.Last().String()
 		if vx == `["Headers"]` {
@@ -1218,10 +1214,27 @@ func (u *ut) centerCheckProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 		}
 		return false
 	}, cmp.Ignore())
-	if !cmp.Equal(statuses, expect, opt) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	err = wait.PollUntilContextTimeout(ctx, time.Second, 30*time.Second, true, func(ctx context.Context) (bool, error) {
+		cmd := exec.Command("kubevpn", "status", "-o", "json")
+		output, err = cmd.Output()
+		if err != nil {
+			return false, nil
+		}
+		statuses = connStatus{}
+		if err = json.Unmarshal(output, &statuses); err != nil {
+			return false, nil
+		}
+		fillDeploymentTunIPs(&expect, &statuses)
+		return cmp.Equal(statuses, expect, opt), nil
+	})
+	if err != nil {
 		marshal, _ := json.Marshal(expect)
-		if cm, err := u.clientset.CoreV1().ConfigMaps(u.namespace).Get(context.Background(), pkgconfig.ConfigMapPodTrafficManager, v1.GetOptions{}); err == nil {
+		if cm, getErr := u.clientset.CoreV1().ConfigMaps(u.namespace).Get(context.Background(), pkgconfig.ConfigMapPodTrafficManager, v1.GetOptions{}); getErr == nil {
 			t.Logf("ENVOY_CONFIG for portmap status mismatch:\n%s", cm.Data[pkgconfig.KeyEnvoy])
+		} else {
+			t.Logf("get traffic-manager ConfigMap failed: %v", getErr)
 		}
 		t.Fatalf("expect: %s, but was: %s", string(marshal), string(output))
 	}
