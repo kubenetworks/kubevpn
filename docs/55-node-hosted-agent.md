@@ -109,6 +109,8 @@ unique admin port (`adminBase+5000`) and `--base-id`.
 A Service is not collapsed into a pod origin. `originIP=ClusterIP` and
 `originPort=ServicePort` preserve kube-proxy/IPVS load balancing. Host rules are inserted at
 PREROUTING position 1 because a Service can otherwise be consumed before a podIP-only rule.
+An ipset of every node-agent Pod IP excludes agent-originated traffic from KubeVPN DNAT only;
+it deliberately does not use `RETURN`, so those packets still traverse kube-proxy/IPVS.
 
 ## 6. Lifecycle and readiness
 

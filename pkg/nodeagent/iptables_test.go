@@ -21,7 +21,7 @@ func (f *fakeRunner) Run(_ context.Context, name string, args ...string) (string
 func (f *fakeRunner) commands() string { return strings.Join(f.calls, "\n") }
 
 func TestConvergeHostDNAT_ConvergesAndExcludesAgent(t *testing.T) {
-	runner := &fakeRunner{listOutput: "-A PREROUTING -p tcp ! -s 10.244.0.8 -d 10.244.0.5 -j DNAT --to 10.244.0.8:20001 -m comment --comment \"kubevpn-nodeagent\"\n"}
+	runner := &fakeRunner{listOutput: "-A PREROUTING -p tcp -m set ! --match-set kubevpn-nodeagent src -d 10.244.0.5 -j DNAT --to 10.244.0.8:20001 -m comment --comment \"kubevpn-nodeagent\"\n"}
 	attachments := []controlplane.NodeAttachment{{
 		PodIP: "10.244.0.5", AgentListenerPort: 20000,
 		Ports: []controlplane.AgentOriginPort{
@@ -41,26 +41,29 @@ func TestConvergeHostDNAT_ConvergesAndExcludesAgent(t *testing.T) {
 	if !strings.Contains(joined, "-D PREROUTING") {
 		t.Fatal("old marked rule was not flushed")
 	}
-	if !strings.Contains(joined, "! -s 10.244.0.8 -d 10.244.0.5") {
-		t.Fatal("agent source exclusion or exact podIP match missing")
+	if !strings.Contains(joined, "-m set ! --match-set kubevpn-nodeagent src") {
+		t.Fatal("node-agent ipset exclusion is missing")
 	}
-	if !strings.Contains(joined, "-p udp ! -s 10.244.0.8 -d 10.244.0.5 --dport 9081 -j DNAT --to 10.244.0.8:20002") {
+	if !strings.Contains(joined, "-p udp -m set ! --match-set kubevpn-nodeagent src -d 10.244.0.5 --dport 9081 -j DNAT --to 10.244.0.8:20002") {
 		t.Fatal("UDP DNAT rule with original-port mapping missing")
 	}
 	if !strings.HasPrefix(joined, "nsenter --net=/host/proc/1/ns/net") {
 		t.Fatal("rule was not applied in host netns")
 	}
-	if !strings.Contains(joined, "-I PREROUTING 1 -p tcp ! -s 10.244.0.8 -d 10.244.0.5 --dport 9080 -j DNAT --to 10.244.0.8:20001") {
+	if !strings.Contains(joined, "-I PREROUTING 1 -p tcp -m set ! --match-set kubevpn-nodeagent src -d 10.244.0.5 --dport 9080 -j DNAT --to 10.244.0.8:20001") {
 		t.Fatal("expected TCP original-port DNAT rule not installed")
 	}
-	if !strings.Contains(joined, "-I PREROUTING 1 -p tcp ! -s 10.244.0.8 -d 10.96.0.10 --dport 80 -j DNAT --to 10.244.0.8:20003") {
+	if !strings.Contains(joined, "-I PREROUTING 1 -p tcp -m set ! --match-set kubevpn-nodeagent src -d 10.96.0.10 --dport 80 -j DNAT --to 10.244.0.8:20003") {
 		t.Fatal("expected Service ClusterIP DNAT rule not installed")
 	}
 	if strings.Count(joined, "-I PREROUTING 1 -p") != 3 {
 		t.Fatalf("expected pod TCP/UDP and service TCP add operations, got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "-s 10.244.0.9 -j RETURN") {
-		t.Fatalf("remote node-agent source must bypass recapture:\n%s", joined)
+	if !strings.Contains(joined, "ipset add kubevpn-nodeagent 10.244.0.9") {
+		t.Fatalf("remote node-agent IP missing from exclusion set:\n%s", joined)
+	}
+	if strings.Contains(joined, "-j RETURN") {
+		t.Fatalf("source RETURN must not bypass kube-proxy/IPVS:\n%s", joined)
 	}
 }
 
