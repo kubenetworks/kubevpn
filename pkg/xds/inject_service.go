@@ -105,6 +105,7 @@ func (s *TunConfigServer) ProxyInject(req *rpc.InjectRequest, stream rpc.TunConf
 		if err != nil {
 			return err
 		}
+		plog.G(ctx).Debugf("[inject] %s portMap=%v", workload, req.GetPortMap())
 		injector := inject.NewInjector(inject.InjectOptions{
 			Clientset:        s.clientset,
 			ManagerNamespace: s.namespace,
