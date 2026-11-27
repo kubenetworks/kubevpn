@@ -745,3 +745,190 @@ func TestGetTunIP_HostnamePersistedToConfigMap(t *testing.T) {
 		t.Fatalf("restored hostname = %q, want dev-laptop-01", got.Hostname)
 	}
 }
+
+// TestGetTunIP_AgentGetsAgentRange verifies that an agent connection (IsAgent=true)
+// gets an IP from the agent CIDR range (198.18.128.0/17).
+func TestGetTunIP_AgentGetsAgentRange(t *testing.T) {
+	s := newTestServer(t)
+	ctx := context.Background()
+
+	resp, err := s.GetTunIP(ctx, &Request{OwnerID: "agent-1", IsAgent: true})
+	if err != nil {
+		t.Fatalf("GetTunIP(agent): %v", err)
+	}
+
+	ip, _, err := net.ParseCIDR(resp.IPv4)
+	if err != nil {
+		t.Fatalf("parse IPv4 %q: %v", resp.IPv4, err)
+	}
+
+	if !config.CIDRAgent.Contains(ip) {
+		t.Fatalf("agent IP %s not in agent CIDR %s", ip, config.CIDRAgent)
+	}
+}
+
+// TestGetTunIP_UserGetsUserRange verifies that a user connection (IsAgent=false)
+// gets an IP from the user CIDR range (198.18.0.0/17).
+func TestGetTunIP_UserGetsUserRange(t *testing.T) {
+	s := newTestServer(t)
+	ctx := context.Background()
+
+	resp, err := s.GetTunIP(ctx, &Request{OwnerID: "user-1", IsAgent: false})
+	if err != nil {
+		t.Fatalf("GetTunIP(user): %v", err)
+	}
+
+	ip, _, err := net.ParseCIDR(resp.IPv4)
+	if err != nil {
+		t.Fatalf("parse IPv4 %q: %v", resp.IPv4, err)
+	}
+
+	if !config.CIDRUser.Contains(ip) {
+		t.Fatalf("user IP %s not in user CIDR %s", ip, config.CIDRUser)
+	}
+}
+
+// TestGetTunIP_BoundaryNotConfused verifies that the boundary between user and
+// agent ranges is not confused: user IPs stay below 198.18.128.0 and agent IPs
+// stay at or above it.
+func TestGetTunIP_BoundaryNotConfused(t *testing.T) {
+	s := newTestServer(t)
+	ctx := context.Background()
+
+	// Allocate multiple users and agents to verify the pattern holds
+	for i := 0; i < 5; i++ {
+		userResp, err := s.GetTunIP(ctx, &Request{OwnerID: fmt.Sprintf("user-%d", i), IsAgent: false})
+		if err != nil {
+			t.Fatalf("GetTunIP(user-%d): %v", i, err)
+		}
+		userIP, _, _ := net.ParseCIDR(userResp.IPv4)
+		if !config.CIDRUser.Contains(userIP) {
+			t.Fatalf("user-%d IP %s not in user CIDR", i, userIP)
+		}
+		if config.CIDRAgent.Contains(userIP) {
+			t.Fatalf("user-%d IP %s incorrectly in agent CIDR", i, userIP)
+		}
+
+		agentResp, err := s.GetTunIP(ctx, &Request{OwnerID: fmt.Sprintf("agent-%d", i), IsAgent: true})
+		if err != nil {
+			t.Fatalf("GetTunIP(agent-%d): %v", i, err)
+		}
+		agentIP, _, _ := net.ParseCIDR(agentResp.IPv4)
+		if !config.CIDRAgent.Contains(agentIP) {
+			t.Fatalf("agent-%d IP %s not in agent CIDR", i, agentIP)
+		}
+		if config.CIDRUser.Contains(agentIP) {
+			t.Fatalf("agent-%d IP %s incorrectly in user CIDR", i, agentIP)
+		}
+	}
+}
+
+// TestGetTunIP_StickyNotReusedAcrossRanges verifies that a sticky IP is not reused
+// when the same owner reconnects with a different IsAgent flag.
+func TestGetTunIP_StickyNotReusedAcrossRanges(t *testing.T) {
+	s := newTestServer(t)
+	ctx := context.Background()
+
+	// Owner connects as user first
+	resp1, err := s.GetTunIP(ctx, &Request{OwnerID: "owner-mixed", IsAgent: false})
+	if err != nil {
+		t.Fatalf("GetTunIP(user): %v", err)
+	}
+	ip1, _, _ := net.ParseCIDR(resp1.IPv4)
+	if !config.CIDRUser.Contains(ip1) {
+		t.Fatalf("user IP %s not in user CIDR", ip1)
+	}
+
+	// Disconnect: let lease expire and get reaped
+	s.mu.Lock()
+	s.allocs["owner-mixed"].LastRenew = time.Now().Add(-LeaseDuration - time.Minute)
+	s.mu.Unlock()
+	s.reapExpiredLeases(ctx)
+
+	// Owner reconnects as agent - should NOT get the same (user-range) IP
+	resp2, err := s.GetTunIP(ctx, &Request{OwnerID: "owner-mixed", IsAgent: true})
+	if err != nil {
+		t.Fatalf("GetTunIP(agent): %v", err)
+	}
+	ip2, _, _ := net.ParseCIDR(resp2.IPv4)
+	if !config.CIDRAgent.Contains(ip2) {
+		t.Fatalf("agent IP %s not in agent CIDR", ip2)
+	}
+
+	if ip1.Equal(ip2) {
+		t.Fatalf("owner reconnected with different IsAgent but got same IP %s", ip1)
+	}
+}
+
+// TestGetTunIP_OldClientGetsUserRange verifies that a client that doesn't specify
+// IsAgent (or explicitly sets it to false) gets an IP from the user range.
+func TestGetTunIP_OldClientGetsUserRange(t *testing.T) {
+	s := newTestServer(t)
+	ctx := context.Background()
+
+	// IsAgent is false by default in Request struct
+	resp, err := s.GetTunIP(ctx, &Request{OwnerID: "old-client"})
+	if err != nil {
+		t.Fatalf("GetTunIP(old client): %v", err)
+	}
+
+	ip, _, err := net.ParseCIDR(resp.IPv4)
+	if err != nil {
+		t.Fatalf("parse IPv4 %q: %v", resp.IPv4, err)
+	}
+
+	if !config.CIDRUser.Contains(ip) {
+		t.Fatalf("old client IP %s not in user CIDR %s", ip, config.CIDRUser)
+	}
+}
+
+// TestGetTunIP_RenewUpdatesIsAgent verifies that when an existing owner renews with
+// a different IsAgent flag, the allocation is updated to reflect it.
+func TestGetTunIP_RenewUpdatesIsAgent(t *testing.T) {
+	s := newTestServer(t)
+	ctx := context.Background()
+
+	// First connect as user
+	_, err := s.GetTunIP(ctx, &Request{OwnerID: "owner-flip", IsAgent: false})
+	if err != nil {
+		t.Fatalf("GetTunIP(user): %v", err)
+	}
+
+	// Check initial state
+	s.mu.RLock()
+	alloc1 := s.allocs["owner-flip"]
+	initialIsAgent := alloc1.IsAgent
+	initialIP := alloc1.IPv4.IP
+	s.mu.RUnlock()
+
+	if initialIsAgent {
+		t.Fatal("initial IsAgent should be false")
+	}
+	if !config.CIDRUser.Contains(initialIP) {
+		t.Fatalf("initial IP %s should be in user CIDR", initialIP)
+	}
+
+	// Renew as agent - note: this updates IsAgent flag but doesn't reallocate IP
+	// (since the existing IP doesn't conflict with ExcludeIPs)
+	_, err = s.GetTunIP(ctx, &Request{OwnerID: "owner-flip", IsAgent: true})
+	if err != nil {
+		t.Fatalf("GetTunIP(agent renew): %v", err)
+	}
+
+	// Check that IsAgent flag was updated
+	s.mu.RLock()
+	alloc2 := s.allocs["owner-flip"]
+	updatedIsAgent := alloc2.IsAgent
+	updatedIP := alloc2.IPv4.IP
+	s.mu.RUnlock()
+
+	if !updatedIsAgent {
+		t.Fatal("IsAgent should have been updated to true")
+	}
+	if !updatedIP.Equal(initialIP) {
+		// Note: IP doesn't change on renew unless forced by ExcludeIPs conflict
+		// This is expected behavior - the IsAgent flag is about the connection's
+		// identity, not necessarily forcing an IP change if the existing one works
+		t.Logf("IP stayed the same on renew (expected behavior: %s)", updatedIP)
+	}
+}

@@ -6,11 +6,14 @@ import (
 	"strings"
 
 	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/sets"
 	pkgresource "k8s.io/cli-runtime/pkg/resource"
+	"k8s.io/client-go/kubernetes"
 	v12 "k8s.io/client-go/kubernetes/typed/core/v1"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
+	"k8s.io/kubectl/pkg/polymorphichelpers"
 
 	clusterworkload "github.com/wencaiwulue/kubevpn/v2/pkg/cluster/workload"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -49,9 +52,15 @@ func (m *meshInjector) Inject(ctx context.Context) error {
 	}
 
 	if injectedForManager(templateSpec, o.ManagerNamespace) {
-		workload := fmt.Sprintf("%s/%s", o.Controller.Mapping.Resource.Resource, o.Controller.Name)
-		plog.G(ctx).Infof("Workload %s/%s has already been injected with sidecar", o.ManagerNamespace, workload)
-		return nil
+		// Dual verification: template says injected, but check actual pods too.
+		// If template is stale (leave just removed sidecars but controller object is cached),
+		// actual pods won't have sidecars and we need to continue injecting.
+		if actualPodsHaveSidecars(ctx, o.Clientset, o.Controller, o.ManagerNamespace) {
+			workload := fmt.Sprintf("%s/%s", o.Controller.Mapping.Resource.Resource, o.Controller.Name)
+			plog.G(ctx).Infof("Workload %s/%s has already been injected with sidecar", o.ManagerNamespace, workload)
+			return nil
+		}
+		plog.G(ctx).Infof("Controller template appears injected, but actual pods do not have sidecars; proceeding with injection")
 	}
 	if alreadyInjected(templateSpec) {
 		// Sidecars exist but target a different traffic-manager namespace. Their
@@ -62,7 +71,10 @@ func (m *meshInjector) Inject(ctx context.Context) error {
 		plog.G(ctx).Infof("Re-injecting sidecar into %s/%s: traffic-manager namespace changed", o.Controller.Namespace, o.Controller.Name)
 	}
 
-	enableIPv6, _ := util.DetectPodSupportIPv6(ctx, o.Factory, o.ManagerNamespace)
+	var enableIPv6 bool
+	if o.Factory != nil {
+		enableIPv6, _ = util.DetectPodSupportIPv6(ctx, o.Factory, o.ManagerNamespace)
+	}
 	AddVPNAndEnvoyContainer(templateSpec, o.Controller.Namespace, o.NodeID, enableIPv6, o.ManagerNamespace, o.Secret, o.Image)
 
 	// inject: undo on rollout failure to restore the working (pre-injection) revision.
@@ -114,9 +126,98 @@ func injectedForManager(templateSpec *v1.PodTemplateSpec, managerNamespace strin
 	return false
 }
 
+// actualPodsHaveSidecars checks if the actual running pods (not just the controller template)
+// have the sidecar containers injected. This is a safety check to avoid skipping injection
+// when the controller object is stale (cached) but the real pods have been reverted to
+// a clean state (e.g. during leave → re-inject race window).
+func actualPodsHaveSidecars(ctx context.Context, clientset kubernetes.Interface, controller *pkgresource.Info, managerNamespace string) bool {
+	if clientset == nil || controller == nil || controller.Object == nil {
+		return true // Can't verify, trust the template
+	}
+
+	u, ok := controller.Object.(*unstructured.Unstructured)
+	if !ok {
+		return true // Can't verify, trust the template
+	}
+
+	// Extract pod selector from controller
+	_, selector, err := polymorphichelpers.SelectorsForObject(u)
+	if err != nil {
+		plog.G(ctx).Debugf("Failed to get selector for controller: %v", err)
+		return true // Can't verify, trust the template
+	}
+	if selector.Empty() {
+		return true // No selector, trust the template
+	}
+
+	// List pods using the selector
+	podList, err := clientset.CoreV1().Pods(controller.Namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: selector.String(),
+	})
+	if err != nil {
+		plog.G(ctx).Debugf("Failed to list pods for controller: %v", err)
+		return true // Can't verify, trust the template
+	}
+	if len(podList.Items) == 0 {
+		plog.G(ctx).Debugf("No running pods found for controller; will verify by template only")
+		return true // No pods, trust the template
+	}
+
+	// Check at least one pod - if any pod doesn't have sidecars, we need to re-inject
+	for _, pod := range podList.Items {
+		// Skip terminating pods
+		if pod.DeletionTimestamp != nil {
+			continue
+		}
+		// Check if this pod has sidecars
+		if !podHasSidecars(&pod) {
+			plog.G(ctx).Infof("Controller template appears injected, but pod %s/%s has no sidecars; will re-inject", pod.Namespace, pod.Name)
+			return false
+		}
+		// Also verify it's injected for the current manager namespace
+		if !podInjectedForManager(&pod, managerNamespace) {
+			plog.G(ctx).Infof("Controller template appears injected, but pod %s/%s is not injected for current manager namespace; will re-inject", pod.Namespace, pod.Name)
+			return false
+		}
+	}
+
+	plog.G(ctx).Debugf("Verified %d running pods have sidecars injected", len(podList.Items))
+	return true
+}
+
+// podHasSidecars checks if a single Pod spec has both sidecar containers.
+func podHasSidecars(pod *v1.Pod) bool {
+	containerNames := sets.New[string]()
+	for _, container := range pod.Spec.Containers {
+		containerNames.Insert(container.Name)
+	}
+	return containerNames.HasAll(config.ContainerSidecarVPN, config.ContainerSidecarEnvoy)
+}
+
+// podInjectedForManager checks if a Pod's envoy container is configured for the given manager namespace.
+func podInjectedForManager(pod *v1.Pod, managerNamespace string) bool {
+	if !podHasSidecars(pod) {
+		return false
+	}
+	want := "address: " + trafficManagerAddr(managerNamespace)
+	for _, c := range pod.Spec.Containers {
+		if c.Name != config.ContainerSidecarEnvoy {
+			continue
+		}
+		for _, arg := range c.Args {
+			for _, line := range strings.Split(arg, "\n") {
+				if strings.TrimSpace(line) == want {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 // UnpatchContainer removes injected sidecar containers and cleans up envoy configuration.
 // Returns (empty, found) where empty indicates all rules were removed and containers cleaned up.
-func UnpatchContainer(ctx context.Context, nodeID string, factory cmdutil.Factory, mapInterface v12.ConfigMapInterface, object *pkgresource.Info, ownerID string) (bool, error) {
+func UnpatchContainer(ctx context.Context, nodeID string, factory cmdutil.Factory, mapInterface v12.ConfigMapInterface, object *pkgresource.Info, ownerID string, clientset kubernetes.Interface, managerNamespace string) (bool, error) {
 	u := object.Object.(*unstructured.Unstructured)
 	templateSpec, path, err := clusterworkload.GetPodTemplateSpecPath(u)
 	if err != nil {
@@ -141,9 +242,16 @@ func UnpatchContainer(ctx context.Context, nodeID string, factory cmdutil.Factor
 		return empty, nil
 	}
 
-	RemoveContainers(&templateSpec.Spec)
-	// unpatch/leave: do NOT undo on rollout failure — the previous revision still
-	// has the sidecar, so undo would re-apply what we just removed.
-	err = patchWorkload(ctx, factory, object, templateSpec, path, false)
-	return empty, err
+	// Only patch the workload if it actually has kubevpn containers
+	if alreadyInjected(templateSpec) {
+		RemoveContainers(&templateSpec.Spec)
+		// unpatch/leave: do NOT undo on rollout failure — the previous revision still
+		// has the sidecar, so undo would re-apply what we just removed.
+		err = patchWorkload(ctx, factory, object, templateSpec, path, false)
+		if err != nil {
+			return empty, err
+		}
+	}
+
+	return empty, nil
 }

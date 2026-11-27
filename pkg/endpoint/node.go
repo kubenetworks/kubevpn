@@ -22,7 +22,10 @@ var errInvalidNode = errors.New("invalid node")
 //	          Addr:    optional listen address
 //	          Forward: optional remote server URI (makes this a client)
 //	          Params:  net (CIDR), net6 (CIDR), mtu (int), name (string),
-//	                   route (comma-separated CIDRs), gw (gateway IP)
+//	                   route (comma-separated CIDRs), gw (gateway IP),
+//	                   agent (pod UID — marks this tunnel as a node-agent
+//	                   connection; its TUN lease is owned by the pod UID with
+//	                   IsAgent=true and allocated from the agent pool)
 //
 //	gtcp    Gvisor TCP listener
 //	          Addr:    required (e.g. ":10801")

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
@@ -40,9 +41,9 @@ func TestGenRole(t *testing.T) {
 	if role.Namespace != namespace {
 		t.Fatalf("expected namespace %q, got %q", namespace, role.Namespace)
 	}
-	// Rule 0: configmaps/secrets; Rules 1-2: CIDR detection (see genRole / docs/46).
-	if len(role.Rules) != 3 {
-		t.Fatalf("expected 3 rules, got %d", len(role.Rules))
+	// Rule 0: configmaps/secrets; Rules 1-2: CIDR detection; Rule 3: batch/jobs.
+	if len(role.Rules) != 4 {
+		t.Fatalf("expected 4 rules, got %d", len(role.Rules))
 	}
 
 	rule := role.Rules[0]
@@ -200,7 +201,7 @@ func TestGenDeploySpec(t *testing.T) {
 	image := "docker.io/naison/kubevpn:test"
 	imagePullSecret := "my-pull-secret"
 
-	deploy := genDeploySpec(namespace, image, imagePullSecret)
+	deploy := genDeploySpec(namespace, image, imagePullSecret, config.AttachModeSidecar)
 
 	if deploy.Name != config.ConfigMapPodTrafficManager {
 		t.Fatalf("expected name %q, got %q", config.ConfigMapPodTrafficManager, deploy.Name)
@@ -295,7 +296,7 @@ func TestGenDeploySpec(t *testing.T) {
 }
 
 func TestGenDeploySpecNoImagePullSecret(t *testing.T) {
-	deploy := genDeploySpec("ns", "img:latest", "")
+	deploy := genDeploySpec("ns", "img:latest", "", config.AttachModeSidecar)
 
 	if len(deploy.Spec.Template.Spec.ImagePullSecrets) != 0 {
 		t.Fatalf("expected no imagePullSecrets when name is empty, got %d", len(deploy.Spec.Template.Spec.ImagePullSecrets))
@@ -303,7 +304,7 @@ func TestGenDeploySpecNoImagePullSecret(t *testing.T) {
 }
 
 func TestGenDeploySpec_Probes(t *testing.T) {
-	deploy := genDeploySpec("test-ns", "img:latest", "")
+	deploy := genDeploySpec("test-ns", "img:latest", "", config.AttachModeSidecar)
 	containers := deploy.Spec.Template.Spec.Containers
 	if len(containers) != 3 {
 		t.Fatalf("expected 3 containers, got %d", len(containers))
@@ -379,7 +380,7 @@ func TestGenDeploySpec_Probes(t *testing.T) {
 }
 
 func TestGenDeploySpec_ContainerPorts(t *testing.T) {
-	deploy := genDeploySpec("test-ns", "img:latest", "")
+	deploy := genDeploySpec("test-ns", "img:latest", "", config.AttachModeSidecar)
 	containers := deploy.Spec.Template.Spec.Containers
 	if len(containers) != 3 {
 		t.Fatalf("expected 3 containers, got %d", len(containers))
@@ -432,7 +433,7 @@ func TestGenDeploySpec_ContainerPorts(t *testing.T) {
 }
 
 func TestGenDeploySpec_SecurityContext(t *testing.T) {
-	deploy := genDeploySpec("test-ns", "img:latest", "")
+	deploy := genDeploySpec("test-ns", "img:latest", "", config.AttachModeSidecar)
 	containers := deploy.Spec.Template.Spec.Containers
 	if len(containers) != 3 {
 		t.Fatalf("expected 3 containers, got %d", len(containers))
@@ -472,14 +473,13 @@ func TestGenDeploySpec_SecurityContext(t *testing.T) {
 var _ *v1.ServiceAccount = genServiceAccount("x")
 var _ *v1.Service = genService("x")
 var _ *v1.Secret = genSecret("x", nil, nil, nil)
-var _ *appsv1.Deployment = genDeploySpec("x", "", "")
+var _ *appsv1.Deployment = genDeploySpec("x", "", "", config.AttachModeSidecar)
 
 func TestWaitPodReady_Timeout(t *testing.T) {
 	namespace := "test-ns"
 	labelSelector := "app=test-timeout"
 
 	clientset := fake.NewSimpleClientset()
-	podClient := clientset.CoreV1().Pods(namespace)
 
 	// Create a pod that is Pending (not ready) — it will never transition.
 	pendingPod := &v1.Pod{
@@ -498,7 +498,7 @@ func TestWaitPodReady_Timeout(t *testing.T) {
 			},
 		},
 	}
-	_, err := podClient.Create(context.Background(), pendingPod, metav1.CreateOptions{})
+	_, err := clientset.CoreV1().Pods(namespace).Create(context.Background(), pendingPod, metav1.CreateOptions{})
 	if err != nil {
 		t.Fatalf("failed to create pending pod: %v", err)
 	}
@@ -507,7 +507,7 @@ func TestWaitPodReady_Timeout(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err = workload.WaitPodReady(ctx, podClient, labelSelector, "")
+	err = workload.WaitPodReady(ctx, clientset.CoreV1(), namespace, labelSelector, "")
 	if err == nil {
 		t.Fatal("expected timeout error, got nil")
 	}
@@ -521,7 +521,6 @@ func TestWaitPodReady_TransitionsToReady(t *testing.T) {
 	labelSelector := "app=test-transition"
 
 	clientset := fake.NewSimpleClientset()
-	podClient := clientset.CoreV1().Pods(namespace)
 
 	// Create a pod that starts as Pending (not ready).
 	pendingPod := &v1.Pod{
@@ -540,7 +539,7 @@ func TestWaitPodReady_TransitionsToReady(t *testing.T) {
 			},
 		},
 	}
-	_, err := podClient.Create(context.Background(), pendingPod, metav1.CreateOptions{})
+	_, err := clientset.CoreV1().Pods(namespace).Create(context.Background(), pendingPod, metav1.CreateOptions{})
 	if err != nil {
 		t.Fatalf("failed to create pending pod: %v", err)
 	}
@@ -556,7 +555,7 @@ func TestWaitPodReady_TransitionsToReady(t *testing.T) {
 				Status: v1.ConditionTrue,
 			},
 		}
-		_, updateErr := podClient.UpdateStatus(context.Background(), readyPod, metav1.UpdateOptions{})
+		_, updateErr := clientset.CoreV1().Pods(namespace).UpdateStatus(context.Background(), readyPod, metav1.UpdateOptions{})
 		if updateErr != nil {
 			// Cannot t.Fatal from goroutine; the test will fail on timeout instead.
 			t.Errorf("failed to update pod status: %v", updateErr)
@@ -566,7 +565,7 @@ func TestWaitPodReady_TransitionsToReady(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	err = workload.WaitPodReady(ctx, podClient, labelSelector, "")
+	err = workload.WaitPodReady(ctx, clientset.CoreV1(), namespace, labelSelector, "")
 	if err != nil {
 		t.Fatalf("expected pod to become ready, got error: %v", err)
 	}
@@ -634,5 +633,52 @@ func TestCreateOutboundPod_RecreatesWhenDeploymentMissing(t *testing.T) {
 	// The fix must have re-created the Deployment despite the lingering pod.
 	if _, err := clientset.AppsV1().Deployments(ns).Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{}); err != nil {
 		t.Fatalf("expected traffic-manager Deployment to be re-created, got: %v", err)
+	}
+}
+
+// TestCreateOutboundPod_CleansUpStaleNodeAgentJobs verifies that when creating a fresh traffic manager,
+// all stale node-agent jobs across all namespaces are cleaned up before the new manager starts.
+// This prevents stale agents from reconnecting and competing for DHCP leases, which caused 3-6 minutes
+// of mesh traffic disruption in CI (TestFunctions 03/05).
+func TestResolveAttachModeOnRecreate_PreservesPin(t *testing.T) {
+	ctx := context.Background()
+	// Simulate a manager installed with sidecar (helm values / kubevpn install pin).
+	deploy := genDeploySpec("kubevpn", "img:1", "", config.AttachModeSidecar)
+	clientset := fake.NewSimpleClientset(deploy)
+	if got := resolveAttachModeOnRecreate(ctx, clientset, "kubevpn"); got != config.AttachModeSidecar {
+		t.Fatalf("expected pinned sidecar preserved, got %q", got)
+	}
+}
+
+func TestResolveAttachModeOnRecreate_MissingDeployDefaultsNodeAgent(t *testing.T) {
+	ctx := context.Background()
+	clientset := fake.NewSimpleClientset()
+	if got := resolveAttachModeOnRecreate(ctx, clientset, "kubevpn"); got != config.AttachModeNodeAgent {
+		t.Fatalf("expected node-agent default, got %q", got)
+	}
+}
+
+func TestWaitForManagerPod_ReturnsOnceRunning(t *testing.T) {
+	ctx := context.Background()
+	deploy := genDeploySpec("kubevpn", "img:1", "", config.AttachModeNodeAgent)
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Name: "kubevpn-traffic-manager-x", Namespace: "kubevpn",
+		Labels: map[string]string{"app": config.ConfigMapPodTrafficManager},
+	}}
+	running := pod.DeepCopy()
+	running.Status.Phase = corev1.PodRunning
+	running.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}
+	running.Status.ContainerStatuses = []corev1.ContainerStatus{{Name: "vpn", Ready: true}}
+	clientset := fake.NewSimpleClientset(deploy, pod) // pod NOT running
+
+	// Pending pod within a short timeout must NOT report ready.
+	if err := waitForManagerPod(ctx, clientset, "kubevpn", 300*time.Millisecond); err == nil {
+		t.Fatal("expected timeout while pod is not running")
+	}
+
+	// Once containers are running, the wait returns immediately.
+	clientset2 := fake.NewSimpleClientset(deploy, running)
+	if err := waitForManagerPod(ctx, clientset2, "kubevpn", time.Second); err != nil {
+		t.Fatalf("expected nil once pod is running: %v", err)
 	}
 }

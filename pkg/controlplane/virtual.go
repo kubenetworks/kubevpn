@@ -37,10 +37,59 @@ type Virtual struct {
 	// and the on-disk key is determined solely by the json tag. Existing ConfigMap
 	// data in production clusters uses the key "Uid"; changing this tag would make
 	// all stored configs unreadable. The yaml tag is kept for documentation only.
-	UID string `yaml:"Uid" json:"Uid"` // group.resource.name
-	FargateMode   bool   `yaml:"fargateMode,omitempty" json:"fargateMode,omitempty"`
-	Ports         []ContainerPort
-	Rules         []*Rule
+	UID         string `yaml:"Uid" json:"Uid"` // group.resource.name
+	FargateMode bool   `yaml:"fargateMode,omitempty" json:"fargateMode,omitempty"`
+	// Selector is the workload's pod label selector, recorded at node-agent
+	// inject time so the reconciler can match pods to rules. Zero value means
+	// the rule was written by sidecar mode; reconciler skips it.
+	Selector string `yaml:"selector,omitempty" json:"selector,omitempty"`
+	// AgentListenerPort is the unique per-workload base port used for the
+	// node-boundary Envoy admin listener and process identity. Zero means
+	// sidecar/legacy mode. Per-pod data listeners are allocated in AgentOrigins.
+	AgentListenerPort int32 `yaml:"agentListenerPort,omitempty" json:"agentListenerPort,omitempty"`
+	// AgentOrigins is manager-derived, per-node desired state. Each origin gets
+	// direct listeners and an explicit podIP return path, avoiding ORIGINAL_DST
+	// across the host/agent network-namespace boundary.
+	AgentOrigins []*AgentOrigin `yaml:"agentOrigins,omitempty" json:"agentOrigins,omitempty"`
+	Ports        []ContainerPort
+	Rules        []*Rule
+}
+
+// AgentOrigin identifies one real pod behind a node-boundary listener set.
+type AgentOrigin struct {
+	PodUID      string `json:"podUID" yaml:"podUID"`
+	ServiceName string `json:"serviceName,omitempty" yaml:"serviceName,omitempty"`
+	PodIP       string `json:"podIP" yaml:"podIP"`
+	// OriginIP is the explicit return destination. Empty means PodIP.
+	OriginIP string            `json:"originIP,omitempty" yaml:"originIP,omitempty"`
+	Ports    []AgentOriginPort `json:"ports" yaml:"ports"`
+}
+
+// ReturnIP returns the address used for unmatched traffic.
+func (o *AgentOrigin) ReturnIP() string {
+	if o.OriginIP != "" {
+		return o.OriginIP
+	}
+	return o.PodIP
+}
+
+// AgentOriginPort maps one original container port to its direct agent listener.
+type AgentOriginPort struct {
+	ContainerPort int32 `json:"containerPort" yaml:"containerPort"`
+	// OriginPort is the destination port seen by clients. Empty means
+	// ContainerPort; for Services it is the ServicePort, not the target port.
+	OriginPort        int32           `json:"originPort,omitempty" yaml:"originPort,omitempty"`
+	Protocol          corev1.Protocol `json:"protocol" yaml:"protocol"`
+	AgentListenerPort int32           `json:"agentListenerPort" yaml:"agentListenerPort"`
+}
+
+// DestinationPort returns the port clients dial before DNAT and the port used
+// for unmatched traffic after it leaves the agent.
+func (p AgentOriginPort) DestinationPort() int32 {
+	if p.OriginPort != 0 {
+		return p.OriginPort
+	}
+	return p.ContainerPort
 }
 
 // ContainerPort describes a port on a container with optional envoy listener binding.
@@ -109,6 +158,9 @@ type Rule struct {
 	// use ssh reverse tunnel, envoy rule endpoint localhost:envoyRulePort will forward to local pc localhost:localPort
 	// localPort is required and envoyRulePort is optional
 	PortMap map[int32]string
+	// IsAgent indicates that this rule belongs to a node-agent connection, not a direct user connection.
+	// When both agent and user rules exist with matching headers, user rules take precedence.
+	IsAgent bool `yaml:"isAgent,omitempty" json:"isAgent,omitempty"`
 }
 
 // PortMapping represents a parsed port mapping from the PortMap string encoding.

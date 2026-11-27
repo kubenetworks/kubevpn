@@ -20,6 +20,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	clusterworkload "github.com/wencaiwulue/kubevpn/v2/pkg/cluster/workload"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
@@ -46,17 +47,33 @@ type InjectOptions struct {
 	Secret           *v1.Secret
 	Image            string
 	OwnerID          string
+	AttachMode       string
+}
+
+// isServiceTarget reports whether the given resource.Info represents a Kubernetes Service.
+func isServiceTarget(object *resource.Info) bool {
+	if object == nil || object.Mapping == nil {
+		return false
+	}
+	return clusterworkload.IsK8sService(object)
 }
 
 // NewInjector returns the appropriate Injector for the given workload and options.
 //   - Service targets use Fargate mode (SSH + Envoy).
-//   - All other targets use Mesh mode (VPN + Envoy). When headers are empty,
-//     envoy matches all requests (full traffic interception, equivalent to legacy VPN-only).
+//   - Non-Service targets use the node-boundary agent except for the explicit
+//     run/sync legacy-sidecar compatibility path. The public sidecar value is
+//     accepted only as a deprecated warning, never as a fallback.
 func NewInjector(opts InjectOptions) Injector {
-	if clusterworkload.IsK8sService(opts.Object) {
+	if isServiceTarget(opts.Object) {
 		return &fargateInjector{opts: opts}
 	}
-	return &meshInjector{opts: opts}
+	if opts.AttachMode == config.AttachModeLegacySidecar {
+		return &meshInjector{opts: opts}
+	}
+	if opts.AttachMode == config.AttachModeSidecar {
+		plog.G(context.Background()).Warn("[node-agent] sidecar mode is deprecated for ordinary workloads; using node-boundary agent instead")
+	}
+	return &nodeAgentInjector{opts: opts}
 }
 
 type JSONPatchOp struct {

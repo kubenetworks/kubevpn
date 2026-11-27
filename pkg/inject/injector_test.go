@@ -36,8 +36,8 @@ func TestNewInjector_WithHeaders(t *testing.T) {
 		Headers: map[string]string{"x-test": "value"},
 	}
 	injector := NewInjector(opts)
-	if _, ok := injector.(*meshInjector); !ok {
-		t.Fatalf("expected *meshInjector, got %T", injector)
+	if _, ok := injector.(*nodeAgentInjector); !ok {
+		t.Fatalf("expected *nodeAgentInjector, got %T", injector)
 	}
 }
 
@@ -51,8 +51,8 @@ func TestNewInjector_WithPortMaps(t *testing.T) {
 		PortMaps: []string{"8080:80"},
 	}
 	injector := NewInjector(opts)
-	if _, ok := injector.(*meshInjector); !ok {
-		t.Fatalf("expected *meshInjector, got %T", injector)
+	if _, ok := injector.(*nodeAgentInjector); !ok {
+		t.Fatalf("expected *nodeAgentInjector, got %T", injector)
 	}
 }
 
@@ -65,8 +65,8 @@ func TestNewInjector_NoHeadersNoPortMaps(t *testing.T) {
 		},
 	}
 	injector := NewInjector(opts)
-	if _, ok := injector.(*meshInjector); !ok {
-		t.Fatalf("expected *meshInjector (VPN-only = mesh with empty headers), got %T", injector)
+	if _, ok := injector.(*nodeAgentInjector); !ok {
+		t.Fatalf("expected *nodeAgentInjector (VPN-only = mesh with empty headers), got %T", injector)
 	}
 }
 

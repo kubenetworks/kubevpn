@@ -22,31 +22,30 @@ func TestGenRole_Fields(t *testing.T) {
 		t.Errorf("Namespace: got %q, want %q", role.Namespace, ns)
 	}
 	// Rule 0: configmaps/secrets (resourceName-scoped); Rules 1-2: CIDR detection
-	// (pods/services + pods/exec, see genRole / docs/46).
-	if len(role.Rules) != 3 {
-		t.Fatalf("Rules len: got %d, want 3", len(role.Rules))
+	// (pods/services, see genRole / docs/46); Rule 3: batch/jobs.
+	if len(role.Rules) != 4 {
+		t.Fatalf("Rules len: got %d, want %d", len(role.Rules), 4)
 	}
-	rule := role.Rules[0]
+	rule0 := role.Rules[0]
 	wantVerbs := []string{"get", "list", "watch", "create", "update", "patch", "delete"}
-	if !stringSliceEqual(rule.Verbs, wantVerbs) {
-		t.Errorf("Rules[0].Verbs: got %v, want %v", rule.Verbs, wantVerbs)
+	if !stringSliceEqual(rule0.Verbs, wantVerbs) {
+		t.Errorf("Rules[0].Verbs: got %v, want %v", rule0.Verbs, wantVerbs)
 	}
-	if !stringSliceEqual(rule.APIGroups, []string{""}) {
-		t.Errorf("Rules[0].APIGroups: got %v, want [\"\"]", rule.APIGroups)
+	if !stringSliceEqual(rule0.APIGroups, []string{""}) {
+		t.Errorf("Rules[0].APIGroups: got %v, want [\"\"]", rule0.APIGroups)
 	}
-	if !stringSliceEqual(rule.Resources, []string{"configmaps", "secrets"}) {
-		t.Errorf("Rules[0].Resources: got %v, want [configmaps secrets]", rule.Resources)
+	if !stringSliceEqual(rule0.Resources, []string{"configmaps", "secrets"}) {
+		t.Errorf("Rules[0].Resources: got %v, want [configmaps secrets]", rule0.Resources)
 	}
-	if !stringSliceEqual(rule.ResourceNames, []string{config.ConfigMapPodTrafficManager}) {
-		t.Errorf("Rules[0].ResourceNames: got %v, want [%s]", rule.ResourceNames, config.ConfigMapPodTrafficManager)
+	if !stringSliceEqual(rule0.ResourceNames, []string{config.ConfigMapPodTrafficManager}) {
+		t.Errorf("Rules[0].ResourceNames: got %v, want [%s]", rule0.ResourceNames, config.ConfigMapPodTrafficManager)
 	}
 	// No-probe-pod CIDR detection: list pods (Rule 1) + create Service (Rule 2).
-	// Must NOT grant pods/create or pods/exec.
 	if !stringSliceEqual(role.Rules[1].Resources, []string{"pods"}) {
 		t.Errorf("Rules[1].Resources: got %v, want [pods]", role.Rules[1].Resources)
 	}
 	if !stringSliceEqual(role.Rules[1].Verbs, []string{"list"}) {
-		t.Errorf("Rules[1].Verbs: got %v, want [list] (no create/exec)", role.Rules[1].Verbs)
+		t.Errorf("Rules[1].Verbs: got %v, want [list]", role.Rules[1].Verbs)
 	}
 	if !stringSliceEqual(role.Rules[2].Resources, []string{"services"}) {
 		t.Errorf("Rules[2].Resources: got %v, want [services]", role.Rules[2].Resources)
@@ -55,10 +54,17 @@ func TestGenRole_Fields(t *testing.T) {
 	if !stringSliceEqual(role.Rules[2].Verbs, []string{"create", "list"}) {
 		t.Errorf("Rules[2].Verbs: got %v, want [create list]", role.Rules[2].Verbs)
 	}
+	// Rule 3 must be the batch/jobs grant (node-agent Jobs); no pods/exec.
+	if !stringSliceEqual(role.Rules[3].APIGroups, []string{"batch"}) {
+		t.Errorf("Rules[3].APIGroups: got %v, want [batch]", role.Rules[3].APIGroups)
+	}
+	if !stringSliceEqual(role.Rules[3].Resources, []string{"jobs"}) {
+		t.Errorf("Rules[3].Resources: got %v, want [jobs]", role.Rules[3].Resources)
+	}
 	for _, r := range role.Rules {
 		for _, res := range r.Resources {
 			if res == "pods/exec" {
-				t.Errorf("manager Role must not grant pods/exec (no-probe-pod detection)")
+				t.Errorf("manager Role must not grant pods/exec (dataplane verification is lease-based)")
 			}
 		}
 	}

@@ -45,13 +45,11 @@ func Main(ctx context.Context, factory cmdutil.Factory, port uint, logger *log.E
 	// exits non-zero and K8s restarts it, rather than serving an xDS endpoint that
 	// silently lacks TunConfigService (which would fail every client's TUN setup
 	// with "unknown service rpc.TunConfigService" for the pod's whole lifetime).
-	tunConfig, err := NewTunConfigServer(ctx, clientset, namespace)
+	tunConfig, err := NewTunConfigServer(ctx, clientset, namespace, factory)
 	if err != nil {
 		return fmt.Errorf("start TunConfigServer: %w", err)
 	}
 	defer func() { cancel(); workers.Wait(); tunConfig.Close() }()
-	// Back server-side sidecar injection (ProxyInject) with the in-cluster factory.
-	tunConfig.factory = factory
 	tunConfig.StartLeaseReaper(ctx)
 	// Warm the cluster CIDR + DNS caches in-cluster BEFORE serving, so both are
 	// populated before the first client connects (no first-connect fallback race).
@@ -67,6 +65,20 @@ func Main(ctx context.Context, factory cmdutil.Factory, port uint, logger *log.E
 	warmup(tunConfig.WarmClusterDNSCache, 5*time.Second)
 
 	errChan := make(chan error, 2)
+
+	// Publish node-boundary attachments when available.
+	if tunConfig.attachmentPublisher != nil {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			plog.G(ctx).Infof("[AttachmentPublisher] starting")
+			if err := tunConfig.attachmentPublisher.Start(ctx); err != nil && err != ctx.Err() {
+				plog.G(ctx).Warnf("[AttachmentPublisher] stopped: %v", err)
+			}
+		}()
+	} else {
+		plog.G(ctx).Infof("[AttachmentPublisher] disabled")
+	}
 
 	workers.Add(1)
 	go func() {

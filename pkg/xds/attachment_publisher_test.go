@@ -1,0 +1,228 @@
+package xds
+
+import (
+	"context"
+	"testing"
+
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/client-go/kubernetes/fake"
+	"sigs.k8s.io/yaml"
+
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
+)
+
+const publisherVirtualsYAML = `- schemaVersion: 2
+  Namespace: default
+  Uid: deployments.apps.reviews
+  selector: app=reviews
+  Ports:
+  - containerPort: 9080
+    protocol: TCP
+  - containerPort: 9081
+    protocol: UDP
+  Rules:
+  - ownerID: owner-1
+    LocalTunIPv4: 198.18.0.1
+    isAgent: true
+`
+
+func newPublisherTestPod() *corev1.Pod {
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "reviews-x", Namespace: "default", UID: "uid-1", Labels: map[string]string{"app": "reviews"}},
+		Spec:       corev1.PodSpec{NodeName: "node-a"},
+		Status:     corev1.PodStatus{Phase: corev1.PodRunning, PodIP: "10.244.0.5"},
+	}
+}
+
+func TestAttachmentPublisher_PublishesAndRemoves(t *testing.T) {
+	ctx := context.Background()
+	pod := newPublisherTestPod()
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "kubevpn"},
+		Data:       map[string]string{config.KeyEnvoy: publisherVirtualsYAML},
+	}
+	clientset := fake.NewSimpleClientset(cm, pod)
+	p := NewAttachmentPublisher(clientset, "kubevpn")
+	if err := p.reconcileOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := clientset.CoreV1().ConfigMaps("kubevpn").Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var attachments []controlplane.NodeAttachment
+	if err := yaml.Unmarshal([]byte(got.Data[config.KeyNodeAttachments]), &attachments); err != nil {
+		t.Fatal(err)
+	}
+	if len(attachments) != 1 || attachments[0].PodUID != "uid-1" || attachments[0].NodeName != "node-a" || attachments[0].PodIP != "10.244.0.5" {
+		t.Fatalf("unexpected attachments: %+v", attachments)
+	}
+	if attachments[0].AgentListenerPort == 0 {
+		t.Fatal("admin base port not allocated")
+	}
+	if attachments[0].NodeID == "" || len(attachments[0].Ports) != 2 {
+		t.Fatalf("derived node or port mappings missing: %+v", attachments[0])
+	}
+	seenPorts := map[int32]bool{}
+	for _, port := range attachments[0].Ports {
+		if port.AgentListenerPort == 0 || seenPorts[port.AgentListenerPort] {
+			t.Fatalf("invalid per-pod listener allocation: %+v", attachments[0].Ports)
+		}
+		seenPorts[port.AgentListenerPort] = true
+	}
+	var virtuals []*controlplane.Virtual
+	if err := yaml.Unmarshal([]byte(got.Data[config.KeyEnvoy]), &virtuals); err != nil {
+		t.Fatal(err)
+	}
+	if len(virtuals) != 2 {
+		t.Fatalf("expected base and per-node derived virtuals: %+v", virtuals)
+	}
+	if virtuals[0].AgentListenerPort != attachments[0].AgentListenerPort {
+		t.Fatal("attachment admin port differs from Virtual port")
+	}
+	derived := virtuals[1]
+	if derived.UID != attachments[0].NodeID || len(derived.AgentOrigins) != 1 {
+		t.Fatalf("unexpected derived virtual: %+v", derived)
+	}
+	if derived.AgentOrigins[0].PodIP != pod.Status.PodIP || len(derived.AgentOrigins[0].Ports) != 2 {
+		t.Fatalf("derived origin does not identify the real pod: %+v", derived.AgentOrigins[0])
+	}
+
+	if err := p.reconcileOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	gotAgain, _ := clientset.CoreV1().ConfigMaps("kubevpn").Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if gotAgain.Data[config.KeyNodeAttachments] != got.Data[config.KeyNodeAttachments] || gotAgain.Data[config.KeyEnvoy] != got.Data[config.KeyEnvoy] {
+		t.Fatal("attachments or derived virtuals changed on an identical reconcile")
+	}
+	var virtualsAgain []*controlplane.Virtual
+	_ = yaml.Unmarshal([]byte(gotAgain.Data[config.KeyEnvoy]), &virtualsAgain)
+	if virtualsAgain[0].AgentListenerPort != virtuals[0].AgentListenerPort {
+		t.Fatal("port changed on second reconcile")
+	}
+	allocationState := gotAgain.Data[config.KeyAgentPortAllocations]
+	if allocationState == "" {
+		t.Fatal("listener allocation state was not persisted")
+	}
+
+	_ = clientset.CoreV1().Pods("default").Delete(ctx, pod.Name, metav1.DeleteOptions{})
+	if err := p.reconcileOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = clientset.CoreV1().ConfigMaps("kubevpn").Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	attachments = nil
+	_ = yaml.Unmarshal([]byte(got.Data[config.KeyNodeAttachments]), &attachments)
+	if len(attachments) != 0 {
+		t.Fatalf("stale attachments: %+v", attachments)
+	}
+	virtuals = nil
+	_ = yaml.Unmarshal([]byte(got.Data[config.KeyEnvoy]), &virtuals)
+	if len(virtuals) != 1 || len(virtuals[0].AgentOrigins) != 0 {
+		t.Fatalf("stale derived virtuals: %+v", virtuals)
+	}
+	if got.Data[config.KeyAgentPortAllocations] != allocationState {
+		t.Fatal("listener allocation state was discarded with the attachment")
+	}
+}
+
+func TestAttachmentPublisher_PublishesServiceOriginsPerNode(t *testing.T) {
+	ctx := context.Background()
+	podA := newPublisherTestPod()
+	podB := newPublisherTestPod()
+	podB.Name = "reviews-y"
+	podB.UID = "uid-2"
+	podB.Spec.NodeName = "node-b"
+	podB.Status.PodIP = "10.244.0.6"
+	service := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "reviews", Namespace: "default"},
+		Spec: corev1.ServiceSpec{
+			Selector:  map[string]string{"app": "reviews"},
+			ClusterIP: "10.96.0.10",
+			Ports: []corev1.ServicePort{{
+				Protocol: corev1.ProtocolTCP, Port: 80, TargetPort: intstr.FromInt(9080),
+			}},
+		},
+	}
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "kubevpn"},
+		Data:       map[string]string{config.KeyEnvoy: publisherVirtualsYAML},
+	}
+	clientset := fake.NewSimpleClientset(cm, podA, podB, service)
+	p := NewAttachmentPublisher(clientset, "kubevpn")
+	if err := p.reconcileOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got, err := clientset.CoreV1().ConfigMaps("kubevpn").Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var attachments []controlplane.NodeAttachment
+	if err := yaml.Unmarshal([]byte(got.Data[config.KeyNodeAttachments]), &attachments); err != nil {
+		t.Fatal(err)
+	}
+	if len(attachments) != 4 {
+		t.Fatalf("expected two pod and two per-node service attachments: %+v", attachments)
+	}
+	serviceAttachments := 0
+	for _, attachment := range attachments {
+		if attachment.ServiceName == "" {
+			continue
+		}
+		serviceAttachments++
+		if attachment.PodIP != "10.96.0.10" || attachment.OriginIP != "10.96.0.10" {
+			t.Fatalf("service destination/origin mismatch: %+v", attachment)
+		}
+		if len(attachment.Ports) != 1 || attachment.Ports[0].ContainerPort != 9080 || attachment.Ports[0].OriginPort != 80 {
+			t.Fatalf("service port was not mapped to the workload port: %+v", attachment.Ports)
+		}
+	}
+	if serviceAttachments != 2 {
+		t.Fatalf("expected one service attachment per node, got %d", serviceAttachments)
+	}
+	var virtuals []*controlplane.Virtual
+	if err := yaml.Unmarshal([]byte(got.Data[config.KeyEnvoy]), &virtuals); err != nil {
+		t.Fatal(err)
+	}
+	if len(virtuals) != 3 {
+		t.Fatalf("expected base plus two node virtuals: %+v", virtuals)
+	}
+	serviceOrigins := 0
+	for _, derived := range virtuals[1:] {
+		for _, origin := range derived.AgentOrigins {
+			if origin.ServiceName != "" {
+				serviceOrigins++
+				if origin.OriginIP != "10.96.0.10" || origin.PodIP != "10.96.0.10" {
+					t.Fatalf("derived service origin lost ClusterIP: %+v", origin)
+				}
+			}
+		}
+	}
+	if serviceOrigins != 2 {
+		t.Fatalf("expected derived service origin on both nodes, got %d", serviceOrigins)
+	}
+}
+
+func TestAttachmentPublisher_SkipsSidecarPod(t *testing.T) {
+	ctx := context.Background()
+	pod := newPublisherTestPod()
+	pod.Spec.Containers = []corev1.Container{{Name: config.ContainerSidecarVPN}, {Name: config.ContainerSidecarEnvoy}}
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "kubevpn"},
+		Data:       map[string]string{config.KeyEnvoy: publisherVirtualsYAML},
+	}
+	clientset := fake.NewSimpleClientset(cm, pod)
+	p := NewAttachmentPublisher(clientset, "kubevpn")
+	if err := p.reconcileOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := clientset.CoreV1().ConfigMaps("kubevpn").Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	var attachments []controlplane.NodeAttachment
+	_ = yaml.Unmarshal([]byte(got.Data[config.KeyNodeAttachments]), &attachments)
+	if len(attachments) != 0 {
+		t.Fatalf("sidecar pod must not get attachment: %+v", attachments)
+	}
+}

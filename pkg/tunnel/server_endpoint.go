@@ -152,7 +152,14 @@ func (h *gvisorTCPHandler) dispatchServerDataPacket(ctx context.Context, conn ne
 		return false
 	}
 	dstKey := string(dst)
-	if h.table.hasRoute(dstKey) {
+	// Guard: a hub-owned destination (the traffic manager's own Service ClusterIP)
+	// must always be handled by the local gvisor forwarder, never routed to a client
+	// conn. Belt-and-braces for the addRoute guard in route_table.go: if a bogus
+	// route for the ClusterIP exists anyway (learned before the reservation took
+	// effect), honoring it would bounce every client's DNS (:53) and xDS (:9002)
+	// flow back to the spoofing client and black-hole them for the connection's
+	// lifetime (the route-table self-registration loop).
+	if !h.table.isReserved(dstKey) && h.table.hasRoute(dstKey) {
 		token := routeStage.begin()
 		usedConn, writeErr := h.writer.writeToRoutePacket(ctx, dstKey, packet)
 		routeStage.finish(token, 1, read, writeErr == nil && ctx.Err() == nil)

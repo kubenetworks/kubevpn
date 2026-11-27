@@ -192,7 +192,7 @@ pkg/
 | `svr.registry.takeAll()` | `daemon/action` | Removes/returns all connections (quit path); `svr.registry.use(id)` selects the connection as current |
 | `svr.getSudoTunIPs(ctx)` | `daemon/action` | Queries sudo daemon Status, returns `map[ConnectionID]tunIP` — use for IP lookup in user daemon |
 | `resolveTunIP(connect, ips)` | `daemon/action` | Resolves TUN IP for a connection: from map (user daemon) or `GetLocalTunIP` fallback (sudo daemon) |
-| `handler.DeleteTrafficManagerCoreResources(ctx, clientset, ns, name, opts)` | `pkg/handler` | Deletes the 8 namespaced traffic-manager resources (deploy/job/svc/configmap/secret/sa/role/rolebinding) — shared by `cleanupTrafficManagerResources` (handler) and `Uninstall` (daemon/action); do NOT re-list these resources in either caller |
+| `handler.DeleteTrafficManagerCoreResources(ctx, clientset, ns, name, opts)` | `pkg/handler` | Deletes the 9 namespaced traffic-manager resources (deploy/job/svc/configmap/secret/sa/role/rolebinding/nodeagent-daemonset) — shared by `cleanupTrafficManagerResources` (handler) and `Uninstall` (daemon/action); do NOT re-list these resources in either caller |
 
 ### Envoy Config Types
 
@@ -338,7 +338,7 @@ When refactoring backend code (`pkg/`):
 
 0. **Read `docs/` design documents first** — before any code change, read the relevant design docs in `docs/` to understand the full architecture. Changes must be consistent with the documented design (dual-daemon model, OwnerID ownership, DHCP lifecycle, logging architecture, etc.). If a change conflicts with the docs, update the docs as part of the same commit. Key docs: `02-dual-daemon.md` (which daemon runs what), `05-owner-id.md` (envoy rule ownership), `13-logging-architecture.md` (log routing), `14-rpc-daemon-mapping.md` (RPC → daemon mapping), `33-client-upgrade.md` (client self-upgrade: download/atomic-swap/rollback).
 1. **Every refactoring must include integration tests** — wire up real components (gRPC, DHCP, ConfigMap, connection management) against `fake.NewSimpleClientset()`. Structure tests as multi-phase stories (connect → proxy → leave → crash → reconnect). Never write single-function unit tests as a substitute.
-2. **Never touch `cmd/`** — CLI is frozen. Sole approved exception for the `pkg/core` → `pkg/endpoint` rename: `cmd/kubevpn/cmds/server.go` may change only the import path and `core` → `endpoint` package qualifiers. No CLI behavior or other CLI file may change.
+2. **`cmd/` is frozen — meaning: existing commands' parameters, behavior, and output must not change.** Adding NEW subcommands (new files in `cmd/kubevpn/cmds/` + registration) is allowed. Sole source-modification exception for the `pkg/core` → `pkg/endpoint` rename: `cmd/kubevpn/cmds/server.go` may change only the import path and `core` → `endpoint` package qualifiers. No other change to existing CLI files.
 3. **Always `go build ./...` after changes** — catch compile errors immediately
 4. **Run `go test` and `go vet`** on affected packages before committing
 5. **Commit per logical change** — don't bundle unrelated fixes

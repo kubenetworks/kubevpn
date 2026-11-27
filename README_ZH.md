@@ -125,6 +125,26 @@ kubevpn uninstall
 - 对于生产集群，使用前请了解 RBAC 和网络影响
 - 了解更多：[安全文档](https://kubevpn.dev/zh/docs/operations/security)
 
+## 示例命令
+
+为 AI 编码代理启动 MCP 服务器（stdio）：
+
+```shell cli-checked
+kubevpn mcp
+```
+
+按连接 ID 断开连接：
+
+```shell cli-checked
+kubevpn disconnect <connection-id>
+```
+
+断开所有连接：
+
+```shell cli-checked
+kubevpn disconnect --all
+```
+
 ## 下一步
 
 - 完整文档：[kubevpn.dev](https://kubevpn.dev/zh)

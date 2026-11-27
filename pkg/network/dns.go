@@ -3,6 +3,9 @@ package network
 import (
 	"context"
 	"encoding/json"
+	"runtime"
+	"slices"
+	"strings"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -60,14 +63,20 @@ func (nm *Runtime) setupDNS(ctx context.Context) error {
 
 	ns := nm.listResolvableNamespaces(ctx)
 
+	// Extend search domains to include all namespaces for cross-namespace short-name resolution
+	// This fixes the case where user connects to "kubevpn" namespace but proxies workloads
+	// in "default" namespace: short name "reviews" resolves as "reviews.default.svc.cluster.local"
+	relovConf.Search = ExtendSearchDomains(relovConf.Search, ns)
+
 	plog.G(ctx).Debugf("Listing namespace %s services...", nm.cfg.WorkloadNamespace)
 	nm.dns.dnsConfig = &dns.Config{
-		Config:   relovConf,
-		Ns:       ns,
-		Services: []v1.Service{},
-		TunName:  nm.device.tunName,
-		Hosts:    nm.dns.extraHost,
-		Lock:     nm.cfg.Lock,
+		Config:           relovConf,
+		Ns:               ns,
+		Services:         []v1.Service{},
+		ResolverServices: nm.listServicesForHosts(ctx, ns),
+		TunName:          nm.device.tunName,
+		Hosts:            nm.dns.extraHost,
+		Lock:             nm.cfg.Lock,
 		HowToGetExternalName: func(domain string) (string, error) {
 			ip, err := resolveDomainViaClusterDNS(ctx, relovConf.Servers, domain)
 			if err != nil {
@@ -110,4 +119,73 @@ func (nm *Runtime) listResolvableNamespaces(ctx context.Context) []string {
 		}
 	}
 	return ns
+}
+
+// listServicesForHosts lists services in the given namespaces for /etc/hosts population on macOS.
+// On other OSes it returns nil. Errors listing individual namespaces are logged at debug level and ignored.
+func (nm *Runtime) listServicesForHosts(ctx context.Context, namespaces []string) []v1.Service {
+	if runtime.GOOS != "darwin" {
+		return nil
+	}
+	var services []v1.Service
+	for _, ns := range namespaces {
+		list, err := nm.cfg.Clientset.CoreV1().Services(ns).List(ctx, metav1.ListOptions{Limit: 500})
+		if err != nil {
+			plog.G(ctx).Debugf("Failed to list services in namespace %q: %v", ns, err)
+			continue
+		}
+		services = append(services, list.Items...)
+	}
+	return services
+}
+
+// ExtendSearchDomains expands the search domain list to include suffixes for all known namespaces.
+// This enables short-name resolution for services in namespaces that are being proxied but
+// are different from the connect namespace.
+func ExtendSearchDomains(search []string, namespaces []string) []string {
+	if len(namespaces) <= 1 {
+		return search
+	}
+
+	// Build a set for deduplication
+	seen := make(map[string]bool)
+	for _, s := range search {
+		seen[s] = true
+	}
+
+	result := slices.Clone(search)
+
+	// Extract the base domain suffixes from the original search list
+	// e.g., "kubevpn.svc.cluster.local" → ["svc.cluster.local", "cluster.local"]
+	var baseSuffixes []string
+	for _, s := range search {
+		parts := strings.SplitN(s, ".", 2)
+		if len(parts) == 2 && parts[1] != "" {
+			if !slices.Contains(baseSuffixes, parts[1]) {
+				baseSuffixes = append(baseSuffixes, parts[1])
+			}
+		}
+	}
+
+	// If we couldn't extract base suffixes, use default Kubernetes suffixes
+	if len(baseSuffixes) == 0 {
+		baseSuffixes = []string{"svc.cluster.local", "cluster.local"}
+	}
+
+	// Add search domains for all namespaces
+	for _, ns := range namespaces {
+		// Skip the workload namespace since it's already in the original search
+		if ns == namespaces[0] {
+			continue
+		}
+		for _, suffix := range baseSuffixes {
+			nsSearch := ns + "." + suffix
+			if !seen[nsSearch] {
+				seen[nsSearch] = true
+				result = append(result, nsSearch)
+			}
+		}
+	}
+
+	return result
 }

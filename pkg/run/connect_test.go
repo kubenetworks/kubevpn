@@ -52,7 +52,7 @@ func TestBuildConnectEntrypoint(t *testing.T) {
 				Workload:  "deployments/web",
 			},
 			managerNamespace: "kubevpn-system",
-			wantPrefix:       []string{"kubevpn", "proxy", "deployments/web"},
+			wantPrefix:       []string{"kubevpn", "legacy-proxy", "deployments/web"},
 			wantContains: [][2]string{
 				{"--image", config.Image},
 				{"--kubeconfig", "/root/.kube/config"},
@@ -69,7 +69,7 @@ func TestBuildConnectEntrypoint(t *testing.T) {
 				Workload:  "statefulsets/db",
 			},
 			managerNamespace: "",
-			wantPrefix:       []string{"kubevpn", "proxy", "statefulsets/db"},
+			wantPrefix:       []string{"kubevpn", "legacy-proxy", "statefulsets/db"},
 			wantContains: [][2]string{
 				{"--manager-namespace", ""},
 			},
@@ -260,8 +260,8 @@ func TestBuildConnectEntrypointProxyWorkloads(t *testing.T) {
 			if len(got) < 3 {
 				t.Fatalf("entrypoint too short: %v", got)
 			}
-			if got[0] != "kubevpn" || got[1] != "proxy" || got[2] != workload {
-				t.Errorf("entrypoint prefix = %v, want [kubevpn proxy %s]", got[:3], workload)
+			if got[0] != "kubevpn" || got[1] != "legacy-proxy" || got[2] != workload {
+				t.Errorf("entrypoint prefix = %v, want [kubevpn legacy-proxy %s]", got[:3], workload)
 			}
 		})
 	}

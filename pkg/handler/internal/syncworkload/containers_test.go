@@ -27,12 +27,12 @@ func TestGenVPNContainer(t *testing.T) {
 		t.Fatalf("image = %q, want %q", c.Image, image)
 	}
 
-	// Command must start with "kubevpn proxy <workload>"
+	// Command must start with the legacy sidecar proxy used by sync mode.
 	if len(c.Command) < 3 {
 		t.Fatalf("command too short: %v", c.Command)
 	}
-	if c.Command[0] != "kubevpn" || c.Command[1] != "proxy" || c.Command[2] != workload {
-		t.Fatalf("command prefix = %v, want [kubevpn proxy %s ...]", c.Command[:3], workload)
+	if c.Command[0] != "kubevpn" || c.Command[1] != "legacy-proxy" || c.Command[2] != workload {
+		t.Fatalf("command prefix = %v, want [kubevpn legacy-proxy %s ...]", c.Command[:3], workload)
 	}
 
 	// Must contain --namespace flag with correct value
@@ -202,10 +202,9 @@ func TestWaitPodReady_AlreadyRunning(t *testing.T) {
 	}
 
 	clientset := fake.NewSimpleClientset(readyPod)
-	podClient := clientset.CoreV1().Pods("default")
 
 	ctx := context.Background()
-	err := clusterworkload.WaitPodReady(ctx, podClient, "app=web", "")
+	err := clusterworkload.WaitPodReady(ctx, clientset.CoreV1(), "default", "app=web", "")
 	if err != nil {
 		t.Fatalf("WaitPodReady returned error for already-running pod: %v", err)
 	}

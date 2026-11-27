@@ -21,10 +21,12 @@ func newFakeManager(t *testing.T) *Manager {
 		}},
 	)
 	return &Manager{
-		clientset: clientset,
-		namespace: "test-ns",
-		cidr:      config.CIDR,
-		cidr6:     config.CIDR6,
+		clientset:  clientset,
+		namespace:  "test-ns",
+		cidr:       config.CIDR,
+		cidr6:      config.CIDR6,
+		cidrAgent:  config.CIDRAgent,
+		cidr6Agent: config.CIDR6Agent,
 	}
 }
 
@@ -160,5 +162,51 @@ func TestForEach_IteratesAllocated(t *testing.T) {
 	}
 	if v6count != 3 {
 		t.Fatalf("expected 3 v6 allocations, got %d", v6count)
+	}
+}
+
+func TestForEach_IncludesAgentPool(t *testing.T) {
+	m := newFakeManager(t)
+	if err := m.InitDHCP(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	// One user-pool and one agent-pool allocation.
+	if _, _, err := m.RentIP(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	v4, v6, err := m.RentIPForAgent(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !config.CIDRAgent.Contains(v4.IP) {
+		t.Fatalf("agent v4 %s not in agent CIDR %s", v4, config.CIDRAgent)
+	}
+
+	var userV4, agentV4 int
+	var agentV4Seen bool
+	err = m.ForEach(context.Background(), func(ip net.IP) {
+		if config.CIDRAgent.Contains(ip) {
+			agentV4++
+			if ip.Equal(v4.IP) {
+				agentV4Seen = true
+			}
+		} else if config.CIDR.Contains(ip) {
+			userV4++
+		}
+	}, func(ip net.IP) {
+		_ = ip // v6 coverage asserted via v4; pool symmetry holds
+	})
+	if err != nil {
+		t.Fatalf("ForEach: %v", err)
+	}
+	if userV4 != 1 {
+		t.Fatalf("expected 1 user-pool v4 allocation, got %d", userV4)
+	}
+	if agentV4 != 1 {
+		t.Fatalf("expected 1 agent-pool v4 allocation visible to ForEach, got %d", agentV4)
+	}
+	if !agentV4Seen {
+		t.Fatalf("agent lease %s (%s) must be visible to ForEach", v4, v6)
 	}
 }

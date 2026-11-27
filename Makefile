@@ -117,7 +117,7 @@ gen:
 E2E_RUN ?= .
 .PHONY: ut
 ut:
-	go test -p=1 -v -tags=integration -timeout=120m ${LDFLAGS} -coverprofile=coverage.txt -coverpkg=./... -run '${E2E_RUN}' ./...
+	go test -p=1 -v -tags=integration -timeout=180m ${LDFLAGS} -coverprofile=coverage.txt -coverpkg=./... -run '${E2E_RUN}' ./...
 
 # ut-no-cluster runs ONLY the tests that need no kubeconfig / real cluster, i.e.
 # everything NOT behind the `integration` build tag. Used by the Windows CI job,

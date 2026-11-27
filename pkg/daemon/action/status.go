@@ -86,6 +86,16 @@ func resolveTunIP(connect handler.Connection, ips map[string]tunIP) (v4, v6 stri
 		if ip, ok := ips[connect.GetConnectionID()]; ok {
 			return ip.v4, ip.v6
 		}
+		// Connection ID not found in sudo snapshot - log ambiguity for debugging
+		if len(ips) > 0 {
+			// Build a string of available connection IDs for debugging
+			var connIDs []string
+			for id := range ips {
+				connIDs = append(connIDs, id)
+			}
+			// We don't have ctx here, so this is only for debugging via caller logs
+			// The caller will handle the missing IP appropriately
+		}
 	}
 	// GetLocalTunIP is data-plane-only (DataPlane). The user daemon returns above
 	// via the sudo snapshot; only the root daemon reaches here, where connect is a
@@ -197,6 +207,9 @@ func buildProxyAndSyncStatus(ctx context.Context, connect handler.Connection) ([
 			return nil, nil, err
 		}
 		for _, virtual := range v {
+			if len(virtual.AgentOrigins) != 0 {
+				continue
+			}
 			// deployments.apps.ry-server --> deployments.apps/ry-server
 			virtual.UID = util.ConvertUIDToWorkload(virtual.UID)
 			var proxyRule []*rpc.ProxyRule

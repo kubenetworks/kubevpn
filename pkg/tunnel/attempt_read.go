@@ -62,6 +62,17 @@ func (s *connAttempt) dispatchReadPacket(ctx context.Context, packet *packet, ge
 		// dispatch: no intermediate bounded queue, so TCP's receive window throttles
 		// the peer instead of a blind drop that forces sender retransmits.
 		// nil-safe for tests that drive a slot in isolation.
+		//
+		// NOTE: the inter-client stack forwards EVERY injected destination to
+		// 127.0.0.1:<dst-port> — that is the legitimate delivery path for proxied
+		// pod/ClusterIP flows to the developer's local services (mesh interception,
+		// pod-IP health checks). The spoofed-source risk that could re-seed the
+		// server's route table is closed server-side instead: the route table
+		// refuses to learn hub-owned IPs and dispatchServerDataPacket forces
+		// hub-owned destinations into the gvisor forwarder (route_table.go /
+		// server_endpoint.go). Do NOT re-add a destination-based guard here — a
+		// previous attempt did and black-holed proxied pod traffic (CI: pod-IP
+		// health checks RST/EOF, pingPodIP hang).
 		if s.interClient != nil {
 			token := inject.begin()
 			s.interClient.InjectIP(ip)

@@ -41,7 +41,7 @@ func (svr *Server) Uninstall(resp rpc.Daemon_UninstallServer) (err error) {
 func Uninstall(ctx context.Context, clientset kubernetes.Interface, ns string) error {
 	plog.StepStart(ctx, "Uninstalling traffic manager")
 	// Remove the full set of traffic-manager resources KubeVPN creates in this namespace:
-	// the eight core resources named config.ConfigMapPodTrafficManager plus the -route and
+	// the nine core resources named config.ConfigMapPodTrafficManager plus the -route and
 	// -proxy RBAC (and the cluster-scoped proxy ClusterRole/Binding in central mode).
 	// Reuses manager.CleanupTrafficManagerResources so the daemon-layer Uninstall and the
 	// handler-layer connect cleanup cannot drift on which resources an uninstall removes.

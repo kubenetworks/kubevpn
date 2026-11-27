@@ -127,6 +127,12 @@ kubevpn uninstall
 
 ## Example Commands
 
+Start the MCP server for AI coding agents (stdio):
+
+```shell cli-checked
+kubevpn mcp
+```
+
 Disconnect from a specific connection ID:
 
 ```shell cli-checked

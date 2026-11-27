@@ -54,6 +54,27 @@ func InvalidateClient(isSudo bool) {
 	}
 }
 
+const LegacyProxyEnv = "KUBEVPN_LEGACY_PROXY"
+
+type attachModeClient struct{ rpc.DaemonClient }
+
+func (c *attachModeClient) Proxy(ctx context.Context, opts ...grpc.CallOption) (rpc.Daemon_ProxyClient, error) {
+	stream, err := c.DaemonClient.Proxy(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &attachModeProxyClient{Daemon_ProxyClient: stream}, nil
+}
+
+type attachModeProxyClient struct{ rpc.Daemon_ProxyClient }
+
+func (c *attachModeProxyClient) Send(req *rpc.ProxyRequest) error {
+	if os.Getenv(LegacyProxyEnv) == "true" {
+		req.AttachMode = config.AttachModeLegacySidecar
+	}
+	return c.Daemon_ProxyClient.Send(req)
+}
+
 // GetClient returns a cached gRPC DaemonClient for the given privilege level, creating one if necessary.
 func GetClient(isSudo bool) (rpc.DaemonClient, error) {
 	return getClientWithContext(context.Background(), isSudo)
@@ -117,7 +138,7 @@ func getClientWithContext(ctx context.Context, isSudo bool) (cli rpc.DaemonClien
 		return nil, fmt.Errorf("health check failed: %v: %w", response.Status, config.ErrDaemonNotRunning)
 	}
 
-	cli = rpc.NewDaemonClient(conn)
+	cli = &attachModeClient{DaemonClient: rpc.NewDaemonClient(conn)}
 	upgradeCtx, cancelUpgrade := context.WithTimeout(ctx, config.DaemonProbeTimeout)
 	var resp *rpc.UpgradeResponse
 	resp, err = cli.Upgrade(upgradeCtx, &rpc.UpgradeRequest{
@@ -199,7 +220,7 @@ func getClientWithoutCache(ctx context.Context, isSudo bool) (cli rpc.DaemonClie
 		err = fmt.Errorf("health check failed: %v: %w", response.Status, config.ErrDaemonNotRunning)
 		return
 	}
-	cli = rpc.NewDaemonClient(conn)
+	cli = &attachModeClient{DaemonClient: rpc.NewDaemonClient(conn)}
 	return cli, conn, nil
 }
 

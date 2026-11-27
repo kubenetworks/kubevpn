@@ -59,6 +59,7 @@ func (option *Options) connectViaHost(ctx context.Context, sshConfig *pkgssh.Ssh
 		Level:                int32(util.If(config.Debug, log.DebugLevel, log.InfoLevel)),
 		SshJump:              handler.SshConfigToRPC(sshConfig),
 		ManagerNamespace:     managerNamespace,
+		AttachMode:           config.AttachModeLegacySidecar,
 	}
 	option.AddRollbackFunc(func() error {
 		return teardownRunProxy(cli, option.NoProxy, ns, option.Workload, kubeConfigBytes, sshConfig)
@@ -241,7 +242,7 @@ func (option *Options) buildConnectEntrypoint(managerNamespace string) []string 
 		}
 	} else {
 		entrypoint = []string{
-			"kubevpn", "proxy", option.Workload,
+			"kubevpn", "legacy-proxy", option.Workload,
 			"--foreground",
 			"-n", option.Namespace,
 			"--kubeconfig", "/root/.kube/config",

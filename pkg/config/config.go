@@ -10,6 +10,14 @@ import (
 )
 
 const (
+	// AttachModeSidecar is the attach mode where the proxy runs as a sidecar container.
+	AttachModeSidecar = "sidecar"
+	// AttachModeNodeAgent is the attach mode where the proxy runs as a node agent (default).
+	AttachModeNodeAgent = "node-agent"
+	// AttachModeLegacySidecar preserves the run/sync sidecar path during the
+	// ordinary-proxy node-boundary migration. It is not a user fallback mode.
+	AttachModeLegacySidecar = "legacy-sidecar"
+
 	// ConfigMapPodTrafficManager is the name of the ConfigMap used by the traffic manager.
 	ConfigMapPodTrafficManager = "kubevpn-traffic-manager"
 
@@ -24,6 +32,11 @@ const (
 	KeyTunIPPool = "TUN_IP_POOL"
 	// KeyEnvoy is the ConfigMap key for the Envoy proxy configuration.
 	KeyEnvoy = "ENVOY_CONFIG"
+	// KeyNodeAttachments stores desired per-pod node-boundary attachments.
+	KeyNodeAttachments = "NODE_ATTACHMENTS"
+	// KeyAgentPortAllocations persists listener assignments and tombstones so
+	// leave/re-proxy cannot reuse a port whose old Envoy is still exiting.
+	KeyAgentPortAllocations = "AGENT_PORT_ALLOCATIONS"
 	// KeyClusterCIDRs is the ConfigMap key for cluster CIDR cache (IPv4 + IPv6).
 	KeyClusterCIDRs = "CLUSTER_CIDRS"
 	// KeyClusterCIDRsSchema is the ConfigMap key holding the schema version of the
@@ -113,6 +126,18 @@ const (
 	// 2001:2::/64 network is part of the 2001:2::/48 (reserved for benchmarking)
 	// https://www.iana.org/assignments/iana-ipv6-special-registry/iana-ipv6-special-registry.xhtml
 	IPv6Pool = "2001:2::/64"
+	// IPv4UserPool is the lower half of IPv4Pool reserved for user connections.
+	// Range: 198.18.0.1 - 198.18.127.254
+	IPv4UserPool = "198.18.0.0/17"
+	// IPv4AgentPool is the upper half of IPv4Pool reserved for agent connections.
+	// Range: 198.18.128.1 - 198.18.255.254
+	IPv4AgentPool = "198.18.128.0/17"
+	// IPv6UserPool is the lower half of IPv6Pool reserved for user connections.
+	// Range: 2001:2:: - 2001:2::7fff:ffff:ffff:ffff
+	IPv6UserPool = "2001:2::/65"
+	// IPv6AgentPool is the upper half of IPv6Pool reserved for agent connections.
+	// Range: 2001:2::8000:0:0:0 - 2001:2::ffff:ffff:ffff:ffff
+	IPv6AgentPool = "2001:2::8000:0:0:0/65"
 	// DockerIPv4Pool is the IPv4 CIDR used for kubevpn Docker bridge networks.
 	/*
 		reason：docker use 172.17.0.0/16 network conflict with k8s service kubernetes
@@ -159,6 +184,15 @@ const (
 	HostsKeyword = "Added by KubeVPN"
 	// HostsDeviceKeyword is the per-device marker comment template for /etc/hosts entries.
 	HostsDeviceKeyword = "# For dev %s " + HostsKeyword
+
+	// AgentIptablesComment is the comment marker for node-agent iptables rules.
+	AgentIptablesComment = "kubevpn-nodeagent"
+	// AgentDNATRuleSpec4 is the IPv4 DNAT rule spec (without -t nat -A PREROUTING) for node-agent.
+	// Keep in sync with AgentDNATRuleSpec6 and the bash script in pkg/inject/nodeagent_job.go.
+	AgentDNATRuleSpec4 = "-p tcp ! -s 127.0.0.1 ! -d ${CIDR4} -j DNAT --to :15006 -m comment --comment \"kubevpn-nodeagent\""
+	// AgentDNATRuleSpec6 is the IPv6 DNAT rule spec (without -t nat -A PREROUTING) for node-agent.
+	// Keep in sync with AgentDNATRuleSpec4 and the bash script in pkg/inject/nodeagent_job.go.
+	AgentDNATRuleSpec6 = "-p tcp ! -s ::1 ! -d ${CIDR6} -j DNAT --to :15006 -m comment --comment \"kubevpn-nodeagent\""
 )
 
 var (
@@ -181,6 +215,14 @@ var (
 	CIDR *net.IPNet
 	// CIDR6 is the parsed IPv6 network used for TUN address allocation.
 	CIDR6 *net.IPNet
+	// CIDRUser is the parsed IPv4 network used for user TUN address allocation.
+	CIDRUser *net.IPNet
+	// CIDRAgent is the parsed IPv4 network used for agent TUN address allocation.
+	CIDRAgent *net.IPNet
+	// CIDR6User is the parsed IPv6 network used for user TUN address allocation.
+	CIDR6User *net.IPNet
+	// CIDR6Agent is the parsed IPv6 network used for agent TUN address allocation.
+	CIDR6Agent *net.IPNet
 	// RouterIP is the gateway IPv4 address within CIDR.
 	RouterIP net.IP
 	// RouterIP6 is the gateway IPv6 address within CIDR6.
@@ -199,6 +241,22 @@ func init() {
 		panic(err)
 	}
 	RouterIP6, CIDR6, err = net.ParseCIDR(IPv6Pool)
+	if err != nil {
+		panic(err)
+	}
+	_, CIDRUser, err = net.ParseCIDR(IPv4UserPool)
+	if err != nil {
+		panic(err)
+	}
+	_, CIDRAgent, err = net.ParseCIDR(IPv4AgentPool)
+	if err != nil {
+		panic(err)
+	}
+	_, CIDR6User, err = net.ParseCIDR(IPv6UserPool)
+	if err != nil {
+		panic(err)
+	}
+	_, CIDR6Agent, err = net.ParseCIDR(IPv6AgentPool)
 	if err != nil {
 		panic(err)
 	}

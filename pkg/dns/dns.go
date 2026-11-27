@@ -25,10 +25,11 @@ import (
 
 // Config holds DNS configuration for setting up cluster DNS resolution on the local machine.
 type Config struct {
-	Config   *miekgdns.ClientConfig
-	Ns       []string
-	Services []corev1.Service
-	TunName  string
+	Config           *miekgdns.ClientConfig
+	Ns               []string
+	Services         []corev1.Service
+	ResolverServices []corev1.Service // additional services used ONLY for /etc/hosts entries, not for /etc/resolver generation
+	TunName          string
 
 	Hosts []Entry
 	Lock  *sync.Mutex
@@ -54,7 +55,8 @@ type Config struct {
 func (c *Config) AddServiceNameToHosts(ctx context.Context, hosts ...Entry) (int, error) {
 	c.Lock.Lock()
 	c.extra = hosts
-	appendHosts := c.generateAppendHosts(c.Services, hosts)
+	combinedServices := append(append([]corev1.Service{}, c.ResolverServices...), c.Services...)
+	appendHosts := c.generateAppendHosts(combinedServices, hosts)
 	err := c.appendHosts(appendHosts)
 	c.Lock.Unlock()
 	if err != nil {
@@ -71,7 +73,8 @@ func (c *Config) AddServiceNameToHosts(ctx context.Context, hosts ...Entry) (int
 func (c *Config) UpdateServices(ctx context.Context, services []corev1.Service) {
 	c.Lock.Lock()
 	c.Services = services
-	appendHosts := c.generateAppendHosts(services, c.extra)
+	combinedServices := append(append([]corev1.Service{}, c.ResolverServices...), services...)
+	appendHosts := c.generateAppendHosts(combinedServices, c.extra)
 	plog.G(ctx).Debugf("UpdateServices: processing %d services, %d hosts entries to append", len(services), len(appendHosts))
 	err := c.appendHosts(appendHosts)
 	c.Lock.Unlock()

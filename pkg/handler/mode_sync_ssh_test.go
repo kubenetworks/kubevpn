@@ -192,6 +192,7 @@ func (u *sshUt) checkSyncWithFullProxyStatus(t *testing.T) {
 	}
 
 	expect.List[0].SyncList[0].RuleList[0].DstWorkload = statuses.List[0].SyncList[0].RuleList[0].DstWorkload
+	fillDeploymentTunIPs(&expect, &statuses)
 
 	if !reflect.DeepEqual(statuses, expect) {
 		marshal, _ := json.Marshal(expect)
@@ -261,6 +262,7 @@ func (u *sshUt) checkSyncWithServiceMeshStatus(t *testing.T) {
 	}
 
 	expect.List[0].SyncList[0].RuleList[0].DstWorkload = statuses.List[0].SyncList[0].RuleList[0].DstWorkload
+	fillDeploymentTunIPs(&expect, &statuses)
 
 	if !reflect.DeepEqual(statuses, expect) {
 		marshal, _ := json.Marshal(expect)

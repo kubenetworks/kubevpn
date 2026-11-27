@@ -46,14 +46,13 @@ const (
 	remote           = `{"status": "Reviews is healthy"}`
 	remoteSyncOrigin = `{"status":"Authors is healthy"}`
 	remoteSyncPod    = `{"status":"Authors is healthy in pod"}`
+	// reviewsUDPPort is the UDP port declared on the reviews workload
+	// (samples/bookinfo.yaml), distinct from the TCP 9080 so fargate's per-number
+	// port map does not clash. In mesh full-proxy the envoy UDP listener binds this
+	// container port and forwards to tunIP:<same port>, so the local udpServer must
+	// listen on it and the client must dial it — it cannot be a random port.
+	reviewsUDPPort = 9081
 )
-
-// reviewsUDPPort is the UDP port declared on the reviews workload
-// (samples/bookinfo.yaml), distinct from the TCP 9080 so fargate's per-number
-// port map does not clash. In mesh full-proxy the envoy UDP listener binds this
-// container port and forwards to tunIP:<same port>, so the local udpServer must
-// listen on it and the client must dial it — it cannot be a random port.
-const reviewsUDPPort = 9081
 
 func TestFunctions(t *testing.T) {
 	u := &ut{}
@@ -255,7 +254,6 @@ func healthCheckBackoff() wait.Backoff {
 // minutes (TLS handshake timeouts), blacking out the traffic-manager pod and
 // breaking the ADS stream until it recovers; the default 150s budget expires
 // mid-outage and the assertion fails on infra flakiness rather than a real bug.
-// The wider, jittered budget rides out that window.
 // See docs/43-macos-ci-apiserver-flakiness.md.
 func meshHealthCheckBackoff() wait.Backoff {
 	return wait.Backoff{Duration: time.Second * 5, Factor: 1.0, Jitter: 0.1, Steps: 60}
@@ -493,7 +491,7 @@ func (u *ut) testUDP(t *testing.T) {
 	port := reviewsUDPPort
 	// Tie the server's lifetime to the test so its socket is released when the
 	// test finishes; otherwise the goroutine keeps the fixed port bound and a
-	// later testUDP run (e.g. centerTestUDP) fails with "address already in use".
+	// later testUDP run (e.g., centerTestUDP) fails with "address already in use".
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	go u.udpServer(ctx, t, port)
@@ -510,7 +508,7 @@ func (u *ut) testUDP(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			t.Logf("Dail udp to IP: %s", ip)
+			t.Logf("Dial udp to IP: %s", ip)
 			return u.udpClient(t, ip, port)
 		})
 	if err != nil {
@@ -551,7 +549,7 @@ func (u *ut) udpClient(t *testing.T, ip string, port int) error {
 }
 
 func (u *ut) udpServer(ctx context.Context, t *testing.T, port int) {
-	// 创建监听
+	// Create listening
 	udpConn, err := net.ListenUDP("udp4", &net.UDPAddr{
 		IP:   net.ParseIP("127.0.0.1"),
 		Port: port,
@@ -706,11 +704,13 @@ func (u *ut) checkConnectStatus(t *testing.T) {
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
+	fillDeploymentTunIPs(&expect, &statuses)
 	if !reflect.DeepEqual(statuses, expect) {
 		marshal, _ := json.Marshal(expect)
 		t.Fatalf("expect: %s, but was: %s", string(marshal), string(output))
 	}
 }
+
 func (u *ut) centerCheckConnectStatus(t *testing.T) {
 	cmd := exec.Command("kubevpn", "status", "-o", "json")
 	output, err := cmd.Output()
@@ -728,6 +728,7 @@ func (u *ut) centerCheckConnectStatus(t *testing.T) {
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
+	fillDeploymentTunIPs(&expect, &statuses)
 	if !reflect.DeepEqual(statuses, expect) {
 		marshal, _ := json.Marshal(expect)
 		t.Fatalf("expect: %s, but was: %s", string(marshal), string(output))
@@ -743,6 +744,8 @@ type connection struct {
 	Status    string
 	ProxyList []*proxyItem
 	SyncList  []*syncItem
+	IPv4      string
+	IPv6      string
 }
 type proxyItem struct {
 	Namespace string
@@ -751,6 +754,8 @@ type proxyItem struct {
 }
 type proxyRule struct {
 	Headers       map[string]string
+	LocalTunIPv4  string
+	LocalTunIPv6  string
 	CurrentDevice bool
 	PortMap       map[int32]int32
 }
@@ -761,6 +766,249 @@ type syncItem struct {
 }
 type syncRule struct {
 	DstWorkload string
+}
+
+func fillDeploymentTunIPs(expect *connStatus, actual *connStatus) {
+	if expect == nil || actual == nil || len(expect.List) == 0 || len(actual.List) == 0 {
+		return
+	}
+	for i, expectedConn := range expect.List {
+		// Set connection-level IPv4/IPv6 from actual
+		if i < len(actual.List) {
+			expectedConn.IPv4 = actual.List[i].IPv4
+			expectedConn.IPv6 = actual.List[i].IPv6
+		}
+		// Build a map from actual workload name to its proxyItem
+		actualWorkloadMap := make(map[string]*proxyItem)
+		if i < len(actual.List) && actual.List[i] != nil {
+			for _, actualProxy := range actual.List[i].ProxyList {
+				if actualProxy != nil {
+					actualWorkloadMap[actualProxy.Workload] = actualProxy
+				}
+			}
+		}
+		// Set proxy rule-level LocalTunIPv4/LocalTunIPv6 from matching actual rules
+		for _, proxy := range expectedConn.ProxyList {
+			if proxy == nil || strings.HasPrefix(proxy.Workload, "services/") {
+				continue
+			}
+			actualProxy, ok := actualWorkloadMap[proxy.Workload]
+			if !ok {
+				continue // no matching actual proxy, leave expected as-is
+			}
+			for ruleIdx, rule := range proxy.RuleList {
+				if ruleIdx < len(actualProxy.RuleList) && actualProxy.RuleList[ruleIdx] != nil {
+					rule.LocalTunIPv4 = actualProxy.RuleList[ruleIdx].LocalTunIPv4
+					rule.LocalTunIPv6 = actualProxy.RuleList[ruleIdx].LocalTunIPv6
+				}
+				// else leave expected as-is
+			}
+		}
+	}
+}
+
+func TestFillDeploymentTunIPs(t *testing.T) {
+	t.Run("deployment expectation filled from actual rule IP, not connection IP", func(t *testing.T) {
+		expect := &connStatus{
+			List: []*connection{
+				{
+					Namespace: "test-ns",
+					Status:    "connected",
+					ProxyList: []*proxyItem{
+						{
+							Namespace: "test-ns",
+							Workload:  "deployments.apps/reviews",
+							RuleList: []*proxyRule{
+								{
+									Headers:       map[string]string{"env": "test"},
+									CurrentDevice: true,
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		actual := &connStatus{
+			List: []*connection{
+				{
+					Namespace: "test-ns",
+					Status:    "connected",
+					IPv4:      "192.18.0.1",
+					IPv6:      "fd00::1",
+					ProxyList: []*proxyItem{
+						{
+							Namespace: "test-ns",
+							Workload:  "deployments.apps/reviews",
+							RuleList: []*proxyRule{
+								{
+									Headers:       map[string]string{"env": "test"},
+									LocalTunIPv4:  "192.18.0.4",
+									LocalTunIPv6:  "fd00::4",
+									CurrentDevice: true,
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		fillDeploymentTunIPs(expect, actual)
+
+		// Connection IP should be set from actual connection
+		if expect.List[0].IPv4 != "192.18.0.1" {
+			t.Errorf("expected connection IPv4 to be 192.18.0.1, got %s", expect.List[0].IPv4)
+		}
+		if expect.List[0].IPv6 != "fd00::1" {
+			t.Errorf("expected connection IPv6 to be fd00::1, got %s", expect.List[0].IPv6)
+		}
+
+		// Deployment rule IP should be set from actual rule, not actual connection
+		if expect.List[0].ProxyList[0].RuleList[0].LocalTunIPv4 != "192.18.0.4" {
+			t.Errorf("expected deployment rule LocalTunIPv4 to be 192.18.0.4, got %s", expect.List[0].ProxyList[0].RuleList[0].LocalTunIPv4)
+		}
+		if expect.List[0].ProxyList[0].RuleList[0].LocalTunIPv6 != "fd00::4" {
+			t.Errorf("expected deployment rule LocalTunIPv6 to be fd00::4, got %s", expect.List[0].ProxyList[0].RuleList[0].LocalTunIPv6)
+		}
+	})
+
+	t.Run("services expectation keeps original IP", func(t *testing.T) {
+		expect := &connStatus{
+			List: []*connection{
+				{
+					Namespace: "test-ns",
+					Status:    "connected",
+					ProxyList: []*proxyItem{
+						{
+							Namespace: "test-ns",
+							Workload:  "services/reviews",
+							RuleList: []*proxyRule{
+								{
+									Headers:       map[string]string{"env": "test"},
+									LocalTunIPv4:  "127.0.0.1",
+									LocalTunIPv6:  "::1",
+									CurrentDevice: true,
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		actual := &connStatus{
+			List: []*connection{
+				{
+					Namespace: "test-ns",
+					Status:    "connected",
+					IPv4:      "192.18.0.1",
+					IPv6:      "fd00::1",
+					ProxyList: []*proxyItem{
+						{
+							Namespace: "test-ns",
+							Workload:  "services/reviews",
+							RuleList: []*proxyRule{
+								{
+									Headers:       map[string]string{"env": "test"},
+									LocalTunIPv4:  "192.18.0.5", // different from expected
+									LocalTunIPv6:  "fd00::5",
+									CurrentDevice: true,
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		fillDeploymentTunIPs(expect, actual)
+
+		// Connection IP should still be set from actual connection
+		if expect.List[0].IPv4 != "192.18.0.1" {
+			t.Errorf("expected connection IPv4 to be 192.18.0.1, got %s", expect.List[0].IPv4)
+		}
+		if expect.List[0].IPv6 != "fd00::1" {
+			t.Errorf("expected connection IPv6 to be fd00::1, got %s", expect.List[0].IPv6)
+		}
+
+		// Services rule IP should remain as expected (127.0.0.1 and ::1)
+		if expect.List[0].ProxyList[0].RuleList[0].LocalTunIPv4 != "127.0.0.1" {
+			t.Errorf("expected services rule LocalTunIPv4 to be 127.0.0.1, got %s", expect.List[0].ProxyList[0].RuleList[0].LocalTunIPv4)
+		}
+		if expect.List[0].ProxyList[0].RuleList[0].LocalTunIPv6 != "::1" {
+			t.Errorf("expected services rule LocalTunIPv6 to be ::1, got %s", expect.List[0].ProxyList[0].RuleList[0].LocalTunIPv6)
+		}
+	})
+
+	t.Run("no matching actual proxy leaves expected as-is", func(t *testing.T) {
+		expect := &connStatus{
+			List: []*connection{
+				{
+					Namespace: "test-ns",
+					Status:    "connected",
+					ProxyList: []*proxyItem{
+						{
+							Namespace: "test-ns",
+							Workload:  "deployments.apps/other",
+							RuleList: []*proxyRule{
+								{
+									Headers:       map[string]string{"env": "test"},
+									LocalTunIPv4:  "192.18.0.9", // original expected value
+									LocalTunIPv6:  "fd00::9",
+									CurrentDevice: true,
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		actual := &connStatus{
+			List: []*connection{
+				{
+					Namespace: "test-ns",
+					Status:    "connected",
+					IPv4:      "192.18.0.1",
+					IPv6:      "fd00::1",
+					ProxyList: []*proxyItem{
+						{
+							Namespace: "test-ns",
+							Workload:  "deployments.apps/reviews", // different workload
+							RuleList: []*proxyRule{
+								{
+									Headers:       map[string]string{"env": "test"},
+									LocalTunIPv4:  "192.18.0.4",
+									LocalTunIPv6:  "fd00::4",
+									CurrentDevice: true,
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		fillDeploymentTunIPs(expect, actual)
+
+		// Connection IP should still be set from actual connection
+		if expect.List[0].IPv4 != "192.18.0.1" {
+			t.Errorf("expected connection IPv4 to be 192.18.0.1, got %s", expect.List[0].IPv4)
+		}
+		if expect.List[0].IPv6 != "fd00::1" {
+			t.Errorf("expected connection IPv6 to be fd00::1, got %s", expect.List[0].IPv6)
+		}
+
+		// Deployment rule IP should remain as expected (192.18.0.9 and fd00::9)
+		if expect.List[0].ProxyList[0].RuleList[0].LocalTunIPv4 != "192.18.0.9" {
+			t.Errorf("expected deployment rule LocalTunIPv4 to remain 192.18.0.9, got %s", expect.List[0].ProxyList[0].RuleList[0].LocalTunIPv4)
+		}
+		if expect.List[0].ProxyList[0].RuleList[0].LocalTunIPv6 != "fd00::9" {
+			t.Errorf("expected deployment rule LocalTunIPv6 to remain fd00::9, got %s", expect.List[0].ProxyList[0].RuleList[0].LocalTunIPv6)
+		}
+	})
 }
 
 func (u *ut) checkProxyStatus(t *testing.T) {
@@ -788,6 +1036,7 @@ func (u *ut) checkProxyStatus(t *testing.T) {
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
+	fillDeploymentTunIPs(&expect, &statuses)
 	if !reflect.DeepEqual(statuses, expect) {
 		marshal, _ := json.Marshal(expect)
 		t.Fatalf("expect: %s, but was: %s", string(marshal), string(output))
@@ -819,6 +1068,7 @@ func (u *ut) centerCheckProxyStatus(t *testing.T) {
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
+	fillDeploymentTunIPs(&expect, &statuses)
 	if !reflect.DeepEqual(statuses, expect) {
 		marshal, _ := json.Marshal(expect)
 		t.Fatalf("expect: %s, but was: %s", string(marshal), string(output))
@@ -850,6 +1100,7 @@ func (u *ut) checkProxyWithServiceMeshStatus(t *testing.T) {
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
+	fillDeploymentTunIPs(&expect, &statuses)
 	if !reflect.DeepEqual(statuses, expect) {
 		marshal, _ := json.Marshal(expect)
 		t.Fatalf("expect: %s, but was: %s", string(marshal), string(output))
@@ -881,6 +1132,7 @@ func (u *ut) centerCheckProxyWithServiceMeshStatus(t *testing.T) {
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
+	fillDeploymentTunIPs(&expect, &statuses)
 	if !reflect.DeepEqual(statuses, expect) {
 		marshal, _ := json.Marshal(expect)
 		t.Fatalf("expect: %s, but was: %s", string(marshal), string(output))
@@ -902,6 +1154,8 @@ func (u *ut) checkProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 			Workload:  "services/reviews",
 			RuleList: []*proxyRule{{
 				Headers:       map[string]string{"env": "test"},
+				LocalTunIPv4:  "127.0.0.1",
+				LocalTunIPv6:  "::1",
 				CurrentDevice: true,
 				PortMap:       map[int32]int32{9080: 9080, 9081: 9081},
 			}},
@@ -912,6 +1166,7 @@ func (u *ut) checkProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
+	fillDeploymentTunIPs(&expect, &statuses)
 	opt := cmp.FilterPath(func(p cmp.Path) bool {
 		vx := p.Last().String()
 		if vx == `["Headers"]` {
@@ -940,6 +1195,8 @@ func (u *ut) centerCheckProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 			Workload:  "services/reviews",
 			RuleList: []*proxyRule{{
 				Headers:       map[string]string{"env": "test"},
+				LocalTunIPv4:  "127.0.0.1",
+				LocalTunIPv6:  "::1",
 				CurrentDevice: true,
 				PortMap:       map[int32]int32{9080: 8080, 9081: 9081},
 			}},
@@ -950,6 +1207,7 @@ func (u *ut) centerCheckProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 	if err = json.Unmarshal(output, &statuses); err != nil {
 		t.Fatal(err)
 	}
+	fillDeploymentTunIPs(&expect, &statuses)
 	opt := cmp.FilterPath(func(p cmp.Path) bool {
 		vx := p.Last().String()
 		if vx == `["Headers"]` {
@@ -1023,7 +1281,7 @@ func (u *ut) checkServiceShouldNotInNsDefault(t *testing.T) {
 func (u *ut) kubectl(t *testing.T) {
 	// Capture KubeVPN sidecar logs first: the kubectl commands below dump pod status
 	// and describe (events, exit codes) but not the sidecar container logs that explain
-	// why traffic did not route or a sidecar crash-looped.
+	// why traffic did not route or a sidecar crash-loops.
 	dumpKubeVPNSidecarLogs(t, u.clientset)
 	cmdGetPod := exec.Command("kubectl", "get", "pods", "-o", "wide", "-A")
 	cmdGetSvc := exec.Command("kubectl", "get", "services", "-o", "wide", "-A")

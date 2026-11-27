@@ -3,10 +3,13 @@ package manager
 import (
 	"context"
 	"fmt"
+	"time"
 
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/kubectl/pkg/polymorphichelpers"
 	"k8s.io/utils/ptr"
@@ -41,6 +44,51 @@ func Ensure(ctx context.Context, cfg Config) error {
 	return nil
 }
 
+// managerRecreateGrace bounds how long createOutboundPod waits for an
+// installing manager pod to become fully running before recreating everything.
+const managerRecreateGrace = 10 * time.Second
+
+// waitForManagerPod polls until a manager pod has all containers running.
+// Returns nil as soon as one qualifies; error when the timeout expires first.
+// Skips the wait entirely if no manager pods exist at all.
+func waitForManagerPod(ctx context.Context, clientset kubernetes.Interface, namespace string, timeout time.Duration) error {
+	label := fields.OneTermEqualSelector("app", config.ConfigMapPodTrafficManager).String()
+	// First check if any pods exist at all
+	pods, err := clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{LabelSelector: label})
+	if err != nil {
+		return nil // don't wait on transient errors
+	}
+	if len(pods.Items) == 0 {
+		return nil // no pods to wait for
+	}
+	// At least one pod exists: wait for it to become ready
+	return wait.PollUntilContextTimeout(ctx, time.Second, timeout, true, func(ctx context.Context) (bool, error) {
+		pods, err := clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{LabelSelector: label})
+		if err != nil {
+			return false, nil // transient read error: keep waiting
+		}
+		for i := range pods.Items {
+			pod := &pods.Items[i]
+			if pod.GetDeletionTimestamp() == nil && workload.AllContainersRunning(pod) {
+				return true, nil
+			}
+		}
+		return false, nil
+	})
+}
+
+// resolveAttachModeOnRecreate reads KUBEVPN_PROXY_ATTACH_MODE from the manager
+// Deployment about to be replaced, so a value set before connect (helm values,
+// kubevpn install) survives manager recreation. Falls back to the node-agent
+// default when the deployment is gone or the env is unset.
+func resolveAttachModeOnRecreate(ctx context.Context, clientset kubernetes.Interface, namespace string) string {
+	deploy, err := clientset.AppsV1().Deployments(namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		return config.AttachModeNodeAgent
+	}
+	return existingAttachMode(&deploy.Spec.Template.Spec)
+}
+
 // createOutboundPod reports whether this call created the traffic manager, rather
 // than reusing a running manager with an existing Deployment.
 func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, namespace, image, imagePullSecretName string) (created bool, err error) {
@@ -66,6 +114,25 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 			return false, fmt.Errorf("failed to get deployment %s: %w", config.ConfigMapPodTrafficManager, derr)
 		}
 	}
+
+	// The install's pod may still be pulling its image when connect runs
+	// (DetectPodExists requires AllContainersRunning). Give it a short grace
+	// period before deleting everything — recreating clobbers any pre-connect
+	// customization of the manager (e.g. helm proxy.attachMode=sidecar).
+	if werr := waitForManagerPod(ctx, clientset, namespace, managerRecreateGrace); werr == nil {
+		_, derr := clientset.AppsV1().Deployments(namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+		if derr == nil {
+			plog.StepDone(ctx, "Using traffic manager in namespace %q", namespace)
+			return false, nil
+		}
+		if !apierrors.IsNotFound(derr) {
+			return false, fmt.Errorf("failed to get deployment %s: %w", config.ConfigMapPodTrafficManager, derr)
+		}
+	}
+
+	// Inherit the attach mode from the deployment being replaced so a pin set
+	// before connect survives recreation (design doc §3).
+	attachMode := resolveAttachModeOnRecreate(ctx, clientset, namespace)
 
 	defer func() {
 		if err != nil {
@@ -142,7 +209,7 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 
 	// 8) create deployment
 	plog.StepStart(ctx, "Creating Deployment")
-	deploy := genDeploySpec(namespace, image, imagePullSecretName)
+	deploy := genDeploySpec(namespace, image, imagePullSecretName, attachMode)
 	deploy, err = clientset.AppsV1().Deployments(namespace).Create(ctx, deploy, metav1.CreateOptions{})
 	if err != nil {
 		return false, fmt.Errorf("failed to create deployment for %s: %w", config.ConfigMapPodTrafficManager, err)
@@ -153,10 +220,15 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 	if err != nil {
 		return false, err
 	}
-	if err = workload.WaitPodReady(ctx, clientset.CoreV1().Pods(namespace), selector.String(), "traffic manager"); err != nil {
+	if err = workload.WaitPodReady(ctx, clientset.CoreV1(), namespace, selector.String(), "traffic manager"); err != nil {
 		return false, err
 	}
 	plog.StepDone(ctx, "Traffic manager ready in namespace %q", namespace)
+	if attachMode == config.AttachModeNodeAgent {
+		if err = ensureNodeAgentDaemonSet(ctx, clientset, namespace, image); err != nil {
+			return false, fmt.Errorf("ensure node-agent daemonset: %w", err)
+		}
+	}
 	return true, nil
 }
 
@@ -233,11 +305,12 @@ func ensureProxyRBAC(ctx context.Context, clientset kubernetes.Interface, worklo
 
 // CleanupTrafficManagerResources removes every traffic-manager resource KubeVPN creates
 // in the given namespace: the route-discovery and proxy-inject RBAC (-route, -proxy),
-// the eight core resources named config.ConfigMapPodTrafficManager, and — when the
+// the nine core resources named config.ConfigMapPodTrafficManager, and — when the
 // namespace is the central kubevpn namespace — the cluster-scoped proxy
-// ClusterRole/ClusterRoleBinding. It is the shared teardown for both the handler-layer
-// connect cleanup and the daemon-layer Uninstall RPC, so the two paths cannot drift on
-// which resources an uninstall must remove.
+// ClusterRole/ClusterRoleBinding. It also removes all node-agent jobs across all
+// namespaces. It is the shared teardown for both the handler-layer connect cleanup and
+// the daemon-layer Uninstall RPC, so the two paths cannot drift on which resources an
+// uninstall must remove.
 func CleanupTrafficManagerResources(ctx context.Context, clientset kubernetes.Interface, namespace string) {
 	options := metav1.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0)}
 	// Route-discovery and proxy-inject RBAC (distinct names). In central mode they live
@@ -257,9 +330,9 @@ func CleanupTrafficManagerResources(ctx context.Context, clientset kubernetes.In
 	}
 }
 
-// DeleteTrafficManagerCoreResources deletes the eight namespaced resources that make up
+// DeleteTrafficManagerCoreResources deletes the nine namespaced resources that make up
 // a traffic-manager instance under the given name: Deployment, Job, Service, ConfigMap,
-// Secret, ServiceAccount, Role, RoleBinding. It is the inner teardown primitive invoked by
+// Secret, ServiceAccount, Role, RoleBinding and the node-agent DaemonSet. It is the inner teardown primitive invoked by
 // CleanupTrafficManagerResources, which is itself the shared teardown for both the
 // handler-layer connect cleanup and the daemon-layer Uninstall RPC (pkg/daemon/action),
 // which previously triplicated this deletion list.
@@ -277,4 +350,5 @@ func DeleteTrafficManagerCoreResources(ctx context.Context, clientset kubernetes
 	_ = clientset.CoreV1().Secrets(namespace).Delete(ctx, name, options)
 	_ = clientset.BatchV1().Jobs(namespace).Delete(ctx, name, options)
 	_ = clientset.AppsV1().Deployments(namespace).Delete(ctx, name, options)
+	_ = clientset.AppsV1().DaemonSets(namespace).Delete(ctx, nodeAgentDaemonSetName, options)
 }

@@ -1,6 +1,7 @@
 package action
 
 import (
+	"context"
 	"os"
 	"testing"
 
@@ -200,5 +201,44 @@ current-context: prod-context
 	}
 	if status.Kubeconfig != tmpKubeconfig {
 		t.Errorf("expected kubeconfig path %q, got %q", tmpKubeconfig, status.Kubeconfig)
+	}
+}
+
+type statusSnapshotConnection struct {
+	*handler.ConnectOptions
+	envoy string
+}
+
+func (c statusSnapshotConnection) GetClusterName() string { return "cluster" }
+func (c statusSnapshotConnection) GetOriginKubeconfigPath() string {
+	return ""
+}
+
+func (c statusSnapshotConnection) StatusSnapshot(context.Context) (handler.SessionStatus, error) {
+	return handler.SessionStatus{Envoy: c.envoy}, nil
+}
+
+func TestBuildProxyAndSyncStatus_SkipsDerivedNodeVirtuals(t *testing.T) {
+	conn := statusSnapshotConnection{
+		ConnectOptions: &handler.ConnectOptions{OwnerID: "owner"},
+		envoy: `- Namespace: default
+  Uid: deployments.apps.reviews
+  Rules:
+  - ownerID: owner
+- Namespace: default
+  Uid: deployments.apps.reviews.nodes.minikube
+  agentOrigins:
+  - podUID: pod-a
+    podIP: 10.244.0.5
+  Rules:
+  - ownerID: owner
+`,
+	}
+	proxies, _, err := buildProxyAndSyncStatus(context.Background(), conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(proxies) != 1 || proxies[0].Workload != "deployments.apps/reviews" {
+		t.Fatalf("derived xDS leaked into user status: %+v", proxies)
 	}
 }

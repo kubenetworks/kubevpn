@@ -17,6 +17,25 @@ func (s *Manager) WatcherCount(ownerID string) int {
 	return len(s.watchers[ownerID])
 }
 
+// AgentSessionAlive reports whether the agent identified by podUID currently
+// holds a live lease: an allocation whose OwnerID matches, that was created by
+// an agent tunnel (IsAgent, so a user connection can never impersonate an
+// agent), and whose LastRenew heartbeat is no older than freshness. Agents
+// renew every few seconds (keepAgentLeaseAlive), so freshness should be a
+// small multiple of that interval.
+//
+// It is an in-memory read — no k8s API call — so the AgentReconciler can call
+// it on every tick without cost.
+func (s *Manager) AgentSessionAlive(podUID string, freshness time.Duration) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	alloc, ok := s.allocs[podUID]
+	if !ok || !alloc.IsAgent {
+		return false
+	}
+	return time.Since(alloc.LastRenew) <= freshness
+}
+
 // notifyWatchers pushes a TunIPResponse to all WatchTunIP subscribers for the given ownerID.
 // Must be called with s.mu held.
 func (s *Manager) notifyWatchers(ownerID string, resp *Event) {

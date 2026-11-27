@@ -3,6 +3,7 @@ package xds
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	xdscore "github.com/cncf/xds/go/xds/core/v3"
@@ -40,16 +41,21 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
 )
 
+// warnedEmptyOwnerID tracks (namespace/uid) pairs we've already warned about to avoid log spam
+var warnedEmptyOwnerID sync.Map
+
 // The envoy config data types (Virtual, Rule, ContainerPort, PortMapping) and their
 // pure helpers now live in the leaf package pkg/controlplane, so pkg/inject can use
 // them without importing pkg/xds (which lets pkg/xds import pkg/inject to run
 // injection server-side). These aliases keep the envoy-resource-building code below —
 // which does pull in the heavy go-control-plane deps — readable with short names.
 type (
-	Virtual       = controlplane.Virtual
-	Rule          = controlplane.Rule
-	ContainerPort = controlplane.ContainerPort
-	PortMapping   = controlplane.PortMapping
+	Virtual         = controlplane.Virtual
+	Rule            = controlplane.Rule
+	ContainerPort   = controlplane.ContainerPort
+	PortMapping     = controlplane.PortMapping
+	AgentOrigin     = controlplane.AgentOrigin
+	AgentOriginPort = controlplane.AgentOriginPort
 )
 
 // CurrentSchemaVersion re-exports controlplane.CurrentSchemaVersion for xds-internal use.
@@ -114,10 +120,11 @@ func envoyPort(r *Rule, containerPort int32) int32 {
 // xdsResources accumulates the four Envoy xDS resource lists a Virtual produces. The
 // per-port builders write into it so To() does not have to spread/merge slices by hand.
 type xdsResources struct {
-	listeners []types.Resource
-	clusters  []types.Resource
-	routes    []types.Resource
-	endpoints []types.Resource
+	listeners   []types.Resource
+	clusters    []types.Resource
+	routes      []types.Resource
+	endpoints   []types.Resource
+	tunClusters map[string]struct{}
 }
 
 // addTunCluster appends the cluster + endpoint routing to ip:port and returns the shared
@@ -125,6 +132,13 @@ type xdsResources struct {
 // pair is created, for both the TCP and UDP builders.
 func (r *xdsResources) addTunCluster(ip string, port int32) string {
 	name := fmt.Sprintf("%s_%v", ip, port)
+	if r.tunClusters == nil {
+		r.tunClusters = make(map[string]struct{})
+	}
+	if _, exists := r.tunClusters[name]; exists {
+		return name
+	}
+	r.tunClusters[name] = struct{}{}
 	r.clusters = append(r.clusters, toCluster(name))
 	r.endpoints = append(r.endpoints, toEndPoint(name, ip, port))
 	return name
@@ -142,19 +156,68 @@ func To(a *Virtual, enableIPv6 bool, logger *log.Entry) (
 ) {
 	var res xdsResources
 	fargate := a.IsFargateMode()
-	logger.Debugf("[xDS] convert %s/%s: fargate=%v ipv6=%v ports=%d rules=%d",
-		a.Namespace, a.UID, fargate, enableIPv6, len(a.Ports), len(a.Rules))
+
+	// Filter out zombie rules with empty OwnerID only for schema v2+ (schema violation)
+	// For schema v0/v1 (legacy), preserve backward compatibility and keep empty OwnerID rules
+	// Log empty OwnerID rules clearly for debugging regardless of schema version.
+	validRules := make([]*Rule, 0, len(a.Rules))
+	key := fmt.Sprintf("%s/%s", a.Namespace, a.UID)
+	for _, r := range a.Rules {
+		if r.OwnerID == "" {
+			if a.SchemaVersion >= 2 {
+				if _, alreadyWarned := warnedEmptyOwnerID.LoadOrStore(key, true); !alreadyWarned {
+					logger.Warnf("[xDS] %s/%s: removing zombie rule (headers=%v, tunV4=%q, tunV6=%q) - empty OwnerID (schema v%d violation); this warning will not repeat for this virtual service",
+						a.Namespace, a.UID, r.Headers, r.LocalTunIPv4, r.LocalTunIPv6, a.SchemaVersion)
+				}
+				continue
+			} else {
+				if _, alreadyWarned := warnedEmptyOwnerID.LoadOrStore(key, true); !alreadyWarned {
+					logger.Warnf("[xDS] %s/%s: legacy rule with empty OwnerID (headers=%v, tunV4=%q, tunV6=%q) - schema v%d, keeping for backward compatibility; this warning will not repeat for this virtual service",
+						a.Namespace, a.UID, r.Headers, r.LocalTunIPv4, r.LocalTunIPv6, a.SchemaVersion)
+				}
+			}
+		}
+		validRules = append(validRules, r)
+	}
+
+	// Create a copy of Virtual with only valid rules for processing
+	// (original is not modified)
+	validVirtual := *a
+	validVirtual.Rules = validRules
+
+	logger.Debugf("[xDS] convert %s/%s: fargate=%v ipv6=%v ports=%d rules=%d (filtered from %d)",
+		a.Namespace, a.UID, fargate, enableIPv6, len(a.Ports), len(validRules), len(a.Rules))
 	for _, port := range a.Ports {
-		// Mesh binds the container port; fargate binds the dedicated envoy listener port.
+		if len(validVirtual.AgentOrigins) != 0 {
+			for _, origin := range validVirtual.AgentOrigins {
+				for _, originPort := range origin.Ports {
+					if originPort.ContainerPort != port.ContainerPort || originPort.Protocol != port.Protocol {
+						continue
+					}
+					listenPort := originPort.AgentListenerPort
+					logger.Debugf("[xDS] %s/%s pod %s port %d/%s -> direct listen on %d", a.Namespace, a.UID, origin.PodUID, port.ContainerPort, port.Protocol, listenPort)
+					if port.Protocol == corev1.ProtocolUDP {
+						addUDPPort(&validVirtual, &res, port, listenPort, enableIPv6, logger)
+					} else {
+						addTCPPort(&validVirtual, &res, port, listenPort, fargate, enableIPv6, logger, origin)
+					}
+				}
+			}
+			continue
+		}
+		// Legacy mesh TCP keeps the original container port so the capture
+		// listener can dispatch by original destination.
 		listenPort := port.ContainerPort
 		if fargate {
 			listenPort = port.EnvoyListenerPort
+		} else if port.Protocol == corev1.ProtocolUDP && a.AgentListenerPort != 0 {
+			listenPort = a.AgentListenerPort
 		}
 		logger.Debugf("[xDS] %s/%s port %d/%s -> listen on %d", a.Namespace, a.UID, port.ContainerPort, port.Protocol, listenPort)
 		if port.Protocol == corev1.ProtocolUDP {
-			addUDPPort(a, &res, port, listenPort, enableIPv6, logger)
+			addUDPPort(&validVirtual, &res, port, listenPort, enableIPv6, logger)
 		} else {
-			addTCPPort(a, &res, port, listenPort, fargate, enableIPv6, logger)
+			addTCPPort(&validVirtual, &res, port, listenPort, fargate, enableIPv6, logger, nil)
 		}
 	}
 
@@ -166,17 +229,21 @@ func To(a *Virtual, enableIPv6 bool, logger *log.Entry) (
 	//     in many places but created exactly once, here.
 	// Fargate binds each listener directly and routes to explicit per-IP clusters, so it
 	// needs neither.
-	if !fargate {
-		res.listeners = append(res.listeners, toInboundCaptureListener(fmt.Sprintf("%s_%s_inbound", a.Namespace, a.UID)))
+	if !fargate && len(a.AgentOrigins) == 0 {
+		inboundPort := config.PortEnvoyInbound
+		if a.AgentListenerPort != 0 {
+			inboundPort = int(a.AgentListenerPort)
+		}
+		res.listeners = append(res.listeners, toInboundCaptureListener(fmt.Sprintf("%s_%s_inbound", a.Namespace, a.UID), int32(inboundPort)))
 		res.clusters = append(res.clusters, originCluster())
-		logger.Debugf("[xDS] %s/%s added mesh inbound capture listener :%d + origin_cluster", a.Namespace, a.UID, config.PortEnvoyInbound)
+		logger.Debugf("[xDS] %s/%s added mesh inbound capture listener :%d + origin_cluster", a.Namespace, a.UID, inboundPort)
 	}
 	// Info-level rule-set summary so the actual generated rules are visible in the
 	// traffic-manager sidecar log even when it does not run at debug level. Reveals, per
 	// workload, whether a full-proxy (empty-headers) rule exists and its TUN IP / owner —
 	// the key signal for diagnosing "traffic fell through to origin_cluster".
-	rules := make([]string, 0, len(a.Rules))
-	for _, r := range a.Rules {
+	rules := make([]string, 0, len(validRules))
+	for _, r := range validRules {
 		rules = append(rules, fmt.Sprintf("{headers=%v tunV4=%q tunV6=%q owner=%q portmap=%v}",
 			r.Headers, r.LocalTunIPv4, r.LocalTunIPv6, r.OwnerID, r.PortMap))
 	}
@@ -217,11 +284,22 @@ func addUDPPort(a *Virtual, res *xdsResources, port ContainerPort, listenPort in
 // TCP port, with header-based routing to each rule's TUN IP. The default route falls back to
 // origin_cluster (mesh, via use_original_dst) or to an explicit per-IP container-port cluster
 // (fargate, where use_original_dst does not work).
-func addTCPPort(a *Virtual, res *xdsResources, port ContainerPort, listenPort int32, fargate, enableIPv6 bool, logger *log.Entry) {
+func addTCPPort(a *Virtual, res *xdsResources, port ContainerPort, listenPort int32, fargate, enableIPv6 bool, logger *log.Entry, origin *AgentOrigin) {
 	listenerName := fmt.Sprintf("%s_%s_%v_%s", a.Namespace, a.UID, listenPort, port.Protocol)
 	// The listener resolves its routes from an RDS config of the same name.
 	routeName := listenerName
-	res.listeners = append(res.listeners, toListener(listenerName, routeName, listenPort, port.Protocol, fargate))
+	originCluster := ""
+	if origin != nil {
+		destinationPort := port.ContainerPort
+		for _, originPort := range origin.Ports {
+			if originPort.AgentListenerPort == listenPort {
+				destinationPort = originPort.DestinationPort()
+				break
+			}
+		}
+		originCluster = res.addTunCluster(origin.ReturnIP(), destinationPort)
+	}
+	res.listeners = append(res.listeners, toListener(listenerName, routeName, listenPort, port.Protocol, fargate, originCluster))
 
 	var rr []*route.Route
 	for _, rule := range a.Rules {
@@ -243,7 +321,11 @@ func addTCPPort(a *Virtual, res *xdsResources, port ContainerPort, listenPort in
 		}
 	}
 
-	if fargate {
+	if origin != nil {
+		// Node-boundary listeners cannot use ORIGINAL_DST across network
+		// namespaces: unmatched traffic returns explicitly to this real pod.
+		rr = append(rr, defaultRouteToCluster(originCluster))
+	} else if fargate {
 		// Fargate needs an explicit default route to the container port (deduped across
 		// rules) because use_original_dst does not work there.
 		ips := sets.New[string]()
@@ -609,7 +691,7 @@ func buildFilterChains(routeName string, tcpFallbackCluster string) []*listener.
 	}
 }
 
-func toListener(listenerName string, routeName string, port int32, p corev1.Protocol, isFargateMode bool) *listener.Listener {
+func toListener(listenerName string, routeName string, port int32, p corev1.Protocol, isFargateMode bool, directOriginCluster string) *listener.Listener {
 	var protocol core.SocketAddress_Protocol
 	switch p {
 	case corev1.ProtocolTCP:
@@ -620,18 +702,37 @@ func toListener(listenerName string, routeName string, port int32, p corev1.Prot
 		protocol = core.SocketAddress_TCP
 	}
 
-	// The raw-TCP fallback chain forwards to the real app: mesh declared ports use the
-	// per-port loopback cluster (127.0.0.1:port); fargate keeps origin_cluster.
+	// The raw-TCP fallback chain forwards to the real app: legacy mesh uses
+	// loopback, fargate keeps origin_cluster, and node-boundary uses the
+	// explicit podIP cluster supplied by the manager.
 	tcpFallbackCluster := loopbackClusterName(port)
 	if isFargateMode {
 		tcpFallbackCluster = originClusterName
+	}
+	direct := directOriginCluster != ""
+	if direct {
+		tcpFallbackCluster = directOriginCluster
+	}
+	listenerFilters := []*listener.ListenerFilter{{
+		Name: wellknown.HttpInspector,
+		ConfigType: &listener.ListenerFilter_TypedConfig{
+			TypedConfig: mustMarshalAny(&httpinspector.HttpInspector{}),
+		},
+	}}
+	if !direct {
+		listenerFilters = append(listenerFilters, &listener.ListenerFilter{
+			Name: wellknown.OriginalDestination,
+			ConfigType: &listener.ListenerFilter_TypedConfig{
+				TypedConfig: mustMarshalAny(&dstv3inspector.OriginalDst{}),
+			},
+		})
 	}
 
 	return &listener.Listener{
 		Name:             listenerName,
 		TrafficDirection: core.TrafficDirection_INBOUND,
-		BindToPort:       &wrapperspb.BoolValue{Value: isFargateMode},
-		UseOriginalDst:   &wrapperspb.BoolValue{Value: true},
+		BindToPort:       &wrapperspb.BoolValue{Value: isFargateMode || direct},
+		UseOriginalDst:   &wrapperspb.BoolValue{Value: !direct},
 		Address: &core.Address{
 			Address: &core.Address_SocketAddress{
 				SocketAddress: &core.SocketAddress{
@@ -643,21 +744,8 @@ func toListener(listenerName string, routeName string, port int32, p corev1.Prot
 				},
 			},
 		},
-		FilterChains: buildFilterChains(routeName, tcpFallbackCluster),
-		ListenerFilters: []*listener.ListenerFilter{
-			{
-				Name: wellknown.HttpInspector,
-				ConfigType: &listener.ListenerFilter_TypedConfig{
-					TypedConfig: mustMarshalAny(&httpinspector.HttpInspector{}),
-				},
-			},
-			{
-				Name: wellknown.OriginalDestination,
-				ConfigType: &listener.ListenerFilter_TypedConfig{
-					TypedConfig: mustMarshalAny(&dstv3inspector.OriginalDst{}),
-				},
-			},
-		},
+		FilterChains:    buildFilterChains(routeName, tcpFallbackCluster),
+		ListenerFilters: listenerFilters,
 	}
 }
 
@@ -668,7 +756,7 @@ func toListener(listenerName string, routeName string, port int32, p corev1.Prot
 // listener (BindToPort=false) that matches the original port. Connections whose original
 // port has no per-port listener fall through to this listener's passthrough filter chain,
 // which TCP-proxies to origin_cluster (ORIGINAL_DST) so the app still receives them.
-func toInboundCaptureListener(name string) *listener.Listener {
+func toInboundCaptureListener(name string, port int32) *listener.Listener {
 	passthrough := &tcpproxy.TcpProxy{
 		StatPrefix:       "inbound_passthrough",
 		ClusterSpecifier: &tcpproxy.TcpProxy_Cluster{Cluster: originClusterName},
@@ -684,7 +772,7 @@ func toInboundCaptureListener(name string) *listener.Listener {
 					Protocol: core.SocketAddress_TCP,
 					Address:  "0.0.0.0",
 					PortSpecifier: &core.SocketAddress_PortValue{
-						PortValue: uint32(config.PortEnvoyInbound),
+						PortValue: uint32(port),
 					},
 				},
 			},

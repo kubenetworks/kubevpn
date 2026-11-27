@@ -102,20 +102,23 @@ func AllContainersRunning(pod *corev1.Pod) bool {
 // empty (callers that own their own step, e.g. sync, and tests) the status is
 // logged at Debug instead. The full multi-line status table is kept only for the
 // timeout error, so the reason survives without --debug.
-func WaitPodReady(ctx context.Context, clientset coreclient.PodInterface, labelSelector, stepName string) error {
+func WaitPodReady(ctx context.Context, corev1Client coreclient.CoreV1Interface, namespace, labelSelector, stepName string) error {
 	const (
 		podReadyTimeout      = 60 * time.Minute
 		podReadyPollInterval = 3 * time.Second
+		progressLogInterval  = 30 * time.Second
 	)
 	var isPodReady bool
 	var lastSummary, lastDetail string
+	var lastProgressLog time.Time
+	podClient := corev1Client.Pods(namespace)
 	if stepName != "" {
 		plog.StepStart(ctx, fmt.Sprintf("Waiting for %s pod", stepName))
 	}
 	ctx2, cancelFunc := context.WithTimeout(ctx, podReadyTimeout)
 	defer cancelFunc()
 	wait.UntilWithContext(ctx2, func(ctx context.Context) {
-		podList, err := clientset.List(ctx, metav1.ListOptions{LabelSelector: labelSelector})
+		podList, err := podClient.List(ctx, metav1.ListOptions{LabelSelector: labelSelector})
 		if err != nil {
 			return
 		}
@@ -131,21 +134,62 @@ func WaitPodReady(ctx context.Context, clientset coreclient.PodInterface, labelS
 			// Only react when the one-line summary changes, to avoid needless
 			// repaints / log lines.
 			summary := PodStatusSummary(&pod)
-			if summary == lastSummary {
-				continue
-			}
-			lastSummary = summary
-			var sb bytes.Buffer
-			PrintStatus(&pod, &sb)
-			lastDetail = sb.String()
-			if stepName != "" {
-				plog.StepStart(ctx, fmt.Sprintf("Waiting for %s pod (%s)", stepName, summary))
-			} else {
-				plog.G(ctx).Debugf("%s", summary)
+			now := time.Now()
+			if summary != lastSummary || now.Sub(lastProgressLog) > progressLogInterval {
+				lastSummary = summary
+				lastProgressLog = now
+				var sb bytes.Buffer
+				PrintStatus(&pod, &sb)
+				lastDetail = sb.String()
+				if stepName != "" {
+					plog.StepStart(ctx, fmt.Sprintf("Waiting for %s pod (%s)", stepName, summary))
+				} else {
+					plog.G(ctx).Debugf("Waiting for pod: phase=%s, %s", pod.Status.Phase, summary)
+				}
 			}
 		}
 	}, podReadyPollInterval)
 	if !isPodReady {
+		// On timeout, try to get and log more details: pod spec, container statuses, events
+		if podList, listErr := podClient.List(ctx, metav1.ListOptions{LabelSelector: labelSelector}); listErr == nil && len(podList.Items) > 0 {
+			pod := &podList.Items[0]
+			var sb bytes.Buffer
+			fmt.Fprintf(&sb, "Pod Spec:\n")
+			fmt.Fprintf(&sb, "  Name: %s\n", pod.Name)
+			fmt.Fprintf(&sb, "  Namespace: %s\n", pod.Namespace)
+			fmt.Fprintf(&sb, "  Phase: %s\n", pod.Status.Phase)
+			fmt.Fprintf(&sb, "  NodeName: %s\n", pod.Spec.NodeName)
+			fmt.Fprintf(&sb, "  Containers:\n")
+			for _, c := range pod.Spec.Containers {
+				fmt.Fprintf(&sb, "    - Name: %s, Image: %s\n", c.Name, c.Image)
+			}
+			fmt.Fprintf(&sb, "  Container Statuses:\n")
+			for _, s := range pod.Status.ContainerStatuses {
+				fmt.Fprintf(&sb, "    - Name: %s\n", s.Name)
+				fmt.Fprintf(&sb, "      Ready: %v\n", s.Ready)
+				fmt.Fprintf(&sb, "      RestartCount: %d\n", s.RestartCount)
+				if s.State.Waiting != nil {
+					fmt.Fprintf(&sb, "      State: Waiting, Reason: %s, Message: %s\n", s.State.Waiting.Reason, s.State.Waiting.Message)
+				} else if s.State.Running != nil {
+					fmt.Fprintf(&sb, "      State: Running, StartedAt: %v\n", s.State.Running.StartedAt)
+				} else if s.State.Terminated != nil {
+					fmt.Fprintf(&sb, "      State: Terminated, Reason: %s, Message: %s, ExitCode: %d\n", s.State.Terminated.Reason, s.State.Terminated.Message, s.State.Terminated.ExitCode)
+				}
+			}
+			// Try to get events for this pod
+			if events, eventsErr := corev1Client.Events(namespace).List(ctx, metav1.ListOptions{
+				FieldSelector: fmt.Sprintf("involvedObject.name=%s,involvedObject.namespace=%s", pod.Name, pod.Namespace),
+			}); eventsErr == nil {
+				fmt.Fprintf(&sb, "  Events:\n")
+				for _, e := range events.Items {
+					fmt.Fprintf(&sb, "    - Type: %s, Reason: %s, Message: %s, LastTimestamp: %v\n", e.Type, e.Reason, e.Message, e.LastTimestamp)
+				}
+			}
+			plog.G(ctx).Debugf("WaitPodReady timeout, dumping details for pod %s/%s:\n%s", pod.Namespace, pod.Name, sb.String())
+			if lastDetail == "" {
+				lastDetail = sb.String()
+			}
+		}
 		cause := config.ErrTrafficManagerTimeout
 		if strings.Contains(lastDetail, "ImagePullBackOff") || strings.Contains(lastDetail, "ErrImagePull") {
 			cause = config.ErrImagePull
