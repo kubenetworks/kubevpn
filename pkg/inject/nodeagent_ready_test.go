@@ -93,6 +93,47 @@ func TestWaitNodeAgentReady_RejectsAttachmentWithoutAgentPod(t *testing.T) {
 	}
 }
 
+func TestWaitNodeAgentReady_RequiresResolvedSyncTarget(t *testing.T) {
+	opts, server := newNodeAgentReadyFixture(t, "")
+	defer server.Close()
+	target := &controlplane.SyncTarget{UID: "deployments.apps.reviews-sync-a", Selector: "owner-ref=reviews-sync-a"}
+	derived := &controlplane.Virtual{
+		Namespace: "default", UID: "deployments.apps.reviews.nodes.node-a", AgentOrigins: []*controlplane.AgentOrigin{{PodUID: "source"}},
+		Rules: []*controlplane.Rule{{OwnerID: "owner-sync", SyncTarget: target}},
+	}
+	data, err := yaml.Marshal([]*controlplane.Virtual{derived})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cm, err := opts.Clientset.CoreV1().ConfigMaps("kubevpn").Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cm.Data[config.KeyEnvoy] = string(data)
+	if _, err := opts.Clientset.CoreV1().ConfigMaps("kubevpn").Update(context.Background(), cm, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	opts.OwnerID = "owner-sync"
+	opts.SyncTarget = target
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if err := waitNodeAgentReady(ctx, opts); err == nil {
+		t.Fatal("expected unresolved sync target error")
+	}
+	derived.Rules[0].LocalTunIPv4 = "10.244.1.10"
+	data, err = yaml.Marshal([]*controlplane.Virtual{derived})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cm.Data[config.KeyEnvoy] = string(data)
+	if _, err := opts.Clientset.CoreV1().ConfigMaps("kubevpn").Update(context.Background(), cm, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := waitNodeAgentReady(context.Background(), opts); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNodeAgentListenerName(t *testing.T) {
 	attachment := controlplane.NodeAttachment{Namespace: "default", NodeID: "deployments.apps.reviews.nodes.node-a"}
 	port := controlplane.AgentOriginPort{AgentListenerPort: 20001, Protocol: corev1.ProtocolTCP}

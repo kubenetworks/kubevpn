@@ -17,6 +17,7 @@ import (
 
 	clusterworkload "github.com/wencaiwulue/kubevpn/v2/pkg/cluster/workload"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/inject"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
@@ -65,8 +66,11 @@ func (s *TunConfigServer) ProxyInject(req *rpc.InjectRequest, stream rpc.TunConf
 	if s.factory == nil {
 		return status.Error(codes.Unavailable, "server-side injection unavailable")
 	}
-	if req.GetLocalTunIPv4() == "" {
+	if req.GetLocalTunIPv4() == "" && len(req.GetSyncRoutes()) == 0 {
 		return status.Error(codes.InvalidArgument, "local tun IPv4 is empty")
+	}
+	if len(req.GetWorkloads()) != 0 && len(req.GetSyncRoutes()) != 0 {
+		return status.Error(codes.InvalidArgument, "ordinary workloads and sync routes cannot be mixed in one request")
 	}
 	if req.GetOwnerID() == "" {
 		return status.Error(codes.InvalidArgument, "owner ID must not be empty - client session state may be stale; reconnect and retry")
@@ -84,8 +88,32 @@ func (s *TunConfigServer) ProxyInject(req *rpc.InjectRequest, stream rpc.TunConf
 	}
 
 	plog.StepStart(ctx, "Injecting proxy sidecar (server-side)")
-	var services []*rpc.ServiceWorkload
+	type injectTarget struct {
+		workload   string
+		syncTarget *controlplane.SyncTarget
+	}
+	targets := make([]injectTarget, 0, len(req.GetWorkloads())+len(req.GetSyncRoutes()))
 	for _, workload := range req.GetWorkloads() {
+		targets = append(targets, injectTarget{workload: workload})
+	}
+	for _, route := range req.GetSyncRoutes() {
+		_, targetController, targetNodeID, err := s.resolveWorkloadNodeID(ctx, req.GetNamespace(), route.GetTargetWorkload())
+		if err != nil {
+			return err
+		}
+		targetSpec, _, err := clusterworkload.GetPodTemplateSpecPath(targetController.Object.(*unstructured.Unstructured))
+		if err != nil {
+			return status.Errorf(codes.Internal, "pod template spec of %s: %v", route.GetTargetWorkload(), err)
+		}
+		selector := labels.SelectorFromSet(targetSpec.Labels).String()
+		if selector == "" {
+			return status.Errorf(codes.InvalidArgument, "sync target %s has no pod labels", route.GetTargetWorkload())
+		}
+		targets = append(targets, injectTarget{workload: route.GetWorkload(), syncTarget: &controlplane.SyncTarget{UID: targetNodeID, Selector: selector}})
+	}
+	var services []*rpc.ServiceWorkload
+	for _, target := range targets {
+		workload := target.workload
 		object, controller, nodeID, err := s.resolveWorkloadNodeID(ctx, req.GetNamespace(), workload)
 		if err != nil {
 			return err
@@ -97,7 +125,7 @@ func (s *TunConfigServer) ProxyInject(req *rpc.InjectRequest, stream rpc.TunConf
 		// A K8s Service workload needs a client-side port Mapper (SSH reverse tunnels
 		// back to the developer's machine). That cannot run in the pod, so report the
 		// workload + its pod selector back and let the client start the Mapper.
-		if clusterworkload.IsK8sService(object) {
+		if target.syncTarget == nil && clusterworkload.IsK8sService(object) {
 			services = append(services, &rpc.ServiceWorkload{
 				Workload: workload,
 				Selector: labels.SelectorFromSet(templateSpec.Labels).String(),
@@ -123,13 +151,14 @@ func (s *TunConfigServer) ProxyInject(req *rpc.InjectRequest, stream rpc.TunConf
 			Image:            req.GetImage(),
 			OwnerID:          req.GetOwnerID(),
 			AttachMode:       attachMode,
+			SyncTarget:       target.syncTarget,
 		})
 		if err := injector.Inject(ctx); err != nil {
 			return status.Errorf(codes.Internal, "inject sidecar into %s: %v", workload, err)
 		}
 		plog.G(ctx).Infof("Injected proxy sidecar into workload %q in namespace %q", workload, req.GetNamespace())
 	}
-	plog.StepDone(ctx, "Injected proxy sidecar into %d workloads", len(req.GetWorkloads()))
+	plog.StepDone(ctx, "Injected proxy sidecar into %d workloads", len(targets))
 
 	// Final frame: report Service workloads needing a client-side Mapper.
 	return stream.Send(&rpc.InjectResponse{Services: services})

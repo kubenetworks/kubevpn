@@ -143,6 +143,13 @@ func ConvertContainerPort(ports ...corev1.ContainerPort) []ContainerPort {
 	return result
 }
 
+// SyncTarget identifies a sync clone whose current Ready pod is the matched
+// traffic destination. The publisher resolves it only in derived Virtuals.
+type SyncTarget struct {
+	UID      string `json:"uid" yaml:"uid"`
+	Selector string `json:"selector" yaml:"selector"`
+}
+
 // Rule defines a header-based routing rule for envoy traffic splitting.
 type Rule struct {
 	Headers      map[string]string
@@ -161,6 +168,9 @@ type Rule struct {
 	// IsAgent indicates that this rule belongs to a node-agent connection, not a direct user connection.
 	// When both agent and user rules exist with matching headers, user rules take precedence.
 	IsAgent bool `yaml:"isAgent,omitempty" json:"isAgent,omitempty"`
+	// SyncTarget routes matched traffic to the current Ready pod of a sync clone.
+	// LocalTunIPv4/6 remain unresolved in the base Virtual for these rules.
+	SyncTarget *SyncTarget `yaml:"syncTarget,omitempty" json:"syncTarget,omitempty"`
 }
 
 // PortMapping represents a parsed port mapping from the PortMap string encoding.

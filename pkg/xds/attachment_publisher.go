@@ -3,6 +3,8 @@ package xds
 import (
 	"context"
 	"fmt"
+	"maps"
+	"net"
 	"sort"
 	"time"
 
@@ -85,6 +87,19 @@ func (p *AttachmentPublisher) reconcileOnce(ctx context.Context) error {
 	}
 
 	attachments := make([]controlplane.NodeAttachment, 0)
+	syncEndpoints := make(map[*controlplane.Rule]syncEndpoint)
+	for _, virtual := range virtuals {
+		for _, rule := range virtual.Rules {
+			if rule == nil || rule.SyncTarget == nil {
+				continue
+			}
+			endpoint, err := resolveSyncTarget(ctx, p.clientset, virtual.Namespace, rule.SyncTarget)
+			if err != nil {
+				return err
+			}
+			syncEndpoints[rule] = endpoint
+		}
+	}
 	for _, virtual := range virtuals {
 		if virtual.Selector == "" {
 			continue
@@ -147,7 +162,7 @@ func (p *AttachmentPublisher) reconcileOnce(ctx context.Context) error {
 				UID:               attachment.NodeID,
 				AgentListenerPort: virtual.AgentListenerPort,
 				Ports:             virtual.Ports,
-				Rules:             virtual.Rules,
+				Rules:             cloneRulesForDerived(virtual.Rules, syncEndpoints),
 			}
 			derivedByNodeID[attachment.NodeID] = derived
 		}
@@ -158,6 +173,9 @@ func (p *AttachmentPublisher) reconcileOnce(ctx context.Context) error {
 			OriginIP:    attachment.OriginIP,
 			Ports:       attachment.Ports,
 		})
+	}
+	if err := validateDerivedUDPRoutes(derivedByNodeID); err != nil {
+		return err
 	}
 	nodeIDs := make([]string, 0, len(derivedByNodeID))
 	for nodeID := range derivedByNodeID {
@@ -194,6 +212,104 @@ func (p *AttachmentPublisher) reconcileOnce(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func validateDerivedUDPRoutes(virtuals map[string]*controlplane.Virtual) error {
+	for _, virtual := range virtuals {
+		for _, origin := range virtual.AgentOrigins {
+			for _, port := range origin.Ports {
+				if port.Protocol != corev1.ProtocolUDP {
+					continue
+				}
+				var ipv4Routes, ipv6Routes int
+				for _, rule := range virtual.Rules {
+					if rule.LocalTunIPv4 != "" {
+						ipv4Routes++
+					}
+					if rule.LocalTunIPv6 != "" {
+						ipv6Routes++
+					}
+				}
+				if ipv4Routes > 1 || ipv6Routes > 1 {
+					return fmt.Errorf("multiple UDP routes for %s/%s listener %d", virtual.Namespace, virtual.UID, port.AgentListenerPort)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+type syncEndpoint struct {
+	ipv4 string
+	ipv6 string
+}
+
+func resolveSyncTarget(ctx context.Context, clientset kubernetes.Interface, namespace string, target *controlplane.SyncTarget) (syncEndpoint, error) {
+	var endpoint syncEndpoint
+	if target.Selector == "" {
+		return endpoint, fmt.Errorf("sync target %s has an empty selector", target.UID)
+	}
+	pods, err := clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{LabelSelector: target.Selector})
+	if err != nil {
+		return endpoint, fmt.Errorf("list sync target %s pods: %w", target.UID, err)
+	}
+	var selected *corev1.Pod
+	for i := range pods.Items {
+		pod := &pods.Items[i]
+		if pod.Status.Phase != corev1.PodRunning || pod.DeletionTimestamp != nil || pod.Status.PodIP == "" || !podIsReady(pod) {
+			continue
+		}
+		if selected == nil || pod.CreationTimestamp.Time.After(selected.CreationTimestamp.Time) ||
+			(pod.CreationTimestamp.Time.Equal(selected.CreationTimestamp.Time) && string(pod.UID) > string(selected.UID)) {
+			selected = pod
+		}
+	}
+	if selected == nil {
+		return endpoint, nil
+	}
+	ips := append([]corev1.PodIP{{IP: selected.Status.PodIP}}, selected.Status.PodIPs...)
+	for _, podIP := range ips {
+		ip := net.ParseIP(podIP.IP)
+		if ip == nil {
+			continue
+		}
+		if ip.To4() != nil {
+			endpoint.ipv4 = podIP.IP
+		} else {
+			endpoint.ipv6 = podIP.IP
+		}
+	}
+	return endpoint, nil
+}
+
+func podIsReady(pod *corev1.Pod) bool {
+	for _, condition := range pod.Status.Conditions {
+		if condition.Type == corev1.PodReady {
+			return condition.Status == corev1.ConditionTrue
+		}
+	}
+	return false
+}
+
+func cloneRulesForDerived(rules []*controlplane.Rule, endpoints map[*controlplane.Rule]syncEndpoint) []*controlplane.Rule {
+	cloned := make([]*controlplane.Rule, 0, len(rules))
+	for _, rule := range rules {
+		if rule == nil {
+			continue
+		}
+		copyRule := *rule
+		copyRule.Headers = maps.Clone(rule.Headers)
+		copyRule.PortMap = maps.Clone(rule.PortMap)
+		if rule.SyncTarget != nil {
+			target := *rule.SyncTarget
+			copyRule.SyncTarget = &target
+			endpoint := endpoints[rule]
+			copyRule.LocalTunIPv4 = endpoint.ipv4
+			copyRule.LocalTunIPv6 = endpoint.ipv6
+		}
+		cloned = append(cloned, &copyRule)
+	}
+	return cloned
 }
 
 // podHasKubevpnSidecar reports whether the pod already carries kubevpn

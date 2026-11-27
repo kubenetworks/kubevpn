@@ -67,6 +67,7 @@ func (n *nodeAgentInjector) Inject(ctx context.Context) error {
 		OwnerID:      o.OwnerID,
 		Selector:     selector,
 		IsAgent:      true,
+		SyncTarget:   o.SyncTarget,
 	}); err != nil {
 		return fmt.Errorf("add envoy config: %w", err)
 	}

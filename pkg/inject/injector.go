@@ -48,6 +48,7 @@ type InjectOptions struct {
 	Image            string
 	OwnerID          string
 	AttachMode       string
+	SyncTarget       *controlplane.SyncTarget
 }
 
 // isServiceTarget reports whether the given resource.Info represents a Kubernetes Service.

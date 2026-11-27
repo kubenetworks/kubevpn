@@ -492,6 +492,12 @@ message InjectRequest {
   string LocalTunIPv6 = 7;             // client's TUN IPv6 (optional)
   string Image = 8;                    // sidecar image
   string AttachMode = 9;               // optional per-request attach mode
+  repeated SyncRoute SyncRoutes = 10;  // original workload -> sync clone routes
+}
+
+message SyncRoute {
+  string Workload = 1;        // original workload
+  string TargetWorkload = 2;  // cloned workload receiving matched traffic
 }
 
 // ServiceWorkload identifies a K8s Service workload that was injected, so the client

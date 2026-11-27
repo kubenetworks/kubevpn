@@ -32,6 +32,12 @@ func waitNodeAgentReady(ctx context.Context, opts InjectOptions) error {
 				return false, fmt.Errorf("parse node attachments: %w", err)
 			}
 		}
+		var virtuals []*controlplane.Virtual
+		if data := cm.Data[config.KeyEnvoy]; data != "" {
+			if err := yaml.Unmarshal([]byte(data), &virtuals); err != nil {
+				return false, fmt.Errorf("parse envoy config: %w", err)
+			}
+		}
 		pods, err := opts.Clientset.CoreV1().Pods(opts.ManagerNamespace).List(ctx, metav1.ListOptions{LabelSelector: "app=kubevpn-nodeagent"})
 		if err != nil {
 			return false, nil
@@ -58,6 +64,9 @@ func waitNodeAgentReady(ctx context.Context, opts InjectOptions) error {
 					return false, nil
 				}
 			}
+			if opts.SyncTarget != nil && !syncTargetReady(virtuals, attachment, opts) {
+				return false, nil
+			}
 		}
 		return checked, nil
 	})
@@ -65,6 +74,24 @@ func waitNodeAgentReady(ctx context.Context, opts InjectOptions) error {
 		return fmt.Errorf("wait for node-agent listeners: %w", err)
 	}
 	return nil
+}
+
+func syncTargetReady(virtuals []*controlplane.Virtual, attachment controlplane.NodeAttachment, opts InjectOptions) bool {
+	for _, virtual := range virtuals {
+		if virtual.Namespace != attachment.Namespace || virtual.UID != attachment.NodeID || len(virtual.AgentOrigins) == 0 {
+			continue
+		}
+		for _, rule := range virtual.Rules {
+			if rule.OwnerID != opts.OwnerID || rule.SyncTarget == nil {
+				continue
+			}
+			if rule.SyncTarget.UID == opts.SyncTarget.UID && rule.SyncTarget.Selector == opts.SyncTarget.Selector &&
+				(rule.LocalTunIPv4 != "" || rule.LocalTunIPv6 != "") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func nodeAgentListenerName(attachment controlplane.NodeAttachment, port controlplane.AgentOriginPort) string {

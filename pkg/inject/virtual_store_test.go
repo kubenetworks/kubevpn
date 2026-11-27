@@ -100,6 +100,47 @@ func TestVirtualStore_AddRule_Basic(t *testing.T) {
 	}
 }
 
+func TestVirtualStore_SyncRuleOwnershipLifecycle(t *testing.T) {
+	const ns = "test-ns"
+	clientset := fake.NewSimpleClientset(newTestConfigMap(ns))
+	store := NewVirtualStore(clientset.CoreV1().ConfigMaps(ns))
+	ctx := context.Background()
+	syncSpec := func(owner, clone string) envoyRuleSpec {
+		return envoyRuleSpec{
+			Namespace: ns, NodeID: "deployments.apps.foo", OwnerID: owner, IsAgent: true,
+			Headers: map[string]string{"env": "test"}, PortMap: map[int32]string{9080: "9080"},
+			SyncTarget: &controlplane.SyncTarget{UID: clone, Selector: "owner-ref=" + clone},
+		}
+	}
+	if err := store.AddRule(ctx, syncSpec("owner-a", "foo-sync-a")); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AddRule(ctx, syncSpec("owner-a", "foo-sync-b")); err != nil {
+		t.Fatal(err)
+	}
+	virtuals := getVirtuals(t, clientset, ns)
+	if got := virtuals[0].Rules[0].SyncTarget.UID; got != "foo-sync-b" {
+		t.Fatalf("same-owner sync target = %q, want updated clone", got)
+	}
+	if err := store.AddRule(ctx, syncSpec("owner-b", "foo-sync-c")); err != nil {
+		t.Fatal(err)
+	}
+	virtuals = getVirtuals(t, clientset, ns)
+	if len(virtuals[0].Rules) != 1 || virtuals[0].Rules[0].OwnerID != "owner-b" || virtuals[0].Rules[0].SyncTarget.UID != "foo-sync-c" || !virtuals[0].Rules[0].IsAgent {
+		t.Fatalf("same-header takeover did not transfer sync ownership: %+v", virtuals[0].Rules)
+	}
+	ordinary := syncSpec("owner-b", "foo-sync-c")
+	ordinary.SyncTarget = nil
+	ordinary.LocalTunIPv4 = "198.18.0.20"
+	if err := store.AddRule(ctx, ordinary); err == nil {
+		t.Fatal("expected ordinary/sync mixing to be rejected")
+	}
+	virtuals = getVirtuals(t, clientset, ns)
+	if virtuals[0].Rules[0].SyncTarget == nil || virtuals[0].Rules[0].SyncTarget.UID != "foo-sync-c" {
+		t.Fatalf("rejected update damaged sync rule: %+v", virtuals[0].Rules[0])
+	}
+}
+
 // TestVirtualStore_RemoveRule_Found verifies that RemoveRule correctly removes a
 // matching rule and sets found=true.
 func TestVirtualStore_RemoveRule_Found(t *testing.T) {

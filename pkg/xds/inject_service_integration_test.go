@@ -73,21 +73,25 @@ func plainDeployment(ns string) *appsv1.Deployment {
 // newInjectTestFactory returns a cmdutil.Factory backed by a fake REST client so
 // GetTopOwnerObject (resource builder) resolves the Deployment with no real cluster.
 // Only GET is served — the injected-for-manager early-return means no PATCH/rollout.
-func newInjectTestFactory(t *testing.T, deploy *appsv1.Deployment) *cmdtesting.TestFactory {
+func newInjectTestFactory(t *testing.T, deployments ...*appsv1.Deployment) *cmdtesting.TestFactory {
 	t.Helper()
-	tf := cmdtesting.NewTestFactory().WithNamespace(deploy.Namespace)
+	tf := cmdtesting.NewTestFactory().WithNamespace(deployments[0].Namespace)
 	t.Cleanup(tf.Cleanup)
 
-	body, err := json.Marshal(deploy)
-	if err != nil {
-		t.Fatalf("marshal deployment: %v", err)
+	bodies := make(map[string][]byte, len(deployments))
+	for _, deploy := range deployments {
+		body, err := json.Marshal(deploy)
+		if err != nil {
+			t.Fatalf("marshal deployment: %v", err)
+		}
+		path := fmt.Sprintf("/namespaces/%s/deployments/%s", deploy.Namespace, deploy.Name)
+		bodies[path] = body
 	}
-	path := fmt.Sprintf("/namespaces/%s/deployments/%s", deploy.Namespace, deploy.Name)
 	fakeClient := &restfake.RESTClient{
 		NegotiatedSerializer: resource.UnstructuredPlusDefaultContentConfig().NegotiatedSerializer,
 		GroupVersion:         appsv1.SchemeGroupVersion,
 		Client: restfake.CreateHTTPClient(func(req *http.Request) (*http.Response, error) {
-			if req.URL.Path == path && req.Method == http.MethodGet {
+			if body, ok := bodies[req.URL.Path]; ok && req.Method == http.MethodGet {
 				return &http.Response{
 					StatusCode: http.StatusOK,
 					Header:     http.Header{"Content-Type": []string{"application/json"}},
@@ -318,4 +322,72 @@ func TestProxyInject_RejectsUnsupportedNodeAgentTargets(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestProxyInject_SyncRouteWritesDeclarativeTarget(t *testing.T) {
+	const ns = "test-ns"
+	env := newTestEnv(t)
+	if _, err := env.server.clientset.CoreV1().Secrets(ns).Create(context.Background(), &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: ns},
+		Data:       map[string][]byte{config.TLSCertKey: {}, config.TLSPrivateKeyKey: {}, config.TLSServerName: []byte("kubevpn")},
+	}, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("seed tls secret: %v", err)
+	}
+	source := plainDeployment(ns)
+	clone := plainDeployment(ns)
+	clone.Name = "foo-sync-a"
+	clone.Spec.Template.Labels = map[string]string{"owner-ref": "foo-sync-a"}
+	env.server.factory = newInjectTestFactory(t, source, clone)
+	prepareNodeAgentReady(t, env, ns, "deployments.apps.foo")
+
+	target := &controlplane.SyncTarget{UID: "deployments.apps.foo-sync-a", Selector: "owner-ref=foo-sync-a"}
+	derived := &controlplane.Virtual{
+		Namespace: ns, UID: "deployments.apps.foo.nodes.node-a", AgentOrigins: []*controlplane.AgentOrigin{{PodUID: "source"}},
+		Rules: []*controlplane.Rule{{OwnerID: "owner-sync", SyncTarget: target, LocalTunIPv4: "10.244.1.10"}},
+	}
+	data, err := yaml.Marshal([]*controlplane.Virtual{derived})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cm, err := env.server.clientset.CoreV1().ConfigMaps(ns).Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cm.Data[config.KeyEnvoy] = string(data)
+	if _, err := env.server.clientset.CoreV1().ConfigMaps(ns).Update(context.Background(), cm, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	stream, err := env.client.ProxyInject(context.Background(), &rpc.InjectRequest{
+		Namespace: ns, OwnerID: "owner-sync",
+		SyncRoutes: []*rpc.SyncRoute{{Workload: "deployments.apps/foo", TargetWorkload: "deployments.apps/foo-sync-a"}},
+	})
+	if err != nil {
+		t.Fatalf("ProxyInject open: %v", err)
+	}
+	if err := collectInjectStream(stream.Recv); err != nil {
+		t.Fatalf("ProxyInject sync route: %v", err)
+	}
+	cm, err = env.server.clientset.CoreV1().ConfigMaps(ns).Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var virtuals []*controlplane.Virtual
+	if err := yaml.Unmarshal([]byte(cm.Data[config.KeyEnvoy]), &virtuals); err != nil {
+		t.Fatal(err)
+	}
+	for _, virtual := range virtuals {
+		if virtual.UID != "deployments.apps.foo" || len(virtual.AgentOrigins) != 0 {
+			continue
+		}
+		if len(virtual.Rules) != 1 || virtual.Rules[0].SyncTarget == nil {
+			t.Fatalf("sync target missing from base rule: %+v", virtual.Rules)
+		}
+		rule := virtual.Rules[0]
+		if rule.SyncTarget.UID != target.UID || rule.SyncTarget.Selector != target.Selector || rule.LocalTunIPv4 != "" {
+			t.Fatalf("unexpected declarative sync rule: %+v", rule)
+		}
+		return
+	}
+	t.Fatal("base sync Virtual not found")
 }

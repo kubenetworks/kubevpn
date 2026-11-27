@@ -76,6 +76,9 @@ func (s *VirtualStore) AddRule(ctx context.Context, spec envoyRuleSpec) error {
 		return err
 	}
 	return s.Mutate(ctx, func(ctx context.Context, virtuals []*controlplane.Virtual) ([]*controlplane.Virtual, error) {
+		if err := validateRuleCompatibility(virtuals, spec); err != nil {
+			return nil, err
+		}
 		updated := addVirtualRule(ctx, virtuals, spec)
 		// Log the persisted rule set for this workload so the actual rules (headers/tunIP/
 		// owner) are visible for diagnosing full-proxy routing and ownership.
@@ -92,6 +95,20 @@ func (s *VirtualStore) AddRule(ctx context.Context, spec envoyRuleSpec) error {
 			spec.Namespace, spec.NodeID, spec.Headers, spec.LocalTunIPv4, spec.OwnerID, rules)
 		return updated, nil
 	})
+}
+
+func validateRuleCompatibility(virtuals []*controlplane.Virtual, spec envoyRuleSpec) error {
+	for _, virtual := range virtuals {
+		if virtual.Namespace != spec.Namespace || virtual.UID != spec.NodeID {
+			continue
+		}
+		for _, rule := range virtual.Rules {
+			if rule.OwnerID == spec.OwnerID && (rule.SyncTarget != nil) != (spec.SyncTarget != nil) {
+				return fmt.Errorf("owner %s cannot mix ordinary proxy and sync routes for %s/%s", spec.OwnerID, spec.Namespace, spec.NodeID)
+			}
+		}
+	}
+	return nil
 }
 
 // RemoveRule removes the envoy proxy rule identified by (namespace, nodeID, ownerID).
