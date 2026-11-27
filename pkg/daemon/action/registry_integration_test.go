@@ -55,6 +55,31 @@ func TestRegistry_RealGRPCStatusAndDuplicateSelection(t *testing.T) {
 	}
 }
 
+func TestRegistry_CurrentUsesNewestDuplicate(t *testing.T) {
+	r := &connectionRegistry{}
+	old := &handler.ConnectOptions{ConnectionID: "same", OwnerID: "old"}
+	replacement := &handler.ConnectOptions{ConnectionID: "same", OwnerID: "new"}
+	r.add(old, true)
+	r.add(replacement, true)
+	if got := r.current(); got != replacement {
+		t.Fatalf("current returned stale duplicate after add: got %p want %p", got, replacement)
+	}
+}
+
+func TestRegistry_UseMovesSelectedDuplicateToFront(t *testing.T) {
+	old := &handler.ConnectOptions{ConnectionID: "same", OwnerID: "old"}
+	replacement := &handler.ConnectOptions{ConnectionID: "same", OwnerID: "new"}
+	r := &connectionRegistry{}
+	r.add(old, true)
+	r.add(replacement, false)
+	if !r.use("same") {
+		t.Fatal("select duplicate failed")
+	}
+	if got := r.current(); got != replacement {
+		t.Fatalf("current returned stale duplicate: got %p want %p", got, replacement)
+	}
+}
+
 type registryBlockingPeer struct {
 	rpc.UnimplementedDaemonServer
 	entered chan struct{}
