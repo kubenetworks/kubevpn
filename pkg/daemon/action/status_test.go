@@ -242,3 +242,24 @@ func TestBuildProxyAndSyncStatus_SkipsDerivedNodeVirtuals(t *testing.T) {
 		t.Fatalf("derived xDS leaked into user status: %+v", proxies)
 	}
 }
+
+func TestBuildProxyAndSyncStatus_SyncRouteIsNotCurrentDevice(t *testing.T) {
+	conn := statusSnapshotConnection{
+		ConnectOptions: &handler.ConnectOptions{OwnerID: "owner"},
+		envoy: `- Namespace: default
+  Uid: deployments.apps.reviews
+  Rules:
+  - ownerID: owner
+    syncTarget:
+      uid: deployments.apps.reviews-sync-a
+      selector: owner-ref=reviews-sync-a
+`,
+	}
+	proxies, _, err := buildProxyAndSyncStatus(context.Background(), conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(proxies) != 1 || len(proxies[0].RuleList) != 1 || proxies[0].RuleList[0].CurrentDevice {
+		t.Fatalf("sync clone route must not be reported as the current device: %+v", proxies)
+	}
+}

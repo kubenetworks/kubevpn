@@ -4,13 +4,10 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"net/netip"
 	"net/url"
 	"strconv"
-	"strings"
 	"time"
 
-	"github.com/joho/godotenv"
 	libconfig "github.com/syncthing/syncthing/lib/config"
 	"github.com/syncthing/syncthing/lib/netutil"
 	v1 "k8s.io/api/core/v1"
@@ -18,8 +15,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
 	"k8s.io/utils/ptr"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -58,74 +53,6 @@ func genSyncthingContainer(remoteDir string, syncDataDirName string, image strin
 		SecurityContext: &v1.SecurityContext{
 			RunAsUser:  ptr.To[int64](0),
 			RunAsGroup: ptr.To[int64](0),
-		},
-	}
-}
-
-func genVPNContainer(workload string, namespace string, managerNamespace string, image string, args []string) *v1.Container {
-	command := []string{
-		"kubevpn",
-		"legacy-proxy",
-		workload,
-		"--kubeconfig", "/tmp/.kube/" + config.KUBECONFIG,
-		"--namespace", namespace,
-		"--image", image,
-	}
-	// Pin the traffic manager namespace so the nested proxy does not fall back to
-	// detecting it (which fails to the workload namespace when manager != workload).
-	if managerNamespace != "" {
-		command = append(command, "--manager-namespace", managerNamespace)
-	}
-	command = append(command, "--foreground")
-	return &v1.Container{
-		Name:    config.ContainerSidecarVPN,
-		Image:   image,
-		Command: append(command, args...),
-		Env:     []v1.EnvVar{},
-		Resources: v1.ResourceRequirements{
-			Requests: map[v1.ResourceName]resource.Quantity{
-				v1.ResourceCPU:    resource.MustParse("200m"),
-				v1.ResourceMemory: resource.MustParse("512Mi"),
-			},
-			Limits: map[v1.ResourceName]resource.Quantity{
-				v1.ResourceCPU:    resource.MustParse("1000m"),
-				v1.ResourceMemory: resource.MustParse("2048Mi"),
-			},
-		},
-		VolumeMounts: []v1.VolumeMount{
-			{
-				Name:      config.KUBECONFIG,
-				ReadOnly:  false,
-				MountPath: "/tmp/.kube",
-			},
-		},
-		Lifecycle: &v1.Lifecycle{
-			PostStart: &v1.LifecycleHandler{
-				Exec: &v1.ExecAction{
-					Command: []string{
-						"/bin/bash",
-						"-c",
-						`
-echo 1 > /proc/sys/net/ipv4/ip_forward
-echo 0 > /proc/sys/net/ipv6/conf/all/disable_ipv6
-echo 1 > /proc/sys/net/ipv6/conf/all/forwarding
-echo 1 > /proc/sys/net/ipv4/conf/all/route_localnet
-for b in iptables-nft iptables-legacy; do "$b" -t nat -L &>/dev/null && update-alternatives --set iptables /usr/sbin/$b && update-alternatives --set ip6tables /usr/sbin/${b/iptables/ip6tables} && break; done
-`,
-					},
-				},
-			},
-		},
-		ImagePullPolicy: v1.PullIfNotPresent,
-		SecurityContext: &v1.SecurityContext{
-			Capabilities: &v1.Capabilities{
-				Add: []v1.Capability{
-					"NET_ADMIN",
-				},
-			},
-			RunAsUser:  ptr.To[int64](0),
-			RunAsGroup: ptr.To[int64](0),
-			Privileged: ptr.To(true),
 		},
 	}
 }
@@ -208,37 +135,4 @@ func (d *Runtime) syncDir(ctx context.Context, labels string) error {
 		}, syncRetryDelay)
 	}()
 	return nil
-}
-
-func ConvertAPIServerToNodeIP(ctx context.Context, clientset kubernetes.Interface, restConfig *rest.Config, namespace string, kubeconfigBytes []byte) ([]byte, error) {
-	list, err := clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{Limit: 100})
-	if err != nil {
-		return nil, err
-	}
-	var result string
-	for _, item := range list.Items {
-		result, err = util.Shell(ctx, clientset, restConfig, item.Name, "", namespace, []string{"env"})
-		if err == nil {
-			break
-		}
-	}
-	parse, err := godotenv.Parse(strings.NewReader(result))
-	if err != nil {
-		return nil, err
-	}
-
-	host := parse["KUBERNETES_SERVICE_HOST"]
-	port := parse["KUBERNETES_SERVICE_PORT"]
-
-	addrPort, err := netip.ParseAddrPort(net.JoinHostPort(host, port))
-	if err != nil {
-		return nil, err
-	}
-
-	var newKubeconfigBytes []byte
-	newKubeconfigBytes, _, err = util.ModifyAPIServer(ctx, kubeconfigBytes, addrPort)
-	if err != nil {
-		return nil, err
-	}
-	return newKubeconfigBytes, nil
 }

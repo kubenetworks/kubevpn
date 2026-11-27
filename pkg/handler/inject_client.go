@@ -153,6 +153,44 @@ func (c *ConnectOptions) createRemoteInboundViaManager(ctx context.Context, name
 	return nil
 }
 
+// CreateRemoteSyncRoutes publishes original-to-clone routes through the existing
+// manager connection. Sync targets do not use a user TUN IP or Service Mapper.
+func (c *ConnectOptions) CreateRemoteSyncRoutes(ctx context.Context, namespace string, routes []SyncRoute, image string) error {
+	if len(routes) == 0 {
+		return nil
+	}
+	if c.OwnerID == "" {
+		return fmt.Errorf("cannot resolve owner ID for connection in namespace %s - reconnect and retry", namespace)
+	}
+	conn, err := c.dialManagerWithRetry(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	request := &rpc.InjectRequest{Namespace: namespace, OwnerID: c.OwnerID, Image: image}
+	for _, route := range routes {
+		request.SyncRoutes = append(request.SyncRoutes, &rpc.SyncRoute{Workload: route.Workload, TargetWorkload: route.TargetWorkload})
+	}
+	stream, err := rpc.NewTunConfigServiceClient(conn).ProxyInject(ctx, request)
+	if err != nil {
+		return fmt.Errorf("server-side sync route inject: %w", err)
+	}
+	for {
+		resp, recvErr := stream.Recv()
+		if recvErr == io.EOF {
+			break
+		}
+		if recvErr != nil {
+			return fmt.Errorf("server-side sync route inject: %w", recvErr)
+		}
+		if resp.GetMessage() != "" {
+			plog.G(ctx).Info(resp.GetMessage())
+		}
+	}
+	_ = c.getConfigMapStore().Refresh(ctx)
+	return nil
+}
+
 // managerLeaveRetryBudget bounds admission of LeaveInject retries on transient errors,
 // not the duration of an admitted dial or stream. Shorter than inject (15s vs 45s)
 // since leave is a user-interactive operation.

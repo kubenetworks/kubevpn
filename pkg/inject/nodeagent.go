@@ -43,7 +43,7 @@ func (n *nodeAgentInjector) Inject(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err = validateNodeAgentTemplate(templateSpec); err != nil {
+	if err = ValidateNodeAgentTemplate(templateSpec); err != nil {
 		return err
 	}
 	ports, portmap := collectPorts(templateSpec, o.PortMaps)
@@ -75,7 +75,9 @@ func (n *nodeAgentInjector) Inject(ctx context.Context) error {
 	return waitNodeAgentReady(ctx, o)
 }
 
-func validateNodeAgentTemplate(templateSpec *corev1.PodTemplateSpec) error {
+// ValidateNodeAgentTemplate rejects targets that cannot use the non-intrusive
+// node-boundary data plane.
+func ValidateNodeAgentTemplate(templateSpec *corev1.PodTemplateSpec) error {
 	if templateSpec.Spec.HostNetwork {
 		return errors.New("hostNetwork workloads are not supported by node-agent")
 	}

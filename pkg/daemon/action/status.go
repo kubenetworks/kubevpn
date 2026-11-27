@@ -218,7 +218,7 @@ func buildProxyAndSyncStatus(ctx context.Context, connect handler.Connection) ([
 					Headers:       rule.Headers,
 					LocalTunIPv4:  rule.LocalTunIPv4,
 					LocalTunIPv6:  rule.LocalTunIPv6,
-					CurrentDevice: rule.OwnerID == connect.GetOwnerID(),
+					CurrentDevice: rule.SyncTarget == nil && rule.OwnerID == connect.GetOwnerID(),
 					PortMap:       portMapToLocalPorts(rule),
 				})
 			}

@@ -2,177 +2,144 @@
 
 ## 1. Overview
 
-Sync mode (`kubevpn sync`) creates a clone of a Kubernetes workload with syncthing-based bidirectional file synchronization. It connects to the cluster network and synchronizes a local directory with a remote directory in the cloned pod, enabling live code reloading during development.
+Sync mode (`kubevpn sync`) creates a clone of a Kubernetes workload with syncthing-based bidirectional file synchronization. It connects to the cluster network, synchronizes a local directory with the cloned pod, and routes matching traffic from the original workload to the clone through the node-boundary agent.
+
+The original workload is never patched or restarted. The clone is the only workload whose PodSpec is modified.
 
 ## 2. Architecture
-
-To use sync mode:
 
 ```shell cli-checked
 kubevpn sync deployment/myapp --sync ./src:/app
 ```
 
 ```
-
-  ┌─ User Daemon ─────────────────────────────────────────┐
-  │                                                       │
-  │  1. Connect to cluster (via Connect RPC)              │
-  │  2. DoSync:                                           │
-  │     a. Clone workload → myapp-sync-{uuid}             │
-  │     b. Add VPN sidecar (kubevpn proxy --foreground)   │
-  │     c. Add Syncthing sidecar (kubevpn syncthing)      │
-  │     d. Modify target container:                       │
-  │        - Mount EmptyDir volume at /app                │
-  │        - Replace command with tail -f /dev/null       │
-  │        - Remove health probes                         │
-  │     e. Create clone in cluster                        │
-  │     f. Wait for pod ready                             │
-  │     g. Start local syncthing client                   │
-  │  3. Watch for pod IP changes (reconnect syncthing)    │
-  │                                                       │
-  └───────────────────────────────────────────────────────┘
+  ┌─ User Daemon / Control Session ─────────────────────────┐
+  │  1. Connect to the cluster                              │
+  │  2. DoSync:                                             │
+  │     a. Clone workload → myapp-sync-{uuid}               │
+  │     b. Modify only the target application container     │
+  │     c. Add the Syncthing helper and shared EmptyDir     │
+  │     d. Create clone and wait for its pod to be Ready    │
+  │     e. Start local Syncthing client and IP tracker      │
+  │  3. CreateRemoteSyncRoutes through the existing manager │
+  │     connection and OwnerID                              │
+  └─────────────────────────────────────────────────────────┘
+                             │
+                             ▼
+  ┌─ Traffic manager / AttachmentPublisher ─────────────────┐
+  │  Base Virtual: original workload + declarative          │
+  │  Rule.SyncTarget(clone UID, clone selector)             │
+  │                                                         │
+  │  Derived per-node Virtual: resolve the newest Ready     │
+  │  clone pod and route matched traffic to clonePodIP      │
+  └─────────────────────────────────────────────────────────┘
 ```
+
+There is no VPN/Envoy container, nested `kubevpn proxy`, nested DHCP lease, or kubeconfig inside the sync clone. Syncthing remains as a file-synchronization helper; it is not a traffic-attachment sidecar.
 
 ## 3. SyncOptions
 
 ```go
 type SyncOptions struct {
-    K8sClient                       // embedded K8s client
+    K8sClient
     WorkloadNamespace     string
-    ManagerNamespace      string    // resolved traffic manager ns; threaded into nested proxy
     Headers               map[string]string
     Workloads             []string
-    TargetContainer       string    // which container to sync into
-    TargetImage           string    // optional image override
-    TargetWorkloadNames   map[string]string  // original → clone name mapping
-    LocalDir              string    // local directory to sync
-    RemoteDir             string    // remote directory in container
+    TargetContainer       string
+    TargetImage           string
+    TargetWorkloadNames   map[string]string // original → clone name
+    LocalDir              string
+    RemoteDir             string
 }
 ```
 
-`SyncOptions` retains the public CLI configuration and status fields and adapts the session to `internal/syncworkload.Runtime` through an explicit `Config` conversion. The runtime owns cloned workloads, local clients, and IP trackers; handler retains the session context and rollback registry. `TargetWorkloadNames` is copied back after `DoSync`, including on failure, and `GetSyncthingGUIAddr` reads runtime status.
+`SyncOptions` adapts the daemon session to `internal/syncworkload.Runtime`. The runtime owns cloned workloads, local Syncthing clients, and Pod IP trackers. The outer `ProxyController` owns manager route creation/removal. `TargetWorkloadNames` is copied back after `DoSync`, including on failure, and `GetSyncthingGUIAddr` reads runtime status.
 
-## 4. Clone Workload Creation (`DoSync`)
+The manager namespace is already resolved by the outer Connect. Sync does not start another connection and therefore does not propagate a separate manager namespace into the clone.
 
-### 4.1 Workload Cloning
+## 4. Clone and Route Creation
 
-1. Get the top-level owner (Deployment/StatefulSet) of the target workload
-2. Deep-copy the unstructured object
-3. Modify metadata:
-   - Name: `{original}-sync-{uuid[:5]}`
-   - Labels: `manage-by: kubevpn-traffic-manager`, `owner-ref`, `origin-workload`
-   - Replicas: forced to 1
-   - Clear resource version, UID, managed fields
-4. Replace selector matchLabels with the new labels
+### 4.1 Workload cloning
 
-### 4.2 Pod Template Modifications (`prepareSyncPodSpec`)
+1. Resolve the top-level owner (Deployment/StatefulSet) of the source workload.
+2. Deep-copy the object, force one replica, and clear resource version, UID, status, and managed fields.
+3. Name it `{original}-sync-{uuid[:5]}`.
+4. Give it unique labels: `manage-by`, `owner-ref`, and `origin-workload`; use those labels for the clone selector.
+5. Reject hostNetwork or legacy sidecar-injected sources before creating the clone.
 
-The clone pod gets three types of modifications:
+### 4.2 Pod template modifications
 
-**Volumes added:**
-- `kubeconfig` — DownwardAPI volume mounting kubeconfig from pod annotation
-- `syncthing` — EmptyDir shared between target container and syncthing sidecar
+- Add one `EmptyDir` shared by the target application and Syncthing helper.
+- Optionally replace the target image.
+- When `LocalDir` is set, mount the shared directory, replace the application command with `tail -f /dev/null`, and remove health probes.
+- Add only `genSyncthingContainer`. Do not add VPN/Envoy containers, kubeconfig annotations, DownwardAPI kubeconfig volumes, or lifecycle networking hooks.
 
-**Target container modified (when `LocalDir` is set):**
-- Command replaced with `tail -f /dev/null` (keeps pod alive without running app)
-- `remoteDir` mounted from the shared EmptyDir volume
-- Health probes removed (liveness, readiness, startup)
+### 4.3 Declarative sync routes
 
-**Sidecar containers added:**
-- **VPN container** (`genVPNContainer`): Runs `kubevpn proxy` with `--foreground`, injects kubeconfig from DownwardAPI. Privileged with `NET_ADMIN` capability. When `SyncOptions.ManagerNamespace` is set, the command also carries `--manager-namespace <ns>` (see §4.4).
-- **Syncthing container** (`genSyncthingContainer`): Runs `kubevpn syncthing --dir {remoteDir}`, shares the EmptyDir volume with the target container.
+After all clones and local clients are ready, the sync action submits original→clone `SyncRoute` entries over the existing manager connection.
 
-### 4.3 Kubeconfig Injection
+For each original workload, the base Virtual records:
 
-The kubeconfig is stored as a pod annotation and mounted via DownwardAPI. This avoids needing a separate Secret for each sync clone. `ConvertApiServerToNodeIP` converts the API server address to a node-reachable IP for in-cluster access.
+- the original workload UID and pod selector;
+- the outer connection OwnerID and requested headers;
+- identity port mappings;
+- `Rule.SyncTarget{UID, Selector}` for the clone.
 
-### 4.4 Manager Namespace Propagation
+The base rule does not store a resolved clone PodIP. On every reconcile, `AttachmentPublisher`:
 
-The cloned workload runs a **nested** `kubevpn proxy <workload> --namespace <workloadNs>`
-inside the VPN sidecar. That nested proxy is the component that injects the envoy sidecar
-into the proxied workload and sets its `TrafficManagerService` env
-(`kubevpn-traffic-manager.<managerNs>`).
+1. Builds normal source pod/Service attachments for the original workload.
+2. Lists Ready, Running, non-deleting clone pods using `SyncTarget.Selector`.
+3. Selects the newest Ready pod deterministically.
+4. Deep-copies rules into each derived per-node Virtual and writes the clone PodIP only into that derived rule.
+5. Never creates a NodeAttachment, host DNAT rule, Envoy process, or DHCP lease for the clone itself.
 
-`SyncRequest` carries no `ManagerNamespace`, and the `sync` CLI exposes no
-`--manager-namespace` flag. If the nested proxy were left to auto-detect, it would fall back
-to the **workload** namespace whenever the traffic manager lives elsewhere (manager ≠
-workload, e.g. a Helm install in a dedicated namespace), pointing envoy at a non-existent
-`kubevpn-traffic-manager.<workloadNs>` and breaking the control-plane connection.
+`xds/internal/envoy/Rules.Sync` skips sync-target rules so a user DHCP renewal cannot overwrite the clone endpoint. A clone List failure preserves the last good ConfigMap; an absent Ready clone never leaves a stale resolved address. Initial attach waits for both source direct listeners and a resolved derived sync rule.
 
-To prevent this, the resolved manager namespace is threaded through explicitly:
+## 5. Local Syncthing Client
 
-1. The `Sync` daemon action runs the inner `Connect` first, which resolves the manager
-   namespace (`detectAndSetManagerNamespace`) and stores it on the connection.
-2. After `connectionID` is known, the action copies the authoritative value into the sync
-   options: `options.ManagerNamespace = svr.findConnection(connectionID).ManagerNamespace`.
-3. `prepareSyncPodSpec` passes `d.ManagerNamespace` to `genVPNContainer`, which appends
-   `--manager-namespace <ns>` **only when non-empty** (empty preserves the legacy
-   auto-detect behavior).
+After the clone pod is ready, the runtime:
 
-This keeps the sync clone consistent with the rest of the namespace model
-([07-namespace-model.md](07-namespace-model.md)). Tests:
-`TestSync_PinsManagerNamespace_WhenManagerDiffersFromWorkload`,
-`TestSync_OmitsManagerNamespace_WhenUnset`.
+1. Reads its PodIP and allocates a random local TCP port.
+2. Starts `syncthing.StartClient` and retains its `ClientHandle`.
+3. Logs the local GUI URL.
+4. Polls the clone every two seconds and updates the remote device address after pod recreation.
 
-## 5. Local Syncthing Client (`Runtime.syncDir`)
+`ClientHandle.Stop()` cancels and waits for the application and early service supervisor. Runtime cleanup joins all clients and IP trackers without cancelling the parent session before route and clone cleanup have finished.
 
-After the clone pod is ready:
+## 6. Cleanup
 
-1. Discover pod IP from running pod list
-2. Allocate a random local TCP port
-3. Start syncthing client: `syncthing.StartClient(ctx, localDir, localAddr, remoteAddr)` and retain the returned `ClientHandle` in the runtime
-4. Log the GUI URL for status monitoring
-5. Start background IP tracker goroutine
+Cleanup is deliberately ordered:
 
-The runtime uses a child of the session context. `ClientHandle.Stop()` cancels and waits for both the application and its early service supervisor; `Done()` closes after both exit, and `Err()` exposes the completed application's error. Startup failure also waits for cleanup before returning. `Runtime.Stop()` cancels its child context and joins the trackers and all client handles without cancelling the parent session.
+1. Map requested clone names back to their source workloads (or select all sources).
+2. Remove the source sync rules through the outer `ProxyController` and OwnerID.
+3. Only after route removal succeeds, delete the selected clone workloads.
+4. Stop and join local Syncthing applications, early services, and Pod IP trackers.
+5. Execute session/SSH rollback functions.
 
-### Pod IP Tracking
-
-A background goroutine polls running pods every 2 seconds. When the pod name changes (indicating recreation), it:
-1. Gets the new pod IP
-2. Calls `client.GetConfig()` / `client.PutConfig()` to update the syncthing remote device address
-3. Syncthing reconnects automatically
-
-## 6. Cleanup (`Cleanup`)
-
-Handler emits `StepStart("Stopping file sync")`, then:
-
-1. Runtime deletes all sync clone workloads via dynamic client
-2. Runtime waits for original workloads to finish rollout (`RolloutStatus`, undo-on-failure disabled)
-3. Runtime stops and joins local Syncthing applications, early services, and pod IP trackers
-4. Handler executes registered session/SSH rollback functions
-5. Handler emits `StepDone("Stopped file sync for %d workloads", count)`
-
-Before client initialization, handler creates no runtime: it emits the same start step, logs `Skipping workload cleanup: kubernetes client not initialized` at Debug, executes rollback, and finally emits `StepDone("Stopped file sync")`.
-
-**Ordering matters.** The rollback functions tear down the session — in the daemon
-the only registered one calls `session.Teardown()` → `session.Cancel()`, which
-cancels the context the SSH port-forward is bound to and closes the local tunnel
-endpoint that `d.factory` talks through (see [12-session-lifecycle.md](12-session-lifecycle.md)
-and [15-ssh-architecture.md](15-ssh-architecture.md)). The `RolloutStatus` wait in
-step 2 still needs that connection, so it must run **before** the rollback functions —
-otherwise it dials a closed tunnel and fails with `connection refused`.
+If route removal fails, the clone is preserved for retry and no stale route is deliberately pointed at a deleted backend. The original workload has no rollout to wait for because sync never modifies it. Disconnect cleanup and manager lease reaping use the same OwnerID ownership model.
 
 ## 7. Daemon RPC Flow
 
-The `Sync` daemon action:
-1. Receives `SyncRequest` via gRPC
-2. Establishes cluster connection via `Connect` RPC (reuses existing connect flow)
-3. Copies the resolved `ManagerNamespace` from the established connection into `SyncOptions`
-   (`svr.findConnection(connectionID).ManagerNamespace`) before sync — see §4.4
-4. Calls `SyncOptions.DoSync()` with the sync-specific parameters
-5. On cancellation, calls `Cleanup()` to remove clone workloads
+1. Receive `SyncRequest` and establish the normal outer Connect.
+2. Initialize `SyncOptions` and create/wait for clones and local Syncthing clients.
+3. Build `handler.SyncRoute` values from `Workloads` and `TargetWorkloadNames`.
+4. Call `ProxyController.CreateRemoteSyncRoutes`; the manager resolves workload selectors and writes declarative sync rules.
+5. Refresh the ConfigMap cache and attach `SyncOptions` to the control session for status and cleanup.
+
+The public `SyncRequest` and CLI flags are unchanged. `InjectRequest.SyncRoutes` is an internal manager API and cannot be mixed with ordinary `Workloads` in one request.
 
 ## 8. Related Files
 
 | File | Purpose |
 |------|---------|
-| `pkg/handler/sync.go` | SyncOptions, runtime adapter, session rollback and progress output |
-| `pkg/handler/internal/syncworkload/runtime.go` | Config, Runtime, clone orchestration, workload cleanup and local-client Stop/join |
-| `pkg/handler/internal/syncworkload/podspec.go` | `prepareSyncPodSpec` + `syncPodSpec` param object (pod template mutation) |
-| `pkg/handler/internal/syncworkload/containers.go` | genSyncthingContainer, genVPNContainer, private syncDir and pod IP tracker |
-| `pkg/syncthing/syncthing.go` | StartClient, ClientHandle (Stop/Done/Err), StartServer |
-| `pkg/syncthing/api.go` | REST API client for config updates |
-| `pkg/daemon/action/sync.go` | Sync daemon RPC handler |
-| `cmd/kubevpn/cmds/sync.go` | CLI command definition |
+| `pkg/handler/sync.go` | SyncOptions, route cleanup ordering, runtime adapter |
+| `pkg/handler/internal/syncworkload/runtime.go` | Clone orchestration and local-client lifecycle |
+| `pkg/handler/internal/syncworkload/podspec.go` | Application/Syncthing-only clone mutation |
+| `pkg/handler/internal/syncworkload/containers.go` | Syncthing helper, local sync and Pod IP tracking |
+| `pkg/handler/inject_client.go` | Outer manager SyncRoute client |
+| `pkg/controlplane/virtual.go` | Declarative `SyncTarget` model |
+| `pkg/xds/attachment_publisher.go` | Clone endpoint resolution in derived Virtuals |
+| `pkg/xds/inject_service.go` | Internal SyncRoute admission |
+| `pkg/daemon/action/sync.go` | Outer Connect → clone → route orchestration |
 | `docs/23-syncthing-file-sync.md` | Syncthing library integration |
+| `docs/55-node-hosted-agent.md` | Node-boundary attachment architecture |
