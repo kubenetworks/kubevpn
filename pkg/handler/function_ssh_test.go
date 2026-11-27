@@ -633,9 +633,13 @@ func (u *sshUt) kubevpnProxyWithServiceMesh(t *testing.T) {
 }
 
 func (u *sshUt) kubevpnProxyWithServiceMeshAndFargateMode(t *testing.T) {
+	identity := captureWorkloadIdentity(t, u.clientset, u.namespace, "reviews", "reviews")
+	targetPorts := captureServiceTargetPorts(t, u.clientset, u.namespace, "reviews")
 	if err := runKubevpn(t, "proxy", "svc/reviews", "--headers", "env=test", "--debug", "--ssh-addr", "localhost:2222", "--ssh-username", "naison", "--ssh-password", "naison"); err != nil {
 		t.Fatal(err)
 	}
+	assertWorkloadIdentityUnchanged(t, u.clientset, u.namespace, "reviews", "reviews", identity)
+	assertServiceTargetPortsUnchanged(t, u.clientset, u.namespace, "reviews", targetPorts)
 }
 
 func (u *sshUt) kubevpnProxyWithServiceMeshAndK8sServicePortMap(t *testing.T) {

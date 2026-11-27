@@ -638,6 +638,8 @@ func (u *ut) kubevpnProxyWithServiceMesh(t *testing.T) {
 }
 
 func (u *ut) kubevpnProxyWithServiceMeshAndFargateMode(t *testing.T) {
+	identity := captureWorkloadIdentity(t, u.clientset, u.namespace, "reviews", "reviews")
+	targetPorts := captureServiceTargetPorts(t, u.clientset, u.namespace, "reviews")
 	cmd := exec.Command("kubevpn", "proxy", "svc/reviews", "--headers", "env=test", "--debug")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -645,6 +647,8 @@ func (u *ut) kubevpnProxyWithServiceMeshAndFargateMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	assertWorkloadIdentityUnchanged(t, u.clientset, u.namespace, "reviews", "reviews", identity)
+	assertServiceTargetPortsUnchanged(t, u.clientset, u.namespace, "reviews", targetPorts)
 }
 
 func (u *ut) kubevpnProxyWithServiceMeshAndK8sServicePortMap(t *testing.T) {

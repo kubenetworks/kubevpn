@@ -36,6 +36,7 @@ jobs:
           overwrite: true
   linux:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     needs: [ "image" ]
     env:
       # Same VERSION as the image job: the built binary's config.Version/config.Image

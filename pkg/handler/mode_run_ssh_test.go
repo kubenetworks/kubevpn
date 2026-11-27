@@ -39,6 +39,7 @@ func (u *sshUt) resetDeployAuthors(t *testing.T) {
 
 func (u *sshUt) kubevpnRunWithFullProxy(t *testing.T) {
 	t.Cleanup(func() { forceCleanupRunContainers(t, "authors") })
+	identity := captureWorkloadIdentity(t, u.clientset, u.namespace, "authors", "authors")
 	path := u.writeTempFile(t)
 	name := filepath.Base(path)
 	dir := filepath.Dir(path)
@@ -59,6 +60,7 @@ func (u *sshUt) kubevpnRunWithFullProxy(t *testing.T) {
 		"--entrypoint", "go", "run", fmt.Sprintf("%s/%s", remoteDir, name),
 	)
 	exited := waitRunStartup(t, cmd, cancelFunc, u.clientset, "Start listening http port 9080 ...")
+	assertWorkloadIdentityUnchanged(t, u.clientset, u.namespace, "authors", "authors", identity)
 
 	app := "authors"
 	ip, err := u.getPodIP(app)
@@ -78,6 +80,7 @@ func (u *sshUt) kubevpnRunWithFullProxy(t *testing.T) {
 
 func (u *sshUt) kubevpnRunWithServiceMesh(t *testing.T) {
 	t.Cleanup(func() { forceCleanupRunContainers(t, "authors") })
+	identity := captureWorkloadIdentity(t, u.clientset, u.namespace, "authors", "authors")
 	path := u.writeTempFile(t)
 	name := filepath.Base(path)
 	dir := filepath.Dir(path)
@@ -100,6 +103,7 @@ func (u *sshUt) kubevpnRunWithServiceMesh(t *testing.T) {
 		"--entrypoint", "go", "run", fmt.Sprintf("%s/%s", remoteDir, name),
 	)
 	exited := waitRunStartup(t, cmd, cancelFunc, u.clientset, "Start listening http port 9080 ...")
+	assertWorkloadIdentityUnchanged(t, u.clientset, u.namespace, "authors", "authors", identity)
 
 	app := "authors"
 	ip, err := u.getServiceIP(app)

@@ -9,6 +9,7 @@ on:
 jobs:
   linux:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     env:
       VERSION: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:

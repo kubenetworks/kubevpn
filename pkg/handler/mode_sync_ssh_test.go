@@ -49,6 +49,7 @@ func (u *sshUt) kubevpnSync(t *testing.T, ctx context.Context, isServiceMesh boo
 	if isServiceMesh {
 		args = append(args, "--headers", "env=test")
 	}
+	identity := captureWorkloadIdentity(t, u.clientset, u.namespace, "authors", "authors")
 	runSyncCommand(t, ctx, u.clientset, args)
 
 	list, err := util.GetRunningPodList(ctx, u.clientset, u.namespace, fields.OneTermEqualSelector("origin-workload", "authors").String())
@@ -57,6 +58,10 @@ func (u *sshUt) kubevpnSync(t *testing.T, ctx context.Context, isServiceMesh boo
 	}
 	if len(list) == 0 {
 		t.Fatal("expect at least one pod")
+	}
+	assertWorkloadIdentityUnchanged(t, u.clientset, u.namespace, "authors", "authors", identity)
+	if len(list[0].Spec.Containers) != 2 {
+		t.Fatalf("sync clone must contain only app and syncthing: %v", list[0].Spec.Containers)
 	}
 
 	remotePath := fmt.Sprintf("%s/%s", remoteDir, name)
