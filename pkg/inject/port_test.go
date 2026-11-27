@@ -127,52 +127,6 @@ func TestCollectPorts_WithHostPortOverride(t *testing.T) {
 	}
 }
 
-func TestAlreadyInjected(t *testing.T) {
-	spec := &v1.PodTemplateSpec{
-		Spec: v1.PodSpec{
-			Containers: []v1.Container{
-				{Name: "app"},
-				{Name: "vpn"},
-				{Name: "envoy"},
-			},
-		},
-	}
-	if !alreadyInjected(spec) {
-		t.Fatal("expected already injected (has 'vpn' + 'envoy' containers)")
-	}
-
-	spec2 := &v1.PodTemplateSpec{
-		Spec: v1.PodSpec{
-			Containers: []v1.Container{
-				{Name: "app"},
-			},
-		},
-	}
-	if alreadyInjected(spec2) {
-		t.Fatal("expected not injected")
-	}
-}
-
-func TestRemoveContainers(t *testing.T) {
-	spec := &v1.PodSpec{
-		Containers: []v1.Container{
-			{Name: "app"},
-			{Name: "vpn"},
-			{Name: "envoy"},
-			{Name: "helper"},
-		},
-	}
-	RemoveContainers(spec)
-	if len(spec.Containers) != 2 {
-		t.Fatalf("expected 2 containers after removal, got %d", len(spec.Containers))
-	}
-	for _, c := range spec.Containers {
-		if c.Name == "vpn" || c.Name == "envoy" {
-			t.Fatalf("sidecar %s should have been removed", c.Name)
-		}
-	}
-}
-
 func Test_renderEnvoyConfig(t *testing.T) {
 	tmpl := "address: {{.}}"
 	result := renderEnvoyConfig(tmpl, "kubevpn-traffic-manager.default")

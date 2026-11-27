@@ -24,19 +24,6 @@ func init() {
 	RegisterProtocol("gtcp", gtcpProtocolFactory)
 	RegisterProtocol("gudp", gudpProtocolFactory)
 	RegisterProtocol("ssh", sshProtocolFactory)
-	RegisterProtocol("udpbridge", udpBridgeProtocolFactory)
-}
-
-// udpBridgeProtocolFactory creates the reverse-UDP bridge listener used by the
-// fargate sidecar to carry UDP inbound back to the developer (the SSH reverse
-// tunnel is TCP-only).
-func udpBridgeProtocolFactory(node *Node, hub *tunnel.Router) (net.Listener, Handler, error) {
-	listener, err := net.Listen("tcp", node.Addr)
-	if err != nil {
-		return nil, nil, err
-	}
-	plog.G(context.Background()).Debugf("[UDP-Bridge] Listening on %s", node.Addr)
-	return listener, UDPBridgeHandler(), nil
 }
 
 func tunProtocolFactory(node *Node, hub *tunnel.Router) (net.Listener, Handler, error) {

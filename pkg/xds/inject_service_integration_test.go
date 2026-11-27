@@ -465,15 +465,12 @@ func TestProxyInject_ServiceUsesNodeAgentWithoutSSHMapper(t *testing.T) {
 		t.Fatal(err)
 	}
 	for {
-		resp, recvErr := stream.Recv()
+		_, recvErr := stream.Recv()
 		if recvErr == io.EOF {
 			break
 		}
 		if recvErr != nil {
 			t.Fatal(recvErr)
-		}
-		if len(resp.GetServices()) != 0 {
-			t.Fatalf("node-agent Service must not start an SSH Mapper: %+v", resp.GetServices())
 		}
 	}
 	cm, err := env.server.clientset.CoreV1().ConfigMaps(ns).Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})

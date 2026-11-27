@@ -378,7 +378,7 @@ func TestManagerDial_FailsWithoutClusterIP(t *testing.T) {
 				SessionBase:      SessionBase{K8sClient: K8sClient{clientset: cs}},
 				ManagerNamespace: "kubevpn",
 			}
-			if err := c.createRemoteInboundViaManager(context.Background(), "kubevpn", nil, nil, "img", "198.18.0.5", "", "", []string{"deployments.apps/foo"}); err == nil {
+			if err := c.createRemoteInboundViaManager(context.Background(), "kubevpn", nil, nil, "img", "198.18.0.5", "", []string{"deployments.apps/foo"}); err == nil {
 				t.Fatal("inject: expected error when manager is unreachable, got nil")
 			}
 			if err := c.leaveViaManager(context.Background(), "kubevpn", []string{"deployments.apps/foo"}, "owner-a"); err == nil {
@@ -398,7 +398,7 @@ func TestManagerDial_PermanentErrorFailsFast(t *testing.T) {
 		ManagerNamespace: "kubevpn",
 	}
 	start := time.Now()
-	err := c.createRemoteInboundViaManager(context.Background(), "kubevpn", nil, nil, "img", "198.18.0.5", "", "", []string{"deployments.apps/foo"})
+	err := c.createRemoteInboundViaManager(context.Background(), "kubevpn", nil, nil, "img", "198.18.0.5", "", []string{"deployments.apps/foo"})
 	elapsed := time.Since(start)
 	if err == nil {
 		t.Fatal("expected error for missing manager service, got nil")

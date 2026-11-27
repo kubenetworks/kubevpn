@@ -133,8 +133,8 @@ message ProxyRequest {
   string ManagerNamespace = 16;
 
   // Optional per-request attach mode. Empty uses the manager default;
-  // legacy-sidecar is reserved for run/sync compatibility.
-  string AttachMode = 17;
+  reserved 17;
+  reserved "AttachMode";
 }
 
 message ProxyResponse {
@@ -491,7 +491,8 @@ message InjectRequest {
   string LocalTunIPv4 = 6;             // client's TUN IPv4 (envoy routes here)
   string LocalTunIPv6 = 7;             // client's TUN IPv6 (optional)
   string Image = 8;                    // sidecar image
-  string AttachMode = 9;               // optional per-request attach mode
+  reserved 9;
+  reserved "AttachMode";
   repeated SyncRoute SyncRoutes = 10;  // original workload -> sync clone routes
 }
 
@@ -500,15 +501,8 @@ message SyncRoute {
   string TargetWorkload = 2;  // cloned workload receiving matched traffic
 }
 
-// ServiceWorkload identifies a K8s Service workload that was injected, so the client
-// runs its local port Mapper (SSH reverse tunnels to the developer's machine) — the
-// one injection side effect that cannot move server-side.
-message ServiceWorkload {
-  string Workload = 1;   // workload string as sent in InjectRequest.Workloads
-  string Selector = 2;   // label selector for the Service's pods (for the Mapper)
-}
-
 message InjectResponse {
-  string Message = 1;                     // progress line to stream to the client
-  repeated ServiceWorkload Services = 2;  // set on the final frame: Service workloads needing a client-side Mapper
+  reserved 2;
+  reserved "Services";
+  string Message = 1;  // progress line to stream to the client
 }

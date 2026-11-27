@@ -21,14 +21,14 @@ ConfigMap
 
 ### 1.2 Ownership Determination
 
-All modes (standard/Fargate) use a unified match: `rule.OwnerID == connect.OwnerID`:
+Workload, Service, and sync rules use a unified match: `rule.OwnerID == connect.OwnerID`:
 
 | Scenario | Match Logic | Code Location |
 |----------|-------------|---------------|
 | Leave (unpatch) | `ownerID == rule.OwnerID` | `inject/envoy.go:removeEnvoyConfig` |
 | Status (CurrentDevice) | `rule.OwnerID == connect.OwnerID` | `daemon/action/status.go` |
 
-The previous dual-branch logic — IP matching for standard mode, Headers matching for Fargate mode — has been unified.
+The previous dual-branch logic — IP matching for standard mode and special Service/Fargate handling — has been unified. Sync routes use the same outer connection OwnerID; their clone destination is resolved separately.
 
 ## 2. Design
 
@@ -112,7 +112,7 @@ for i := 0; i < len(virtual.Rules); i++ {
 }
 ```
 
-No `isFargateMode` branch is needed — OwnerID matching works for all modes.
+No Fargate or sidecar-mode branch remains — OwnerID matching works for all node-agent rules.
 
 ### 2.6 Schema Versioning
 

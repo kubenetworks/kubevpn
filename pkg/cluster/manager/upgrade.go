@@ -57,27 +57,7 @@ func Upgrade(ctx context.Context, f cmdutil.Factory, namespace, image string) er
 	if err != nil {
 		return fmt.Errorf("get kubernetes client: %w", err)
 	}
-	deploy, err := clientset.AppsV1().Deployments(namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
-	if err != nil {
-		return fmt.Errorf("get traffic manager deployment: %w", err)
-	}
-	if existingAttachMode(&deploy.Spec.Template.Spec) == config.AttachModeNodeAgent {
-		return ensureNodeAgentDaemonSet(ctx, clientset, namespace, image)
-	}
-	return nil
-}
-
-// existingAttachMode reads KUBEVPN_PROXY_ATTACH_MODE from the pod spec's containers.
-// If not found, returns config.AttachModeNodeAgent as default.
-func existingAttachMode(spec *v1.PodSpec) string {
-	for _, c := range spec.Containers {
-		for _, env := range c.Env {
-			if env.Name == "KUBEVPN_PROXY_ATTACH_MODE" {
-				return env.Value
-			}
-		}
-	}
-	return config.AttachModeNodeAgent
+	return ensureNodeAgentDaemonSet(ctx, clientset, namespace, image)
 }
 
 func upgradeDeploySpec(ctx context.Context, f cmdutil.Factory, ns, name, image string) error {
@@ -121,8 +101,7 @@ func upgradeDeploySpec(ctx context.Context, f cmdutil.Factory, ns, name, image s
 					break
 				}
 			}
-			attachMode := existingAttachMode(spec)
-			deploySpec := genDeploySpec(ns, image, imagePullSecret, attachMode)
+			deploySpec := genDeploySpec(ns, image, imagePullSecret)
 			*spec = deploySpec.Spec.Template.Spec
 			return nil
 		})

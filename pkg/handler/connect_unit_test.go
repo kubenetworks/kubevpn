@@ -116,21 +116,9 @@ func TestConnectOptions_GetFactory(t *testing.T) {
 
 func TestConnectOptions_LeaveAllProxyResources_Empty(t *testing.T) {
 	c := newTestConnectOptions(t)
-	c.proxyManager = newProxyManager()
 	err := c.LeaveAllProxyResources(context.Background())
 	if err != nil {
 		t.Fatalf("LeaveAllProxyResources empty: %v", err)
-	}
-}
-
-func TestConnectOptions_ProxyResources(t *testing.T) {
-	c := newTestConnectOptions(t)
-	c.proxyManager = newProxyManager()
-	c.proxyManager.Add(&Proxy{workload: "deploy/a", namespace: "ns1"})
-	c.proxyManager.Add(&Proxy{workload: "deploy/b", namespace: "ns2"})
-	res := c.ProxyResources()
-	if len(res) != 2 {
-		t.Fatalf("expected 2 proxy resources, got %d", len(res))
 	}
 }
 
@@ -204,47 +192,6 @@ func TestConnectOptions_GetConnectionID_NilReceiver(t *testing.T) {
 	id := c.GetConnectionID()
 	if id != "" {
 		t.Fatalf("expected empty connectionID on nil receiver, got %q", id)
-	}
-}
-
-func TestConnectOptions_ProxyResources_Empty(t *testing.T) {
-	c := newTestConnectOptions(t)
-	c.proxyManager = newProxyManager()
-	res := c.ProxyResources()
-	if len(res) != 0 {
-		t.Fatalf("expected 0 proxy resources, got %d", len(res))
-	}
-}
-
-func TestConnectOptions_ProxyResources_Nil(t *testing.T) {
-	c := newTestConnectOptions(t)
-	// proxyManager is nil by default
-	res := c.ProxyResources()
-	if res != nil {
-		t.Fatalf("expected nil ProxyResources, got %v", res)
-	}
-}
-
-func TestConnectOptions_ProxyResources_ToResources(t *testing.T) {
-	c := newTestConnectOptions(t)
-	c.proxyManager = newProxyManager()
-	c.proxyManager.Add(&Proxy{workload: "deployments.apps/web", namespace: "prod"})
-	c.proxyManager.Add(&Proxy{workload: "statefulsets.apps/db", namespace: "prod"})
-	c.proxyManager.Add(&Proxy{workload: "deployments.apps/api", namespace: "staging"})
-	res := c.ProxyResources()
-	if len(res) != 3 {
-		t.Fatalf("expected 3, got %d", len(res))
-	}
-	resources := res.ToResources()
-	if len(resources) != 3 {
-		t.Fatalf("ToResources: expected 3, got %d", len(resources))
-	}
-	// Verify ordering is preserved.
-	if resources[0].Workload != "deployments.apps/web" || resources[0].Namespace != "prod" {
-		t.Fatalf("resources[0] = %+v", resources[0])
-	}
-	if resources[2].Workload != "deployments.apps/api" || resources[2].Namespace != "staging" {
-		t.Fatalf("resources[2] = %+v", resources[2])
 	}
 }
 

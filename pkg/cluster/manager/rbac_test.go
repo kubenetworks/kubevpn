@@ -73,7 +73,7 @@ func TestConnectCreateOutboundPod_RBACLifecycle(t *testing.T) {
 			defer cancel()
 			cs := fake.NewSimpleClientset(&v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: tc.managerNS}})
 			if tc.deployment {
-				if err := cs.Tracker().Add(genDeploySpec(tc.managerNS, "test-image", "", config.AttachModeSidecar)); err != nil {
+				if err := cs.Tracker().Add(genDeploySpec(tc.managerNS, "test-image", "")); err != nil {
 					t.Fatal(err)
 				}
 			}

@@ -1,6 +1,6 @@
 // Package controlplane holds the envoy xDS configuration data types that are
 // stored (as YAML) in the traffic-manager ConfigMap and shared between the
-// sidecar-injection logic (pkg/inject) and the xDS snapshot builder (pkg/xds).
+// node-agent attachment logic (pkg/inject) and the xDS snapshot builder (pkg/xds).
 //
 // These types live in a leaf package — depending only on the Kubernetes core
 // types and the standard library — so both pkg/inject and pkg/xds can import
@@ -139,12 +139,8 @@ type Rule struct {
 	// OwnerID identifies the connection that owns this rule (a UUID prefix).
 	// Required — used as the primary key for rule matching in addVirtualRule and removeEnvoyConfig.
 	OwnerID string `yaml:"ownerID" json:"ownerID"`
-	// for no privileged mode (AWS Fargate mode), don't have cap NET_ADMIN and privileged: true. so we cannot use OSI layer 3 proxy
-	// containerPort -> envoyRulePort:localPort
-	// envoyRulePort for envoy forward to localhost:envoyRulePort
-	// localPort for local pc listen localhost:localPort
-	// use ssh reverse tunnel, envoy rule endpoint localhost:envoyRulePort will forward to local pc localhost:localPort
-	// localPort is required and envoyRulePort is optional
+	// PortMap maps each backend container port to the developer-side listening port.
+	// The value is either "envoyPort" or "envoyPort:localPort".
 	PortMap map[int32]string
 	// IsAgent indicates that this rule belongs to a node-agent connection, not a direct user connection.
 	// When both agent and user rules exist with matching headers, user rules take precedence.
@@ -161,8 +157,8 @@ type PortMapping struct {
 	// EnvoyPort is the port envoy forwards to (the first number in the string value).
 	EnvoyPort int32
 	// LocalPort is the port the local PC listens on.
-	// In non-fargate mode (plain "envoyPort" format), LocalPort equals ContainerPort.
-	// In fargate mode ("envoyPort:localPort" format), LocalPort is the second number.
+	// In plain "envoyPort" format, LocalPort equals ContainerPort.
+	// In "envoyPort:localPort" format, LocalPort is the second number.
 	LocalPort int32
 }
 

@@ -31,9 +31,9 @@
 ## Proxy & Envoy (Service Mesh)
 
 - [05-owner-id.md](./05-owner-id.md): Envoy rule ownership by OwnerID
-- [06-fargate-mode.md](./06-fargate-mode.md): Fargate/Service mode design
+- [06-fargate-mode.md](./06-fargate-mode.md): Fargate removal and Service node-agent attachment
 - [16-envoy-controlplane.md](./16-envoy-controlplane.md): Envoy control plane (xDS)
-- [17-sidecar-injection.md](./17-sidecar-injection.md): Sidecar injection strategies
+- [17-sidecar-injection.md](./17-sidecar-injection.md): Sidecar removal and node-agent replacement
 - [40-envoy-original-dst-loop.md](./40-envoy-original-dst-loop.md): Envoy original destination loop
 - [41-five-tuple-pool-dispatch.md](./41-five-tuple-pool-dispatch.md): 5-tuple pool dispatch
 - [42-origin-loopback-cluster.md](./42-origin-loopback-cluster.md): Origin loopback cluster

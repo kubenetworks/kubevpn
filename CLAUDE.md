@@ -10,7 +10,7 @@
 ## Project Overview
 
 KubeVPN is a CLI tool that connects local development environments to Kubernetes cluster networks. It creates TUN
-devices, manages DHCP IP allocation, injects Envoy sidecar proxies, and supports SSH jump hosts.
+devices, manages DHCP IP allocation, attaches workloads to node-boundary Envoy agents, and supports SSH jump hosts.
 
 - **Language:** Go 1.26+
 - **Module:** `github.com/wencaiwulue/kubevpn/v2`
@@ -98,18 +98,16 @@ pkg/
 │   ├── k8s_client.go      K8sClient embedded struct (via SessionBase → ConnectOptions/DataSession/SyncOptions)
 │   ├── traffmgr.go        Create traffic manager pod
 │   ├── traffmgr_resources.go  K8s resource generators (deploy, svc, secret, etc.)
-│   ├── leave.go           Leave/unpatch proxy resources
-│   ├── proxy.go           Port mapping management
-│   ├── proxy_mapper.go    Mapper for port-forward config from ConfigMap
-│   ├── sync.go            Syncthing-based file sync
-│   └── reset.go           Reset workloads to original spec
-├── inject/            Sidecar injection (Injector interface + Strategy pattern)
-│   ├── injector.go        Interface, factory, shared helpers
-│   ├── vpn.go             VPN-only injector
-│   ├── mesh.go            Envoy+VPN injector + UnpatchContainer
-│   ├── fargate.go         Envoy+SSH injector (Fargate/Service mode)
-│   ├── container.go       Container builders (shared helpers)
-│   └── envoy.go           Envoy ConfigMap CRUD, template rendering
+│   ├── leave.go           Leave node-agent proxy rules
+│   ├── proxy.go           Workload resource identity for leave
+│   ├── sync.go            Syncthing-based file sync + declarative clone routes
+│   └── reset.go           Reset node-agent proxy state without workload mutation
+├── inject/            Node-boundary attachment and Envoy rule storage
+│   ├── injector.go        Single node-agent constructor + shared port helpers
+│   ├── nodeagent.go       Workload/Service attachment admission and publication
+│   ├── nodeagent_ready.go Direct-listener and sync-target readiness gates
+│   ├── envoy.go           Envoy ConfigMap CRUD, node-agent bootstrap rendering
+│   └── tls.go             Node-agent TLS environment helpers
 ├── localproxy/        Local SOCKS5/HTTP proxy server
 ├── log/               Structured logging (context-based)
 ├── run/               `kubevpn run` — run K8s workloads in local Docker
@@ -163,7 +161,7 @@ pkg/
 
 ### Design Patterns in Use
 
-- **Strategy pattern** in `pkg/inject` — `Injector` interface with `NewInjector` factory
+- **Single attachment implementation** in `pkg/inject` — `NewInjector` always returns the node-boundary implementation; no sidecar strategy or fallback
 - **Strategy pattern** in `pkg/tunnel/server.go` — `stackConstructor` function type for gvisor stack creation
 - **Embedded struct** in `pkg/handler` — `K8sClient` bundles (clientset, restclient, config, factory) + `InitClient`/`GetFactory`/`GetClientset` methods; embedded via `SessionBase` by `ConnectOptions`/`DataSession`, and directly by `SyncOptions`
 - **Session lifecycle** in `daemon/action` — `SessionLifecycle` owns the daemon session context + `Teardown()` (cancel + logger detach); the rollback/cleanup registry lives separately in `handler.rollbackList` + `SessionBase.cleanup`
@@ -185,8 +183,8 @@ pkg/
 | `cleanupConnection(ctx, conn)` | `daemon/action` | Cleans up a connection's sync and VPN state — used by disconnect and quit |
 | `util.InitKubeClient(f)` | `pkg/util` | Returns (config, restclient, clientset, namespace) — used by `K8sClient.InitClient` |
 | `util.IsNewer(clientVer, clientImg, serverImg)` | `pkg/util` | Version/image-tag comparison (MAJOR.MINOR, tolerant of SHA/latest) — used by client self-upgrade and traffic-manager `UpgradeDeploy` |
-| `gatherContainerPorts(spec, portMaps)` | `pkg/inject` | Collects container ports from pod spec + portMaps — shared by mesh and fargate |
-| `addEnvoyConfig(ctx, mapInterface, spec)` | `pkg/inject` | Adds envoy proxy rule to ConfigMap using `envoyRuleSpec` — shared by vpn and fargate injectors |
+| `gatherContainerPorts(spec, portMaps)` | `pkg/inject` | Collects container ports from pod spec + portMaps — used by node-agent workload and Service attachment |
+| `addEnvoyConfig(ctx, mapInterface, spec)` | `pkg/inject` | Adds a node-agent rule to the manager ConfigMap using `envoyRuleSpec` |
 | `svr.registry.find(id)` | `daemon/action` | Finds connection by ID — do NOT write `for range svr.connections` lookup loops |
 | `svr.registry.removeByID(id)` | `daemon/action` | Removes connections by ID, returns them for caller cleanup |
 | `svr.registry.takeAll()` | `daemon/action` | Removes/returns all connections (quit path); `svr.registry.use(id)` selects the connection as current |
@@ -198,15 +196,15 @@ pkg/
 
 - **`controlplane.Virtual`** — per-workload envoy xDS config stored in ConfigMap. Has `SchemaVersion` field (current: `controlplane.CurrentSchemaVersion = 2`; zero = legacy pre-versioning, requires OwnerID on all rules)
 - **`controlplane.PortMapping`** — parsed representation of the `Rule.PortMap` string encoding. Use `rule.ParsePortMap()` instead of manually parsing the `"envoyPort:localPort"` strings
-- **`inject.envoyRuleSpec`** — parameter object for `addEnvoyConfig`/`addVirtualRule`. Groups Namespace, NodeID, IPs, Headers, Ports, PortMap, FargateMode, OwnerID
+- **`inject.envoyRuleSpec`** — parameter object for `addEnvoyConfig`/`addVirtualRule`. Groups Namespace, NodeID, IPs, Headers, Ports, PortMap, OwnerID, Selector, ServiceName, IsAgent, and optional SyncTarget
 
-### Fargate/Service Mode
+### Node-boundary / Service Attachment
 
-- Detection: use `virtual.IsFargateMode()` which checks the explicit `FargateMode` bool field first
-- Do NOT infer mode from `EnvoyListenerPort != 0` — that is a legacy fallback only
-- Port names: use `config.PortNameTCP`, `config.PortNameEnvoy`, `config.PortNameHTTP`, `config.PortNameDNS`
-- Rollback functions: always `AddRollbackFunc`
-- Design doc: `docs/06-fargate-mode.md`
+- All workload and Service targets use the node-boundary DaemonSet; there is no sidecar or Fargate fallback
+- Explicit Services set `Virtual.ServiceName` and publish only their own ClusterIP/ServicePort origins; unmatched traffic returns to that ClusterIP
+- Sync routes set `Rule.SyncTarget`; only derived per-node Virtuals contain the resolved clone PodIP
+- `hostNetwork` and legacy sidecar-injected workloads are rejected rather than migrated
+- Design docs: `docs/55-node-hosted-agent.md`, `docs/26-sync-mode.md`
 
 ### Dual-Session Pattern: ControlSession vs DataSession (IMPORTANT)
 
@@ -235,7 +233,7 @@ Root Daemon: ds.OwnerID = req.OwnerID → ds.DoConnect (getCIDR → NetworkManag
 - `ControlSession` does not hold `LocalTunIPv4/v6`
 - When it needs an IP, it calls `svr.getSudoTunIPs(ctx)` to query the sudo daemon's Status RPC
 - It matches the IP for each connection by ConnectionID via `resolveTunIP(connect, ips)`
-- Used by: sidecar injection (`CreateRemoteInboundPod`), leave, and status queries
+- Used by: node-agent attachment (`CreateRemoteInboundPod`), sync routes, leave, and status queries
 
 **Rules when modifying these types:**
 - **K8s client fields live in `K8sClient`** (embedded via `SessionBase`) — holds clientset, restclient, config, factory. Use `GetFactory()`/`GetClientset()`. Initialize via `InitClient(f)` (delegates to `util.InitKubeClient`); build the factory with `util.InitFactoryByBytes` (no temp file)
@@ -260,7 +258,7 @@ Root Daemon: ds.OwnerID = req.OwnerID → ds.DoConnect (getCIDR → NetworkManag
 
 - **`Connection`** — the shared identity/lifecycle/status surface **both** `*ConnectOptions` and `*DataSession` satisfy. `Server.connections` is typed `[]Connection`.
 - **`DataPlane`** (embeds `Connection`) — root-daemon-only operations: `DoConnect`, `GetLocalTunIP`, `GetAPIServerIPs`, `GetNetworkExtraHost`, `GetLastHeartbeat`. Only `*DataSession` satisfies it.
-- **`ProxyController`** (embeds `Connection`) — user-daemon-only operations: `CreateRemoteInboundPod`, `LeaveAllProxyResources`, `LeaveResource`, `ProxyResources`, `SetSync`. Only `*ConnectOptions` satisfies it.
+- **`ProxyController`** (embeds `Connection`) — user-daemon-only operations: `CreateRemoteInboundPod`, `CreateRemoteSyncRoutes`, `LeaveAllProxyResources`, `LeaveResource`, `SetSync`. Only `*ConnectOptions` satisfies it.
 
 This replaced the old single 28-method `Connection` interface, where each type carried stubs for the other plane's methods (e.g. `ConnectOptions.DoConnect` returned an error, `DataSession.CreateRemoteInboundPod` was a no-op) — a wrong-plane call compiled and failed at runtime. Now the type system rejects it at compile time.
 

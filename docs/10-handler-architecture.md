@@ -8,7 +8,7 @@
 Session orchestration (control and data remain separate)
 ├── DataSession → network.Runtime      — transports, TUN, addresses, routes and DNS
 ├── ConnectOptions → cluster/manager   — traffic manager deployment and upgrade
-├── ProxyManager                       — local port mappers; injection runs server-side
+├── ProxyController → xds             — node-agent attachment and sync-route lifecycle
 ├── SyncOptions → internal/syncworkload — clone and local Syncthing lifecycle
 ├── ConfigMapStore                     — session-owned cache and live writes
 └── K8sClient                          — Kubernetes access (embedded)
@@ -68,7 +68,7 @@ ConnectOptions (= ControlSession)     DataSession
 ├── ConnectionID         string       ├── ConnectionID         string
 ├── RequestRaw           []byte       ├── Lock  *sync.Mutex
 ├── SshHosts             []net.IP     ├── ReservedTunIPs func() []net.IP
-├── proxyManager *ProxyManager        ├── ctx    context.Context    (set at start of DoConnect)
+├── syncMu + Sync                     ├── ctx    context.Context    (set at start of DoConnect)
 ├── syncMu + Sync                     ├── cancel context.CancelFunc
 └── ProxyController role             ├── nm     *network.Runtime
                                       └── DataPlane role
@@ -82,7 +82,7 @@ ConnectOptions (= ControlSession)     DataSession
 |---|---|---|
 | Entry point | `redirectConnectToSudoDaemon` | `Connect` → `ds.DoConnect` |
 | IP acquisition | queries sudo daemon via `getSudoTunIPs` | `network.Runtime.rentIP` (in startTUN) |
-| Sub-managers | proxyManager, configMapStore | nm (*network.Runtime), configMapStore |
+| Sub-managers | configMapStore | nm (*network.Runtime), configMapStore |
 | Cleanup path | always `cleanupControlPlane` | always `cleanupDataPlane` |
 | Persistence | ✅ OffloadToConfig (json tags) | ❌ never persisted |
 
@@ -216,29 +216,24 @@ message TunIPRequest {
 | Scenario | OwnerID Value | Lifecycle |
 |----------|---------------|-----------|
 | Client (connect/proxy) | `uuid.New().String()[:12]` | Unique per connection |
-| Sidecar (mesh mode) | `podName` | Pod lifecycle |
+| Node-agent tunnel | `nodeName` | Node-local tunnel and lease lifecycle |
 
 **Why not connectionID:** connectionID = last 12 hex chars of the namespace UID, which is per-namespace. Multiple clients connecting to the same namespace would conflict.
 
-## ProxyManager — Sidecar Injection/Removal
+## ProxyController — Node-agent Attachment Lifecycle
 
-```go
-type ProxyManager struct {
-    factory            cmdutil.Factory
-    clientset          kubernetes.Interface
-    managerNamespace   string
-    mu                 sync.Mutex
-    workloads          ProxyList
-}
-```
+`ProxyController` owns manager-facing proxy and sync operations. There is no
+client-side sidecar registry or SSH port Mapper.
 
 | Method | Description |
 |--------|-------------|
-| `Add(proxy)` | Register a proxy workload |
-| `Remove(ns, workload)` | Remove from tracking |
-| `Resources()` | Snapshot the list |
-| `LeaveAll(ctx, ownerID)` | Remove all sidecars for the given ownerID |
-| `Leave(ctx, resources, ownerID)` | Remove sidecars from specified workloads for the given ownerID |
+| `CreateRemoteInboundPod(...)` | Publish workload or explicit Service attachment rules |
+| `CreateRemoteSyncRoutes(...)` | Publish declarative original-to-clone sync routes |
+| `LeaveAllProxyResources(ctx)` | Remove all rules owned by the current connection |
+| `LeaveResource(ctx, resources, ownerID)` | Remove selected workload/Service rules without mutating targets |
+
+The manager's `AttachmentPublisher` derives per-node Virtuals and direct
+listeners. Sync clone PodIPs appear only in derived rules.
 
 ## ConfigMapStore — traffic manager ConfigMap access
 
@@ -308,16 +303,15 @@ pkg/handler/
 ├── connect_tun.go        Run() delegates to endpoint.Serve
 ├── connect_route.go      newTickerResetHandler
 ├── connect_upgrade.go    upgradeDeploy
-├── proxy_manager.go      ProxyManager (Add/Remove/Leave)
 ├── configmap_store.go    ConfigMapStore (EnsureSynced/Get/GetConfigMap/Set)
-├── proxy.go              Proxy/ProxyList data types
-├── proxy_mapper.go       Mapper (port-forward config watcher)
+├── proxy.go              Workload resource identity for leave
+├── inject_client.go      Manager-facing attachment and sync-route clients
 ├── k8s_client.go         K8sClient embedded struct
-├── sync.go               SyncOptions, DoSync
+├── sync.go               SyncOptions, DoSync, route-before-clone cleanup
 ├── traffmgr.go           Traffic manager pod creation
 ├── traffmgr_resources.go K8s resource generators
-├── leave.go              Proxy removal delegation
-├── reset.go              Reset workloads
+├── leave.go              Proxy rule removal delegation
+├── reset.go              Reset node-agent proxy state without workload mutation
 ├── once.go               Server-side helpers (labelNs, genTLS, getCIDR)
 ├── sort.go               Connects sorting
 ├── extraoptions.go       ExtraRouteInfo + RPC conversion

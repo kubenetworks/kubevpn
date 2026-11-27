@@ -1,14 +1,11 @@
 package inject
 
 import (
-	"encoding/json"
 	"testing"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/cli-runtime/pkg/resource"
 )
 
@@ -67,97 +64,6 @@ func TestNewInjector_NoHeadersNoPortMaps(t *testing.T) {
 	injector := NewInjector(opts)
 	if _, ok := injector.(*nodeAgentInjector); !ok {
 		t.Fatalf("expected *nodeAgentInjector (VPN-only = mesh with empty headers), got %T", injector)
-	}
-}
-
-func Test_clearPodMetadata(t *testing.T) {
-	now := metav1.Now()
-	pod := &v1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:              "test-pod",
-			Namespace:         "default",
-			SelfLink:          "/api/v1/namespaces/default/pods/test-pod",
-			Generation:        3,
-			ResourceVersion:   "12345",
-			UID:               types.UID("abc-123"),
-			DeletionTimestamp: &now,
-			ManagedFields: []metav1.ManagedFieldsEntry{
-				{Manager: "kubectl", Operation: metav1.ManagedFieldsOperationUpdate},
-			},
-			OwnerReferences: []metav1.OwnerReference{
-				{Name: "owner", UID: types.UID("owner-uid")},
-			},
-		},
-	}
-
-	clearPodMetadata(pod)
-
-	if pod.SelfLink != "" {
-		t.Errorf("expected SelfLink to be cleared, got %q", pod.SelfLink)
-	}
-	if pod.Generation != 0 {
-		t.Errorf("expected Generation to be 0, got %d", pod.Generation)
-	}
-	if pod.ResourceVersion != "" {
-		t.Errorf("expected ResourceVersion to be cleared, got %q", pod.ResourceVersion)
-	}
-	if pod.UID != "" {
-		t.Errorf("expected UID to be cleared, got %q", pod.UID)
-	}
-	if pod.DeletionTimestamp != nil {
-		t.Errorf("expected DeletionTimestamp to be nil, got %v", pod.DeletionTimestamp)
-	}
-	if pod.ManagedFields != nil {
-		t.Errorf("expected ManagedFields to be nil, got %v", pod.ManagedFields)
-	}
-	if pod.OwnerReferences != nil {
-		t.Errorf("expected OwnerReferences to be nil, got %v", pod.OwnerReferences)
-	}
-	// Name and Namespace should remain unchanged
-	if pod.Name != "test-pod" {
-		t.Errorf("expected Name to remain %q, got %q", "test-pod", pod.Name)
-	}
-	if pod.Namespace != "default" {
-		t.Errorf("expected Namespace to remain %q, got %q", "default", pod.Namespace)
-	}
-}
-
-func TestJSONPatchOp_Marshal(t *testing.T) {
-	op := JSONPatchOp{
-		Op:    "replace",
-		Path:  "/spec/template/spec",
-		Value: map[string]string{"key": "value"},
-	}
-	data, err := json.Marshal(op)
-	if err != nil {
-		t.Fatalf("unexpected marshal error: %v", err)
-	}
-	var decoded map[string]any
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		t.Fatalf("unexpected unmarshal error: %v", err)
-	}
-	if decoded["op"] != "replace" {
-		t.Errorf("expected op %q, got %q", "replace", decoded["op"])
-	}
-	if decoded["path"] != "/spec/template/spec" {
-		t.Errorf("expected path %q, got %q", "/spec/template/spec", decoded["path"])
-	}
-	valMap, ok := decoded["value"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected value to be a map, got %T", decoded["value"])
-	}
-	if valMap["key"] != "value" {
-		t.Errorf("expected value.key %q, got %q", "value", valMap["key"])
-	}
-
-	// Verify omitempty: empty fields should be omitted
-	empty := JSONPatchOp{}
-	emptyData, err := json.Marshal(empty)
-	if err != nil {
-		t.Fatalf("unexpected marshal error for empty op: %v", err)
-	}
-	if string(emptyData) != "{}" {
-		t.Errorf("expected empty op to marshal to %q, got %q", "{}", string(emptyData))
 	}
 }
 

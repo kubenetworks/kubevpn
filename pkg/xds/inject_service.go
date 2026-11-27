@@ -50,18 +50,12 @@ func injectStreamLogger(sendMsg func(string) error) *log.Logger {
 	return logger
 }
 
-// ProxyInject injects envoy sidecars into the requested workloads server-side, run
-// by the traffic manager with its own in-cluster ServiceAccount. It mirrors the
-// client-side ConnectOptions.CreateRemoteInboundPod loop, but performs every cluster
-// mutation (workload get/patch, envoy ConfigMap rule, rollout wait, fargate service
-// target-port) here in the pod. The one side effect that cannot move server-side —
-// the SSH reverse-tunnel port Mapper for K8s Service workloads, which forwards to the
-// developer's LOCAL machine — is not run here; instead the response reports which
-// workloads are Services (plus their pod selector) so the client runs its own Mapper.
+// ProxyInject publishes node-agent workload, explicit Service, and sync-clone
+// attachment state through the manager. It never patches workload PodSpecs or
+// Service target ports and has no sidecar fallback.
 //
-// Progress is streamed to the client as Message lines. If the factory is unset
-// (server-side injection unavailable), it returns codes.Unavailable so the client
-// falls back to local injection.
+// Progress is streamed to the client as Message lines. An unset factory returns
+// codes.Unavailable because workload resolution is unavailable.
 func (s *TunConfigServer) ProxyInject(req *rpc.InjectRequest, stream rpc.TunConfigService_ProxyInjectServer) error {
 	if s.factory == nil {
 		return status.Error(codes.Unavailable, "server-side injection unavailable")
@@ -80,12 +74,6 @@ func (s *TunConfigServer) ProxyInject(req *rpc.InjectRequest, stream rpc.TunConf
 		return stream.Send(&rpc.InjectResponse{Message: m})
 	})
 	ctx := plog.WithLogger(stream.Context(), logger)
-
-	// The manager runs in the manager namespace, so its own Secret holds the TLS cert.
-	tlsSecret, err := s.clientset.CoreV1().Secrets(s.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
-	if err != nil {
-		return status.Errorf(codes.Internal, "get tls secret: %v", err)
-	}
 
 	plog.StepStart(ctx, "Injecting proxy sidecar (server-side)")
 	type injectTarget struct {
@@ -111,19 +99,13 @@ func (s *TunConfigServer) ProxyInject(req *rpc.InjectRequest, stream rpc.TunConf
 		}
 		targets = append(targets, injectTarget{workload: route.GetWorkload(), syncTarget: &controlplane.SyncTarget{UID: targetNodeID, Selector: selector}})
 	}
-	var services []*rpc.ServiceWorkload
 	for _, target := range targets {
 		workload := target.workload
 		object, controller, nodeID, err := s.resolveWorkloadNodeID(ctx, req.GetNamespace(), workload)
 		if err != nil {
 			return err
 		}
-		attachMode := req.GetAttachMode()
-		if attachMode == "" {
-			attachMode = s.ResolveAttachMode(ctx)
-		}
 		injector := inject.NewInjector(inject.InjectOptions{
-			Factory:          s.factory,
 			Clientset:        s.clientset,
 			ManagerNamespace: s.namespace,
 			NodeID:           nodeID,
@@ -133,10 +115,7 @@ func (s *TunConfigServer) ProxyInject(req *rpc.InjectRequest, stream rpc.TunConf
 			LocalTunIPv6:     req.GetLocalTunIPv6(),
 			Headers:          req.GetHeaders(),
 			PortMaps:         req.GetPortMap(),
-			Secret:           tlsSecret,
-			Image:            req.GetImage(),
 			OwnerID:          req.GetOwnerID(),
-			AttachMode:       attachMode,
 			SyncTarget:       target.syncTarget,
 			ServiceName:      util.If(clusterworkload.IsK8sService(object), object.Name, ""),
 		})
@@ -147,14 +126,12 @@ func (s *TunConfigServer) ProxyInject(req *rpc.InjectRequest, stream rpc.TunConf
 	}
 	plog.StepDone(ctx, "Injected proxy sidecar into %d workloads", len(targets))
 
-	// Final frame: report Service workloads needing a client-side Mapper.
-	return stream.Send(&rpc.InjectResponse{Services: services})
+	return stream.Send(&rpc.InjectResponse{})
 }
 
-// LeaveInject removes the caller's envoy rule (by OwnerID) from workloads server-side:
-// the traffic manager unpatches the sidecar when the workload has no rules left, waits
-// for rollout and (fargate) restores the service target port, using its own in-cluster
-// ServiceAccount.
+// LeaveInject removes the caller's node-agent rules by OwnerID. It never
+// unpatches workloads or restores Service target ports; deleted targets are
+// resolved from stored Virtual identities when necessary.
 //
 // If Workloads is empty it removes the OwnerID's rules from ALL workloads it currently
 // proxies (derived from ENVOY_CONFIG) — used by the client's disconnect cleanup, since

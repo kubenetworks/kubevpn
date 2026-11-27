@@ -45,9 +45,6 @@ type ConnectOptions struct {
 	// Control-plane only: SSH jump host IPs (added to API server IPs at CIDR detection).
 	SshHosts []net.IP `json:"-"`
 
-	// Control-plane only: sidecar injection lifecycle.
-	proxyManager *ProxyManager
-
 	// Control-plane only: file sync.
 	syncMu sync.RWMutex
 	Sync   *SyncOptions
@@ -232,14 +229,6 @@ func (c *ConnectOptions) GetConfigMapInformer() cache.SharedInformer {
 	return c.getConfigMapStore().GetInformer()
 }
 
-// ProxyResources returns the list of workloads currently being proxied by this connection.
-func (c *ConnectOptions) ProxyResources() ProxyList {
-	if c.proxyManager == nil {
-		return nil
-	}
-	return c.proxyManager.Resources()
-}
-
 // GetSync returns the SyncOptions associated with this connection, or nil.
 func (c *ConnectOptions) GetSync() *SyncOptions {
 	c.syncMu.RLock()
@@ -254,16 +243,14 @@ func (c *ConnectOptions) SetSync(s *SyncOptions) {
 	c.Sync = s
 }
 
-// CreateRemoteInboundPod injects Envoy sidecar proxies into the specified workloads for
-// inbound traffic interception. Injection runs entirely server-side (the traffic manager
-// patches workloads and writes envoy rules with its own ServiceAccount over the VPN); the
-// client only starts the local port Mapper for K8s Service workloads. There is no local
-// fallback — a manager/RBAC failure is returned to the caller.
-func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace string, workloads []string, headers map[string]string, portMap []string, image string, localTunIPv4, localTunIPv6, attachMode string) error {
+// CreateRemoteInboundPod attaches workloads to node-boundary agents for inbound
+// traffic interception. The manager writes all desired state server-side; there
+// is no local sidecar fallback.
+func (c *ConnectOptions) CreateRemoteInboundPod(ctx context.Context, namespace string, workloads []string, headers map[string]string, portMap []string, image string, localTunIPv4, localTunIPv6 string) error {
 	if localTunIPv4 == "" {
 		return fmt.Errorf("local tun IPv4 is empty")
 	}
-	if err := c.createRemoteInboundViaManager(ctx, namespace, headers, portMap, image, localTunIPv4, localTunIPv6, attachMode, workloads); err != nil {
+	if err := c.createRemoteInboundViaManager(ctx, namespace, headers, portMap, image, localTunIPv4, localTunIPv6, workloads); err != nil {
 		return fmt.Errorf("%w: %w", err, config.ErrEnvoyInject)
 	}
 	// The server-side inject just wrote envoy rules to the ConfigMap. Refresh the

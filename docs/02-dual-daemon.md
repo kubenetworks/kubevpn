@@ -91,11 +91,10 @@ connect := &handler.ConnectOptions{
 Fields used:
 | Field | Purpose |
 |-------|---------|
-| `SessionBase.K8sClient` (clientset, factory) | Interact with K8s API (inject sidecar, query ConfigMap) |
+| `SessionBase.K8sClient` (clientset, factory) | Publish node-agent state and query ConfigMaps |
 | `OwnerID` | Written into Envoy Rule to identify ownership |
 | `Image/ImagePullSecretName` | CreateOutboundPod creates the traffic manager pod |
-| `proxyManager` | ProxyManager — manages proxied workloads lifecycle |
-| `Sync` | File sync options |
+| `Sync` | File sync options and declarative clone routes |
 | `RequestRaw` | Needed for persistence |
 
 `ConnectOptions` satisfies `Connection` and `ProxyController`, not `DataPlane`.

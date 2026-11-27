@@ -100,13 +100,10 @@ func (c *ConnectOptions) dialManagerWithRetry(ctx context.Context) (*grpc.Client
 	}
 }
 
-// createRemoteInboundViaManager performs sidecar injection server-side: it dials the
-// traffic manager's ProxyInject RPC over the VPN and streams progress. Injection runs
-// entirely in the pod with the manager's own ServiceAccount; there is no local fallback,
-// so any failure (unreachable manager, missing RBAC, workload error) is returned. On
-// success it starts the client-side port Mapper for any K8s Service workloads the manager
-// reports — the SSH reverse tunnels to the developer's machine cannot run in the pod.
-func (c *ConnectOptions) createRemoteInboundViaManager(ctx context.Context, namespace string, headers map[string]string, portMap []string, image, localTunIPv4, localTunIPv6, attachMode string, workloads []string) error {
+// createRemoteInboundViaManager publishes node-agent attachments through the
+// manager's ProxyInject RPC. There is no local sidecar fallback, so manager,
+// RBAC, workload, and readiness failures are returned to the caller.
+func (c *ConnectOptions) createRemoteInboundViaManager(ctx context.Context, namespace string, headers map[string]string, portMap []string, image, localTunIPv4, localTunIPv6 string, workloads []string) error {
 	if c.OwnerID == "" {
 		return fmt.Errorf("cannot resolve owner ID for connection in namespace %s - reconnect and retry", namespace)
 	}
@@ -126,13 +123,11 @@ func (c *ConnectOptions) createRemoteInboundViaManager(ctx context.Context, name
 		LocalTunIPv4: localTunIPv4,
 		LocalTunIPv6: localTunIPv6,
 		Image:        image,
-		AttachMode:   attachMode,
 	})
 	if err != nil {
 		return fmt.Errorf("server-side inject: %w", err)
 	}
 
-	var services []*rpc.ServiceWorkload
 	for {
 		resp, recvErr := stream.Recv()
 		if recvErr == io.EOF {
@@ -144,12 +139,7 @@ func (c *ConnectOptions) createRemoteInboundViaManager(ctx context.Context, name
 		if resp.GetMessage() != "" {
 			plog.G(ctx).Info(resp.GetMessage())
 		}
-		if len(resp.GetServices()) > 0 {
-			services = resp.GetServices()
-		}
 	}
-
-	c.startServiceMappers(namespace, headers, portMap, services)
 	return nil
 }
 
@@ -265,40 +255,4 @@ func (c *ConnectOptions) tryLeaveInject(ctx context.Context, addr, namespace str
 func isTransientGRPC(err error) bool {
 	code := status.Code(err)
 	return errors.Is(err, context.DeadlineExceeded) || code == codes.Unavailable || code == codes.DeadlineExceeded
-}
-
-// startServiceMappers starts a client-side port Mapper for each K8s Service workload the
-// manager injected. The Mapper opens SSH reverse tunnels from the sidecar back to the
-// developer's local ports, so it must run on the client even though injection itself ran
-// server-side.
-func (c *ConnectOptions) startServiceMappers(namespace string, headers map[string]string, portMap []string, services []*rpc.ServiceWorkload) {
-	if len(services) == 0 {
-		return
-	}
-	if c.proxyManager == nil {
-		c.proxyManager = newProxyManager()
-	}
-	for _, s := range services {
-		mapper := NewMapper(c.clientset, namespace, s.GetSelector(), headers, s.GetWorkload(), c.GetConfigMapInformer())
-		c.proxyManager.Add(&Proxy{
-			headers:    headers,
-			portMap:    portMap,
-			workload:   s.GetWorkload(),
-			namespace:  namespace,
-			portMapper: mapper,
-		})
-		go mapper.Run()
-	}
-}
-
-// stopServiceMappers stops and removes any local port Mapper for the given workloads
-// (used after a server-side leave). ProxyList.Remove stops the Mapper before dropping it;
-// a no-op when no Mapper is tracked (e.g. mesh workloads).
-func (c *ConnectOptions) stopServiceMappers(namespace string, workloads []string) {
-	if c.proxyManager == nil {
-		return
-	}
-	for _, w := range workloads {
-		c.proxyManager.Remove(namespace, w)
-	}
 }

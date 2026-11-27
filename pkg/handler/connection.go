@@ -62,11 +62,10 @@ type SyncRoute struct {
 // and kubeconfig recovery use the concrete control session, not shared Connection.
 type ProxyController interface {
 	Connection
-	CreateRemoteInboundPod(context.Context, string, []string, map[string]string, []string, string, string, string, string) error
+	CreateRemoteInboundPod(context.Context, string, []string, map[string]string, []string, string, string, string) error
 	CreateRemoteSyncRoutes(context.Context, string, []SyncRoute, string) error
 	LeaveAllProxyResources(context.Context) error
 	LeaveResource(context.Context, []Resources, string) error
-	ProxyResources() ProxyList
 	GetRunningPodList(context.Context) ([]v1.Pod, error)
 	RefreshConfigMapCache(context.Context) error
 	GetSocksListenAddr() string

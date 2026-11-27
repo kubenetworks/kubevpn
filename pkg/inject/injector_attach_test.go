@@ -8,65 +8,19 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/cli-runtime/pkg/resource"
-
-	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
-func TestNewInjectorSelectsNodeAgentForNonService(t *testing.T) {
-	opts := minimalInjectOptionsForTest()
-	opts.AttachMode = config.AttachModeNodeAgent
-	inj := NewInjector(opts)
-	if _, ok := inj.(*nodeAgentInjector); !ok {
-		t.Fatalf("want nodeAgentInjector for non-Service + node-agent mode, got %T", inj)
+func TestNewInjectorSelectsNodeAgentForWorkloadAndService(t *testing.T) {
+	for _, object := range []*resource.Info{minimalInjectOptionsForTest().Object, serviceObjectForTest()} {
+		inj := NewInjector(InjectOptions{Object: object})
+		if _, ok := inj.(*nodeAgentInjector); !ok {
+			t.Fatalf("want nodeAgentInjector, got %T", inj)
+		}
 	}
 }
 
-func TestNewInjectorSelectsNodeAgentByDefault(t *testing.T) {
-	opts := minimalInjectOptionsForTest()
-	inj := NewInjector(opts)
-	if _, ok := inj.(*nodeAgentInjector); !ok {
-		t.Fatalf("want nodeAgentInjector by default, got %T", inj)
-	}
-}
-
-func TestNewInjectorSelectsNodeAgentEvenWhenSidecarRequested(t *testing.T) {
-	opts := minimalInjectOptionsForTest()
-	opts.AttachMode = config.AttachModeSidecar
-	inj := NewInjector(opts)
-	if _, ok := inj.(*nodeAgentInjector); !ok {
-		t.Fatalf("sidecar value must not fall back to mesh, got %T", inj)
-	}
-}
-
-func TestNewInjectorSelectsMeshOnlyForLegacySync(t *testing.T) {
-	opts := minimalInjectOptionsForTest()
-	opts.AttachMode = config.AttachModeLegacySidecar
-	inj := NewInjector(opts)
-	if _, ok := inj.(*meshInjector); !ok {
-		t.Fatalf("sync legacy path must keep mesh injection, got %T", inj)
-	}
-}
-
-func TestNewInjectorSelectsNodeAgentForService(t *testing.T) {
-	opts := minimalInjectOptionsForTest()
-	opts.AttachMode = config.AttachModeNodeAgent
-	opts.Object = serviceObjectForTest()
-	inj := NewInjector(opts)
-	if _, ok := inj.(*nodeAgentInjector); !ok {
-		t.Fatalf("Service target must use nodeAgentInjector, got %T", inj)
-	}
-}
-
-// minimalInjectOptionsForTest builds the minimal non-Service InjectOptions the
-// factory needs.
 func minimalInjectOptionsForTest() InjectOptions {
-	return InjectOptions{
-		Object: &resource.Info{
-			Mapping: &meta.RESTMapping{
-				Resource: schema.GroupVersionResource{Resource: "deployments"},
-			},
-		},
-	}
+	return InjectOptions{Object: &resource.Info{Mapping: &meta.RESTMapping{Resource: schema.GroupVersionResource{Resource: "deployments"}}}}
 }
 
 func serviceObjectForTest() *resource.Info {

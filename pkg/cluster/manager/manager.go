@@ -77,18 +77,6 @@ func waitForManagerPod(ctx context.Context, clientset kubernetes.Interface, name
 	})
 }
 
-// resolveAttachModeOnRecreate reads KUBEVPN_PROXY_ATTACH_MODE from the manager
-// Deployment about to be replaced, so a value set before connect (helm values,
-// kubevpn install) survives manager recreation. Falls back to the node-agent
-// default when the deployment is gone or the env is unset.
-func resolveAttachModeOnRecreate(ctx context.Context, clientset kubernetes.Interface, namespace string) string {
-	deploy, err := clientset.AppsV1().Deployments(namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
-	if err != nil {
-		return config.AttachModeNodeAgent
-	}
-	return existingAttachMode(&deploy.Spec.Template.Spec)
-}
-
 // createOutboundPod reports whether this call created the traffic manager, rather
 // than reusing a running manager with an existing Deployment.
 func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, namespace, image, imagePullSecretName string) (created bool, err error) {
@@ -118,7 +106,7 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 	// The install's pod may still be pulling its image when connect runs
 	// (DetectPodExists requires AllContainersRunning). Give it a short grace
 	// period before deleting everything — recreating clobbers any pre-connect
-	// customization of the manager (e.g. helm proxy.attachMode=sidecar).
+	// customization of the manager before its first connect.
 	if werr := waitForManagerPod(ctx, clientset, namespace, managerRecreateGrace); werr == nil {
 		_, derr := clientset.AppsV1().Deployments(namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 		if derr == nil {
@@ -129,10 +117,6 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 			return false, fmt.Errorf("failed to get deployment %s: %w", config.ConfigMapPodTrafficManager, derr)
 		}
 	}
-
-	// Inherit the attach mode from the deployment being replaced so a pin set
-	// before connect survives recreation (design doc §3).
-	attachMode := resolveAttachModeOnRecreate(ctx, clientset, namespace)
 
 	defer func() {
 		if err != nil {
@@ -209,7 +193,7 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 
 	// 8) create deployment
 	plog.StepStart(ctx, "Creating Deployment")
-	deploy := genDeploySpec(namespace, image, imagePullSecretName, attachMode)
+	deploy := genDeploySpec(namespace, image, imagePullSecretName)
 	deploy, err = clientset.AppsV1().Deployments(namespace).Create(ctx, deploy, metav1.CreateOptions{})
 	if err != nil {
 		return false, fmt.Errorf("failed to create deployment for %s: %w", config.ConfigMapPodTrafficManager, err)
@@ -224,10 +208,8 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 		return false, err
 	}
 	plog.StepDone(ctx, "Traffic manager ready in namespace %q", namespace)
-	if attachMode == config.AttachModeNodeAgent {
-		if err = ensureNodeAgentDaemonSet(ctx, clientset, namespace, image); err != nil {
-			return false, fmt.Errorf("ensure node-agent daemonset: %w", err)
-		}
+	if err = ensureNodeAgentDaemonSet(ctx, clientset, namespace, image); err != nil {
+		return false, fmt.Errorf("ensure node-agent daemonset: %w", err)
 	}
 	return true, nil
 }

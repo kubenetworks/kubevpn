@@ -24,15 +24,6 @@ import (
 //go:embed envoy.yaml
 var envoyConfig []byte
 
-//go:embed envoy_ipv4.yaml
-var envoyConfigIPv4 []byte
-
-//go:embed fargate_envoy.yaml
-var envoyConfigFargate []byte
-
-//go:embed fargate_envoy_ipv4.yaml
-var envoyConfigIPv4Fargate []byte
-
 func renderEnvoyConfig(tmplStr string, value string) string {
 	tmpl, err := template.New("").Parse(tmplStr)
 	if err != nil {

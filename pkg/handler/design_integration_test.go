@@ -60,54 +60,6 @@ func TestDoc07_ManagerNamespaceUsedForTrafficManager(t *testing.T) {
 	}
 }
 
-func TestDoc07_WorkloadNamespaceSeparateFromManager(t *testing.T) {
-	// Doc says: proxy injection targets WorkloadNamespace, not ManagerNamespace
-	c := &ConnectOptions{
-		ManagerNamespace:  "kubevpn",
-		WorkloadNamespace: "production",
-	}
-	c.proxyManager = newProxyManager()
-	c.proxyManager.Add(&Proxy{workload: "deploy/web", namespace: "production"})
-
-	res := c.ProxyResources()
-	if len(res) != 1 || res[0].namespace != "production" {
-		t.Fatalf("proxy should be in workload namespace 'production', got %v", res)
-	}
-}
-
-// ============================================================================
-// Tests for 10-handler-architecture.md:
-// NetworkManager lifecycle, ProxyManager, ConfigMapStore
-// ============================================================================
-
-func TestDoc10_ProxyManager_AddAndResources(t *testing.T) {
-	// Doc says: ProxyManager tracks injected sidecars
-	pm := newProxyManager()
-	pm.Add(&Proxy{workload: "deployments.apps/web", namespace: "test-ns"})
-	pm.Add(&Proxy{workload: "deployments.apps/api", namespace: "test-ns"})
-
-	resources := pm.Resources()
-	if len(resources) != 2 {
-		t.Fatalf("expected 2 resources, got %d", len(resources))
-	}
-}
-
-func TestDoc10_ProxyManager_RemoveByWorkload(t *testing.T) {
-	// Doc says: Leave removes specific workloads
-	pm := newProxyManager()
-	pm.Add(&Proxy{workload: "deploy/a", namespace: "ns"})
-	pm.Add(&Proxy{workload: "deploy/b", namespace: "ns"})
-
-	pm.Remove("ns", "deploy/a")
-	resources := pm.Resources()
-	if len(resources) != 1 {
-		t.Fatalf("expected 1 proxy after remove, got %d", len(resources))
-	}
-	if resources[0].workload != "deploy/b" {
-		t.Fatalf("wrong proxy remaining: %s", resources[0].workload)
-	}
-}
-
 func TestDoc10_ConfigMapStore_CacheFirst(t *testing.T) {
 	// ConfigMapStore.Get is cache-only (no live-API fallback): EnsureSynced warms the
 	// informer at connect, then Get is served from memory.
