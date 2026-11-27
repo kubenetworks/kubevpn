@@ -11,6 +11,18 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+func TestBaseVirtualWithoutOriginsProducesNoResources(t *testing.T) {
+	virtual := &Virtual{
+		Namespace: "default", UID: "deployments.apps.reviews",
+		Ports: []ContainerPort{{ContainerPort: 9080, Protocol: "TCP"}},
+		Rules: []*Rule{{OwnerID: "owner-a", LocalTunIPv4: "198.18.0.1", PortMap: map[int32]string{9080: "9080"}}},
+	}
+	listeners, clusters, routes, endpoints := To(virtual, false, logrus.NewEntry(logrus.New()))
+	if len(listeners) != 0 || len(clusters) != 0 || len(routes) != 0 || len(endpoints) != 0 {
+		t.Fatalf("base Virtual must not produce legacy data-plane resources: %d %d %d %d", len(listeners), len(clusters), len(routes), len(endpoints))
+	}
+}
+
 func TestAgentOrigins_DirectListenersAndExplicitPodRoutes(t *testing.T) {
 	virtual := &Virtual{
 		Namespace:         "default",

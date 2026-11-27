@@ -181,25 +181,72 @@ func (s *TunConfigServer) LeaveInject(req *rpc.InjectRequest, stream rpc.TunConf
 
 	plog.StepStart(ctx, "Removing proxy from workloads (server-side)")
 	for _, workload := range workloads {
-		object, controller, nodeID, err := s.resolveWorkloadNodeID(ctx, req.GetNamespace(), workload)
-		if err != nil {
-			return err
+		nodeID := s.resolveLeaveNodeID(ctx, req.GetNamespace(), workload, req.GetOwnerID())
+		_, found, err := inject.NewVirtualStore(s.clientset.CoreV1().ConfigMaps(s.namespace)).RemoveRule(ctx, req.GetNamespace(), nodeID, req.GetOwnerID())
+		if apierrors.IsNotFound(err) {
+			continue
 		}
-		empty, err := inject.UnpatchContainer(ctx, nodeID, s.factory, s.clientset.CoreV1().ConfigMaps(s.namespace), controller, req.GetOwnerID(), s.clientset, s.namespace)
 		if err != nil {
 			return status.Errorf(codes.Internal, "leave workload %s: %v", workload, err)
 		}
-		// When this owner was the last rule, the sidecar is removed; a fargate Service
-		// also needs its target port restored to the original.
-		if empty && clusterworkload.IsK8sService(object) {
-			if err := inject.RestoreServiceTargetPort(ctx, s.clientset, req.GetNamespace(), object.Name); err != nil {
-				return status.Errorf(codes.Internal, "restore service %s target port: %v", object.Name, err)
-			}
+		if !found {
+			plog.G(ctx).Infof("Not found proxy resource %s", workload)
+			continue
 		}
 		plog.G(ctx).Infof("Left workload %q in namespace %q", workload, req.GetNamespace())
 	}
 	plog.StepDone(ctx, "Removed proxy from %d workloads", len(workloads))
 	return stream.Send(&rpc.InjectResponse{})
+}
+
+func (s *TunConfigServer) resolveLeaveNodeID(ctx context.Context, namespace, workload, ownerID string) string {
+	_, _, nodeID, err := s.resolveWorkloadNodeID(ctx, namespace, workload)
+	if err == nil {
+		return nodeID
+	}
+	fallback := util.ConvertWorkloadToUID(workload)
+	cm, getErr := s.clientset.CoreV1().ConfigMaps(s.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if getErr != nil {
+		return fallback
+	}
+	virtuals, parseErr := parseYaml(cm.Data[config.KeyEnvoy])
+	if parseErr != nil {
+		return fallback
+	}
+	for _, virtual := range virtuals {
+		if virtual.Namespace != namespace || len(virtual.AgentOrigins) != 0 || !leaveAliasMatches(workload, virtual.UID) {
+			continue
+		}
+		for _, rule := range virtual.Rules {
+			if rule.OwnerID == ownerID {
+				return virtual.UID
+			}
+		}
+	}
+	return fallback
+}
+
+func leaveAliasMatches(workload, uid string) bool {
+	if util.ConvertWorkloadToUID(workload) == uid {
+		return true
+	}
+	resource, name, found := strings.Cut(workload, "/")
+	if !found {
+		return false
+	}
+	index := strings.LastIndex(uid, ".")
+	if index < 0 || uid[index+1:] != name {
+		return false
+	}
+	canonical := map[string]string{
+		"deploy": "deployments.apps", "deployment": "deployments.apps", "deployments": "deployments.apps",
+		"sts": "statefulsets.apps", "statefulset": "statefulsets.apps", "statefulsets": "statefulsets.apps",
+		"ds": "daemonsets.apps", "daemonset": "daemonsets.apps", "daemonsets": "daemonsets.apps",
+		"rs": "replicasets.apps", "replicaset": "replicasets.apps", "replicasets": "replicasets.apps",
+		"svc": "services", "service": "services", "services": "services",
+		"po": "pods", "pod": "pods", "pods": "pods",
+	}
+	return canonical[resource] == uid[:index]
 }
 
 // resolveWorkloadNodeID resolves a workload string (group/resource/name) to its top

@@ -78,14 +78,14 @@ func TestResetConfigMap_RemoveMatchingWorkload(t *testing.T) {
 			Namespace: "default",
 			UID:       "deployments.apps.nginx",
 			Rules: []*controlplane.Rule{
-				{LocalTunIPv4: "10.0.0.1"},
+				{LocalTunIPv4: "10.0.0.1", IsAgent: true},
 			},
 		},
 		{
 			Namespace: "default",
 			UID:       "deployments.apps.redis",
 			Rules: []*controlplane.Rule{
-				{LocalTunIPv4: "10.0.0.2"},
+				{LocalTunIPv4: "10.0.0.2", IsAgent: true},
 			},
 		},
 	}
@@ -117,6 +117,32 @@ func TestResetConfigMap_RemoveMatchingWorkload(t *testing.T) {
 	}
 	if remaining[0].UID != "deployments.apps.redis" {
 		t.Fatalf("expected remaining UID to be deployments.apps.redis, got %s", remaining[0].UID)
+	}
+}
+
+func TestResetConfigMap_RejectsLegacyVirtual(t *testing.T) {
+	virtuals := []*controlplane.Virtual{{
+		Namespace: "default", UID: "deployments.apps.nginx",
+		Rules: []*controlplane.Rule{{LocalTunIPv4: "10.0.0.1", OwnerID: "owner-a"}},
+	}}
+	data, err := yaml.Marshal(virtuals)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientset := fake.NewSimpleClientset(&corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "test-ns"},
+		Data:       map[string]string{config.KeyEnvoy: string(data)},
+	})
+	mapInterface := clientset.CoreV1().ConfigMaps("test-ns")
+	if err := resetConfigMap(context.Background(), mapInterface, "default", []string{"deployments.apps/nginx"}); err == nil {
+		t.Fatal("expected legacy sidecar Virtual to be rejected")
+	}
+	cm, err := mapInterface.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cm.Data[config.KeyEnvoy] != string(data) {
+		t.Fatal("legacy Virtual was modified during rejected reset")
 	}
 }
 

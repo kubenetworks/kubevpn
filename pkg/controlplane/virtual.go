@@ -37,8 +37,7 @@ type Virtual struct {
 	// and the on-disk key is determined solely by the json tag. Existing ConfigMap
 	// data in production clusters uses the key "Uid"; changing this tag would make
 	// all stored configs unreadable. The yaml tag is kept for documentation only.
-	UID         string `yaml:"Uid" json:"Uid"` // group.resource.name
-	FargateMode bool   `yaml:"fargateMode,omitempty" json:"fargateMode,omitempty"`
+	UID string `yaml:"Uid" json:"Uid"` // group.resource.name
 	// Selector is the workload's pod label selector, recorded at node-agent
 	// inject time so the reconciler can match pods to rules. Zero value means
 	// the rule was written by sidecar mode; reconciler skips it.
@@ -102,10 +101,6 @@ type ContainerPort struct {
 	// referred to by services.
 	// +optional
 	Name string `json:"name,omitempty"`
-	// EnvoyListenerPort is the port envoy binds to in fargate mode (BindToPort=true).
-	// In mesh mode this is 0 (envoy uses iptables-redirected traffic instead).
-	// +optional
-	EnvoyListenerPort int32 `json:"envoyListenerPort,omitempty"`
 	// Number of port to expose on the pod's IP address.
 	// This must be a valid port number, 0 < x < 65536.
 	ContainerPort int32 `json:"containerPort"`
@@ -116,31 +111,14 @@ type ContainerPort struct {
 	Protocol corev1.Protocol `json:"protocol,omitempty"`
 }
 
-// IsFargateMode returns true if this Virtual uses Fargate/Service mode
-// (no iptables, SSH tunnels instead of VPN sidecar).
-// Checks the explicit FargateMode field first, with a fallback to the legacy
-// heuristic (EnvoyListenerPort != 0) for backward compatibility with existing ConfigMaps.
-func (a *Virtual) IsFargateMode() bool {
-	if a.FargateMode {
-		return true
-	}
-	for _, port := range a.Ports {
-		if port.EnvoyListenerPort != 0 {
-			return true
-		}
-	}
-	return false
-}
-
-// ConvertContainerPort converts Kubernetes ContainerPort values to controlplane ContainerPort with EnvoyListenerPort=0.
+// ConvertContainerPort converts Kubernetes ContainerPort values to controlplane ContainerPort.
 func ConvertContainerPort(ports ...corev1.ContainerPort) []ContainerPort {
 	var result []ContainerPort
 	for _, port := range ports {
 		result = append(result, ContainerPort{
-			Name:              port.Name,
-			EnvoyListenerPort: 0,
-			ContainerPort:     port.ContainerPort,
-			Protocol:          port.Protocol,
+			Name:          port.Name,
+			ContainerPort: port.ContainerPort,
+			Protocol:      port.Protocol,
 		})
 	}
 	return result

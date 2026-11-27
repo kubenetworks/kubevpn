@@ -491,3 +491,68 @@ func TestProxyInject_ServiceUsesNodeAgentWithoutSSHMapper(t *testing.T) {
 	}
 	t.Fatalf("explicit Service Virtual missing: %+v", virtuals)
 }
+
+func TestLeaveInject_RemovesStoredRuleWhenTargetIsDeleted(t *testing.T) {
+	const ns = "test-ns"
+	env := newTestEnv(t)
+	env.server.factory = newInjectTestFactory(t, plainDeployment(ns))
+	stored := &controlplane.Virtual{
+		Namespace: ns, UID: "services.reviews", ServiceName: "reviews", Selector: "app=foo",
+		Rules: []*controlplane.Rule{{OwnerID: "owner-a", LocalTunIPv4: "198.18.0.10", IsAgent: true}},
+	}
+	data, err := yaml.Marshal([]*controlplane.Virtual{stored})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cm, err := env.server.clientset.CoreV1().ConfigMaps(ns).Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cm.Data[config.KeyEnvoy] = string(data)
+	if _, err := env.server.clientset.CoreV1().ConfigMaps(ns).Update(context.Background(), cm, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	stream, err := env.client.LeaveInject(context.Background(), &rpc.InjectRequest{Namespace: ns, Workloads: []string{"services/reviews"}, OwnerID: "owner-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := collectInjectStream(stream.Recv); err != nil {
+		t.Fatalf("leave deleted Service must use stored identity: %v", err)
+	}
+	cm, err = env.server.clientset.CoreV1().ConfigMaps(ns).Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cm.Data[config.KeyEnvoy] != "[]\n" && cm.Data[config.KeyEnvoy] != "" {
+		t.Fatalf("stored rule was not removed: %s", cm.Data[config.KeyEnvoy])
+	}
+}
+
+func TestLeaveInject_ResolvesShortWorkloadAlias(t *testing.T) {
+	const ns = "test-ns"
+	env := newTestEnv(t)
+	env.server.factory = newInjectTestFactory(t, plainDeployment(ns))
+	stored := &controlplane.Virtual{Namespace: ns, UID: "deployments.apps.foo", Selector: "app=foo", Rules: []*controlplane.Rule{{OwnerID: "owner-a", IsAgent: true}}}
+	data, err := yaml.Marshal([]*controlplane.Virtual{stored})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cm, err := env.server.clientset.CoreV1().ConfigMaps(ns).Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cm.Data[config.KeyEnvoy] = string(data)
+	if _, err := env.server.clientset.CoreV1().ConfigMaps(ns).Update(context.Background(), cm, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	stream, err := env.client.LeaveInject(context.Background(), &rpc.InjectRequest{Namespace: ns, Workloads: []string{"deploy/foo"}, OwnerID: "owner-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := collectInjectStream(stream.Recv); err != nil {
+		t.Fatal(err)
+	}
+	if owners := readRuleOwners(t, env.server, ns); len(owners) != 0 {
+		t.Fatalf("short alias did not remove stored rule: %v", owners)
+	}
+}

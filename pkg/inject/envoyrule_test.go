@@ -25,8 +25,7 @@ func TestAddVirtualRule(t *testing.T) {
 		{
 			Ports: []controlplane.ContainerPort{
 				{
-					EnvoyListenerPort: 15006,
-					ContainerPort:     9080,
+					ContainerPort: 9080,
 				},
 			},
 			LocalTunIPv4: "127.0.0.1",
@@ -38,8 +37,7 @@ func TestAddVirtualRule(t *testing.T) {
 					UID:           "deployments.authors",
 					Ports: []controlplane.ContainerPort{
 						{
-							EnvoyListenerPort: 15006,
-							ContainerPort:     9080,
+							ContainerPort: 9080,
 						},
 					},
 					Rules: []*controlplane.Rule{{

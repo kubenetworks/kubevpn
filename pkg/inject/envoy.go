@@ -82,7 +82,6 @@ type envoyRuleSpec struct {
 	Headers      map[string]string
 	Ports        []controlplane.ContainerPort
 	PortMap      map[int32]string
-	FargateMode  bool
 	OwnerID      string
 	// Selector is the pod label selector for the workload, used by the agent
 	// reconciler to match pods to rules. Only set in node-agent mode.
@@ -110,13 +109,6 @@ func (s *envoyRuleSpec) validate() error {
 	}
 	if s.OwnerID == "" {
 		return errors.New("envoyRuleSpec: ownerID must not be empty")
-	}
-	if s.FargateMode {
-		for _, p := range s.Ports {
-			if p.EnvoyListenerPort == 0 {
-				return errors.New("envoyRuleSpec: fargate mode requires EnvoyListenerPort on all ports")
-			}
-		}
 	}
 	return nil
 }
@@ -158,7 +150,6 @@ func addVirtualRule(ctx context.Context, v []*controlplane.Virtual, spec envoyRu
 			SchemaVersion: controlplane.CurrentSchemaVersion,
 			UID:           spec.NodeID,
 			Namespace:     spec.Namespace,
-			FargateMode:   spec.FargateMode,
 			Selector:      spec.Selector,
 			ServiceName:   spec.ServiceName,
 			Ports:         spec.Ports,
@@ -174,18 +165,16 @@ func addVirtualRule(ctx context.Context, v []*controlplane.Virtual, spec envoyRu
 		v[index].ServiceName = spec.ServiceName
 	}
 
-	// 2) same owner updating their own rule (matched by OwnerID, non-fargate)
-	if !v[index].IsFargateMode() {
-		for j, rule := range v[index].Rules {
-			if rule.OwnerID == spec.OwnerID {
-				v[index].Rules[j].Headers = util.Merge(v[index].Rules[j].Headers, spec.Headers)
-				v[index].Rules[j].PortMap = util.Merge(v[index].Rules[j].PortMap, spec.PortMap)
-				v[index].Rules[j].LocalTunIPv4 = spec.LocalTunIPv4
-				v[index].Rules[j].LocalTunIPv6 = spec.LocalTunIPv6
-				v[index].Rules[j].SyncTarget = spec.SyncTarget
-				v[index].Rules[j].IsAgent = spec.IsAgent
-				return v
-			}
+	// 2) same owner updating their own rule (matched by OwnerID)
+	for j, rule := range v[index].Rules {
+		if rule.OwnerID == spec.OwnerID {
+			v[index].Rules[j].Headers = util.Merge(v[index].Rules[j].Headers, spec.Headers)
+			v[index].Rules[j].PortMap = util.Merge(v[index].Rules[j].PortMap, spec.PortMap)
+			v[index].Rules[j].LocalTunIPv4 = spec.LocalTunIPv4
+			v[index].Rules[j].LocalTunIPv6 = spec.LocalTunIPv6
+			v[index].Rules[j].SyncTarget = spec.SyncTarget
+			v[index].Rules[j].IsAgent = spec.IsAgent
+			return v
 		}
 	}
 
