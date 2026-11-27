@@ -2,19 +2,21 @@ package inject
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 
 	clusterworkload "github.com/wencaiwulue/kubevpn/v2/pkg/cluster/workload"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 // nodeAgentInjector attaches to a workload without patching it: writes the
-// same ENVOY_CONFIG rules as mesh mode, then ensures one privileged Job per
-// target pod in the manager namespace.
+// ENVOY_CONFIG rules, then waits for the node-boundary direct listeners.
 type nodeAgentInjector struct {
 	opts InjectOptions
 }
@@ -39,6 +41,9 @@ func (n *nodeAgentInjector) Inject(ctx context.Context) error {
 
 	templateSpec, _, err := clusterworkload.GetPodTemplateSpecPath(u)
 	if err != nil {
+		return err
+	}
+	if err = validateNodeAgentTemplate(templateSpec); err != nil {
 		return err
 	}
 	ports, portmap := collectPorts(templateSpec, o.PortMaps)
@@ -67,4 +72,16 @@ func (n *nodeAgentInjector) Inject(ctx context.Context) error {
 	}
 
 	return waitNodeAgentReady(ctx, o)
+}
+
+func validateNodeAgentTemplate(templateSpec *corev1.PodTemplateSpec) error {
+	if templateSpec.Spec.HostNetwork {
+		return errors.New("hostNetwork workloads are not supported by node-agent")
+	}
+	for _, container := range templateSpec.Spec.Containers {
+		if container.Name == config.ContainerSidecarVPN || container.Name == config.ContainerSidecarEnvoy {
+			return errors.New("legacy sidecar-injected workloads are not supported; use a clean workload")
+		}
+	}
+	return nil
 }

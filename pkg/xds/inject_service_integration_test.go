@@ -10,8 +10,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
+	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -58,6 +62,12 @@ func injectedDeployment(ns string) *appsv1.Deployment {
 			},
 		},
 	}
+}
+
+func plainDeployment(ns string) *appsv1.Deployment {
+	deploy := injectedDeployment(ns)
+	deploy.Spec.Template.Spec.Containers = deploy.Spec.Template.Spec.Containers[:1]
+	return deploy
 }
 
 // newInjectTestFactory returns a cmdutil.Factory backed by a fake REST client so
@@ -185,7 +195,7 @@ func TestInject_MultiUser_ProxyLeave(t *testing.T) {
 	}, metav1.CreateOptions{}); err != nil {
 		t.Fatalf("seed tls secret: %v", err)
 	}
-	env.server.factory = newInjectTestFactory(t, injectedDeployment(ns))
+	env.server.factory = newInjectTestFactory(t, plainDeployment(ns))
 
 	proxy := func(owner string, headers map[string]string) {
 		prepareNodeAgentReady(t, env, ns, "deployments.apps.foo")
@@ -260,5 +270,52 @@ func TestInject_MultiUser_ProxyLeave(t *testing.T) {
 	leaveAll("owner-a")
 	if owners := readRuleOwners(t, env.server, ns); len(owners) != 1 || owners[0] != "owner-b" {
 		t.Fatalf("after A leave-all, want [owner-b], got %v", owners)
+	}
+}
+
+func TestProxyInject_RejectsUnsupportedNodeAgentTargets(t *testing.T) {
+	const ns = "test-ns"
+	tests := []struct {
+		name        string
+		deployment  *appsv1.Deployment
+		wantMessage string
+	}{
+		{name: "legacy sidecar injection", deployment: injectedDeployment(ns), wantMessage: "legacy sidecar"},
+		{name: "host network", deployment: func() *appsv1.Deployment {
+			deploy := plainDeployment(ns)
+			deploy.Spec.Template.Spec.HostNetwork = true
+			return deploy
+		}(), wantMessage: "hostNetwork"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := newTestEnv(t)
+			if _, err := env.server.clientset.CoreV1().Secrets(ns).Create(context.Background(), &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: ns},
+				Data:       map[string][]byte{config.TLSCertKey: {}, config.TLSPrivateKeyKey: {}, config.TLSServerName: []byte("kubevpn")},
+			}, metav1.CreateOptions{}); err != nil {
+				t.Fatalf("seed tls secret: %v", err)
+			}
+			env.server.factory = newInjectTestFactory(t, tt.deployment)
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			stream, err := env.client.ProxyInject(ctx, &rpc.InjectRequest{
+				Namespace: ns, Workloads: []string{"deployments.apps/foo"}, OwnerID: "owner-a", LocalTunIPv4: "198.18.0.10",
+			})
+			if err != nil {
+				t.Fatalf("ProxyInject open: %v", err)
+			}
+			err = collectInjectStream(stream.Recv)
+			if status.Code(err) != codes.Internal || !strings.Contains(err.Error(), tt.wantMessage) {
+				t.Fatalf("expected %q rejection, got %v", tt.wantMessage, err)
+			}
+			cm, getErr := env.server.clientset.CoreV1().ConfigMaps(ns).Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+			if getErr != nil {
+				t.Fatal(getErr)
+			}
+			if cm.Data[config.KeyEnvoy] != "" {
+				t.Fatalf("rejected target wrote envoy config: %s", cm.Data[config.KeyEnvoy])
+			}
+		})
 	}
 }

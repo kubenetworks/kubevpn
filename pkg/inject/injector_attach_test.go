@@ -38,12 +38,12 @@ func TestNewInjectorSelectsNodeAgentEvenWhenSidecarRequested(t *testing.T) {
 	}
 }
 
-func TestNewInjectorSelectsMeshOnlyForLegacyRunAndSync(t *testing.T) {
+func TestNewInjectorSelectsMeshOnlyForLegacySync(t *testing.T) {
 	opts := minimalInjectOptionsForTest()
 	opts.AttachMode = config.AttachModeLegacySidecar
 	inj := NewInjector(opts)
 	if _, ok := inj.(*meshInjector); !ok {
-		t.Fatalf("run/sync legacy path must keep mesh injection, got %T", inj)
+		t.Fatalf("sync legacy path must keep mesh injection, got %T", inj)
 	}
 }
 
