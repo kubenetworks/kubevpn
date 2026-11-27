@@ -79,6 +79,17 @@ func (c *ConnectOptions) GetClusterName() string { return util.GetKubeconfigClus
 
 // StatusSnapshot copies presentation data while the session retains cache ownership.
 func (c *ConnectOptions) StatusSnapshot(ctx context.Context) (SessionStatus, error) {
+	if err := c.RefreshConfigMapCache(ctx); err != nil {
+		// A manager can be replaced while the session is alive. If the cached
+		// namespace no longer has a ConfigMap, re-resolve it instead of serving
+		// stale proxy state forever.
+		if namespace, detectErr := manager.DetectManagerNamespace(ctx, c.factory, c.WorkloadNamespace); detectErr == nil && namespace != "" && namespace != c.ManagerNamespace {
+			c.getConfigMapStore().Stop()
+			c.ManagerNamespace = namespace
+			c.configMapStore = newConfigMapStore(c.clientset, namespace)
+			_ = c.RefreshConfigMapCache(ctx)
+		}
+	}
 	cm, err := c.getConfigMapStore().GetConfigMap(ctx)
 	var status SessionStatus
 	if cm != nil {
