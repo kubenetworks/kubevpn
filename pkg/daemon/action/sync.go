@@ -142,7 +142,7 @@ func (svr *Server) Sync(resp rpc.Daemon_SyncServer) (err error) {
 			}
 			routes = append(routes, handler.SyncRoute{Workload: workload, TargetWorkload: target})
 		}
-		if err = pc.CreateRemoteSyncRoutes(plog.WithLogger(session.Ctx, logger), req.Namespace, routes, req.Image); err != nil {
+		if err = pc.CreateRemoteSyncRoutes(plog.WithLogger(session.Ctx, logger), req.Namespace, req.Headers, routes, req.Image); err != nil {
 			return err
 		}
 		if err = pc.RefreshConfigMapCache(resp.Context()); err != nil {

@@ -977,7 +977,7 @@ func (m *mockConnection) GetLocalTunIP() (string, string) { return "", "" }
 func (m *mockConnection) CreateRemoteInboundPod(ctx context.Context, ns string, workloads []string, headers map[string]string, portMap []string, image string, v4, v6 string) error {
 	return nil
 }
-func (m *mockConnection) CreateRemoteSyncRoutes(ctx context.Context, ns string, routes []handler.SyncRoute, image string) error {
+func (m *mockConnection) CreateRemoteSyncRoutes(ctx context.Context, ns string, headers map[string]string, routes []handler.SyncRoute, image string) error {
 	return nil
 }
 func (m *mockConnection) LeaveAllProxyResources(ctx context.Context) error { return nil }

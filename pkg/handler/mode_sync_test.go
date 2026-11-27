@@ -230,8 +230,17 @@ func (u *ut) kubevpnSync(t *testing.T, ctx context.Context, isServiceMesh bool) 
 		t.Fatal("expect at least one pod")
 	}
 	assertWorkloadIdentityUnchanged(t, u.clientset, u.namespace, "authors", "authors", identity)
-	if len(list[0].Spec.Containers) != 2 {
-		t.Fatalf("sync clone must contain only app and syncthing: %v", list[0].Spec.Containers)
+	hasSyncthing := false
+	for _, container := range list[0].Spec.Containers {
+		if container.Name == config.ContainerSidecarVPN || container.Name == config.ContainerSidecarEnvoy {
+			t.Fatalf("traffic sidecar found in sync clone: %s", container.Name)
+		}
+		if container.Name == config.ContainerSidecarSyncthing {
+			hasSyncthing = true
+		}
+	}
+	if !hasSyncthing {
+		t.Fatal("sync clone is missing the syncthing helper")
 	}
 
 	remotePath := fmt.Sprintf("%s/%s", remoteDir, name)

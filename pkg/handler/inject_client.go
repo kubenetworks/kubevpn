@@ -145,7 +145,7 @@ func (c *ConnectOptions) createRemoteInboundViaManager(ctx context.Context, name
 
 // CreateRemoteSyncRoutes publishes original-to-clone routes through the existing
 // manager connection. Sync targets do not use a user TUN IP or Service Mapper.
-func (c *ConnectOptions) CreateRemoteSyncRoutes(ctx context.Context, namespace string, routes []SyncRoute, image string) error {
+func (c *ConnectOptions) CreateRemoteSyncRoutes(ctx context.Context, namespace string, headers map[string]string, routes []SyncRoute, image string) error {
 	if len(routes) == 0 {
 		return nil
 	}
@@ -157,7 +157,7 @@ func (c *ConnectOptions) CreateRemoteSyncRoutes(ctx context.Context, namespace s
 		return err
 	}
 	defer conn.Close()
-	request := &rpc.InjectRequest{Namespace: namespace, OwnerID: c.OwnerID, Image: image}
+	request := &rpc.InjectRequest{Namespace: namespace, OwnerID: c.OwnerID, Image: image, Headers: headers}
 	for _, route := range routes {
 		request.SyncRoutes = append(request.SyncRoutes, &rpc.SyncRoute{Workload: route.Workload, TargetWorkload: route.TargetWorkload})
 	}

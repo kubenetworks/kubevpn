@@ -63,7 +63,7 @@ type SyncRoute struct {
 type ProxyController interface {
 	Connection
 	CreateRemoteInboundPod(context.Context, string, []string, map[string]string, []string, string, string, string) error
-	CreateRemoteSyncRoutes(context.Context, string, []SyncRoute, string) error
+	CreateRemoteSyncRoutes(context.Context, string, map[string]string, []SyncRoute, string) error
 	LeaveAllProxyResources(context.Context) error
 	LeaveResource(context.Context, []Resources, string) error
 	GetRunningPodList(context.Context) ([]v1.Pod, error)
