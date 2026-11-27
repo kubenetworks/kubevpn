@@ -1220,6 +1220,9 @@ func (u *ut) centerCheckProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 	}, cmp.Ignore())
 	if !cmp.Equal(statuses, expect, opt) {
 		marshal, _ := json.Marshal(expect)
+		if cm, err := u.clientset.CoreV1().ConfigMaps(u.namespace).Get(context.Background(), pkgconfig.ConfigMapPodTrafficManager, v1.GetOptions{}); err == nil {
+			t.Logf("ENVOY_CONFIG for portmap status mismatch:\n%s", cm.Data[pkgconfig.KeyEnvoy])
+		}
 		t.Fatalf("expect: %s, but was: %s", string(marshal), string(output))
 	}
 }

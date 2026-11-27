@@ -68,6 +68,34 @@ func TestCreateRemoteSyncRoutes_SendsHeaders(t *testing.T) {
 	}
 }
 
+func TestCreateRemoteInboundViaManager_SendsPortMap(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:9002")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	service := &syncRouteTestService{}
+	server := grpc.NewServer()
+	rpc.RegisterTunConfigServiceServer(server, service)
+	go func() { _ = server.Serve(listener) }()
+	defer server.Stop()
+	c := &ConnectOptions{
+		SessionBase: SessionBase{K8sClient: K8sClient{clientset: fake.NewSimpleClientset(&v1.Service{
+			ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "kubevpn"},
+			Spec:       v1.ServiceSpec{ClusterIP: "127.0.0.1"},
+		})}},
+		ManagerNamespace: "kubevpn",
+		OwnerID:          "owner-a",
+	}
+	err = c.createRemoteInboundViaManager(context.Background(), "default", nil, []string{"9080:8080"}, "img", "198.18.0.1", "", []string{"services/reviews"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if service.req == nil || len(service.req.GetPortMap()) != 1 || service.req.GetPortMap()[0] != "9080:8080" {
+		t.Fatalf("inbound request lost portmap: %v", service.req)
+	}
+}
+
 // leaveTestService exercises the real streaming RPC, including request ownership,
 // progress delivery, terminal status and EOF.
 type leaveTestService struct {
