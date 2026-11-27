@@ -789,7 +789,7 @@ func fillDeploymentTunIPs(expect *connStatus, actual *connStatus) {
 		}
 		// Set proxy rule-level LocalTunIPv4/LocalTunIPv6 from matching actual rules
 		for _, proxy := range expectedConn.ProxyList {
-			if proxy == nil || strings.HasPrefix(proxy.Workload, "services/") {
+			if proxy == nil {
 				continue
 			}
 			actualProxy, ok := actualWorkloadMap[proxy.Workload]
@@ -874,7 +874,7 @@ func TestFillDeploymentTunIPs(t *testing.T) {
 		}
 	})
 
-	t.Run("services expectation keeps original IP", func(t *testing.T) {
+	t.Run("service expectation is filled from actual node-agent rule IP", func(t *testing.T) {
 		expect := &connStatus{
 			List: []*connection{
 				{
@@ -933,12 +933,11 @@ func TestFillDeploymentTunIPs(t *testing.T) {
 			t.Errorf("expected connection IPv6 to be fd00::1, got %s", expect.List[0].IPv6)
 		}
 
-		// Services rule IP should remain as expected (127.0.0.1 and ::1)
-		if expect.List[0].ProxyList[0].RuleList[0].LocalTunIPv4 != "127.0.0.1" {
-			t.Errorf("expected services rule LocalTunIPv4 to be 127.0.0.1, got %s", expect.List[0].ProxyList[0].RuleList[0].LocalTunIPv4)
+		if expect.List[0].ProxyList[0].RuleList[0].LocalTunIPv4 != "192.18.0.5" {
+			t.Errorf("expected services rule LocalTunIPv4 to be 192.18.0.5, got %s", expect.List[0].ProxyList[0].RuleList[0].LocalTunIPv4)
 		}
-		if expect.List[0].ProxyList[0].RuleList[0].LocalTunIPv6 != "::1" {
-			t.Errorf("expected services rule LocalTunIPv6 to be ::1, got %s", expect.List[0].ProxyList[0].RuleList[0].LocalTunIPv6)
+		if expect.List[0].ProxyList[0].RuleList[0].LocalTunIPv6 != "fd00::5" {
+			t.Errorf("expected services rule LocalTunIPv6 to be fd00::5, got %s", expect.List[0].ProxyList[0].RuleList[0].LocalTunIPv6)
 		}
 	})
 
