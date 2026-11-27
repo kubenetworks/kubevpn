@@ -459,7 +459,7 @@ func TestProxyInject_ServiceUsesNodeAgentWithoutSSHMapper(t *testing.T) {
 	env.server.factory = newInjectServiceTestFactory(t, service, deploy)
 	prepareNodeAgentReady(t, env, ns, "services.reviews")
 	stream, err := env.client.ProxyInject(context.Background(), &rpc.InjectRequest{
-		Namespace: ns, Workloads: []string{"services/reviews"}, OwnerID: "owner-a", LocalTunIPv4: "198.18.0.10",
+		Namespace: ns, Workloads: []string{"services/reviews"}, OwnerID: "owner-a", LocalTunIPv4: "198.18.0.10", PortMap: []string{"8080:18080"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -482,7 +482,7 @@ func TestProxyInject_ServiceUsesNodeAgentWithoutSSHMapper(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, virtual := range virtuals {
-		if virtual.UID == "services.reviews" && virtual.ServiceName == "reviews" && virtual.Rules[0].LocalTunIPv4 == "198.18.0.10" {
+		if virtual.UID == "services.reviews" && virtual.ServiceName == "reviews" && virtual.Rules[0].LocalTunIPv4 == "198.18.0.10" && virtual.Rules[0].PortMap[8080] == "18080" {
 			return
 		}
 	}

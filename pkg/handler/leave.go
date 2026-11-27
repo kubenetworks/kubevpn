@@ -46,6 +46,7 @@ func (c *ConnectOptions) LeaveResource(ctx context.Context, resources []Resource
 		if err := c.leaveViaManager(ctx, ns, workloads, ownerID); err != nil {
 			return err
 		}
+		_ = c.getConfigMapStore().Refresh(ctx)
 	}
 
 	plog.StepDone(ctx, "Removed proxy from %d workloads", len(resources))
