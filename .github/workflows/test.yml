@@ -131,6 +131,66 @@ jobs:
       - name: Test (TUN)
         run: sudo -E env HOME="$HOME" PATH="$PATH" make ut-tun
 
+  linux-multinode:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    needs: [ "image" ]
+    env:
+      VERSION: ${{ github.event.pull_request.head.sha || github.sha }}
+      E2E_RUN: '^TestIntegration_NodeBoundaryMultiNode$'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      - name: Setup two-node Minikube
+        uses: medyagh/setup-minikube@latest
+        with:
+          cache: true
+          cpus: 'max'
+          memory: 'max'
+          nodes: 2
+
+      - name: Download test image
+        uses: actions/download-artifact@v4
+        with:
+          name: kubevpn-image
+          path: /tmp
+
+      - name: Load test image into both nodes
+        run: minikube image load /tmp/kubevpn-image.tar
+
+      - name: Install demo bookinfo
+        run: |
+          minikube image load --remote ghcr.io/kubenetworks/examples-bookinfo-details-v1:1.20.2
+          minikube image load --remote ghcr.io/kubenetworks/examples-bookinfo-ratings-v1:1.20.2
+          minikube image load --remote ghcr.io/kubenetworks/examples-bookinfo-reviews-v1:1.20.2
+          minikube image load --remote ghcr.io/kubenetworks/examples-bookinfo-productpage-v1:1.20.2
+          minikube image load --remote ghcr.io/kubenetworks/authors:latest
+          minikube image load --remote ghcr.io/kubenetworks/nginx:latest
+          kubectl apply -f samples/bookinfo.yaml
+
+      - name: Build
+        run: |
+          make kubevpn-linux-amd64
+          chmod +x ./bin/kubevpn
+          cp ./bin/kubevpn /usr/local/bin/kubevpn
+          kubevpn version
+
+      - name: Wait for bookinfo pods
+        run: |
+          kubectl wait --for=condition=Ready pods --all --timeout=10m
+          kubectl get nodes -o wide
+          kubectl get pods -A -o wide
+          sudo ln /usr/bin/resolvectl /usr/bin/systemd-resolve
+
+      - name: Test cross-node Service fallback and sync routes
+        run: make ut
+
   macos:
     runs-on:  macos-15-intel
     needs: [ "image" ]
