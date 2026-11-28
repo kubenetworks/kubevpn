@@ -8,6 +8,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	v1 "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/yaml"
 
 	clusterworkload "github.com/wencaiwulue/kubevpn/v2/pkg/cluster/workload"
@@ -41,6 +42,12 @@ func (c *ConnectOptions) Reset(ctx context.Context, namespace string, workloads 
 }
 
 func resetConfigMap(ctx context.Context, mapInterface v1.ConfigMapInterface, namespace string, workloads []string) error {
+	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		return resetConfigMapOnce(ctx, mapInterface, namespace, workloads)
+	})
+}
+
+func resetConfigMapOnce(ctx context.Context, mapInterface v1.ConfigMapInterface, namespace string, workloads []string) error {
 	cm, err := mapInterface.Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {

@@ -5,6 +5,9 @@ import (
 	"runtime"
 	"testing"
 
+	"gvisor.dev/gvisor/pkg/buffer"
+	"gvisor.dev/gvisor/pkg/tcpip/stack"
+
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 )
 
@@ -92,5 +95,29 @@ func TestStage4HeapAllocationModel(t *testing.T) {
 		old := uint64(128+queued)*cost[65536] + removed
 		fresh := uint64(128+queued) * cost[65538]
 		t.Logf("distinct queued=%d old=%d direct=%d delta=%d bytes (shared refs counted once)", queued, old, fresh, int64(fresh)-int64(old))
+	}
+}
+
+func BenchmarkCopyPacketToPoolMTU(b *testing.B) {
+	payload := make([]byte, 1500)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{Payload: buffer.MakeWithData(payload)})
+		packet := copyPacketToPool(pkt, packetTypeToTUN, datagramHeaderLen)
+		b.ReportMetric(float64(len(packet.data)), "buffer_B")
+		packet.release()
+	}
+}
+
+func BenchmarkNewPacketFromPoolSize(b *testing.B) {
+	for _, size := range []int{1500, 12000, 65000} {
+		b.Run(fmt.Sprint(size), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				packet := newPacketFromPool(size)
+				b.ReportMetric(float64(len(packet.data)), "buffer_B")
+				packet.release()
+			}
+		})
 	}
 }

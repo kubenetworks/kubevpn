@@ -160,6 +160,11 @@ Shared packet references count only once. Other Linux `LPool` users also pay the
 allocation cost; fallback read scratch and write scratch are not removed. This is not a
 global memory-reduction claim, process RSS measurement, or real Linux-kernel benchmark.
 
+Single and batched TUN reads retain the existing 64 KiB `config.LPool` behavior; they are not part
+of the known-size buffer-class optimization. Size classes apply only when the complete frame size
+is known before construction, such as `bufferedTCP.Write` and gVisor output copies. Unknown-size
+reads must not grow by re-reading or risk truncating a packet.
+
 - **Deadlines**: Not supported (returns OpError)
 - **LocalAddr**: Returns the TUN device's IP address
 
