@@ -31,6 +31,9 @@ func (s *Rules) mutateEnvoyVirtuals(
 			return err
 		}
 		virtuals, parseErr := parseVirtuals(cm.Data[config.KeyEnvoy])
+		if parseErr == nil {
+			parseErr = controlplane.ValidateDesiredVirtuals(virtuals)
+		}
 		if parseErr != nil {
 			if onParseErr != nil {
 				onParseErr(parseErr)

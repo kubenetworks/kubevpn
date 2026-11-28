@@ -46,6 +46,23 @@ func TestInitDHCP_CreatesConfigMap(t *testing.T) {
 	}
 }
 
+func TestInitDHCPInitializesSeparatedVirtualKeys(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	manager := NewDHCPManager(clientset, "kubevpn")
+	if err := manager.InitDHCP(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	cm, err := clientset.CoreV1().ConfigMaps("kubevpn").Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{config.KeyEnvoy, config.KeyAgentXDS} {
+		if value, ok := cm.Data[key]; !ok || value != "" {
+			t.Fatalf("key %s was not initialized empty: %q, present=%v", key, value, ok)
+		}
+	}
+}
+
 func TestInitDHCP_ExistingConfigMap(t *testing.T) {
 	m := newFakeManager(t)
 	// Pre-create the configmap

@@ -48,6 +48,7 @@ func TestAttachmentPublisher_PublishesAndRemoves(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "kubevpn"},
 		Data:       map[string]string{config.KeyEnvoy: publisherVirtualsYAML},
 	}
+	desiredBefore := cm.Data[config.KeyEnvoy]
 	clientset := fake.NewSimpleClientset(cm, pod)
 	p := NewAttachmentPublisher(clientset, "kubevpn")
 	if err := p.reconcileOnce(ctx); err != nil {
@@ -57,6 +58,9 @@ func TestAttachmentPublisher_PublishesAndRemoves(t *testing.T) {
 	got, err := clientset.CoreV1().ConfigMaps("kubevpn").Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if got.Data[config.KeyEnvoy] != desiredBefore {
+		t.Fatal("publisher mutated desired Virtuals")
 	}
 	var attachments []controlplane.NodeAttachment
 	if err := yaml.Unmarshal([]byte(got.Data[config.KeyNodeAttachments]), &attachments); err != nil {
@@ -78,35 +82,29 @@ func TestAttachmentPublisher_PublishesAndRemoves(t *testing.T) {
 		}
 		seenPorts[port.AgentListenerPort] = true
 	}
-	var virtuals []*controlplane.Virtual
-	if err := yaml.Unmarshal([]byte(got.Data[config.KeyEnvoy]), &virtuals); err != nil {
+	var derived []*controlplane.Virtual
+	if err := yaml.Unmarshal([]byte(got.Data[config.KeyAgentXDS]), &derived); err != nil {
 		t.Fatal(err)
 	}
-	if len(virtuals) != 2 {
-		t.Fatalf("expected base and per-node derived virtuals: %+v", virtuals)
+	if len(derived) != 1 || derived[0].UID != attachments[0].NodeID || len(derived[0].AgentOrigins) != 1 {
+		t.Fatalf("unexpected derived state: %+v", derived)
 	}
-	if virtuals[0].AgentListenerPort != attachments[0].AgentListenerPort {
-		t.Fatal("attachment admin port differs from Virtual port")
+	if derived[0].AgentListenerPort != attachments[0].AgentListenerPort {
+		t.Fatal("derived admin port differs from attachment port")
 	}
-	derived := virtuals[1]
-	if derived.UID != attachments[0].NodeID || len(derived.AgentOrigins) != 1 {
-		t.Fatalf("unexpected derived virtual: %+v", derived)
-	}
-	if derived.AgentOrigins[0].PodIP != pod.Status.PodIP || len(derived.AgentOrigins[0].Ports) != 2 {
-		t.Fatalf("derived origin does not identify the real pod: %+v", derived.AgentOrigins[0])
+	if derived[0].AgentOrigins[0].PodIP != pod.Status.PodIP || len(derived[0].AgentOrigins[0].Ports) != 2 {
+		t.Fatalf("derived origin does not identify the real pod: %+v", derived[0].AgentOrigins[0])
 	}
 
 	if err := p.reconcileOnce(ctx); err != nil {
 		t.Fatal(err)
 	}
 	gotAgain, _ := clientset.CoreV1().ConfigMaps("kubevpn").Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
-	if gotAgain.Data[config.KeyNodeAttachments] != got.Data[config.KeyNodeAttachments] || gotAgain.Data[config.KeyEnvoy] != got.Data[config.KeyEnvoy] {
+	if gotAgain.Data[config.KeyNodeAttachments] != got.Data[config.KeyNodeAttachments] || gotAgain.Data[config.KeyAgentXDS] != got.Data[config.KeyAgentXDS] {
 		t.Fatal("attachments or derived virtuals changed on an identical reconcile")
 	}
-	var virtualsAgain []*controlplane.Virtual
-	_ = yaml.Unmarshal([]byte(gotAgain.Data[config.KeyEnvoy]), &virtualsAgain)
-	if virtualsAgain[0].AgentListenerPort != virtuals[0].AgentListenerPort {
-		t.Fatal("port changed on second reconcile")
+	if gotAgain.Data[config.KeyEnvoy] != desiredBefore {
+		t.Fatal("identical reconcile changed desired state")
 	}
 	allocationState := gotAgain.Data[config.KeyAgentPortAllocations]
 	if allocationState == "" {
@@ -123,10 +121,13 @@ func TestAttachmentPublisher_PublishesAndRemoves(t *testing.T) {
 	if len(attachments) != 0 {
 		t.Fatalf("stale attachments: %+v", attachments)
 	}
-	virtuals = nil
-	_ = yaml.Unmarshal([]byte(got.Data[config.KeyEnvoy]), &virtuals)
-	if len(virtuals) != 1 || len(virtuals[0].AgentOrigins) != 0 {
-		t.Fatalf("stale derived virtuals: %+v", virtuals)
+	derived = nil
+	_ = yaml.Unmarshal([]byte(got.Data[config.KeyAgentXDS]), &derived)
+	if len(derived) != 0 {
+		t.Fatalf("stale derived virtuals: %+v", derived)
+	}
+	if got.Data[config.KeyEnvoy] != desiredBefore {
+		t.Fatal("pod removal changed desired state")
 	}
 	if got.Data[config.KeyAgentPortAllocations] != allocationState {
 		t.Fatal("listener allocation state was discarded with the attachment")
@@ -188,14 +189,14 @@ func TestAttachmentPublisher_PublishesServiceOriginsPerNode(t *testing.T) {
 		t.Fatalf("expected one service attachment per node, got %d", serviceAttachments)
 	}
 	var virtuals []*controlplane.Virtual
-	if err := yaml.Unmarshal([]byte(got.Data[config.KeyEnvoy]), &virtuals); err != nil {
+	if err := yaml.Unmarshal([]byte(got.Data[config.KeyAgentXDS]), &virtuals); err != nil {
 		t.Fatal(err)
 	}
-	if len(virtuals) != 3 {
-		t.Fatalf("expected base plus two node virtuals: %+v", virtuals)
+	if len(virtuals) != 2 {
+		t.Fatalf("expected two node virtuals: %+v", virtuals)
 	}
 	serviceOrigins := 0
-	for _, derived := range virtuals[1:] {
+	for _, derived := range virtuals {
 		for _, origin := range derived.AgentOrigins {
 			if origin.ServiceName != "" {
 				serviceOrigins++
@@ -353,28 +354,29 @@ func TestAttachmentPublisher_ResolvesSyncTargetOnlyInDerivedVirtual(t *testing.T
 	}
 	clientset := fake.NewSimpleClientset(cm, newPublisherTestPod(), oldClone)
 	p := NewAttachmentPublisher(clientset, "kubevpn")
-	readVirtuals := func() []*controlplane.Virtual {
+	readVirtuals := func(key string) []*controlplane.Virtual {
 		t.Helper()
 		got, err := clientset.CoreV1().ConfigMaps("kubevpn").Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
 		var virtuals []*controlplane.Virtual
-		if err := yaml.Unmarshal([]byte(got.Data[config.KeyEnvoy]), &virtuals); err != nil {
+		if err := yaml.Unmarshal([]byte(got.Data[key]), &virtuals); err != nil {
 			t.Fatal(err)
 		}
 		return virtuals
 	}
 	assertEndpoints := func(wantBase, wantDerived string) {
 		t.Helper()
-		virtuals := readVirtuals()
-		if len(virtuals) != 2 {
-			t.Fatalf("expected base and derived virtuals: %+v", virtuals)
+		baseVirtuals := readVirtuals(config.KeyEnvoy)
+		derivedVirtuals := readVirtuals(config.KeyAgentXDS)
+		if len(baseVirtuals) != 1 || len(derivedVirtuals) != 1 {
+			t.Fatalf("expected one desired and one derived virtual: base=%+v derived=%+v", baseVirtuals, derivedVirtuals)
 		}
-		if got := virtuals[0].Rules[0].LocalTunIPv4; got != wantBase {
+		if got := baseVirtuals[0].Rules[0].LocalTunIPv4; got != wantBase {
 			t.Fatalf("base sync endpoint = %q, want %q", got, wantBase)
 		}
-		if got := virtuals[1].Rules[0].LocalTunIPv4; got != wantDerived {
+		if got := derivedVirtuals[0].Rules[0].LocalTunIPv4; got != wantDerived {
 			t.Fatalf("derived sync endpoint = %q, want %q", got, wantDerived)
 		}
 	}
@@ -461,7 +463,7 @@ func TestAttachmentPublisher_SyncTargetListFailurePreservesLastGoodState(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{config.KeyEnvoy, config.KeyNodeAttachments, config.KeyAgentPortAllocations} {
+	for _, key := range []string{config.KeyEnvoy, config.KeyAgentXDS, config.KeyNodeAttachments, config.KeyAgentPortAllocations} {
 		if after.Data[key] != before.Data[key] {
 			t.Fatalf("failed reconcile changed %s", key)
 		}

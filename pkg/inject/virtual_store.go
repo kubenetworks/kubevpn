@@ -48,6 +48,9 @@ func (s *VirtualStore) Mutate(ctx context.Context, fn MutationFunc) error {
 				return err
 			}
 		}
+		if err = controlplane.ValidateDesiredVirtuals(virtuals); err != nil {
+			return err
+		}
 		updated, err := fn(ctx, virtuals)
 		if err != nil {
 			return err

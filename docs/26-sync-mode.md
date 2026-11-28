@@ -27,11 +27,11 @@ kubevpn sync deployment/myapp --sync ./src:/app
                              │
                              ▼
   ┌─ Traffic manager / AttachmentPublisher ─────────────────┐
-  │  Base Virtual: original workload + declarative          │
+  │  ENVOY_CONFIG: original workload + declarative          │
   │  Rule.SyncTarget(clone UID, clone selector)             │
   │                                                         │
-  │  Derived per-node Virtual: resolve the newest Ready     │
-  │  clone pod and route matched traffic to clonePodIP      │
+  │  AGENT_XDS_CONFIG: resolve the newest Ready clone pod   │
+  │  and route matched traffic to clonePodIP                │
   └─────────────────────────────────────────────────────────┘
 ```
 
@@ -85,7 +85,9 @@ For each original workload, the base Virtual records:
 - identity port mappings;
 - `Rule.SyncTarget{UID, Selector}` for the clone.
 
-The base rule does not store a resolved clone PodIP. On every reconcile, `AttachmentPublisher`:
+The base rule does not store a resolved clone PodIP. `ENVOY_CONFIG` contains only these desired base rules; `AGENT_XDS_CONFIG` contains the derived per-node projection. `AttachmentPublisher` reads desired state but never writes it, and is the sole writer of the derived projection.
+
+On every reconcile, `AttachmentPublisher`:
 
 1. Builds normal source pod/Service attachments for the original workload.
 2. Lists Ready, Running, non-deleting clone pods using `SyncTarget.Selector`.

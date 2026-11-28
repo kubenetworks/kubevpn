@@ -49,6 +49,10 @@ func NewTunConfigServer(ctx context.Context, clientset kubernetes.Interface, nam
 	if err != nil {
 		return nil, err
 	}
+	if err := validateDesiredVirtualConfig(ctx, clientset, namespace); err != nil {
+		manager.Close()
+		return nil, err
+	}
 	s.leases = manager
 	s.routes = discovery.New(ctx, clientset)
 

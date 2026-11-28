@@ -33,7 +33,7 @@ func waitNodeAgentReady(ctx context.Context, opts InjectOptions) error {
 			}
 		}
 		var virtuals []*controlplane.Virtual
-		if data := cm.Data[config.KeyEnvoy]; data != "" {
+		if data := cm.Data[config.KeyAgentXDS]; data != "" {
 			if err := yaml.Unmarshal([]byte(data), &virtuals); err != nil {
 				return false, fmt.Errorf("parse envoy config: %w", err)
 			}

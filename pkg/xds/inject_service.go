@@ -192,7 +192,7 @@ func (s *TunConfigServer) resolveLeaveNodeID(ctx context.Context, namespace, wor
 		return fallback
 	}
 	for _, virtual := range virtuals {
-		if virtual.Namespace != namespace || len(virtual.AgentOrigins) != 0 || !leaveAliasMatches(workload, virtual.UID) {
+		if virtual.Namespace != namespace || !leaveAliasMatches(workload, virtual.UID) {
 			continue
 		}
 		for _, rule := range virtual.Rules {
@@ -262,7 +262,7 @@ func (s *TunConfigServer) workloadsOwnedBy(ctx context.Context, namespace, owner
 	}
 	var workloads []string
 	for _, v := range virtuals {
-		if v.Namespace != namespace || len(v.AgentOrigins) != 0 {
+		if v.Namespace != namespace {
 			continue
 		}
 		for _, r := range v.Rules {

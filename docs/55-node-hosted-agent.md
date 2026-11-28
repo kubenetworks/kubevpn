@@ -41,14 +41,14 @@ workloads and `hostNetwork` workloads are rejected instead of migrated.
 ```text
 ProxyInject (server-side)
   │
-  ├─ write base Virtual/Rule (OwnerID, headers, ports, selector, IsAgent)
+  ├─ write desired base Virtual/Rule to ENVOY_CONFIG (OwnerID, headers, ports, selector, IsAgent)
   │
   ├─ AttachmentPublisher (every 5s)
   │   ├─ allocate a stable admin base port for each workload
   │   ├─ list target pods and matching Services
   │   ├─ allocate stable direct listeners per pod/Service/original port
   │   ├─ publish NODE_ATTACHMENTS
-  │   ├─ publish a derived Virtual per (namespace, workload, node)
+  │   ├─ publish a derived Virtual per (namespace, workload, node) to AGENT_XDS_CONFIG
   │   └─ persist AGENT_PORT_ALLOCATIONS tombstones
   │
   └─ node-boundary DaemonSet agent (one per node)
@@ -105,6 +105,12 @@ unique admin port (`adminBase+5000`) and `--base-id`.
   ClusterIP/ServicePort and suppresses the same inferred Service on backend Virtuals.
 - **Sync target** — `Rule.syncTarget` stores clone UID/selector in the base rule. Only derived
   Virtuals contain the newest Ready clone PodIP; DHCP renewal never overwrites it.
+- **Separated state ownership** — `ENVOY_CONFIG` contains only desired base Virtuals, while
+  `AGENT_XDS_CONFIG` contains only derived per-node Virtuals. The publisher reads but never
+  writes desired state; it is the sole writer of derived Virtuals, attachments, and allocations.
+  Old mixed `ENVOY_CONFIG` is rejected rather than migrated and requires a manager reinstall.
+  ResourceVersion conflicts restart the complete derivation from the newest ConfigMap and desired
+  state; the publisher never retries an Update with a stale object or stale rules.
 
 A Service is not collapsed into a pod origin. `originIP=ClusterIP` and
 `originPort=ServicePort` preserve kube-proxy/IPVS load balancing. Host rules are inserted at

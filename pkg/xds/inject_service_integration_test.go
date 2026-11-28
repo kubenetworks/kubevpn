@@ -399,7 +399,7 @@ func TestProxyInject_SyncRouteWritesDeclarativeTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cm.Data[config.KeyEnvoy] = string(data)
+	cm.Data[config.KeyAgentXDS] = string(data)
 	if _, err := env.server.clientset.CoreV1().ConfigMaps(ns).Update(context.Background(), cm, metav1.UpdateOptions{}); err != nil {
 		t.Fatal(err)
 	}

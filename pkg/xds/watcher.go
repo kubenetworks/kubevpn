@@ -84,7 +84,7 @@ func Watch(ctx context.Context, f cmdutil.Factory, notifyCh chan<- NotifyMessage
 					configMap.Data = make(map[string]string)
 				}
 				select {
-				case notifyCh <- NotifyMessage{Content: configMap.Data[config.KeyEnvoy]}:
+				case notifyCh <- NotifyMessage{Content: configMap.Data[config.KeyAgentXDS]}:
 				case <-ctx.Done():
 					return ctx.Err()
 				}

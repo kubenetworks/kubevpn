@@ -260,7 +260,7 @@ func waitForDerivedSyncEndpoint(t *testing.T, u *ut, sourceUID, sourceNode, clon
 			return false, nil
 		}
 		var virtuals []*controlplane.Virtual
-		if err = yaml.Unmarshal([]byte(cm.Data[config.KeyEnvoy]), &virtuals); err != nil {
+		if err = yaml.Unmarshal([]byte(cm.Data[config.KeyAgentXDS]), &virtuals); err != nil {
 			return false, err
 		}
 		for _, virtual := range virtuals {
