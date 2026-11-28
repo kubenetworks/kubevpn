@@ -649,9 +649,19 @@ func (u *sshUt) kubevpnProxyWithServiceMeshAndK8sServicePortMap(t *testing.T) {
 }
 
 func (u *sshUt) kubevpnLeave(t *testing.T) {
-	if err := runKubevpn(t, "leave", "deployments/reviews"); err != nil {
-		t.Fatal(err)
+	// Match the non-SSH suite: the in-cluster manager dial can hit a transient
+	// deadline while the SSH-jumped apiserver recovers. Retry the idempotent leave
+	// a bounded number of times instead of failing the whole suite on one blip.
+	var err error
+	for range 3 {
+		err = runKubevpn(t, "leave", "deployments/reviews")
+		if err == nil {
+			return
+		}
+		t.Logf("kubevpn SSH leave deployments/reviews attempt failed: %v", err)
+		time.Sleep(5 * time.Second)
 	}
+	t.Fatal(err)
 }
 
 func (u *sshUt) kubevpnLeaveService(t *testing.T) {
