@@ -177,6 +177,7 @@ func createOutboundPod(ctx context.Context, clientset kubernetes.Interface, name
 		},
 		Data: map[string]string{
 			config.KeyEnvoy:        "",
+			config.KeyAgentXDS:     "",
 			config.KeyTunIPPool:    "",
 			config.KeyClusterCIDRs: "",
 		},

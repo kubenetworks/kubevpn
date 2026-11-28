@@ -24,6 +24,9 @@ const (
 	KeyTunIPPool = "TUN_IP_POOL"
 	// KeyEnvoy is the ConfigMap key for the Envoy proxy configuration.
 	KeyEnvoy = "ENVOY_CONFIG"
+	// KeyAgentXDS stores manager-derived per-node Virtuals for xDS consumers.
+	// ENVOY_CONFIG remains the desired base Virtual list.
+	KeyAgentXDS = "AGENT_XDS_CONFIG"
 	// KeyNodeAttachments stores desired per-pod node-boundary attachments.
 	KeyNodeAttachments = "NODE_ATTACHMENTS"
 	// KeyAgentPortAllocations persists listener assignments and tombstones so

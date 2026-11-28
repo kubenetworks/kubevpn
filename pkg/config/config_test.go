@@ -365,6 +365,7 @@ func TestConfigMapAndKeyConstants(t *testing.T) {
 		"ConfigMapPodTrafficManager": ConfigMapPodTrafficManager,
 		"KeyTunIPPool":               KeyTunIPPool,
 		"KeyEnvoy":                   KeyEnvoy,
+		"KeyAgentXDS":                KeyAgentXDS,
 		"KeyClusterCIDRs":            KeyClusterCIDRs,
 	}
 	for name, val := range constants {

@@ -101,6 +101,7 @@ func (m *Manager) InitDHCP(ctx context.Context) error {
 		},
 		Data: map[string]string{
 			config.KeyEnvoy:        "",
+			config.KeyAgentXDS:     "",
 			config.KeyTunIPPool:    "",
 			config.KeyClusterCIDRs: "",
 			config.KeyTunAllocs:    "",
