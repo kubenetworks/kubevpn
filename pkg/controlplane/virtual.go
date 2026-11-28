@@ -140,7 +140,8 @@ type Rule struct {
 	// Required — used as the primary key for rule matching in addVirtualRule and removeEnvoyConfig.
 	OwnerID string `yaml:"ownerID" json:"ownerID"`
 	// PortMap maps each backend container port to the developer-side listening port.
-	// The value is either "envoyPort" or "envoyPort:localPort".
+	// Node-agent rules store the local listening port as a single value.
+	// The legacy "envoyPort:localPort" pair remains readable for stored configurations.
 	PortMap map[int32]string
 	// IsAgent indicates that this rule belongs to a node-agent connection, not a direct user connection.
 	// When both agent and user rules exist with matching headers, user rules take precedence.
@@ -154,16 +155,17 @@ type Rule struct {
 type PortMapping struct {
 	// ContainerPort is the original container port (the map key in PortMap).
 	ContainerPort int32
-	// EnvoyPort is the port envoy forwards to (the first number in the string value).
+	// EnvoyPort is the port envoy forwards to (the single value, or the first number in a pair).
 	EnvoyPort int32
 	// LocalPort is the port the local PC listens on.
-	// In plain "envoyPort" format, LocalPort equals ContainerPort.
-	// In "envoyPort:localPort" format, LocalPort is the second number.
+	// In node-agent single-value format, LocalPort equals EnvoyPort.
+	// In legacy "envoyPort:localPort" format, LocalPort is the second number.
 	LocalPort int32
 }
 
 // ParsePortMap parses the string-encoded PortMap into typed PortMapping values.
-// The string value is either "envoyPort" (plain number) or "envoyPort:localPort" (colon-separated pair).
+// Node-agent rules use a single local-port value; legacy colon-separated pairs
+// retain their distinct envoy and local ports.
 func (r *Rule) ParsePortMap() []PortMapping {
 	result := make([]PortMapping, 0, len(r.PortMap))
 	for containerPort, portStr := range r.PortMap {
@@ -173,7 +175,7 @@ func (r *Rule) ParsePortMap() []PortMapping {
 			pm.LocalPort, _ = parsePort(after)
 		} else {
 			pm.EnvoyPort, _ = parsePort(portStr)
-			pm.LocalPort = containerPort
+			pm.LocalPort = pm.EnvoyPort
 		}
 		result = append(result, pm)
 	}

@@ -251,7 +251,7 @@ ENVOY_CONFIG ([]*Virtual)
 | `Rules[].Headers` | envoy header routing match. **Empty matches all requests** (VPN-only full hijack) |
 | `Rules[].LocalTunIPv4/v6` | **the envoy route target IP** — the IP of the user's local TUN device. **The core field this document fixes**: it must auto-update when the IP changes |
 | `Rules[].OwnerID` | connection identity (UUID[:12]), used for rule matching and deletion. Generated at inject time, the Rule's primary key |
-| `Rules[].PortMap` | port mapping. Format `containerPort → "envoyPort"` or `containerPort → "envoyPort:localPort"` (Fargate mode) |
+| `Rules[].PortMap` | port mapping. Node-agent format `containerPort → "localPort"`; legacy `containerPort → "envoyPort:localPort"` pairs remain readable |
 
 ### 2.4 Rule Write / Update / Delete
 

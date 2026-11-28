@@ -25,7 +25,7 @@ func TestParsePortMap_MultipleEntries(t *testing.T) {
 		PortMap: map[int32]string{
 			8080: "8080",
 			9090: "29090:19090",
-			53:   "53",
+			53:   "1053",
 		},
 	}
 	result := r.ParsePortMap()
@@ -57,13 +57,13 @@ func TestParsePortMap_MultipleEntries(t *testing.T) {
 		t.Fatalf("port 9090: LocalPort want 19090, got %d", pm.LocalPort)
 	}
 
-	// 53 -> plain "53": EnvoyPort=53, LocalPort=containerPort=53
+	// 53 -> node-agent plain "1053": EnvoyPort=1053, LocalPort=1053
 	pm = byContainer[53]
-	if pm.EnvoyPort != 53 {
-		t.Fatalf("port 53: EnvoyPort want 53, got %d", pm.EnvoyPort)
+	if pm.EnvoyPort != 1053 {
+		t.Fatalf("port 53: EnvoyPort want 1053, got %d", pm.EnvoyPort)
 	}
-	if pm.LocalPort != 53 {
-		t.Fatalf("port 53: LocalPort want 53, got %d", pm.LocalPort)
+	if pm.LocalPort != 1053 {
+		t.Fatalf("port 53: LocalPort want 1053, got %d", pm.LocalPort)
 	}
 }
 
@@ -91,7 +91,7 @@ func TestParsePortMap_ColonWithInvalidFirst(t *testing.T) {
 }
 
 func TestParsePortMap_ZeroPort(t *testing.T) {
-	// Plain "0" — EnvoyPort=0, LocalPort=containerPort
+	// Plain "0" — EnvoyPort=0, LocalPort=0
 	r := &Rule{
 		PortMap: map[int32]string{
 			443: "0",
@@ -108,8 +108,8 @@ func TestParsePortMap_ZeroPort(t *testing.T) {
 	if pm.EnvoyPort != 0 {
 		t.Fatalf("EnvoyPort want 0, got %d", pm.EnvoyPort)
 	}
-	if pm.LocalPort != 443 {
-		t.Fatalf("LocalPort want containerPort 443, got %d", pm.LocalPort)
+	if pm.LocalPort != 0 {
+		t.Fatalf("LocalPort want 0, got %d", pm.LocalPort)
 	}
 
 	// Colon format "0:0" — both should be 0

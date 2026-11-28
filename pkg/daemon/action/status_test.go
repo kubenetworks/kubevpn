@@ -37,9 +37,9 @@ func TestPortMapToLocalPorts_PlainNumber(t *testing.T) {
 	if len(result) != 1 {
 		t.Fatalf("expected 1 entry, got %d", len(result))
 	}
-	// Plain number format: LocalPort defaults to ContainerPort (8080), not the string value
-	if result[8080] != 8080 {
-		t.Errorf("expected 8080 → 8080 (containerPort fallback), got %d", result[8080])
+	// Node-agent plain values are the local listening port.
+	if result[8080] != 9080 {
+		t.Errorf("expected 8080 → 9080, got %d", result[8080])
 	}
 }
 
@@ -65,9 +65,9 @@ func TestPortMapToLocalPorts_InvalidPort(t *testing.T) {
 	if len(result) != 1 {
 		t.Fatalf("expected 1 entry, got %d", len(result))
 	}
-	// Invalid string → EnvoyPort=0, LocalPort=containerPort(8080)
-	if result[8080] != 8080 {
-		t.Errorf("expected 8080 → 8080 for invalid port, got %d", result[8080])
+	// Invalid node-agent values have no local listening port.
+	if result[8080] != 0 {
+		t.Errorf("expected 8080 → 0 for invalid port, got %d", result[8080])
 	}
 }
 
@@ -86,7 +86,7 @@ func TestPortMapToLocalPorts_MultipleEntries(t *testing.T) {
 	expected := map[int32]int32{
 		80:   8080,
 		443:  8443,
-		3000: 3000, // plain number → LocalPort = ContainerPort
+		3000: 5000, // node-agent plain number → LocalPort = EnvoyPort
 	}
 	for k, want := range expected {
 		if got := result[k]; got != want {

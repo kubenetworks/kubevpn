@@ -13,7 +13,7 @@ type registryStatusSession struct{ *handler.ConnectOptions }
 
 func (s *registryStatusSession) GetClusterName() string { return "cluster" }
 func (s *registryStatusSession) StatusSnapshot(context.Context) (handler.SessionStatus, error) {
-	return handler.SessionStatus{Envoy: `[{"UID":"deployments.apps.web","Namespace":"work","Rules":[{"OwnerID":"alice","Headers":{"version":"test"},"PortMap":{"8080":"30000:9090"}}]}]`, Sync: &handler.SyncStatus{Workloads: []string{"deploy/web"}, Headers: map[string]string{"user": "alice"}, TargetWorkloadNames: map[string]string{"deploy/web": "deploy/web-sync"}, SyncthingGUIAddr: "http://127.0.0.1:8384"}}, nil
+	return handler.SessionStatus{Envoy: `[{"UID":"deployments.apps.web","Namespace":"work","Rules":[{"OwnerID":"alice","Headers":{"version":"test"},"PortMap":{"8080":"9090"}}]}]`, Sync: &handler.SyncStatus{Workloads: []string{"deploy/web"}, Headers: map[string]string{"user": "alice"}, TargetWorkloadNames: map[string]string{"deploy/web": "deploy/web-sync"}, SyncthingGUIAddr: "http://127.0.0.1:8384"}}, nil
 }
 
 func TestRegistry_RealGRPCStatusAndDuplicateSelection(t *testing.T) {
