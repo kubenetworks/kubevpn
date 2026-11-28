@@ -94,3 +94,16 @@ func TestStage4HeapAllocationModel(t *testing.T) {
 		t.Logf("distinct queued=%d old=%d direct=%d delta=%d bytes (shared refs counted once)", queued, old, fresh, int64(fresh)-int64(old))
 	}
 }
+
+func BenchmarkNewPacketFromPoolSize(b *testing.B) {
+	for _, size := range []int{1500, 12000, 65000} {
+		b.Run(fmt.Sprint(size), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				packet := newPacketFromPool(size)
+				b.ReportMetric(float64(len(packet.data)), "buffer_B")
+				packet.release()
+			}
+		})
+	}
+}

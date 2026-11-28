@@ -85,6 +85,18 @@ type packet struct {
 	probeQueued bool
 }
 
+const (
+	smallPacketBufferSize  = 4 * 1024
+	mediumPacketBufferSize = 16 * 1024
+)
+
+var smallPacketBufferPool = sync.Pool{New: func() any {
+	return make([]byte, smallPacketBufferSize)
+}}
+var mediumPacketBufferPool = sync.Pool{New: func() any {
+	return make([]byte, mediumPacketBufferSize)
+}}
+
 var packetPool = sync.Pool{New: func() any { return new(packet) }}
 
 // acquire adds a reference to the packet's buffer. Pair every acquire with a release.
@@ -112,7 +124,14 @@ func (p *packet) release() {
 		p.probeEpoch = 0
 		p.probeQueued = false
 		if data != nil {
-			config.LPool.Put(data[:])
+			switch len(data) {
+			case smallPacketBufferSize:
+				smallPacketBufferPool.Put(data[:])
+			case mediumPacketBufferSize:
+				mediumPacketBufferPool.Put(data[:])
+			case config.LargeBufferSize:
+				config.LPool.Put(data[:])
+			}
 		}
 		packetPool.Put(p)
 	case n < -1:
@@ -137,10 +156,16 @@ func newPacket(data []byte, length int, src net.IP, dst net.IP) *packet {
 // newPacketFromPool allocates a packet buffer with room for size bytes. Buffers
 // returned to the pool retain the existing LPool ownership policy.
 func newPacketFromPool(size int) *packet {
-	if size > config.LargeBufferSize {
+	switch {
+	case size <= smallPacketBufferSize:
+		return newPacket(smallPacketBufferPool.Get().([]byte), 0, nil, nil)
+	case size <= mediumPacketBufferSize:
+		return newPacket(mediumPacketBufferPool.Get().([]byte), 0, nil, nil)
+	case size <= config.LargeBufferSize:
+		return newPacket(packetBufferFromPool(), 0, nil, nil)
+	default:
 		return newPacket(make([]byte, size), 0, nil, nil)
 	}
-	return newPacket(packetBufferFromPool(), 0, nil, nil)
 }
 
 func packetBufferFromPool() []byte {
