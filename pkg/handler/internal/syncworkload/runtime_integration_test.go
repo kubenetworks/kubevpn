@@ -37,8 +37,8 @@ func (c *testLocalClient) Err() error            { return nil }
 func (c *testLocalClient) release()              { c.releaseOnce.Do(func() { close(c.done) }) }
 
 // Exercise real owner resolution, pod mutation, dynamic create/delete, ready-pod
-// discovery, rollout watches, and runtime cancellation without starting the
-// user's embedded Syncthing process or reading an ambient kubeconfig.
+// discovery, and runtime cancellation without starting the user's embedded
+// Syncthing process or reading an ambient kubeconfig.
 func TestRuntime_CloneReadyCancelCleanup(t *testing.T) {
 	for _, failStart := range []bool{false, true} {
 		t.Run(fmt.Sprintf("startFailure=%v", failStart), func(t *testing.T) {
@@ -117,7 +117,7 @@ func TestRuntime_CloneReadyCancelCleanup(t *testing.T) {
 			}))
 			defer server.Close()
 			factory := util.InitFactoryByBytes([]byte("apiVersion: v1\nkind: Config\nclusters:\n- name: test\n  cluster:\n    server: "+server.URL+"\ncontexts:\n- name: test\n  context:\n    cluster: test\n    namespace: test\ncurrent-context: test\n"), "test")
-			cfg := Config{WorkloadNamespace: "test", ManagerNamespace: "manager", Workloads: []string{"deployments/app"}, Headers: map[string]string{"user": "alice"}, LocalDir: t.TempDir(), RemoteDir: "/app", TargetContainer: "app", TargetImage: "debug:v2"}
+			cfg := Config{WorkloadNamespace: "test", Workloads: []string{"deployments/app"}, Headers: map[string]string{"user": "alice"}, LocalDir: t.TempDir(), RemoteDir: "/app", TargetContainer: "app", TargetImage: "debug:v2"}
 			r := New(ctx, cfg, client, factory, nil, nil)
 			defer r.Stop()
 			var workerCtx context.Context
@@ -134,7 +134,7 @@ func TestRuntime_CloneReadyCancelCleanup(t *testing.T) {
 				}
 				return localHandle, nil
 			}
-			err := r.DoSync(ctx, []byte("test-kubeconfig"), "vpn:v1")
+			err := r.DoSync(ctx, "vpn:v1")
 			if failStart && !errors.Is(err, startErr) || !failStart && err != nil {
 				t.Fatalf("DoSync: %v", err)
 			}
@@ -145,19 +145,15 @@ func TestRuntime_CloneReadyCancelCleanup(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if created.GetUID() != "" || created.GetName() == original.Name || len(spec.Spec.Containers) != 3 {
+			if created.GetUID() != "" || created.GetName() == original.Name || len(spec.Spec.Containers) != 2 {
 				t.Fatalf("invalid clone: %v", created)
 			}
 			app := spec.Spec.Containers[0]
-			if app.Image != cfg.TargetImage || app.Command[0] != "tail" || spec.Annotations[config.KUBECONFIG] != "test-kubeconfig" {
+			if app.Image != cfg.TargetImage || app.Command[0] != "tail" || spec.Annotations[config.KUBECONFIG] != "" {
 				t.Fatalf("clone configuration lost: %+v", spec)
 			}
-			vpn := spec.Spec.Containers[1]
-			if value, ok := findFlagValue(vpn.Command, "--manager-namespace"); !ok || value != "manager" {
-				t.Fatalf("manager namespace lost: %v", vpn.Command)
-			}
-			if value, ok := findFlagValue(vpn.Command, "--headers"); !ok || value != "user=alice" {
-				t.Fatalf("headers lost: %v", vpn.Command)
+			if spec.Spec.Containers[1].Name != config.ContainerSidecarSyncthing {
+				t.Fatalf("clone must contain only app and syncthing: %v", spec.Spec.Containers)
 			}
 			targets := r.TargetWorkloadNames()
 			if targets["deployments/app"] != "deployments/"+created.GetName() {
@@ -211,8 +207,11 @@ func TestRuntime_CloneReadyCancelCleanup(t *testing.T) {
 					rolloutIndex = i
 				}
 			}
-			if deleteIndex < 0 || rolloutIndex <= deleteIndex {
-				t.Fatalf("cleanup order: %v", events)
+			if deleteIndex < 0 {
+				t.Fatalf("clone was not deleted: %v", events)
+			}
+			if rolloutIndex >= 0 {
+				t.Fatalf("original workload must not be rolled or watched during sync cleanup: %v", events)
 			}
 		})
 	}

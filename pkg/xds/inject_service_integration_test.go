@@ -10,12 +10,17 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
+	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/cli-runtime/pkg/resource"
 	restfake "k8s.io/client-go/rest/fake"
 	cmdtesting "k8s.io/kubectl/pkg/cmd/testing"
@@ -60,24 +65,34 @@ func injectedDeployment(ns string) *appsv1.Deployment {
 	}
 }
 
+func plainDeployment(ns string) *appsv1.Deployment {
+	deploy := injectedDeployment(ns)
+	deploy.Spec.Template.Spec.Containers = deploy.Spec.Template.Spec.Containers[:1]
+	return deploy
+}
+
 // newInjectTestFactory returns a cmdutil.Factory backed by a fake REST client so
 // GetTopOwnerObject (resource builder) resolves the Deployment with no real cluster.
 // Only GET is served — the injected-for-manager early-return means no PATCH/rollout.
-func newInjectTestFactory(t *testing.T, deploy *appsv1.Deployment) *cmdtesting.TestFactory {
+func newInjectTestFactory(t *testing.T, deployments ...*appsv1.Deployment) *cmdtesting.TestFactory {
 	t.Helper()
-	tf := cmdtesting.NewTestFactory().WithNamespace(deploy.Namespace)
+	tf := cmdtesting.NewTestFactory().WithNamespace(deployments[0].Namespace)
 	t.Cleanup(tf.Cleanup)
 
-	body, err := json.Marshal(deploy)
-	if err != nil {
-		t.Fatalf("marshal deployment: %v", err)
+	bodies := make(map[string][]byte, len(deployments))
+	for _, deploy := range deployments {
+		body, err := json.Marshal(deploy)
+		if err != nil {
+			t.Fatalf("marshal deployment: %v", err)
+		}
+		path := fmt.Sprintf("/namespaces/%s/deployments/%s", deploy.Namespace, deploy.Name)
+		bodies[path] = body
 	}
-	path := fmt.Sprintf("/namespaces/%s/deployments/%s", deploy.Namespace, deploy.Name)
 	fakeClient := &restfake.RESTClient{
 		NegotiatedSerializer: resource.UnstructuredPlusDefaultContentConfig().NegotiatedSerializer,
 		GroupVersion:         appsv1.SchemeGroupVersion,
 		Client: restfake.CreateHTTPClient(func(req *http.Request) (*http.Response, error) {
-			if req.URL.Path == path && req.Method == http.MethodGet {
+			if body, ok := bodies[req.URL.Path]; ok && req.Method == http.MethodGet {
 				return &http.Response{
 					StatusCode: http.StatusOK,
 					Header:     http.Header{"Content-Type": []string{"application/json"}},
@@ -85,6 +100,51 @@ func newInjectTestFactory(t *testing.T, deploy *appsv1.Deployment) *cmdtesting.T
 				}, nil
 			}
 			return nil, fmt.Errorf("unexpected request %s %s", req.Method, req.URL.Path)
+		}),
+	}
+	tf.Client = fakeClient
+	tf.UnstructuredClient = fakeClient
+	return tf
+}
+
+func newInjectServiceTestFactory(t *testing.T, service *corev1.Service, deploy *appsv1.Deployment) *cmdtesting.TestFactory {
+	t.Helper()
+	tf := cmdtesting.NewTestFactory().WithNamespace(service.Namespace)
+	t.Cleanup(tf.Cleanup)
+	marshal := func(obj any) []byte {
+		data, err := json.Marshal(obj)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return data
+	}
+	serviceBody := marshal(service)
+	deploymentBody := marshal(deploy)
+	pod := &corev1.Pod{
+		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Pod"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "foo-pod", Namespace: service.Namespace, Labels: map[string]string{"app": "foo"},
+			OwnerReferences: []metav1.OwnerReference{{APIVersion: "apps/v1", Kind: "Deployment", Name: deploy.Name, Controller: ptr.To(true)}},
+		},
+	}
+	podBody := marshal(pod)
+	podListBody := marshal(&corev1.PodList{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "PodList"}, Items: []corev1.Pod{*pod}})
+	responses := map[string][]byte{
+		"/namespaces/" + service.Namespace + "/services/" + service.Name:               serviceBody,
+		"/api/v1/namespaces/" + service.Namespace + "/services/" + service.Name:        serviceBody,
+		"/api/v1/namespaces/" + service.Namespace + "/pods":                            podListBody,
+		"/namespaces/" + service.Namespace + "/pods/" + pod.Name:                       podBody,
+		"/namespaces/" + deploy.Namespace + "/deployments/" + deploy.Name:              deploymentBody,
+		"/apis/apps/v1/namespaces/" + deploy.Namespace + "/deployments/" + deploy.Name: deploymentBody,
+	}
+	fakeClient := &restfake.RESTClient{
+		NegotiatedSerializer: resource.UnstructuredPlusDefaultContentConfig().NegotiatedSerializer,
+		GroupVersion:         appsv1.SchemeGroupVersion,
+		Client: restfake.CreateHTTPClient(func(req *http.Request) (*http.Response, error) {
+			if body, ok := responses[req.URL.Path]; ok && req.Method == http.MethodGet {
+				return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(bytes.NewReader(body))}, nil
+			}
+			return nil, fmt.Errorf("unexpected request %s %s", req.Method, req.URL.String())
 		}),
 	}
 	tf.Client = fakeClient
@@ -185,7 +245,7 @@ func TestInject_MultiUser_ProxyLeave(t *testing.T) {
 	}, metav1.CreateOptions{}); err != nil {
 		t.Fatalf("seed tls secret: %v", err)
 	}
-	env.server.factory = newInjectTestFactory(t, injectedDeployment(ns))
+	env.server.factory = newInjectTestFactory(t, plainDeployment(ns))
 
 	proxy := func(owner string, headers map[string]string) {
 		prepareNodeAgentReady(t, env, ns, "deployments.apps.foo")
@@ -260,5 +320,236 @@ func TestInject_MultiUser_ProxyLeave(t *testing.T) {
 	leaveAll("owner-a")
 	if owners := readRuleOwners(t, env.server, ns); len(owners) != 1 || owners[0] != "owner-b" {
 		t.Fatalf("after A leave-all, want [owner-b], got %v", owners)
+	}
+}
+
+func TestProxyInject_RejectsUnsupportedNodeAgentTargets(t *testing.T) {
+	const ns = "test-ns"
+	tests := []struct {
+		name        string
+		deployment  *appsv1.Deployment
+		wantMessage string
+	}{
+		{name: "legacy sidecar injection", deployment: injectedDeployment(ns), wantMessage: "legacy sidecar"},
+		{name: "host network", deployment: func() *appsv1.Deployment {
+			deploy := plainDeployment(ns)
+			deploy.Spec.Template.Spec.HostNetwork = true
+			return deploy
+		}(), wantMessage: "hostNetwork"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := newTestEnv(t)
+			if _, err := env.server.clientset.CoreV1().Secrets(ns).Create(context.Background(), &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: ns},
+				Data:       map[string][]byte{config.TLSCertKey: {}, config.TLSPrivateKeyKey: {}, config.TLSServerName: []byte("kubevpn")},
+			}, metav1.CreateOptions{}); err != nil {
+				t.Fatalf("seed tls secret: %v", err)
+			}
+			env.server.factory = newInjectTestFactory(t, tt.deployment)
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			stream, err := env.client.ProxyInject(ctx, &rpc.InjectRequest{
+				Namespace: ns, Workloads: []string{"deployments.apps/foo"}, OwnerID: "owner-a", LocalTunIPv4: "198.18.0.10",
+			})
+			if err != nil {
+				t.Fatalf("ProxyInject open: %v", err)
+			}
+			err = collectInjectStream(stream.Recv)
+			if status.Code(err) != codes.Internal || !strings.Contains(err.Error(), tt.wantMessage) {
+				t.Fatalf("expected %q rejection, got %v", tt.wantMessage, err)
+			}
+			cm, getErr := env.server.clientset.CoreV1().ConfigMaps(ns).Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+			if getErr != nil {
+				t.Fatal(getErr)
+			}
+			if cm.Data[config.KeyEnvoy] != "" {
+				t.Fatalf("rejected target wrote envoy config: %s", cm.Data[config.KeyEnvoy])
+			}
+		})
+	}
+}
+
+func TestProxyInject_SyncRouteWritesDeclarativeTarget(t *testing.T) {
+	const ns = "test-ns"
+	env := newTestEnv(t)
+	if _, err := env.server.clientset.CoreV1().Secrets(ns).Create(context.Background(), &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: ns},
+		Data:       map[string][]byte{config.TLSCertKey: {}, config.TLSPrivateKeyKey: {}, config.TLSServerName: []byte("kubevpn")},
+	}, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("seed tls secret: %v", err)
+	}
+	source := plainDeployment(ns)
+	clone := plainDeployment(ns)
+	clone.Name = "foo-sync-a"
+	clone.Spec.Template.Labels = map[string]string{"owner-ref": "foo-sync-a"}
+	env.server.factory = newInjectTestFactory(t, source, clone)
+	prepareNodeAgentReady(t, env, ns, "deployments.apps.foo")
+
+	target := &controlplane.SyncTarget{UID: "deployments.apps.foo-sync-a", Selector: "owner-ref=foo-sync-a"}
+	derived := &controlplane.Virtual{
+		Namespace: ns, UID: "deployments.apps.foo.nodes.node-a", AgentOrigins: []*controlplane.AgentOrigin{{PodUID: "source"}},
+		Rules: []*controlplane.Rule{{OwnerID: "owner-sync", SyncTarget: target, LocalTunIPv4: "10.244.1.10"}},
+	}
+	data, err := yaml.Marshal([]*controlplane.Virtual{derived})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cm, err := env.server.clientset.CoreV1().ConfigMaps(ns).Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cm.Data[config.KeyEnvoy] = string(data)
+	if _, err := env.server.clientset.CoreV1().ConfigMaps(ns).Update(context.Background(), cm, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	stream, err := env.client.ProxyInject(context.Background(), &rpc.InjectRequest{
+		Namespace: ns, OwnerID: "owner-sync",
+		SyncRoutes: []*rpc.SyncRoute{{Workload: "deployments.apps/foo", TargetWorkload: "deployments.apps/foo-sync-a"}},
+	})
+	if err != nil {
+		t.Fatalf("ProxyInject open: %v", err)
+	}
+	if err := collectInjectStream(stream.Recv); err != nil {
+		t.Fatalf("ProxyInject sync route: %v", err)
+	}
+	cm, err = env.server.clientset.CoreV1().ConfigMaps(ns).Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var virtuals []*controlplane.Virtual
+	if err := yaml.Unmarshal([]byte(cm.Data[config.KeyEnvoy]), &virtuals); err != nil {
+		t.Fatal(err)
+	}
+	for _, virtual := range virtuals {
+		if virtual.UID != "deployments.apps.foo" || len(virtual.AgentOrigins) != 0 {
+			continue
+		}
+		if len(virtual.Rules) != 1 || virtual.Rules[0].SyncTarget == nil {
+			t.Fatalf("sync target missing from base rule: %+v", virtual.Rules)
+		}
+		rule := virtual.Rules[0]
+		if rule.SyncTarget.UID != target.UID || rule.SyncTarget.Selector != target.Selector || rule.LocalTunIPv4 != "" {
+			t.Fatalf("unexpected declarative sync rule: %+v", rule)
+		}
+		return
+	}
+	t.Fatal("base sync Virtual not found")
+}
+
+func TestProxyInject_ServiceUsesNodeAgentWithoutSSHMapper(t *testing.T) {
+	const ns = "test-ns"
+	env := newTestEnv(t)
+	if _, err := env.server.clientset.CoreV1().Secrets(ns).Create(context.Background(), &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: ns},
+		Data:       map[string][]byte{config.TLSCertKey: {}, config.TLSPrivateKeyKey: {}, config.TLSServerName: []byte("kubevpn")},
+	}, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	deploy := plainDeployment(ns)
+	service := &corev1.Service{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Service"},
+		ObjectMeta: metav1.ObjectMeta{Name: "reviews", Namespace: ns},
+		Spec: corev1.ServiceSpec{
+			Selector: map[string]string{"app": "foo"}, ClusterIP: "10.96.0.10",
+			Ports: []corev1.ServicePort{{Port: 80, TargetPort: intstr.FromInt(8080), Protocol: corev1.ProtocolTCP}},
+		},
+	}
+	env.server.factory = newInjectServiceTestFactory(t, service, deploy)
+	prepareNodeAgentReady(t, env, ns, "services.reviews")
+	stream, err := env.client.ProxyInject(context.Background(), &rpc.InjectRequest{
+		Namespace: ns, Workloads: []string{"services/reviews"}, OwnerID: "owner-a", LocalTunIPv4: "198.18.0.10", PortMap: []string{"8080:18080"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for {
+		_, recvErr := stream.Recv()
+		if recvErr == io.EOF {
+			break
+		}
+		if recvErr != nil {
+			t.Fatal(recvErr)
+		}
+	}
+	cm, err := env.server.clientset.CoreV1().ConfigMaps(ns).Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var virtuals []*controlplane.Virtual
+	if err := yaml.Unmarshal([]byte(cm.Data[config.KeyEnvoy]), &virtuals); err != nil {
+		t.Fatal(err)
+	}
+	for _, virtual := range virtuals {
+		if virtual.UID == "services.reviews" && virtual.ServiceName == "reviews" && virtual.Rules[0].LocalTunIPv4 == "198.18.0.10" && virtual.Rules[0].PortMap[8080] == "18080" {
+			return
+		}
+	}
+	t.Fatalf("explicit Service Virtual missing: %+v", virtuals)
+}
+
+func TestLeaveInject_RemovesStoredRuleWhenTargetIsDeleted(t *testing.T) {
+	const ns = "test-ns"
+	env := newTestEnv(t)
+	env.server.factory = newInjectTestFactory(t, plainDeployment(ns))
+	stored := &controlplane.Virtual{
+		Namespace: ns, UID: "services.reviews", ServiceName: "reviews", Selector: "app=foo",
+		Rules: []*controlplane.Rule{{OwnerID: "owner-a", LocalTunIPv4: "198.18.0.10", IsAgent: true}},
+	}
+	data, err := yaml.Marshal([]*controlplane.Virtual{stored})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cm, err := env.server.clientset.CoreV1().ConfigMaps(ns).Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cm.Data[config.KeyEnvoy] = string(data)
+	if _, err := env.server.clientset.CoreV1().ConfigMaps(ns).Update(context.Background(), cm, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	stream, err := env.client.LeaveInject(context.Background(), &rpc.InjectRequest{Namespace: ns, Workloads: []string{"services/reviews"}, OwnerID: "owner-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := collectInjectStream(stream.Recv); err != nil {
+		t.Fatalf("leave deleted Service must use stored identity: %v", err)
+	}
+	cm, err = env.server.clientset.CoreV1().ConfigMaps(ns).Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cm.Data[config.KeyEnvoy] != "[]\n" && cm.Data[config.KeyEnvoy] != "" {
+		t.Fatalf("stored rule was not removed: %s", cm.Data[config.KeyEnvoy])
+	}
+}
+
+func TestLeaveInject_ResolvesShortWorkloadAlias(t *testing.T) {
+	const ns = "test-ns"
+	env := newTestEnv(t)
+	env.server.factory = newInjectTestFactory(t, plainDeployment(ns))
+	stored := &controlplane.Virtual{Namespace: ns, UID: "deployments.apps.foo", Selector: "app=foo", Rules: []*controlplane.Rule{{OwnerID: "owner-a", IsAgent: true}}}
+	data, err := yaml.Marshal([]*controlplane.Virtual{stored})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cm, err := env.server.clientset.CoreV1().ConfigMaps(ns).Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cm.Data[config.KeyEnvoy] = string(data)
+	if _, err := env.server.clientset.CoreV1().ConfigMaps(ns).Update(context.Background(), cm, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	stream, err := env.client.LeaveInject(context.Background(), &rpc.InjectRequest{Namespace: ns, Workloads: []string{"deploy/foo"}, OwnerID: "owner-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := collectInjectStream(stream.Recv); err != nil {
+		t.Fatal(err)
+	}
+	if owners := readRuleOwners(t, env.server, ns); len(owners) != 0 {
+		t.Fatalf("short alias did not remove stored rule: %v", owners)
 	}
 }

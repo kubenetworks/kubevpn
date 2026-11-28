@@ -2,30 +2,22 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
-	pkgresource "k8s.io/cli-runtime/pkg/resource"
-	"k8s.io/client-go/kubernetes"
 	v1 "k8s.io/client-go/kubernetes/typed/core/v1"
-	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"sigs.k8s.io/yaml"
 
 	clusterworkload "github.com/wencaiwulue/kubevpn/v2/pkg/cluster/workload"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/inject"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-// Reset removes injected sidecar containers and restores workloads to their original spec.
+// Reset removes node-agent proxy state without modifying workloads or Services.
 func (c *ConnectOptions) Reset(ctx context.Context, namespace string, workloads []string) error {
 	if c == nil || c.clientset == nil {
 		return nil
@@ -41,13 +33,7 @@ func (c *ConnectOptions) Reset(ctx context.Context, namespace string, workloads 
 	err = resetConfigMap(ctx, c.clientset.CoreV1().ConfigMaps(c.ManagerNamespace), namespace, workloads)
 	if err != nil {
 		plog.G(ctx).Error(err)
-	}
-
-	for _, workload := range workloads {
-		err = removeInjectContainer(ctx, c.factory, c.clientset, namespace, workload)
-		if err != nil {
-			plog.G(ctx).Error(err)
-		}
+		return err
 	}
 	plog.StepDone(ctx, "Reset %d workloads", len(workloads))
 
@@ -79,6 +65,9 @@ func resetConfigMap(ctx context.Context, mapInterface v1.ConfigMapInterface, nam
 
 	for i := 0; i < len(v); i++ {
 		if ws.Has(v[i].UID) && v[i].Namespace == namespace {
+			if isLegacySidecarVirtual(v[i]) {
+				return fmt.Errorf("legacy sidecar-injected workload %s is not supported", v[i].UID)
+			}
 			v = append(v[:i], v[i+1:]...)
 			i--
 		}
@@ -96,55 +85,14 @@ func resetConfigMap(ctx context.Context, mapInterface v1.ConfigMapInterface, nam
 	return nil
 }
 
-func removeInjectContainer(ctx context.Context, factory cmdutil.Factory, clientset kubernetes.Interface, namespace, workload string) error {
-	object, controller, err := clusterworkload.GetTopOwnerObject(ctx, factory, namespace, workload)
-	if err != nil {
-		plog.G(ctx).Errorf("Failed to get unstructured object: %v", err)
-		return err
+func isLegacySidecarVirtual(virtual *controlplane.Virtual) bool {
+	if virtual.Selector != "" || len(virtual.AgentOrigins) != 0 {
+		return false
 	}
-
-	u := controller.Object.(*unstructured.Unstructured)
-	templateSpec, depth, err := clusterworkload.GetPodTemplateSpecPath(u)
-	if err != nil {
-		plog.G(ctx).Errorf("Failed to get template spec path: %v", err)
-		return err
+	for _, rule := range virtual.Rules {
+		if !rule.IsAgent {
+			return true
+		}
 	}
-
-	plog.G(ctx).Debugf("Resetting workload %q", workload)
-
-	inject.RemoveContainers(&templateSpec.Spec)
-
-	helper := pkgresource.NewHelper(controller.Client, controller.Mapping)
-	plog.G(ctx).Debugf("The %s is under controller management", workload)
-	// resource with controller, like deployment,statefulset
-	var bytes []byte
-	bytes, err = json.Marshal([]inject.JSONPatchOp{
-		{
-			Op:    "replace",
-			Path:  "/" + strings.Join(append(depth, "spec"), "/"),
-			Value: templateSpec.Spec,
-		},
-	})
-	if err != nil {
-		plog.G(ctx).Errorf("Failed to generate json patch: %v", err)
-		return err
-	}
-	_, err = helper.Patch(controller.Namespace, controller.Name, types.JSONPatchType, bytes, &metav1.PatchOptions{})
-	if err != nil {
-		plog.G(ctx).Errorf("Failed to patch resource: %s %s: %v", controller.Mapping.Resource.Resource, controller.Name, err)
-		return err
-	}
-	workloadRef := fmt.Sprintf("%s/%s", controller.Mapping.Resource.Resource, controller.Name)
-	// reset restores the original spec; a timed-out rollout must not undo it.
-	if err = clusterworkload.RolloutStatus(ctx, factory, controller.Namespace, workloadRef, false); err != nil {
-		plog.G(ctx).Warnf("Rollout status check failed for %s: %v", workloadRef, err)
-	}
-	if !clusterworkload.IsK8sService(object) {
-		return nil
-	}
-
-	if err = inject.RestoreServiceTargetPort(ctx, clientset, namespace, object.Name); err != nil {
-		return fmt.Errorf("failed to restore service %s target ports: %w: %w", object.Name, err, config.ErrCleanupFailed)
-	}
-	return nil
+	return false
 }

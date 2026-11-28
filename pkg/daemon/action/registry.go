@@ -59,9 +59,11 @@ func (r *connectionRegistry) filter(ids []string) (handler.Connects, string) {
 func (r *connectionRegistry) add(c handler.Connection, selectCurrent bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.list = append(r.list, c)
 	if selectCurrent {
+		r.list = append(handler.Connects{c}, r.list...)
 		r.currentID = c.GetConnectionID()
+	} else {
+		r.list = append(r.list, c)
 	}
 }
 
@@ -106,9 +108,19 @@ func (r *connectionRegistry) takeAll() handler.Connects {
 func (r *connectionRegistry) use(id string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, i := r.findLocked(id); i < 0 {
+	i := -1
+	for index := len(r.list) - 1; index >= 0; index-- {
+		if r.list[index].GetConnectionID() == id {
+			i = index
+			break
+		}
+	}
+	if i < 0 {
 		return false
 	}
+	selected := r.list[i]
+	r.list = slices.Delete(r.list, i, i+1)
+	r.list = append(handler.Connects{selected}, r.list...)
 	r.currentID = id
 	return true
 }

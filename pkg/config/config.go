@@ -10,14 +10,6 @@ import (
 )
 
 const (
-	// AttachModeSidecar is the attach mode where the proxy runs as a sidecar container.
-	AttachModeSidecar = "sidecar"
-	// AttachModeNodeAgent is the attach mode where the proxy runs as a node agent (default).
-	AttachModeNodeAgent = "node-agent"
-	// AttachModeLegacySidecar preserves the run/sync sidecar path during the
-	// ordinary-proxy node-boundary migration. It is not a user fallback mode.
-	AttachModeLegacySidecar = "legacy-sidecar"
-
 	// ConfigMapPodTrafficManager is the name of the ConfigMap used by the traffic manager.
 	ConfigMapPodTrafficManager = "kubevpn-traffic-manager"
 
@@ -107,14 +99,6 @@ const (
 	PortNameUDP = "10802-for-udp"
 	// PortUDP is the traffic-manager UDP tunnel port number.
 	PortUDP = 10802
-	// PortSSH is the traffic-manager SSH tunnel port number (service/fargate mode and reverse tunnel).
-	PortSSH = 2222
-	// PortUDPBridge is the sidecar reverse-UDP bridge port (fargate/service mode),
-	// carrying UDP inbound back to the developer since the SSH reverse tunnel is TCP-only.
-	PortUDPBridge = 2223
-	// PortEnvoyInbound is the Envoy inbound capture port that mesh-mode iptables DNAT redirects to.
-	PortEnvoyInbound = 15006
-
 	// IPv4Pool is the TUN IP allocation range. Its prefix bounds the allocator
 	// (InRange); individual leases carry a host mask (/32), not this pool prefix.
 	// 198.18.0.0/16 network is part of the 198.18.0.0/15 (reserved for benchmarking).

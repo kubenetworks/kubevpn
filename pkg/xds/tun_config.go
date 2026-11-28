@@ -3,7 +3,6 @@ package xds
 import (
 	"context"
 	"net"
-	"os"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -23,11 +22,11 @@ const LeaseDuration = leases.LeaseDuration
 // TunConfigServer adapts the RPC protocol to the lease and discovery domains.
 type TunConfigServer struct {
 	rpc.UnimplementedTunConfigServiceServer
-	clientset       kubernetes.Interface
-	namespace       string
-	factory         cmdutil.Factory
-	leases          *leases.Manager
-	routes          *discovery.Broadcaster
+	clientset           kubernetes.Interface
+	namespace           string
+	factory             cmdutil.Factory
+	leases              *leases.Manager
+	routes              *discovery.Broadcaster
 	attachmentPublisher *AttachmentPublisher
 }
 
@@ -104,20 +103,4 @@ func (s *TunConfigServer) ReconcileAllocsFromConfigMap(ctx context.Context) {
 func (s *TunConfigServer) Close() {
 	s.routes.Close()
 	s.leases.Close()
-}
-
-// ResolveAttachMode returns the effective attach mode. Defaults to node-agent.
-func (s *TunConfigServer) ResolveAttachMode(ctx context.Context) string {
-	return attachModeFromEnv()
-}
-
-// attachModeFromEnv reads the cluster-level proxy attach mode. Default is the
-// node-agent mode; the value is set by the Helm chart / genDeploySpec.
-func attachModeFromEnv() string {
-	switch os.Getenv("KUBEVPN_PROXY_ATTACH_MODE") {
-	case config.AttachModeSidecar:
-		return config.AttachModeSidecar
-	default:
-		return config.AttachModeNodeAgent
-	}
 }

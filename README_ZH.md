@@ -101,7 +101,7 @@ curl productpage:9080  # 同一命名空间下可用短名
 
 ```bash
 # 1. 如果使用过 `kubevpn proxy` 或 `kubevpn sync`，先离开这些资源
-#    这会将工作负载恢复到原始状态并移除注入的 sidecar
+#    这会移除你的 node-agent 代理规则，不会修改工作负载
 kubevpn leave deployments/productpage
 
 # 2. 按连接 ID 断开连接（从 `kubevpn status` 获取）
@@ -121,7 +121,7 @@ kubevpn uninstall
 ## 安全提示
 
 - KubeVPN 会修改本地 TUN 设备、路由表和 DNS 设置
-- 代理模式会向工作负载注入 Sidecar 容器，可能需要 `privileged`、`NET_ADMIN` 或 `NET_RAW` 权限
+- 代理模式使用特权 node-agent DaemonSet（`hostPID`、只读宿主机 `/proc`、`hostNetwork=false`），不会修改工作负载 PodSpec 或 Service
 - 对于生产集群，使用前请了解 RBAC 和网络影响
 - 了解更多：[安全文档](https://kubevpn.dev/zh/docs/operations/security)
 

@@ -1,7 +1,7 @@
 FROM envoyproxy/envoy:v1.36.2 AS envoy
 FROM debian:bookworm-slim
 
-RUN apt-get update && apt-get install -y iptables dnsutils \
+RUN apt-get update && apt-get install -y iptables ipset dnsutils \
     && apt-get autoremove -y \
     && apt-get clean -y \
     && rm -rf /var/lib/apt/lists/*

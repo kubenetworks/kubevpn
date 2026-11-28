@@ -1,9 +1,10 @@
 # Node-hosted Traffic Agent (Non-intrusive Proxy Attachment)
 
-> Status: **implemented (Phase 1)** — the node-boundary DaemonSet is the default for
-> ordinary non-Service proxy/connect. Run, sync, and Fargate/Service retain their legacy
-> sidecar paths pending later migration phases. The legacy per-pod Job architecture is
-> described only as historical context in §14–§21.
+> Status: **implemented** — the node-boundary DaemonSet is the only traffic
+> attachment mode for ordinary proxy/connect, run, sync, and Service targets.
+> Workload sidecar injection, Fargate/SSH tunnels, and legacy attach-mode
+> selection have been removed. The legacy per-pod Job architecture is historical
+> context only in §14–§21.
 
 ## 1. The Question
 
@@ -20,8 +21,8 @@ The production design is now a **node-boundary agent** with these properties:
 - `hostNetwork=false`, `hostPID=true`, read-only host `/proc`, and the existing privileged
   agent level.
 
-Sidecar is not a fallback for ordinary workloads. Run, sync, and Fargate/Service mode keep
-their existing paths during Phase 1 and will be migrated separately.
+There is no sidecar fallback for any workload or Service target. Legacy sidecar-injected
+workloads and `hostNetwork` workloads are rejected instead of migrated.
 
 ## 2. Requirements
 
@@ -29,7 +30,7 @@ their existing paths during Phase 1 and will be migrated separately.
 |---|---|
 | R1 | Zero workload modification: PodSpec and controller templates untouched, no rollout, no pod restart |
 | R2 | Routing semantics identical to mesh: OwnerID rules, header splitting, multi-user merge, TUN IP hot update |
-| R3 | Ordinary non-Service proxy/connect uses only node-boundary; no silent sidecar fallback |
+| R3 | Proxy/connect, run, sync, and Service targets use only node-boundary; no sidecar fallback |
 | R4 | Declarative desired state with stable allocation and convergence, not per-pod imperative job reconciliation |
 | R5 | One tunnel and one agent lease per node; no per-pod jobs or leases |
 | R6 | Correct podIP **and Service ClusterIP** interception without relying on `ORIGINAL_DST` across netns |
@@ -56,7 +57,7 @@ ProxyInject (server-side)
       ├─ filter attachments to this node
       ├─ insert marked host-netns PREROUTING rules BEFORE KUBE-SERVICES:
       │    dst podIP/ServiceIP + original dport → agentPodIP:listenerPort
-      │    exclude src=<agentPodIP> to prevent origin-forwarding loops
+      │    exclude every node-agent source IP to prevent origin-forwarding loops
       └─ one Envoy per workload on this node:
            direct listener per pod/Service/original port
            header match → user TUN IP through the node tunnel
@@ -79,7 +80,7 @@ explicit return endpoints are required. This was proven by real-cluster errors
 | hostPath | `/proc` mounted read-only at `/host/proc` | access to `/host/proc/1/ns/net` |
 | service account | traffic-manager SA | get/list/watch only the manager ConfigMap |
 | pod identity | Downward API `NODE_NAME`, `POD_IP` | node filtering and DNAT target |
-| TLS env | manager Secret cert/key/server/obfuscation | same tunnel contract as sidecars |
+| TLS env | manager Secret cert/key/server/obfuscation | same manager tunnel contract |
 | SA UID annotation | `kubevpn.io/service-account-uid` | forces a rollout after manager reinstall |
 | imagePullPolicy | `IfNotPresent` | supports CI-loaded images |
 
@@ -100,10 +101,16 @@ unique admin port (`adminBase+5000`) and `--base-id`.
   whose old Envoy may still be exiting. Re-proxy restores the original assignment.
 - **Derived UID** — `<workloadUID>.nodes.<nodeName>`, used only by xDS. Status and leave-all
   filter derived Virtuals and operate on the base workload.
+- **Explicit Service identity** — `Virtual.serviceName` publishes only the requested
+  ClusterIP/ServicePort and suppresses the same inferred Service on backend Virtuals.
+- **Sync target** — `Rule.syncTarget` stores clone UID/selector in the base rule. Only derived
+  Virtuals contain the newest Ready clone PodIP; DHCP renewal never overwrites it.
 
 A Service is not collapsed into a pod origin. `originIP=ClusterIP` and
 `originPort=ServicePort` preserve kube-proxy/IPVS load balancing. Host rules are inserted at
 PREROUTING position 1 because a Service can otherwise be consumed before a podIP-only rule.
+An ipset of every node-agent Pod IP excludes agent-originated traffic from KubeVPN DNAT only;
+it deliberately does not use `RETURN`, so those packets still traverse kube-proxy/IPVS.
 
 ## 6. Lifecycle and readiness
 
@@ -127,17 +134,17 @@ PREROUTING position 1 because a Service can otherwise be consumed before a podIP
   `pods/exec`, or host CRI socket is required.
 - The manager can create/update/delete the node-agent DaemonSet and read the traffic-manager
   ServiceAccount/Secret.
-- The manager namespace must permit privileged pods. Sidecar remains a separate legacy path
-  for run/sync/Fargate, not a fallback for ordinary proxy.
+- The manager namespace must permit privileged pods. There is no alternate workload sidecar
+  path for restricted clusters.
 
 ## 8. Limitations
 
 | Limitation | Notes |
 |---|---|
-| Privileged node access | `hostPID` and privileged containers remain a significant trust requirement; restricted clusters need the existing sidecar path outside Phase 1 |
+| Privileged node access | `hostPID` and privileged containers remain a significant trust requirement; there is no unprivileged Fargate or sidecar alternative |
 | `ORIGINAL_DST` | Not supported across host/agent netns; direct listeners are mandatory, not optional |
-| run/sync/Fargate migration | These modes intentionally retain legacy sidecar behavior in Phase 1 via the internal `legacy-sidecar` request mode and hidden `legacy-proxy` command |
-| Global sidecar removal | Only starts after sync, run, and Fargate/Service have independent migrations; it is not part of this phase |
+| Legacy instances | Existing sidecar-injected workloads are rejected, not migrated or reset; use a clean workload |
+| `hostNetwork` targets | Rejected because host-level interception cannot distinguish their destination traffic safely |
 | Allocation capacity | Tombstones are retained until the manager ConfigMap is deleted, trading eventual range exhaustion for correctness during leave/re-proxy races |
 
 ## 9. Security analysis
@@ -165,21 +172,20 @@ Fake-clientset and process-level coverage includes:
 6. readiness checks reject missing agents and missing listeners, using `httptest` and fake
    pods/ConfigMaps;
 7. DaemonSet security contract, SA UID rollout, TLS env refresh, and core-resource cleanup;
-8. status/leave-all hide derived Virtuals; legacy run/sync mode is preserved;
+8. status/leave-all hide derived Virtuals; sync routes and explicit Services remain base workloads;
 9. real-cluster lifecycle: attach, mesh, portmap, leave/re-proxy, agent/target/manager
    restarts, no per-pod Jobs, no workload generation or UID change.
 
 The PoC additionally verifies ServiceIP header/origin, multiple workloads, UDP, and
 `hostNetwork=false`.
 
-## 11. Phasing
+## 11. Migration completion
 
-1. **Phase 1 — ordinary proxy/connect:** replace sidecar with the node-boundary DaemonSet,
-   keep run/sync/Fargate on their existing paths, and require the full real-cluster matrix.
-2. **Phase 2 — sync migration.**
-3. **Phase 3 — run migration.**
-4. **Phase 4 — Fargate/Service migration.**
-5. **Final:** delete sidecar code and configuration globally only after all migrations pass.
+1. **Ordinary proxy/connect:** replaced sidecar with the node-boundary DaemonSet.
+2. **Sync:** replaced the nested clone VPN with declarative original-to-clone routes.
+3. **Run:** removed the hidden legacy-proxy path in host and container modes.
+4. **Service:** replaced Fargate/SSH Mapper with explicit Service attachments.
+5. **Final:** removed workload sidecar code, attach-mode configuration, and obsolete RPCs.
 
 ## 12. Measured vs Reasoned
 

@@ -207,7 +207,7 @@ func TestPersistence_LegacyFieldSetAndDetachedRecords(t *testing.T) {
 	c := &handler.ConnectOptions{RequestRaw: record.RequestRaw, ManagerNamespace: "manager", WorkloadNamespace: "work",
 		ExtraRouteInfo:       handler.ExtraRouteInfo{ExtraCIDR: []string{"10.1.0.0/16"}, ExtraDomain: []string{"example.test"}, ExtraNodeIP: true},
 		OriginKubeconfigPath: "/old/config", Image: "image:v1", ImagePullSecretName: "pull", OwnerID: "disk-owner", ConnectionID: "old-id", SocksListenAddr: "127.0.0.1:1080", SocksEgress: true}
-	c.SetSync(&handler.SyncOptions{WorkloadNamespace: "work", ManagerNamespace: "manager", Headers: map[string]string{"version": "test"}, Workloads: []string{"deploy/web"},
+	c.SetSync(&handler.SyncOptions{WorkloadNamespace: "work", Headers: map[string]string{"version": "test"}, Workloads: []string{"deploy/web"},
 		ExtraRouteInfo: handler.ExtraRouteInfo{ExtraCIDR: []string{"10.2.0.0/16"}, ExtraDomain: []string{"sync.test"}, ExtraNodeIP: true}, TargetContainer: "web", TargetImage: "sync:v1", TargetWorkloadNames: map[string]string{"deploy/web": "deploy/web-sync"}, OriginKubeconfigPath: "/sync/config", LocalDir: "/local", RemoteDir: "/remote"})
 	detached := recordConnection(c)
 	encoded, err = json.Marshal(detached)

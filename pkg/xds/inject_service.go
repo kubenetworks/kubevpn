@@ -17,6 +17,7 @@ import (
 
 	clusterworkload "github.com/wencaiwulue/kubevpn/v2/pkg/cluster/workload"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/controlplane"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/inject"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
@@ -49,24 +50,21 @@ func injectStreamLogger(sendMsg func(string) error) *log.Logger {
 	return logger
 }
 
-// ProxyInject injects envoy sidecars into the requested workloads server-side, run
-// by the traffic manager with its own in-cluster ServiceAccount. It mirrors the
-// client-side ConnectOptions.CreateRemoteInboundPod loop, but performs every cluster
-// mutation (workload get/patch, envoy ConfigMap rule, rollout wait, fargate service
-// target-port) here in the pod. The one side effect that cannot move server-side —
-// the SSH reverse-tunnel port Mapper for K8s Service workloads, which forwards to the
-// developer's LOCAL machine — is not run here; instead the response reports which
-// workloads are Services (plus their pod selector) so the client runs its own Mapper.
+// ProxyInject publishes node-agent workload, explicit Service, and sync-clone
+// attachment state through the manager. It never patches workload PodSpecs or
+// Service target ports and has no sidecar fallback.
 //
-// Progress is streamed to the client as Message lines. If the factory is unset
-// (server-side injection unavailable), it returns codes.Unavailable so the client
-// falls back to local injection.
+// Progress is streamed to the client as Message lines. An unset factory returns
+// codes.Unavailable because workload resolution is unavailable.
 func (s *TunConfigServer) ProxyInject(req *rpc.InjectRequest, stream rpc.TunConfigService_ProxyInjectServer) error {
 	if s.factory == nil {
 		return status.Error(codes.Unavailable, "server-side injection unavailable")
 	}
-	if req.GetLocalTunIPv4() == "" {
+	if req.GetLocalTunIPv4() == "" && len(req.GetSyncRoutes()) == 0 {
 		return status.Error(codes.InvalidArgument, "local tun IPv4 is empty")
+	}
+	if len(req.GetWorkloads()) != 0 && len(req.GetSyncRoutes()) != 0 {
+		return status.Error(codes.InvalidArgument, "ordinary workloads and sync routes cannot be mixed in one request")
 	}
 	if req.GetOwnerID() == "" {
 		return status.Error(codes.InvalidArgument, "owner ID must not be empty - client session state may be stale; reconnect and retry")
@@ -77,39 +75,38 @@ func (s *TunConfigServer) ProxyInject(req *rpc.InjectRequest, stream rpc.TunConf
 	})
 	ctx := plog.WithLogger(stream.Context(), logger)
 
-	// The manager runs in the manager namespace, so its own Secret holds the TLS cert.
-	tlsSecret, err := s.clientset.CoreV1().Secrets(s.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
-	if err != nil {
-		return status.Errorf(codes.Internal, "get tls secret: %v", err)
-	}
-
 	plog.StepStart(ctx, "Injecting proxy sidecar (server-side)")
-	var services []*rpc.ServiceWorkload
+	type injectTarget struct {
+		workload   string
+		syncTarget *controlplane.SyncTarget
+	}
+	targets := make([]injectTarget, 0, len(req.GetWorkloads())+len(req.GetSyncRoutes()))
 	for _, workload := range req.GetWorkloads() {
+		targets = append(targets, injectTarget{workload: workload})
+	}
+	for _, route := range req.GetSyncRoutes() {
+		_, targetController, targetNodeID, err := s.resolveWorkloadNodeID(ctx, req.GetNamespace(), route.GetTargetWorkload())
+		if err != nil {
+			return err
+		}
+		targetSpec, _, err := clusterworkload.GetPodTemplateSpecPath(targetController.Object.(*unstructured.Unstructured))
+		if err != nil {
+			return status.Errorf(codes.Internal, "pod template spec of %s: %v", route.GetTargetWorkload(), err)
+		}
+		selector := labels.SelectorFromSet(targetSpec.Labels).String()
+		if selector == "" {
+			return status.Errorf(codes.InvalidArgument, "sync target %s has no pod labels", route.GetTargetWorkload())
+		}
+		targets = append(targets, injectTarget{workload: route.GetWorkload(), syncTarget: &controlplane.SyncTarget{UID: targetNodeID, Selector: selector}})
+	}
+	for _, target := range targets {
+		workload := target.workload
 		object, controller, nodeID, err := s.resolveWorkloadNodeID(ctx, req.GetNamespace(), workload)
 		if err != nil {
 			return err
 		}
-		templateSpec, _, err := clusterworkload.GetPodTemplateSpecPath(controller.Object.(*unstructured.Unstructured))
-		if err != nil {
-			return status.Errorf(codes.Internal, "pod template spec of %s: %v", workload, err)
-		}
-		// A K8s Service workload needs a client-side port Mapper (SSH reverse tunnels
-		// back to the developer's machine). That cannot run in the pod, so report the
-		// workload + its pod selector back and let the client start the Mapper.
-		if clusterworkload.IsK8sService(object) {
-			services = append(services, &rpc.ServiceWorkload{
-				Workload: workload,
-				Selector: labels.SelectorFromSet(templateSpec.Labels).String(),
-			})
-		}
-
-		attachMode := req.GetAttachMode()
-		if attachMode == "" {
-			attachMode = s.ResolveAttachMode(ctx)
-		}
+		plog.G(ctx).Debugf("[inject] %s portMap=%v", workload, req.GetPortMap())
 		injector := inject.NewInjector(inject.InjectOptions{
-			Factory:          s.factory,
 			Clientset:        s.clientset,
 			ManagerNamespace: s.namespace,
 			NodeID:           nodeID,
@@ -119,26 +116,23 @@ func (s *TunConfigServer) ProxyInject(req *rpc.InjectRequest, stream rpc.TunConf
 			LocalTunIPv6:     req.GetLocalTunIPv6(),
 			Headers:          req.GetHeaders(),
 			PortMaps:         req.GetPortMap(),
-			Secret:           tlsSecret,
-			Image:            req.GetImage(),
 			OwnerID:          req.GetOwnerID(),
-			AttachMode:       attachMode,
+			SyncTarget:       target.syncTarget,
+			ServiceName:      util.If(clusterworkload.IsK8sService(object), object.Name, ""),
 		})
 		if err := injector.Inject(ctx); err != nil {
 			return status.Errorf(codes.Internal, "inject sidecar into %s: %v", workload, err)
 		}
 		plog.G(ctx).Infof("Injected proxy sidecar into workload %q in namespace %q", workload, req.GetNamespace())
 	}
-	plog.StepDone(ctx, "Injected proxy sidecar into %d workloads", len(req.GetWorkloads()))
+	plog.StepDone(ctx, "Injected proxy sidecar into %d workloads", len(targets))
 
-	// Final frame: report Service workloads needing a client-side Mapper.
-	return stream.Send(&rpc.InjectResponse{Services: services})
+	return stream.Send(&rpc.InjectResponse{})
 }
 
-// LeaveInject removes the caller's envoy rule (by OwnerID) from workloads server-side:
-// the traffic manager unpatches the sidecar when the workload has no rules left, waits
-// for rollout and (fargate) restores the service target port, using its own in-cluster
-// ServiceAccount.
+// LeaveInject removes the caller's node-agent rules by OwnerID. It never
+// unpatches workloads or restores Service target ports; deleted targets are
+// resolved from stored Virtual identities when necessary.
 //
 // If Workloads is empty it removes the OwnerID's rules from ALL workloads it currently
 // proxies (derived from ENVOY_CONFIG) — used by the client's disconnect cleanup, since
@@ -165,25 +159,72 @@ func (s *TunConfigServer) LeaveInject(req *rpc.InjectRequest, stream rpc.TunConf
 
 	plog.StepStart(ctx, "Removing proxy from workloads (server-side)")
 	for _, workload := range workloads {
-		object, controller, nodeID, err := s.resolveWorkloadNodeID(ctx, req.GetNamespace(), workload)
-		if err != nil {
-			return err
+		nodeID := s.resolveLeaveNodeID(ctx, req.GetNamespace(), workload, req.GetOwnerID())
+		_, found, err := inject.NewVirtualStore(s.clientset.CoreV1().ConfigMaps(s.namespace)).RemoveRule(ctx, req.GetNamespace(), nodeID, req.GetOwnerID())
+		if apierrors.IsNotFound(err) {
+			continue
 		}
-		empty, err := inject.UnpatchContainer(ctx, nodeID, s.factory, s.clientset.CoreV1().ConfigMaps(s.namespace), controller, req.GetOwnerID(), s.clientset, s.namespace)
 		if err != nil {
 			return status.Errorf(codes.Internal, "leave workload %s: %v", workload, err)
 		}
-		// When this owner was the last rule, the sidecar is removed; a fargate Service
-		// also needs its target port restored to the original.
-		if empty && clusterworkload.IsK8sService(object) {
-			if err := inject.RestoreServiceTargetPort(ctx, s.clientset, req.GetNamespace(), object.Name); err != nil {
-				return status.Errorf(codes.Internal, "restore service %s target port: %v", object.Name, err)
-			}
+		if !found {
+			plog.G(ctx).Infof("Not found proxy resource %s", workload)
+			continue
 		}
 		plog.G(ctx).Infof("Left workload %q in namespace %q", workload, req.GetNamespace())
 	}
 	plog.StepDone(ctx, "Removed proxy from %d workloads", len(workloads))
 	return stream.Send(&rpc.InjectResponse{})
+}
+
+func (s *TunConfigServer) resolveLeaveNodeID(ctx context.Context, namespace, workload, ownerID string) string {
+	_, _, nodeID, err := s.resolveWorkloadNodeID(ctx, namespace, workload)
+	if err == nil {
+		return nodeID
+	}
+	fallback := util.ConvertWorkloadToUID(workload)
+	cm, getErr := s.clientset.CoreV1().ConfigMaps(s.namespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if getErr != nil {
+		return fallback
+	}
+	virtuals, parseErr := parseYaml(cm.Data[config.KeyEnvoy])
+	if parseErr != nil {
+		return fallback
+	}
+	for _, virtual := range virtuals {
+		if virtual.Namespace != namespace || len(virtual.AgentOrigins) != 0 || !leaveAliasMatches(workload, virtual.UID) {
+			continue
+		}
+		for _, rule := range virtual.Rules {
+			if rule.OwnerID == ownerID {
+				return virtual.UID
+			}
+		}
+	}
+	return fallback
+}
+
+func leaveAliasMatches(workload, uid string) bool {
+	if util.ConvertWorkloadToUID(workload) == uid {
+		return true
+	}
+	resource, name, found := strings.Cut(workload, "/")
+	if !found {
+		return false
+	}
+	index := strings.LastIndex(uid, ".")
+	if index < 0 || uid[index+1:] != name {
+		return false
+	}
+	canonical := map[string]string{
+		"deploy": "deployments.apps", "deployment": "deployments.apps", "deployments": "deployments.apps",
+		"sts": "statefulsets.apps", "statefulset": "statefulsets.apps", "statefulsets": "statefulsets.apps",
+		"ds": "daemonsets.apps", "daemonset": "daemonsets.apps", "daemonsets": "daemonsets.apps",
+		"rs": "replicasets.apps", "replicaset": "replicasets.apps", "replicasets": "replicasets.apps",
+		"svc": "services", "service": "services", "services": "services",
+		"po": "pods", "pod": "pods", "pods": "pods",
+	}
+	return canonical[resource] == uid[:index]
 }
 
 // resolveWorkloadNodeID resolves a workload string (group/resource/name) to its top

@@ -11,6 +11,18 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+func TestBaseVirtualWithoutOriginsProducesNoResources(t *testing.T) {
+	virtual := &Virtual{
+		Namespace: "default", UID: "deployments.apps.reviews",
+		Ports: []ContainerPort{{ContainerPort: 9080, Protocol: "TCP"}},
+		Rules: []*Rule{{OwnerID: "owner-a", LocalTunIPv4: "198.18.0.1", PortMap: map[int32]string{9080: "9080"}}},
+	}
+	listeners, clusters, routes, endpoints := To(virtual, false, logrus.NewEntry(logrus.New()))
+	if len(listeners) != 0 || len(clusters) != 0 || len(routes) != 0 || len(endpoints) != 0 {
+		t.Fatalf("base Virtual must not produce legacy data-plane resources: %d %d %d %d", len(listeners), len(clusters), len(routes), len(endpoints))
+	}
+}
+
 func TestAgentOrigins_DirectListenersAndExplicitPodRoutes(t *testing.T) {
 	virtual := &Virtual{
 		Namespace:         "default",
@@ -130,5 +142,45 @@ func TestAgentOrigins_DirectListenersAndExplicitPodRoutes(t *testing.T) {
 	}
 	if len(wantEndpoints) != 0 {
 		t.Fatalf("missing explicit pod origin endpoints: %v", wantEndpoints)
+	}
+}
+
+func TestAgentOrigins_ServicePortsSharingTargetUseDistinctFallbacks(t *testing.T) {
+	virtual := &Virtual{
+		Namespace: "default", UID: "services.reviews.nodes.node-a", AgentListenerPort: 20000,
+		Ports: []ContainerPort{{ContainerPort: 9080, Protocol: "TCP"}},
+		AgentOrigins: []*AgentOrigin{{PodUID: "service-reviews", ServiceName: "reviews", PodIP: "10.96.0.10", OriginIP: "10.96.0.10", Ports: []AgentOriginPort{
+			{ContainerPort: 9080, OriginPort: 80, Protocol: "TCP", AgentListenerPort: 20005},
+			{ContainerPort: 9080, OriginPort: 8080, Protocol: "TCP", AgentListenerPort: 20006},
+		}}},
+		Rules: []*Rule{{OwnerID: "owner-a", LocalTunIPv4: "198.18.0.1", PortMap: map[int32]string{9080: "18080"}}},
+	}
+	listeners, _, routes, _ := To(virtual, false, logrus.NewEntry(logrus.New()))
+	seenListeners := map[uint32]bool{}
+	for _, resource := range listeners {
+		port := resource.(*listener.Listener).Address.GetSocketAddress().GetPortValue()
+		seenListeners[port] = true
+	}
+	if !seenListeners[20005] || !seenListeners[20006] {
+		t.Fatalf("missing direct Service listeners: %v", seenListeners)
+	}
+	wantFallbacks := map[string]string{
+		"default_services.reviews.nodes.node-a_20005_TCP": "10.96.0.10_80",
+		"default_services.reviews.nodes.node-a_20006_TCP": "10.96.0.10_8080",
+	}
+	for _, resource := range routes {
+		rc := resource.(*route.RouteConfiguration)
+		want, ok := wantFallbacks[rc.Name]
+		if !ok {
+			continue
+		}
+		routeList := rc.VirtualHosts[0].Routes
+		if got := routeList[len(routeList)-1].GetRoute().GetCluster(); got != want {
+			t.Fatalf("fallback for %s = %q, want %q", rc.Name, got, want)
+		}
+		delete(wantFallbacks, rc.Name)
+	}
+	if len(wantFallbacks) != 0 {
+		t.Fatalf("missing Service fallback routes: %v", wantFallbacks)
 	}
 }

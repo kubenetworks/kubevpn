@@ -29,9 +29,6 @@ func TestAddVirtualRule_Case1_NoExistingEntry(t *testing.T) {
 	if vr.Namespace != "default" {
 		t.Errorf("expected Namespace 'default', got %q", vr.Namespace)
 	}
-	if vr.FargateMode != false {
-		t.Errorf("expected FargateMode false, got true")
-	}
 	if len(vr.Ports) != 1 || vr.Ports[0].ContainerPort != 8080 {
 		t.Errorf("expected ports [8080], got %+v", vr.Ports)
 	}
@@ -129,42 +126,6 @@ func TestAddVirtualRule_Case2_MergeHeadersAndPortmap(t *testing.T) {
 	}
 	if rule.PortMap[9090] != "7070" {
 		t.Errorf("expected portmap 9090->7070 merged, got %v", rule.PortMap)
-	}
-}
-
-func TestAddVirtualRule_Case2_SkippedInFargateMode(t *testing.T) {
-	// Case 2 does NOT apply in fargate mode — even with same TUN IP, it should not merge
-	// Instead it falls through to case 3 or 4
-	existing := []*controlplane.Virtual{
-		{
-			UID:         "deployments.apps.nginx",
-			Namespace:   "default",
-			FargateMode: true,
-			Ports:       []controlplane.ContainerPort{{ContainerPort: 8080, EnvoyListenerPort: 15001}},
-			Rules: []*controlplane.Rule{{
-				Headers:      map[string]string{"foo": "bar"},
-				LocalTunIPv4: "10.0.0.1",
-				LocalTunIPv6: "fd00::1",
-				PortMap:      map[int32]string{8080: "9090:7070"},
-			}},
-		},
-	}
-	// Same TUN IP and same headers — falls to case 3 (replace)
-	newHeaders := map[string]string{"foo": "bar"}
-	newPortmap := map[int32]string{8080: "9091:7071"}
-
-	result := addVirtualRule(context.Background(), existing, envoyRuleSpec{Namespace: "default", NodeID: "deployments.apps.nginx", Headers: newHeaders, LocalTunIPv4: "10.0.0.1", LocalTunIPv6: "fd00::1", PortMap: newPortmap, FargateMode: true, OwnerID: "test-owner"})
-
-	if len(result) != 1 {
-		t.Fatalf("expected 1 virtual, got %d", len(result))
-	}
-	if len(result[0].Rules) != 1 {
-		t.Fatalf("expected 1 rule, got %d", len(result[0].Rules))
-	}
-	// Case 3 replaces portmap
-	rule := result[0].Rules[0]
-	if rule.PortMap[8080] != "9091:7071" {
-		t.Errorf("expected portmap replaced to 9091:7071, got %v", rule.PortMap)
 	}
 }
 

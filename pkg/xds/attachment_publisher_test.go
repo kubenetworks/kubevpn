@@ -2,12 +2,16 @@ package xds
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 	"sigs.k8s.io/yaml"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -206,6 +210,79 @@ func TestAttachmentPublisher_PublishesServiceOriginsPerNode(t *testing.T) {
 	}
 }
 
+func TestAttachmentPublisher_ExplicitServiceUsesOnlyRequestedClusterIP(t *testing.T) {
+	base := &controlplane.Virtual{
+		SchemaVersion: controlplane.CurrentSchemaVersion, Namespace: "default", UID: "services.reviews", ServiceName: "reviews", Selector: "app=reviews",
+		Ports: []controlplane.ContainerPort{{ContainerPort: 9080, Protocol: corev1.ProtocolTCP}},
+		Rules: []*controlplane.Rule{{OwnerID: "owner-a", LocalTunIPv4: "198.18.0.1", IsAgent: true}},
+	}
+	data, err := yaml.Marshal([]*controlplane.Virtual{base})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "kubevpn"}, Data: map[string]string{config.KeyEnvoy: string(data)}}
+	reviews := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "reviews", Namespace: "default"}, Spec: corev1.ServiceSpec{
+		Selector: map[string]string{"app": "reviews"}, ClusterIP: "10.96.0.10",
+		Ports: []corev1.ServicePort{{Port: 80, TargetPort: intstr.FromInt(9080), Protocol: corev1.ProtocolTCP}},
+	}}
+	other := reviews.DeepCopy()
+	other.Name = "reviews-other"
+	other.Spec.ClusterIP = "10.96.0.20"
+	clientset := fake.NewSimpleClientset(cm, newPublisherTestPod(), reviews, other)
+	p := NewAttachmentPublisher(clientset, "kubevpn")
+	if err := p.reconcileOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got, err := clientset.CoreV1().ConfigMaps("kubevpn").Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var attachments []controlplane.NodeAttachment
+	if err := yaml.Unmarshal([]byte(got.Data[config.KeyNodeAttachments]), &attachments); err != nil {
+		t.Fatal(err)
+	}
+	if len(attachments) != 1 || attachments[0].ServiceName != "reviews" || attachments[0].PodIP != "10.96.0.10" || attachments[0].OriginIP != "10.96.0.10" {
+		t.Fatalf("explicit Service must produce only its own ClusterIP attachment: %+v", attachments)
+	}
+	if len(attachments[0].Ports) != 1 || attachments[0].Ports[0].OriginPort != 80 {
+		t.Fatalf("service port mapping missing: %+v", attachments[0].Ports)
+	}
+}
+
+func TestAttachmentPublisher_ExplicitServiceSuppressesInferredDuplicate(t *testing.T) {
+	explicit := &controlplane.Virtual{Namespace: "default", UID: "services.reviews", ServiceName: "reviews", Selector: "app=reviews", Ports: []controlplane.ContainerPort{{ContainerPort: 9080, Protocol: corev1.ProtocolTCP}}, Rules: []*controlplane.Rule{{OwnerID: "owner-a", LocalTunIPv4: "198.18.0.1", IsAgent: true}}}
+	backend := &controlplane.Virtual{Namespace: "default", UID: "deployments.apps.reviews", Selector: "app=reviews", Ports: []controlplane.ContainerPort{{ContainerPort: 9080, Protocol: corev1.ProtocolTCP}}, Rules: []*controlplane.Rule{{OwnerID: "owner-b", LocalTunIPv4: "198.18.0.2", IsAgent: true}}}
+	data, err := yaml.Marshal([]*controlplane.Virtual{explicit, backend})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "kubevpn"}, Data: map[string]string{config.KeyEnvoy: string(data)}}
+	service := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "reviews", Namespace: "default"}, Spec: corev1.ServiceSpec{
+		Selector: map[string]string{"app": "reviews"}, ClusterIP: "10.96.0.10",
+		Ports: []corev1.ServicePort{{Port: 80, TargetPort: intstr.FromInt(9080), Protocol: corev1.ProtocolTCP}},
+	}}
+	clientset := fake.NewSimpleClientset(cm, newPublisherTestPod(), service)
+	if err := NewAttachmentPublisher(clientset, "kubevpn").reconcileOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got, err := clientset.CoreV1().ConfigMaps("kubevpn").Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var attachments []controlplane.NodeAttachment
+	if err := yaml.Unmarshal([]byte(got.Data[config.KeyNodeAttachments]), &attachments); err != nil {
+		t.Fatal(err)
+	}
+	if len(attachments) != 2 {
+		t.Fatalf("expected one explicit Service and one backend pod, got %+v", attachments)
+	}
+	for _, attachment := range attachments {
+		if attachment.ServiceName == "reviews" && attachment.WorkloadUID != "services.reviews" {
+			t.Fatalf("inferred duplicate Service attachment was not suppressed: %+v", attachment)
+		}
+	}
+}
+
 func TestAttachmentPublisher_SkipsSidecarPod(t *testing.T) {
 	ctx := context.Background()
 	pod := newPublisherTestPod()
@@ -224,5 +301,169 @@ func TestAttachmentPublisher_SkipsSidecarPod(t *testing.T) {
 	_ = yaml.Unmarshal([]byte(got.Data[config.KeyNodeAttachments]), &attachments)
 	if len(attachments) != 0 {
 		t.Fatalf("sidecar pod must not get attachment: %+v", attachments)
+	}
+}
+
+func TestAttachmentPublisher_RejectsConflictingUDPRoutes(t *testing.T) {
+	virtual := &controlplane.Virtual{
+		SchemaVersion: controlplane.CurrentSchemaVersion, Namespace: "default", UID: "deployments.apps.reviews", Selector: "app=reviews",
+		Ports: []controlplane.ContainerPort{{ContainerPort: 9081, Protocol: corev1.ProtocolUDP}},
+		Rules: []*controlplane.Rule{
+			{OwnerID: "owner-a", LocalTunIPv4: "198.18.0.1", IsAgent: true},
+			{OwnerID: "owner-b", LocalTunIPv4: "198.18.0.2", IsAgent: true},
+		},
+	}
+	data, err := yaml.Marshal([]*controlplane.Virtual{virtual})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "kubevpn"}, Data: map[string]string{config.KeyEnvoy: string(data)}}
+	p := NewAttachmentPublisher(fake.NewSimpleClientset(cm, newPublisherTestPod()), "kubevpn")
+	if err := p.reconcileOnce(context.Background()); err == nil {
+		t.Fatal("expected conflicting UDP routes to be rejected")
+	}
+}
+
+func TestAttachmentPublisher_ResolvesSyncTargetOnlyInDerivedVirtual(t *testing.T) {
+	ctx := context.Background()
+	base := &controlplane.Virtual{
+		SchemaVersion: controlplane.CurrentSchemaVersion,
+		Namespace:     "default",
+		UID:           "deployments.apps.reviews",
+		Selector:      "app=reviews",
+		Ports:         []controlplane.ContainerPort{{ContainerPort: 9080, Protocol: corev1.ProtocolTCP}},
+		Rules: []*controlplane.Rule{{
+			OwnerID: "owner-sync", IsAgent: true, Headers: map[string]string{"env": "test"},
+			PortMap:    map[int32]string{9080: "9080"},
+			SyncTarget: &controlplane.SyncTarget{UID: "deployments.apps.reviews-sync-a", Selector: "owner-ref=reviews-sync-a"},
+		}},
+	}
+	data, err := yaml.Marshal([]*controlplane.Virtual{base})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "kubevpn"}, Data: map[string]string{config.KeyEnvoy: string(data)}}
+	now := time.Now()
+	oldClone := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "clone-old", Namespace: "default", UID: "clone-old", Labels: map[string]string{"owner-ref": "reviews-sync-a"}, CreationTimestamp: metav1.NewTime(now.Add(-time.Minute))},
+		Spec:       corev1.PodSpec{NodeName: "node-b"},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning, PodIP: "10.244.1.10", Conditions: []corev1.PodCondition{{
+			Type: corev1.PodReady, Status: corev1.ConditionTrue,
+		}}},
+	}
+	clientset := fake.NewSimpleClientset(cm, newPublisherTestPod(), oldClone)
+	p := NewAttachmentPublisher(clientset, "kubevpn")
+	readVirtuals := func() []*controlplane.Virtual {
+		t.Helper()
+		got, err := clientset.CoreV1().ConfigMaps("kubevpn").Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var virtuals []*controlplane.Virtual
+		if err := yaml.Unmarshal([]byte(got.Data[config.KeyEnvoy]), &virtuals); err != nil {
+			t.Fatal(err)
+		}
+		return virtuals
+	}
+	assertEndpoints := func(wantBase, wantDerived string) {
+		t.Helper()
+		virtuals := readVirtuals()
+		if len(virtuals) != 2 {
+			t.Fatalf("expected base and derived virtuals: %+v", virtuals)
+		}
+		if got := virtuals[0].Rules[0].LocalTunIPv4; got != wantBase {
+			t.Fatalf("base sync endpoint = %q, want %q", got, wantBase)
+		}
+		if got := virtuals[1].Rules[0].LocalTunIPv4; got != wantDerived {
+			t.Fatalf("derived sync endpoint = %q, want %q", got, wantDerived)
+		}
+	}
+
+	if err := p.reconcileOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	assertEndpoints("", oldClone.Status.PodIP)
+
+	newClone := oldClone.DeepCopy()
+	newClone.Name = "clone-new"
+	newClone.UID = "clone-new"
+	newClone.ResourceVersion = ""
+	newClone.CreationTimestamp = metav1.NewTime(now)
+	newClone.Status.PodIP = "10.244.1.11"
+	newClone.Status.Conditions[0].Status = corev1.ConditionFalse
+	if _, err := clientset.CoreV1().Pods("default").Create(ctx, newClone, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.reconcileOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	assertEndpoints("", oldClone.Status.PodIP)
+
+	newClone.Status.Conditions[0].Status = corev1.ConditionTrue
+	if _, err := clientset.CoreV1().Pods("default").Update(ctx, newClone, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := clientset.CoreV1().Pods("default").Delete(ctx, oldClone.Name, metav1.DeleteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.reconcileOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	assertEndpoints("", newClone.Status.PodIP)
+
+	if err := clientset.CoreV1().Pods("default").Delete(ctx, newClone.Name, metav1.DeleteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.reconcileOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	assertEndpoints("", "")
+}
+
+func TestAttachmentPublisher_SyncTargetListFailurePreservesLastGoodState(t *testing.T) {
+	ctx := context.Background()
+	base := &controlplane.Virtual{
+		SchemaVersion: controlplane.CurrentSchemaVersion, Namespace: "default", UID: "deployments.apps.reviews", Selector: "app=reviews",
+		Ports: []controlplane.ContainerPort{{ContainerPort: 9080, Protocol: corev1.ProtocolTCP}},
+		Rules: []*controlplane.Rule{{OwnerID: "owner-sync", IsAgent: true, SyncTarget: &controlplane.SyncTarget{UID: "deployments.apps.reviews-sync-a", Selector: "owner-ref=reviews-sync-a"}}},
+	}
+	data, err := yaml.Marshal([]*controlplane.Virtual{base})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "kubevpn"}, Data: map[string]string{config.KeyEnvoy: string(data)}}
+	clone := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "clone", Namespace: "default", UID: "clone", Labels: map[string]string{"owner-ref": "reviews-sync-a"}},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning, PodIP: "10.244.1.10", Conditions: []corev1.PodCondition{{
+			Type: corev1.PodReady, Status: corev1.ConditionTrue,
+		}}},
+	}
+	clientset := fake.NewSimpleClientset(cm, newPublisherTestPod(), clone)
+	p := NewAttachmentPublisher(clientset, "kubevpn")
+	if err := p.reconcileOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	before, err := clientset.CoreV1().ConfigMaps("kubevpn").Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientset.PrependReactor("list", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		selector := action.(k8stesting.ListAction).GetListRestrictions().Labels.String()
+		if selector == "owner-ref=reviews-sync-a" {
+			return true, nil, errors.New("injected sync target list failure")
+		}
+		return false, nil, nil
+	})
+	if err := p.reconcileOnce(ctx); err == nil {
+		t.Fatal("expected sync target list failure")
+	}
+	after, err := clientset.CoreV1().ConfigMaps("kubevpn").Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{config.KeyEnvoy, config.KeyNodeAttachments, config.KeyAgentPortAllocations} {
+		if after.Data[key] != before.Data[key] {
+			t.Fatalf("failed reconcile changed %s", key)
+		}
 	}
 }

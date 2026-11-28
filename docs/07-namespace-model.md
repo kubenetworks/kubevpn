@@ -169,26 +169,22 @@ kubevpn connect -n default    (no --manager-namespace)
         connect.ManagerNamespace = detected result
 ```
 
-Detection runs in the **User Daemon only** (`detectAndSetManagerNamespace`). The resolved
-namespace is written to both `connect.ManagerNamespace` (User Daemon) and `req.ManagerNamespace`
-(forwarded to the Root Daemon) by the same assignment, so the two daemons can never disagree.
+Detection runs in the **User Daemon only** (`detectAndSetManagerNamespace`). A manager Pod
+without its ConfigMap is treated as stale and skipped. The resolved namespace is written to both
+`connect.ManagerNamespace` (User Daemon) and `req.ManagerNamespace` (forwarded to the Root Daemon)
+by the same assignment, so the two daemons can never disagree.
 See [02-dual-daemon.md](02-dual-daemon.md) §2.3 for the lock-step invariant.
 
 ## Sync Mode Propagation
 
 `SyncRequest` has **no** `ManagerNamespace` field, and the `kubevpn sync` CLI has no
-`--manager-namespace` flag. A naive sync clone would therefore run its injected
-`kubevpn proxy` sidecar (`genVPNContainer`) without `--manager-namespace`, forcing that
-nested proxy to re-detect — which falls back to the **workload** namespace when the manager
-lives elsewhere, producing a wrong `TrafficManagerService` (`kubevpn-traffic-manager.<workloadNs>`)
-in the envoy sidecar it injects.
+`--manager-namespace` flag. Sync uses the manager connection established by the outer
+Connect, so no second namespace resolution is needed. The clone contains only the target
+application and Syncthing helper; there is no nested `kubevpn proxy`, VPN sidecar, or
+kubeconfig that could select a different manager namespace.
 
-To avoid this, the `Sync` daemon action reads the **authoritative** `ManagerNamespace` from
-the already-established connection (`svr.findConnection(connectionID).ManagerNamespace`, set by
-the inner Connect's detection) into `SyncOptions.ManagerNamespace`. `prepareSyncPodSpec` then
-passes it to `genVPNContainer`, which appends `--manager-namespace <ns>` (only when non-empty)
-so the nested proxy pins the correct namespace instead of re-detecting. See
-[26-sync-mode.md](26-sync-mode.md) §4.4.
+`ProxyController.CreateRemoteSyncRoutes` dials the same resolved manager as ordinary
+proxying. See [26-sync-mode.md](26-sync-mode.md) §4.3.
 
 ## Common Pitfalls
 
@@ -200,4 +196,4 @@ so the nested proxy pins the correct namespace instead of re-detecting. See
 
 4. **The shared ConfigMap informer uses `c.ManagerNamespace` (manager).** This is correct because the ConfigMap lives in the manager namespace. All consumers that need the ConfigMap go through this informer.
 
-5. **Sync clones must inherit the resolved manager namespace, not re-detect it.** `SyncOptions.ManagerNamespace` is copied from the established connection and threaded into the nested `kubevpn proxy` via `--manager-namespace`. Letting the nested proxy auto-detect breaks when manager ≠ workload (see "Sync Mode Propagation" above).
+5. **Sync routes must use the outer connection's manager.** Do not create a nested proxy connection inside a sync clone; `CreateRemoteSyncRoutes` already uses the authoritative manager namespace resolved by Connect.

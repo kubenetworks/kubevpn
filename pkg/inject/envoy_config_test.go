@@ -64,9 +64,6 @@ func TestAddEnvoyConfig_NewEntry(t *testing.T) {
 	if vr.Namespace != "test-ns" {
 		t.Errorf("expected Namespace 'test-ns', got %q", vr.Namespace)
 	}
-	if vr.FargateMode {
-		t.Error("expected FargateMode=false")
-	}
 	if len(vr.Rules) != 1 {
 		t.Fatalf("expected 1 rule, got %d", len(vr.Rules))
 	}
@@ -145,55 +142,6 @@ func TestAddEnvoyConfig_MergeExisting(t *testing.T) {
 	}
 	if rule.PortMap[9090] != "7070" {
 		t.Errorf("expected portmap 9090->7070, got %v", rule.PortMap)
-	}
-}
-
-func TestAddEnvoyConfig_FargateMode(t *testing.T) {
-	cm := &v1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      config.ConfigMapPodTrafficManager,
-			Namespace: "test-ns",
-		},
-		Data: map[string]string{
-			config.KeyEnvoy: "",
-		},
-	}
-	clientset := fake.NewSimpleClientset(cm)
-	mapInterface := clientset.CoreV1().ConfigMaps("test-ns")
-
-	ports := []controlplane.ContainerPort{
-		{ContainerPort: 8080, EnvoyListenerPort: 15001, Protocol: "TCP"},
-	}
-	headers := map[string]string{"user": "alice"}
-	portmap := map[int32]string{8080: "15001:9090"}
-
-	err := addEnvoyConfig(context.Background(), mapInterface, envoyRuleSpec{Namespace: "test-ns", NodeID: "deployments.apps.web", LocalTunIPv4: "10.0.0.5", LocalTunIPv6: "fd00::5", Headers: headers, Ports: ports, PortMap: portmap, FargateMode: true, OwnerID: "test-owner"})
-	if err != nil {
-		t.Fatalf("addEnvoyConfig returned error: %v", err)
-	}
-
-	updated, err := mapInterface.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("failed to get ConfigMap: %v", err)
-	}
-
-	var virtuals []*controlplane.Virtual
-	if err := yamlUnmarshal([]byte(updated.Data[config.KeyEnvoy]), &virtuals); err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
-
-	if len(virtuals) != 1 {
-		t.Fatalf("expected 1 virtual, got %d", len(virtuals))
-	}
-	vr := virtuals[0]
-	if !vr.FargateMode {
-		t.Error("expected FargateMode=true")
-	}
-	if !vr.IsFargateMode() {
-		t.Error("expected IsFargateMode() to return true")
-	}
-	if vr.Ports[0].EnvoyListenerPort != 15001 {
-		t.Errorf("expected EnvoyListenerPort 15001, got %d", vr.Ports[0].EnvoyListenerPort)
 	}
 }
 

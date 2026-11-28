@@ -27,6 +27,75 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/daemon/rpc"
 )
 
+type syncRouteTestService struct {
+	rpc.UnimplementedTunConfigServiceServer
+	req *rpc.InjectRequest
+}
+
+func (s *syncRouteTestService) ProxyInject(req *rpc.InjectRequest, _ rpc.TunConfigService_ProxyInjectServer) error {
+	s.req = req
+	return nil
+}
+
+func TestCreateRemoteSyncRoutes_SendsHeaders(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:9002")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	service := &syncRouteTestService{}
+	server := grpc.NewServer()
+	rpc.RegisterTunConfigServiceServer(server, service)
+	go func() { _ = server.Serve(listener) }()
+	defer server.Stop()
+	c := &ConnectOptions{
+		SessionBase: SessionBase{K8sClient: K8sClient{clientset: fake.NewSimpleClientset(&v1.Service{
+			ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "kubevpn"},
+			Spec:       v1.ServiceSpec{ClusterIP: "127.0.0.1"},
+		})}},
+		ManagerNamespace: "kubevpn",
+		OwnerID:          "owner-a",
+	}
+	err = c.CreateRemoteSyncRoutes(context.Background(), "default", map[string]string{"env": "test"}, []SyncRoute{{Workload: "deployments/apps/foo", TargetWorkload: "deployments/apps/foo-sync-a"}}, "img")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if service.req == nil || service.req.GetHeaders()["env"] != "test" {
+		t.Fatalf("sync route request lost headers: %v", service.req)
+	}
+	if len(service.req.GetSyncRoutes()) != 1 || service.req.GetSyncRoutes()[0].GetTargetWorkload() != "deployments/apps/foo-sync-a" {
+		t.Fatalf("unexpected sync routes: %v", service.req.GetSyncRoutes())
+	}
+}
+
+func TestCreateRemoteInboundViaManager_SendsPortMap(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:9002")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	service := &syncRouteTestService{}
+	server := grpc.NewServer()
+	rpc.RegisterTunConfigServiceServer(server, service)
+	go func() { _ = server.Serve(listener) }()
+	defer server.Stop()
+	c := &ConnectOptions{
+		SessionBase: SessionBase{K8sClient: K8sClient{clientset: fake.NewSimpleClientset(&v1.Service{
+			ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "kubevpn"},
+			Spec:       v1.ServiceSpec{ClusterIP: "127.0.0.1"},
+		})}},
+		ManagerNamespace: "kubevpn",
+		OwnerID:          "owner-a",
+	}
+	err = c.createRemoteInboundViaManager(context.Background(), "default", nil, []string{"9080:8080"}, "img", "198.18.0.1", "", []string{"services/reviews"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if service.req == nil || len(service.req.GetPortMap()) != 1 || service.req.GetPortMap()[0] != "9080:8080" {
+		t.Fatalf("inbound request lost portmap: %v", service.req)
+	}
+}
+
 // leaveTestService exercises the real streaming RPC, including request ownership,
 // progress delivery, terminal status and EOF.
 type leaveTestService struct {
@@ -378,7 +447,7 @@ func TestManagerDial_FailsWithoutClusterIP(t *testing.T) {
 				SessionBase:      SessionBase{K8sClient: K8sClient{clientset: cs}},
 				ManagerNamespace: "kubevpn",
 			}
-			if err := c.createRemoteInboundViaManager(context.Background(), "kubevpn", nil, nil, "img", "198.18.0.5", "", "", []string{"deployments.apps/foo"}); err == nil {
+			if err := c.createRemoteInboundViaManager(context.Background(), "kubevpn", nil, nil, "img", "198.18.0.5", "", []string{"deployments.apps/foo"}); err == nil {
 				t.Fatal("inject: expected error when manager is unreachable, got nil")
 			}
 			if err := c.leaveViaManager(context.Background(), "kubevpn", []string{"deployments.apps/foo"}, "owner-a"); err == nil {
@@ -398,7 +467,7 @@ func TestManagerDial_PermanentErrorFailsFast(t *testing.T) {
 		ManagerNamespace: "kubevpn",
 	}
 	start := time.Now()
-	err := c.createRemoteInboundViaManager(context.Background(), "kubevpn", nil, nil, "img", "198.18.0.5", "", "", []string{"deployments.apps/foo"})
+	err := c.createRemoteInboundViaManager(context.Background(), "kubevpn", nil, nil, "img", "198.18.0.5", "", []string{"deployments.apps/foo"})
 	elapsed := time.Since(start)
 	if err == nil {
 		t.Fatal("expected error for missing manager service, got nil")

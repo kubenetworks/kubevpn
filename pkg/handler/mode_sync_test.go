@@ -27,19 +27,14 @@ import (
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
-// syncCmdTimeout bounds a `kubevpn sync` invocation. The cloned sync pod carries an
-// injected vpn sidecar that runs `kubevpn proxy --foreground` (see genVPNContainer);
-// if that sidecar exits and goes CrashLoopBackOff, `kubevpn sync` waits forever for
-// the pod to become ready. Without a bound the test hangs until the global `go test`
-// timeout (observed: a 2h CI stall). This caps it so the test fails in minutes with
-// the pod-status output the command already streams.
+// syncCmdTimeout bounds a `kubevpn sync` invocation. Clone creation, direct
+// listener readiness, and sync-target resolution must all finish within this
+// budget; otherwise the test fails with manager and node-agent diagnostics.
 const syncCmdTimeout = 6 * time.Minute
 
 // runSyncCommand runs `kubevpn sync <args>` under a bounded context, streaming output.
-// On failure (timeout or non-zero exit) it dumps the injected KubeVPN sidecar logs — the
-// usual root cause is a sidecar crash-looping, and the test otherwise only shows pod
-// status, never the container logs needed to diagnose it. Shared by the SSH and non-SSH
-// sync tests.
+// On failure it dumps manager and node-agent logs so route/listener convergence
+// failures are visible instead of only pod status.
 func runSyncCommand(t *testing.T, ctx context.Context, clientset kubernetes.Interface, args []string) {
 	t.Helper()
 	syncCtx, cancel := context.WithTimeout(ctx, syncCmdTimeout)
@@ -50,8 +45,8 @@ func runSyncCommand(t *testing.T, ctx context.Context, clientset kubernetes.Inte
 	err := cmd.Run()
 	if syncCtx.Err() == context.DeadlineExceeded {
 		dumpKubeVPNSidecarLogs(t, clientset)
-		t.Fatalf("kubevpn sync did not finish within %s — the injected %q sidecar is likely crash-looping "+
-			"(sidecar logs dumped above)", syncCmdTimeout, config.ContainerSidecarVPN)
+		t.Fatalf("kubevpn sync did not finish within %s — clone, listener, or sync-target readiness is stuck "+
+			"(manager and node-agent logs dumped above)", syncCmdTimeout)
 	}
 	if err != nil {
 		dumpKubeVPNSidecarLogs(t, clientset)
@@ -224,6 +219,7 @@ func (u *ut) kubevpnSync(t *testing.T, ctx context.Context, isServiceMesh bool) 
 	if isServiceMesh {
 		args = append(args, "--headers", "env=test")
 	}
+	identity := captureWorkloadIdentity(t, u.clientset, u.namespace, "authors", "authors")
 	runSyncCommand(t, ctx, u.clientset, args)
 
 	list, err := util.GetRunningPodList(ctx, u.clientset, u.namespace, fields.OneTermEqualSelector("origin-workload", "authors").String())
@@ -232,6 +228,19 @@ func (u *ut) kubevpnSync(t *testing.T, ctx context.Context, isServiceMesh bool) 
 	}
 	if len(list) == 0 {
 		t.Fatal("expect at least one pod")
+	}
+	assertWorkloadIdentityUnchanged(t, u.clientset, u.namespace, "authors", "authors", identity)
+	hasSyncthing := false
+	for _, container := range list[0].Spec.Containers {
+		if container.Name == config.ContainerSidecarVPN || container.Name == config.ContainerSidecarEnvoy {
+			t.Fatalf("traffic sidecar found in sync clone: %s", container.Name)
+		}
+		if container.Name == config.ContainerSidecarSyncthing {
+			hasSyncthing = true
+		}
+	}
+	if !hasSyncthing {
+		t.Fatal("sync clone is missing the syncthing helper")
 	}
 
 	remotePath := fmt.Sprintf("%s/%s", remoteDir, name)

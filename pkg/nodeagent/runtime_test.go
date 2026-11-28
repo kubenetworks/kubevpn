@@ -92,3 +92,42 @@ func TestAttachmentSignature_ChangesWithConfig(t *testing.T) {
 		t.Fatal("changed config should have different signature")
 	}
 }
+
+func TestNodeAgentSourceIPs_IncludesOnlyRunningAgents(t *testing.T) {
+	running := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "agent-b", Namespace: "kubevpn", Labels: map[string]string{"app": "kubevpn-nodeagent"}},
+		Status:     corev1.PodStatus{Phase: corev1.PodRunning, PodIP: "10.244.0.9"},
+	}
+	pending := running.DeepCopy()
+	pending.Name = "agent-c"
+	pending.Status.Phase = corev1.PodPending
+	pending.Status.PodIP = "10.244.0.10"
+	clientset := fake.NewSimpleClientset(running, pending)
+	opts := Options{Clientset: clientset, ManagerNamespace: "kubevpn", PodIP: "10.244.0.8"}
+	sources, err := nodeAgentSourceIPs(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sources) != 2 || sources[0] != "10.244.0.8" || sources[1] != "10.244.0.9" {
+		t.Fatalf("unexpected node-agent sources: %v", sources)
+	}
+	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "kubevpn"}}
+	if _, err := clientset.CoreV1().ConfigMaps("kubevpn").Create(context.Background(), cm, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := attachmentSignature(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	running.Status.Phase = corev1.PodSucceeded
+	if _, err := clientset.CoreV1().Pods("kubevpn").Update(context.Background(), running, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	after, err := attachmentSignature(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before == after {
+		t.Fatal("agent source set change did not trigger reconciliation")
+	}
+}

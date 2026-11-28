@@ -10,11 +10,11 @@ Both user daemon and root daemon register the same `Server` struct with all RPC 
 |---|---|---|---|---|---|
 | `Connect` | user daemon | **both** | ✅ line 18,38 | user→sudo (via `redirectConnectToSudoDaemon`) | User: control plane (traffic mgr, proxy inject; also starts the managed SOCKS5 proxy when `ConnectRequest.EnableSocks`, mode per `SocksEgress`/`SocksListen`). Sudo: data plane (TUN, DHCP, DNS) |
 | `Disconnect` | user daemon | **both** | ✅ line 20,45 | user→sudo (forwards first, then cleans up user side) | User: disconnect sudo first, then clean up SSH/connections |
-| `Proxy` | user daemon | **user only** | ❌ | user→user self-call (`Connect`), then inject sidecar | Calls `GetClient(false)` to run Connect flow on itself |
+| `Proxy` | user daemon | **user only** | ❌ | user→user self-call (`Connect`), then publish node-agent attachment | Calls `GetClient(false)` to run Connect flow on itself |
 | `Leave` | user daemon | **user only** | ❌ | — | Operates on `currentConnectionID` (user daemon state) |
-| `Sync` | user daemon | **user only** | ❌ | user→user self-call (`Connect`) | Like Proxy: connects first, then sets up syncthing |
-| `Unsync` | user daemon | **user only** | ❌ | — | Cleans up sync on `currentConnectionID` |
-| `Reset` | user daemon | **user only** | ❌ | — | Resets workload spec via K8s API |
+| `Sync` | user daemon | **user only** | ❌ | user→user self-call (`Connect`) | Connects first, creates the Syncthing clone, then publishes clone routes |
+| `Unsync` | user daemon | **user only** | ❌ | — | Removes routes before deleting sync clones on `currentConnectionID` |
+| `Reset` | user daemon | **user only** | ❌ | — | Removes node-agent proxy state without changing workload specs |
 | `Uninstall` | user daemon | **user only** | ❌ | — | Deletes traffic manager deployment |
 | `Status` | user daemon | **both** | ✅ line 27 | user queries sudo for TUN IPs + status verdict | User: enriches with TUN IPs from sudo and reuses sudo's computed `Status` string (data-plane verdict). Sudo: computes `Status` from local TUN + heartbeat |
 | `Route` | user daemon | **both** | ✅ line 17 | user→sudo (resolves TUN device, forwards) | User: finds TUN IP + device name. Sudo: executes `tun.AddRoutes` |
@@ -57,10 +57,10 @@ CLI ──→ User Daemon (GetClient(false))
           │                                                └── DoConnect (TUN, DHCP, DNS)
           │
           ├── Proxy ──→ GetClient(false) ──→ self Connect flow (above)
-          │              then: CreateRemoteInboundPod (inject sidecar)
+          │              then: CreateRemoteInboundPod (node-agent attachment)
           │
           ├── Sync ──→ GetClient(false) ──→ self Connect flow
-          │             then: DoSync (syncthing)
+          │             then: DoSync + CreateRemoteSyncRoutes (clone routes)
           │
           ├── Disconnect ──→ GetClient(true) ──→ Sudo Daemon Disconnect
           │                   then: clean up user side

@@ -2,19 +2,22 @@ package inject
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime"
 
 	clusterworkload "github.com/wencaiwulue/kubevpn/v2/pkg/cluster/workload"
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
 // nodeAgentInjector attaches to a workload without patching it: writes the
-// same ENVOY_CONFIG rules as mesh mode, then ensures one privileged Job per
-// target pod in the manager namespace.
+// ENVOY_CONFIG rules, then waits for the node-boundary direct listeners.
 type nodeAgentInjector struct {
 	opts InjectOptions
 }
@@ -37,8 +40,26 @@ func (n *nodeAgentInjector) Inject(ctx context.Context) error {
 
 	u := o.Controller.Object.(*unstructured.Unstructured)
 
+	serviceName := o.ServiceName
+	if isServiceTarget(o.Object) {
+		service := &corev1.Service{}
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(o.Object.Object.(*unstructured.Unstructured).Object, service); err != nil {
+			return fmt.Errorf("decode service %s: %w", o.Object.Name, err)
+		}
+		if service.Spec.ClusterIP == "" || service.Spec.ClusterIP == corev1.ClusterIPNone {
+			return fmt.Errorf("headless service %s/%s is not supported by node-agent", service.Namespace, service.Name)
+		}
+		if len(service.Spec.Selector) == 0 {
+			return fmt.Errorf("service %s/%s without a selector is not supported by node-agent", service.Namespace, service.Name)
+		}
+		serviceName = service.Name
+	}
+
 	templateSpec, _, err := clusterworkload.GetPodTemplateSpecPath(u)
 	if err != nil {
+		return err
+	}
+	if err = ValidateNodeAgentTemplate(templateSpec); err != nil {
 		return err
 	}
 	ports, portmap := collectPorts(templateSpec, o.PortMaps)
@@ -61,10 +82,26 @@ func (n *nodeAgentInjector) Inject(ctx context.Context) error {
 		Ports:        ports,
 		OwnerID:      o.OwnerID,
 		Selector:     selector,
+		ServiceName:  serviceName,
 		IsAgent:      true,
+		SyncTarget:   o.SyncTarget,
 	}); err != nil {
 		return fmt.Errorf("add envoy config: %w", err)
 	}
 
 	return waitNodeAgentReady(ctx, o)
+}
+
+// ValidateNodeAgentTemplate rejects targets that cannot use the non-intrusive
+// node-boundary data plane.
+func ValidateNodeAgentTemplate(templateSpec *corev1.PodTemplateSpec) error {
+	if templateSpec.Spec.HostNetwork {
+		return errors.New("hostNetwork workloads are not supported by node-agent")
+	}
+	for _, container := range templateSpec.Spec.Containers {
+		if container.Name == config.ContainerSidecarVPN || container.Name == config.ContainerSidecarEnvoy {
+			return errors.New("legacy sidecar-injected workloads are not supported; use a clean workload")
+		}
+	}
+	return nil
 }

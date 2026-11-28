@@ -121,23 +121,9 @@ func (svr *Server) Sync(resp rpc.Daemon_SyncServer) (err error) {
 		plog.G(resp.Context()).Errorf("Failed to init client: %v", err)
 		return err
 	}
-	// The inner Connect above already resolved the traffic manager namespace
-	// (detectAndSetManagerNamespace). Thread that authoritative value into the
-	// sync options so the cloned workload's nested `kubevpn proxy` pins
-	// --manager-namespace instead of re-detecting it (which falls back to the
-	// workload namespace when manager != workload).
-	if conn, _ := svr.registry.find(connectionID); conn != nil {
-		options.ManagerNamespace = conn.GetManagerNamespace()
-	}
-
 	logger.Debugf("Syncing workloads")
 	options.SetContext(session.Ctx)
-	newKubeconfigBytes, err := options.ConvertApiServerToNodeIP(resp.Context(), []byte(req.KubeconfigBytes))
-	if err != nil {
-		plog.G(resp.Context()).Errorf("Failed to convert apiserver to node IP: %v", err)
-		return err
-	}
-	err = options.DoSync(plog.WithLogger(session.Ctx, logger), newKubeconfigBytes, req.Image)
+	err = options.DoSync(plog.WithLogger(session.Ctx, logger), req.Image)
 	if err != nil {
 		plog.G(resp.Context()).Errorf("Sync workloads failed: %v", err)
 		return err
@@ -146,10 +132,19 @@ func (svr *Server) Sync(resp rpc.Daemon_SyncServer) (err error) {
 	if opt == nil {
 		return fmt.Errorf("cluster %s not found: %w", connectionID, config.ErrConnectionNotFound)
 	}
-	// The sync pod's VPN sidecar wrote envoy rules to the ConfigMap via ProxyInject.
-	// Refresh the user daemon's informer cache so the next status query sees
-	// ProxyList immediately, without waiting for the watch event to propagate.
 	if pc, ok := opt.(handler.ProxyController); ok {
+		options.SetRouteController(pc)
+		routes := make([]handler.SyncRoute, 0, len(options.Workloads))
+		for _, workload := range options.Workloads {
+			target := options.TargetWorkloadNames[workload]
+			if target == "" {
+				return fmt.Errorf("sync clone for workload %s not found", workload)
+			}
+			routes = append(routes, handler.SyncRoute{Workload: workload, TargetWorkload: target})
+		}
+		if err = pc.CreateRemoteSyncRoutes(plog.WithLogger(session.Ctx, logger), req.Namespace, req.Headers, routes, req.Image); err != nil {
+			return err
+		}
 		if err = pc.RefreshConfigMapCache(resp.Context()); err != nil {
 			plog.G(resp.Context()).Debugf("Failed to refresh ConfigMap cache after sync: %v", err)
 		}

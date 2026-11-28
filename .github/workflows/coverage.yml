@@ -5,12 +5,20 @@ on:
     branches: [ master ]
   pull_request:
     branches: [ master ]
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: E2E_RUN regular expression
+        required: false
+        default: '.'
 
 jobs:
   linux:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     env:
       VERSION: ${{ github.event.pull_request.head.sha || github.sha }}
+      E2E_RUN: ${{ inputs.suite || '.' }}
     steps:
       - uses: actions/checkout@v4
 

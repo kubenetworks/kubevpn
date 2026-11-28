@@ -638,6 +638,8 @@ func (u *ut) kubevpnProxyWithServiceMesh(t *testing.T) {
 }
 
 func (u *ut) kubevpnProxyWithServiceMeshAndFargateMode(t *testing.T) {
+	identity := captureWorkloadIdentity(t, u.clientset, u.namespace, "reviews", "reviews")
+	targetPorts := captureServiceTargetPorts(t, u.clientset, u.namespace, "reviews")
 	cmd := exec.Command("kubevpn", "proxy", "svc/reviews", "--headers", "env=test", "--debug")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -645,6 +647,8 @@ func (u *ut) kubevpnProxyWithServiceMeshAndFargateMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	assertWorkloadIdentityUnchanged(t, u.clientset, u.namespace, "reviews", "reviews", identity)
+	assertServiceTargetPortsUnchanged(t, u.clientset, u.namespace, "reviews", targetPorts)
 }
 
 func (u *ut) kubevpnProxyWithServiceMeshAndK8sServicePortMap(t *testing.T) {
@@ -789,7 +793,7 @@ func fillDeploymentTunIPs(expect *connStatus, actual *connStatus) {
 		}
 		// Set proxy rule-level LocalTunIPv4/LocalTunIPv6 from matching actual rules
 		for _, proxy := range expectedConn.ProxyList {
-			if proxy == nil || strings.HasPrefix(proxy.Workload, "services/") {
+			if proxy == nil {
 				continue
 			}
 			actualProxy, ok := actualWorkloadMap[proxy.Workload]
@@ -874,7 +878,7 @@ func TestFillDeploymentTunIPs(t *testing.T) {
 		}
 	})
 
-	t.Run("services expectation keeps original IP", func(t *testing.T) {
+	t.Run("service expectation is filled from actual node-agent rule IP", func(t *testing.T) {
 		expect := &connStatus{
 			List: []*connection{
 				{
@@ -933,12 +937,11 @@ func TestFillDeploymentTunIPs(t *testing.T) {
 			t.Errorf("expected connection IPv6 to be fd00::1, got %s", expect.List[0].IPv6)
 		}
 
-		// Services rule IP should remain as expected (127.0.0.1 and ::1)
-		if expect.List[0].ProxyList[0].RuleList[0].LocalTunIPv4 != "127.0.0.1" {
-			t.Errorf("expected services rule LocalTunIPv4 to be 127.0.0.1, got %s", expect.List[0].ProxyList[0].RuleList[0].LocalTunIPv4)
+		if expect.List[0].ProxyList[0].RuleList[0].LocalTunIPv4 != "192.18.0.5" {
+			t.Errorf("expected services rule LocalTunIPv4 to be 192.18.0.5, got %s", expect.List[0].ProxyList[0].RuleList[0].LocalTunIPv4)
 		}
-		if expect.List[0].ProxyList[0].RuleList[0].LocalTunIPv6 != "::1" {
-			t.Errorf("expected services rule LocalTunIPv6 to be ::1, got %s", expect.List[0].ProxyList[0].RuleList[0].LocalTunIPv6)
+		if expect.List[0].ProxyList[0].RuleList[0].LocalTunIPv6 != "fd00::5" {
+			t.Errorf("expected services rule LocalTunIPv6 to be fd00::5, got %s", expect.List[0].ProxyList[0].RuleList[0].LocalTunIPv6)
 		}
 	})
 
@@ -1204,10 +1207,6 @@ func (u *ut) centerCheckProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 	}}}
 
 	var statuses connStatus
-	if err = json.Unmarshal(output, &statuses); err != nil {
-		t.Fatal(err)
-	}
-	fillDeploymentTunIPs(&expect, &statuses)
 	opt := cmp.FilterPath(func(p cmp.Path) bool {
 		vx := p.Last().String()
 		if vx == `["Headers"]` {
@@ -1215,8 +1214,32 @@ func (u *ut) centerCheckProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 		}
 		return false
 	}, cmp.Ignore())
-	if !cmp.Equal(statuses, expect, opt) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	err = wait.PollUntilContextTimeout(ctx, time.Second, 30*time.Second, true, func(ctx context.Context) (bool, error) {
+		cmd := exec.Command("kubevpn", "status", "-o", "json")
+		output, err = cmd.Output()
+		if err != nil {
+			return false, nil
+		}
+		statuses = connStatus{}
+		if err = json.Unmarshal(output, &statuses); err != nil {
+			return false, nil
+		}
+		fillDeploymentTunIPs(&expect, &statuses)
+		return cmp.Equal(statuses, expect, opt), nil
+	})
+	if err != nil {
 		marshal, _ := json.Marshal(expect)
+		if list, listErr := u.clientset.CoreV1().ConfigMaps("").List(context.Background(), v1.ListOptions{}); listErr == nil {
+			for _, cm := range list.Items {
+				if cm.Name == pkgconfig.ConfigMapPodTrafficManager {
+					t.Logf("ENVOY_CONFIG for portmap status mismatch (%s):\n%s", cm.Namespace, cm.Data[pkgconfig.KeyEnvoy])
+				}
+			}
+		} else {
+			t.Logf("list traffic-manager ConfigMaps failed: %v", listErr)
+		}
 		t.Fatalf("expect: %s, but was: %s", string(marshal), string(output))
 	}
 }

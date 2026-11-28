@@ -24,15 +24,6 @@ import (
 //go:embed envoy.yaml
 var envoyConfig []byte
 
-//go:embed envoy_ipv4.yaml
-var envoyConfigIPv4 []byte
-
-//go:embed fargate_envoy.yaml
-var envoyConfigFargate []byte
-
-//go:embed fargate_envoy_ipv4.yaml
-var envoyConfigIPv4Fargate []byte
-
 func renderEnvoyConfig(tmplStr string, value string) string {
 	tmpl, err := template.New("").Parse(tmplStr)
 	if err != nil {
@@ -82,13 +73,15 @@ type envoyRuleSpec struct {
 	Headers      map[string]string
 	Ports        []controlplane.ContainerPort
 	PortMap      map[int32]string
-	FargateMode  bool
 	OwnerID      string
 	// Selector is the pod label selector for the workload, used by the agent
 	// reconciler to match pods to rules. Only set in node-agent mode.
 	Selector string
+	// ServiceName restricts an explicit Service Virtual to its own ClusterIP.
+	ServiceName string
 	// IsAgent indicates that this rule comes from a node-agent connection, not a direct user connection.
-	IsAgent bool
+	IsAgent    bool
+	SyncTarget *controlplane.SyncTarget
 }
 
 // validate checks that all required fields are populated.
@@ -99,18 +92,14 @@ func (s *envoyRuleSpec) validate() error {
 	if s.NodeID == "" {
 		return errors.New("envoyRuleSpec: nodeID must not be empty")
 	}
-	if s.LocalTunIPv4 == "" {
+	if s.LocalTunIPv4 == "" && s.SyncTarget == nil {
 		return errors.New("envoyRuleSpec: localTunIPv4 must not be empty")
+	}
+	if s.SyncTarget != nil && (s.SyncTarget.UID == "" || s.SyncTarget.Selector == "") {
+		return errors.New("envoyRuleSpec: sync target UID and selector must not be empty")
 	}
 	if s.OwnerID == "" {
 		return errors.New("envoyRuleSpec: ownerID must not be empty")
-	}
-	if s.FargateMode {
-		for _, p := range s.Ports {
-			if p.EnvoyListenerPort == 0 {
-				return errors.New("envoyRuleSpec: fargate mode requires EnvoyListenerPort on all ports")
-			}
-		}
 	}
 	return nil
 }
@@ -143,6 +132,7 @@ func addVirtualRule(ctx context.Context, v []*controlplane.Virtual, spec envoyRu
 		OwnerID:      spec.OwnerID,
 		PortMap:      spec.PortMap,
 		IsAgent:      spec.IsAgent,
+		SyncTarget:   spec.SyncTarget,
 	}
 
 	// 1) no existing Virtual for this workload — create one
@@ -151,8 +141,8 @@ func addVirtualRule(ctx context.Context, v []*controlplane.Virtual, spec envoyRu
 			SchemaVersion: controlplane.CurrentSchemaVersion,
 			UID:           spec.NodeID,
 			Namespace:     spec.Namespace,
-			FargateMode:   spec.FargateMode,
 			Selector:      spec.Selector,
+			ServiceName:   spec.ServiceName,
 			Ports:         spec.Ports,
 			Rules:         []*controlplane.Rule{newRule},
 		})
@@ -162,17 +152,20 @@ func addVirtualRule(ctx context.Context, v []*controlplane.Virtual, spec envoyRu
 	if spec.Selector != "" && v[index].Selector == "" {
 		v[index].Selector = spec.Selector
 	}
+	if spec.ServiceName != "" && v[index].ServiceName == "" {
+		v[index].ServiceName = spec.ServiceName
+	}
 
-	// 2) same owner updating their own rule (matched by OwnerID, non-fargate)
-	if !v[index].IsFargateMode() {
-		for j, rule := range v[index].Rules {
-			if rule.OwnerID == spec.OwnerID {
-				v[index].Rules[j].Headers = util.Merge(v[index].Rules[j].Headers, spec.Headers)
-				v[index].Rules[j].PortMap = util.Merge(v[index].Rules[j].PortMap, spec.PortMap)
-				v[index].Rules[j].LocalTunIPv4 = spec.LocalTunIPv4
-				v[index].Rules[j].LocalTunIPv6 = spec.LocalTunIPv6
-				return v
-			}
+	// 2) same owner updating their own rule (matched by OwnerID)
+	for j, rule := range v[index].Rules {
+		if rule.OwnerID == spec.OwnerID {
+			v[index].Rules[j].Headers = util.Merge(v[index].Rules[j].Headers, spec.Headers)
+			v[index].Rules[j].PortMap = util.Merge(v[index].Rules[j].PortMap, spec.PortMap)
+			v[index].Rules[j].LocalTunIPv4 = spec.LocalTunIPv4
+			v[index].Rules[j].LocalTunIPv6 = spec.LocalTunIPv6
+			v[index].Rules[j].SyncTarget = spec.SyncTarget
+			v[index].Rules[j].IsAgent = spec.IsAgent
+			return v
 		}
 	}
 
@@ -185,6 +178,8 @@ func addVirtualRule(ctx context.Context, v []*controlplane.Virtual, spec envoyRu
 			v[index].Rules[j].LocalTunIPv4 = spec.LocalTunIPv4
 			v[index].Rules[j].OwnerID = spec.OwnerID
 			v[index].Rules[j].PortMap = spec.PortMap
+			v[index].Rules[j].SyncTarget = spec.SyncTarget
+			v[index].Rules[j].IsAgent = spec.IsAgent
 			return v
 		}
 	}

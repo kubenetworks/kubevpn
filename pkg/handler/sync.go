@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
@@ -9,11 +10,15 @@ import (
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 )
 
+type syncRouteController interface {
+	GetOwnerID() string
+	LeaveResource(context.Context, []Resources, string) error
+}
+
 // SyncOptions holds CLI configuration and adapts the daemon session to the sync runtime.
 type SyncOptions struct {
 	K8sClient
 	WorkloadNamespace    string
-	ManagerNamespace     string
 	Headers              map[string]string
 	Workloads            []string
 	ExtraRouteInfo       ExtraRouteInfo
@@ -25,8 +30,9 @@ type SyncOptions struct {
 	RemoteDir            string
 
 	rollbackList
-	ctx     context.Context
-	runtime *syncworkload.Runtime
+	ctx             context.Context
+	runtime         *syncworkload.Runtime
+	routeController syncRouteController
 }
 
 func (d *SyncOptions) InitClient(f cmdutil.Factory) error {
@@ -44,6 +50,10 @@ func (d *SyncOptions) SetContext(ctx context.Context) {
 	d.ctx = ctx
 }
 
+func (d *SyncOptions) SetRouteController(controller syncRouteController) {
+	d.routeController = controller
+}
+
 func (d *SyncOptions) syncRuntime(ctx context.Context) *syncworkload.Runtime {
 	if d.runtime == nil {
 		if d.ctx != nil {
@@ -51,7 +61,6 @@ func (d *SyncOptions) syncRuntime(ctx context.Context) *syncworkload.Runtime {
 		}
 		d.runtime = syncworkload.New(ctx, syncworkload.Config{
 			WorkloadNamespace: d.WorkloadNamespace,
-			ManagerNamespace:  d.ManagerNamespace,
 			Headers:           d.Headers,
 			Workloads:         d.Workloads,
 			TargetContainer:   d.TargetContainer,
@@ -63,23 +72,30 @@ func (d *SyncOptions) syncRuntime(ctx context.Context) *syncworkload.Runtime {
 	return d.runtime
 }
 
-func (d *SyncOptions) DoSync(ctx context.Context, kubeconfigJSON []byte, image string) error {
+func (d *SyncOptions) DoSync(ctx context.Context, image string) error {
 	r := d.syncRuntime(ctx)
 	// Preserve partial clone state on failure for status and persisted cleanup.
 	defer func() { d.TargetWorkloadNames = r.TargetWorkloadNames() }()
-	return r.DoSync(ctx, kubeconfigJSON, image)
+	return r.DoSync(ctx, image)
 }
 
-// Cleanup keeps the session/SSH connection alive until workload cleanup and
-// local worker cancellation have completed, including the pre-init error path.
+// Cleanup removes routes before deleting clones, then stops local workers and
+// tears down the session. A failed route cleanup preserves the clone for retry.
 func (d *SyncOptions) Cleanup(ctx context.Context, workloads ...string) error {
 	plog.StepStart(ctx, "Stopping file sync")
 	uninitialized := d.runtime == nil && d.factory == nil
 	count := len(workloads)
+	routeErr := d.cleanupRoutes(ctx, workloads)
 	var err error
-	if uninitialized {
+	switch {
+	case routeErr != nil:
+		err = routeErr
+		if d.runtime != nil {
+			d.runtime.Stop()
+		}
+	case uninitialized:
 		plog.G(ctx).Debug("Skipping workload cleanup: kubernetes client not initialized")
-	} else {
+	default:
 		r := d.syncRuntime(ctx)
 		if count == 0 {
 			count = len(r.TargetWorkloadNames())
@@ -95,14 +111,44 @@ func (d *SyncOptions) Cleanup(ctx context.Context, workloads ...string) error {
 	return err
 }
 
+func (d *SyncOptions) cleanupRoutes(ctx context.Context, requested []string) error {
+	if d.routeController == nil {
+		return nil
+	}
+	sources := make([]string, 0, len(d.Workloads))
+	if len(requested) == 0 {
+		sources = append(sources, d.Workloads...)
+	} else {
+		reverse := make(map[string]string, len(d.TargetWorkloadNames))
+		for source, clone := range d.TargetWorkloadNames {
+			reverse[clone] = source
+		}
+		for _, workload := range requested {
+			if _, ok := d.TargetWorkloadNames[workload]; ok {
+				sources = append(sources, workload)
+			} else if source := reverse[workload]; source != "" {
+				sources = append(sources, source)
+			}
+		}
+	}
+	seen := make(map[string]struct{}, len(sources))
+	var errs []error
+	for _, source := range sources {
+		if _, ok := seen[source]; ok {
+			continue
+		}
+		seen[source] = struct{}{}
+		resource := Resources{Namespace: d.WorkloadNamespace, Workload: source}
+		if err := d.routeController.LeaveResource(ctx, []Resources{resource}, d.routeController.GetOwnerID()); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
 func (d *SyncOptions) GetSyncthingGUIAddr() string {
 	if d.runtime == nil {
 		return ""
 	}
 	return d.runtime.GetSyncthingGUIAddr()
-}
-
-func (d *SyncOptions) ConvertApiServerToNodeIP(ctx context.Context, kubeconfigBytes []byte) ([]byte, error) {
-	// Conversion precedes DoSync; do not freeze runtime configuration here.
-	return syncworkload.ConvertAPIServerToNodeIP(ctx, d.clientset, d.config, d.WorkloadNamespace, kubeconfigBytes)
 }

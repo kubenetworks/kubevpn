@@ -1,6 +1,6 @@
 // Package controlplane holds the envoy xDS configuration data types that are
 // stored (as YAML) in the traffic-manager ConfigMap and shared between the
-// sidecar-injection logic (pkg/inject) and the xDS snapshot builder (pkg/xds).
+// node-agent attachment logic (pkg/inject) and the xDS snapshot builder (pkg/xds).
 //
 // These types live in a leaf package — depending only on the Kubernetes core
 // types and the standard library — so both pkg/inject and pkg/xds can import
@@ -37,12 +37,14 @@ type Virtual struct {
 	// and the on-disk key is determined solely by the json tag. Existing ConfigMap
 	// data in production clusters uses the key "Uid"; changing this tag would make
 	// all stored configs unreadable. The yaml tag is kept for documentation only.
-	UID         string `yaml:"Uid" json:"Uid"` // group.resource.name
-	FargateMode bool   `yaml:"fargateMode,omitempty" json:"fargateMode,omitempty"`
+	UID string `yaml:"Uid" json:"Uid"` // group.resource.name
 	// Selector is the workload's pod label selector, recorded at node-agent
 	// inject time so the reconciler can match pods to rules. Zero value means
 	// the rule was written by sidecar mode; reconciler skips it.
 	Selector string `yaml:"selector,omitempty" json:"selector,omitempty"`
+	// ServiceName is set only when the user explicitly proxies a Service. The
+	// publisher then creates only that Service's ClusterIP origins.
+	ServiceName string `yaml:"serviceName,omitempty" json:"serviceName,omitempty"`
 	// AgentListenerPort is the unique per-workload base port used for the
 	// node-boundary Envoy admin listener and process identity. Zero means
 	// sidecar/legacy mode. Per-pod data listeners are allocated in AgentOrigins.
@@ -99,10 +101,6 @@ type ContainerPort struct {
 	// referred to by services.
 	// +optional
 	Name string `json:"name,omitempty"`
-	// EnvoyListenerPort is the port envoy binds to in fargate mode (BindToPort=true).
-	// In mesh mode this is 0 (envoy uses iptables-redirected traffic instead).
-	// +optional
-	EnvoyListenerPort int32 `json:"envoyListenerPort,omitempty"`
 	// Number of port to expose on the pod's IP address.
 	// This must be a valid port number, 0 < x < 65536.
 	ContainerPort int32 `json:"containerPort"`
@@ -113,34 +111,24 @@ type ContainerPort struct {
 	Protocol corev1.Protocol `json:"protocol,omitempty"`
 }
 
-// IsFargateMode returns true if this Virtual uses Fargate/Service mode
-// (no iptables, SSH tunnels instead of VPN sidecar).
-// Checks the explicit FargateMode field first, with a fallback to the legacy
-// heuristic (EnvoyListenerPort != 0) for backward compatibility with existing ConfigMaps.
-func (a *Virtual) IsFargateMode() bool {
-	if a.FargateMode {
-		return true
-	}
-	for _, port := range a.Ports {
-		if port.EnvoyListenerPort != 0 {
-			return true
-		}
-	}
-	return false
-}
-
-// ConvertContainerPort converts Kubernetes ContainerPort values to controlplane ContainerPort with EnvoyListenerPort=0.
+// ConvertContainerPort converts Kubernetes ContainerPort values to controlplane ContainerPort.
 func ConvertContainerPort(ports ...corev1.ContainerPort) []ContainerPort {
 	var result []ContainerPort
 	for _, port := range ports {
 		result = append(result, ContainerPort{
-			Name:              port.Name,
-			EnvoyListenerPort: 0,
-			ContainerPort:     port.ContainerPort,
-			Protocol:          port.Protocol,
+			Name:          port.Name,
+			ContainerPort: port.ContainerPort,
+			Protocol:      port.Protocol,
 		})
 	}
 	return result
+}
+
+// SyncTarget identifies a sync clone whose current Ready pod is the matched
+// traffic destination. The publisher resolves it only in derived Virtuals.
+type SyncTarget struct {
+	UID      string `json:"uid" yaml:"uid"`
+	Selector string `json:"selector" yaml:"selector"`
 }
 
 // Rule defines a header-based routing rule for envoy traffic splitting.
@@ -151,32 +139,33 @@ type Rule struct {
 	// OwnerID identifies the connection that owns this rule (a UUID prefix).
 	// Required — used as the primary key for rule matching in addVirtualRule and removeEnvoyConfig.
 	OwnerID string `yaml:"ownerID" json:"ownerID"`
-	// for no privileged mode (AWS Fargate mode), don't have cap NET_ADMIN and privileged: true. so we cannot use OSI layer 3 proxy
-	// containerPort -> envoyRulePort:localPort
-	// envoyRulePort for envoy forward to localhost:envoyRulePort
-	// localPort for local pc listen localhost:localPort
-	// use ssh reverse tunnel, envoy rule endpoint localhost:envoyRulePort will forward to local pc localhost:localPort
-	// localPort is required and envoyRulePort is optional
+	// PortMap maps each backend container port to the developer-side listening port.
+	// Node-agent rules store the local listening port as a single value.
+	// The legacy "envoyPort:localPort" pair remains readable for stored configurations.
 	PortMap map[int32]string
 	// IsAgent indicates that this rule belongs to a node-agent connection, not a direct user connection.
 	// When both agent and user rules exist with matching headers, user rules take precedence.
 	IsAgent bool `yaml:"isAgent,omitempty" json:"isAgent,omitempty"`
+	// SyncTarget routes matched traffic to the current Ready pod of a sync clone.
+	// LocalTunIPv4/6 remain unresolved in the base Virtual for these rules.
+	SyncTarget *SyncTarget `yaml:"syncTarget,omitempty" json:"syncTarget,omitempty"`
 }
 
 // PortMapping represents a parsed port mapping from the PortMap string encoding.
 type PortMapping struct {
 	// ContainerPort is the original container port (the map key in PortMap).
 	ContainerPort int32
-	// EnvoyPort is the port envoy forwards to (the first number in the string value).
+	// EnvoyPort is the port envoy forwards to (the single value, or the first number in a pair).
 	EnvoyPort int32
 	// LocalPort is the port the local PC listens on.
-	// In non-fargate mode (plain "envoyPort" format), LocalPort equals ContainerPort.
-	// In fargate mode ("envoyPort:localPort" format), LocalPort is the second number.
+	// In node-agent single-value format, LocalPort equals EnvoyPort.
+	// In legacy "envoyPort:localPort" format, LocalPort is the second number.
 	LocalPort int32
 }
 
 // ParsePortMap parses the string-encoded PortMap into typed PortMapping values.
-// The string value is either "envoyPort" (plain number) or "envoyPort:localPort" (colon-separated pair).
+// Node-agent rules use a single local-port value; legacy colon-separated pairs
+// retain their distinct envoy and local ports.
 func (r *Rule) ParsePortMap() []PortMapping {
 	result := make([]PortMapping, 0, len(r.PortMap))
 	for containerPort, portStr := range r.PortMap {
@@ -186,7 +175,7 @@ func (r *Rule) ParsePortMap() []PortMapping {
 			pm.LocalPort, _ = parsePort(after)
 		} else {
 			pm.EnvoyPort, _ = parsePort(portStr)
-			pm.LocalPort = containerPort
+			pm.LocalPort = pm.EnvoyPort
 		}
 		result = append(result, pm)
 	}

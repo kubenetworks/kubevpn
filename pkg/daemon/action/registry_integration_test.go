@@ -13,7 +13,7 @@ type registryStatusSession struct{ *handler.ConnectOptions }
 
 func (s *registryStatusSession) GetClusterName() string { return "cluster" }
 func (s *registryStatusSession) StatusSnapshot(context.Context) (handler.SessionStatus, error) {
-	return handler.SessionStatus{Envoy: `[{"UID":"deployments.apps.web","Namespace":"work","Rules":[{"OwnerID":"alice","Headers":{"version":"test"},"PortMap":{"8080":"30000:9090"}}]}]`, Sync: &handler.SyncStatus{Workloads: []string{"deploy/web"}, Headers: map[string]string{"user": "alice"}, TargetWorkloadNames: map[string]string{"deploy/web": "deploy/web-sync"}, SyncthingGUIAddr: "http://127.0.0.1:8384"}}, nil
+	return handler.SessionStatus{Envoy: `[{"UID":"deployments.apps.web","Namespace":"work","Rules":[{"OwnerID":"alice","Headers":{"version":"test"},"PortMap":{"8080":"9090"}}]}]`, Sync: &handler.SyncStatus{Workloads: []string{"deploy/web"}, Headers: map[string]string{"user": "alice"}, TargetWorkloadNames: map[string]string{"deploy/web": "deploy/web-sync"}, SyncthingGUIAddr: "http://127.0.0.1:8384"}}, nil
 }
 
 func TestRegistry_RealGRPCStatusAndDuplicateSelection(t *testing.T) {
@@ -52,6 +52,31 @@ func TestRegistry_RealGRPCStatusAndDuplicateSelection(t *testing.T) {
 	remaining, current := svr.registry.snapshot()
 	if len(remaining) != 0 || current != "" {
 		t.Fatal("removal did not clear membership and selection")
+	}
+}
+
+func TestRegistry_CurrentUsesNewestDuplicate(t *testing.T) {
+	r := &connectionRegistry{}
+	old := &handler.ConnectOptions{ConnectionID: "same", OwnerID: "old"}
+	replacement := &handler.ConnectOptions{ConnectionID: "same", OwnerID: "new"}
+	r.add(old, true)
+	r.add(replacement, true)
+	if got := r.current(); got != replacement {
+		t.Fatalf("current returned stale duplicate after add: got %p want %p", got, replacement)
+	}
+}
+
+func TestRegistry_UseMovesSelectedDuplicateToFront(t *testing.T) {
+	old := &handler.ConnectOptions{ConnectionID: "same", OwnerID: "old"}
+	replacement := &handler.ConnectOptions{ConnectionID: "same", OwnerID: "new"}
+	r := &connectionRegistry{}
+	r.add(old, true)
+	r.add(replacement, false)
+	if !r.use("same") {
+		t.Fatal("select duplicate failed")
+	}
+	if got := r.current(); got != replacement {
+		t.Fatalf("current returned stale duplicate: got %p want %p", got, replacement)
 	}
 }
 

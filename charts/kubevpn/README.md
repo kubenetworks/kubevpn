@@ -23,14 +23,9 @@ in China, you can use tencent image registry
 helm install kubevpn kubevpn/kubevpn --set image.repository=ccr.ccs.tencentyun.com/kubevpn/kubevpn -n kubevpn --create-namespace
 ```
 
-## AWS Fargate cluster
+## Privileged node-agent requirement
 
-```shell
-helm install kubevpn kubevpn/kubevpn -n kubevpn --create-namespace
-```
-
-*Proxy/ServiceMesh mode only support k8s service*
-
-```shell
-kubevpn proxy service/authors
-```
+Proxy and Service interception use the `kubevpn-nodeagent` DaemonSet. The manager
+namespace must allow privileged pods with `hostPID=true` and a read-only host
+`/proc` mount. The agent does not use `hostNetwork`, and workloads/Services are
+not modified. Unprivileged AWS Fargate data planes are not supported.

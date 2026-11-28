@@ -60,7 +60,7 @@ func recordConnection(c *handler.ConnectOptions) *connectionRecord {
 	}
 	if s := c.GetSync(); s != nil {
 		record.Sync = &syncRecord{
-			WorkloadNamespace: s.WorkloadNamespace, ManagerNamespace: s.ManagerNamespace,
+			WorkloadNamespace: s.WorkloadNamespace, ManagerNamespace: c.ManagerNamespace,
 			Headers: maps.Clone(s.Headers), Workloads: slices.Clone(s.Workloads), ExtraRouteInfo: recordRoute(s.ExtraRouteInfo),
 			TargetContainer: s.TargetContainer, TargetImage: s.TargetImage, TargetWorkloadNames: maps.Clone(s.TargetWorkloadNames),
 			OriginKubeconfigPath: s.OriginKubeconfigPath, LocalDir: s.LocalDir, RemoteDir: s.RemoteDir,

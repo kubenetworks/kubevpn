@@ -41,9 +41,9 @@ func TestGenRole(t *testing.T) {
 	if role.Namespace != namespace {
 		t.Fatalf("expected namespace %q, got %q", namespace, role.Namespace)
 	}
-	// Rule 0: configmaps/secrets; Rules 1-2: CIDR detection; Rule 3: batch/jobs.
-	if len(role.Rules) != 4 {
-		t.Fatalf("expected 4 rules, got %d", len(role.Rules))
+	// Rule 0: configmaps/secrets; Rules 1-2: CIDR detection.
+	if len(role.Rules) != 3 {
+		t.Fatalf("expected 3 rules, got %d", len(role.Rules))
 	}
 
 	rule := role.Rules[0]
@@ -201,7 +201,7 @@ func TestGenDeploySpec(t *testing.T) {
 	image := "docker.io/naison/kubevpn:test"
 	imagePullSecret := "my-pull-secret"
 
-	deploy := genDeploySpec(namespace, image, imagePullSecret, config.AttachModeSidecar)
+	deploy := genDeploySpec(namespace, image, imagePullSecret)
 
 	if deploy.Name != config.ConfigMapPodTrafficManager {
 		t.Fatalf("expected name %q, got %q", config.ConfigMapPodTrafficManager, deploy.Name)
@@ -296,7 +296,7 @@ func TestGenDeploySpec(t *testing.T) {
 }
 
 func TestGenDeploySpecNoImagePullSecret(t *testing.T) {
-	deploy := genDeploySpec("ns", "img:latest", "", config.AttachModeSidecar)
+	deploy := genDeploySpec("ns", "img:latest", "")
 
 	if len(deploy.Spec.Template.Spec.ImagePullSecrets) != 0 {
 		t.Fatalf("expected no imagePullSecrets when name is empty, got %d", len(deploy.Spec.Template.Spec.ImagePullSecrets))
@@ -304,7 +304,7 @@ func TestGenDeploySpecNoImagePullSecret(t *testing.T) {
 }
 
 func TestGenDeploySpec_Probes(t *testing.T) {
-	deploy := genDeploySpec("test-ns", "img:latest", "", config.AttachModeSidecar)
+	deploy := genDeploySpec("test-ns", "img:latest", "")
 	containers := deploy.Spec.Template.Spec.Containers
 	if len(containers) != 3 {
 		t.Fatalf("expected 3 containers, got %d", len(containers))
@@ -380,7 +380,7 @@ func TestGenDeploySpec_Probes(t *testing.T) {
 }
 
 func TestGenDeploySpec_ContainerPorts(t *testing.T) {
-	deploy := genDeploySpec("test-ns", "img:latest", "", config.AttachModeSidecar)
+	deploy := genDeploySpec("test-ns", "img:latest", "")
 	containers := deploy.Spec.Template.Spec.Containers
 	if len(containers) != 3 {
 		t.Fatalf("expected 3 containers, got %d", len(containers))
@@ -433,7 +433,7 @@ func TestGenDeploySpec_ContainerPorts(t *testing.T) {
 }
 
 func TestGenDeploySpec_SecurityContext(t *testing.T) {
-	deploy := genDeploySpec("test-ns", "img:latest", "", config.AttachModeSidecar)
+	deploy := genDeploySpec("test-ns", "img:latest", "")
 	containers := deploy.Spec.Template.Spec.Containers
 	if len(containers) != 3 {
 		t.Fatalf("expected 3 containers, got %d", len(containers))
@@ -473,7 +473,7 @@ func TestGenDeploySpec_SecurityContext(t *testing.T) {
 var _ *v1.ServiceAccount = genServiceAccount("x")
 var _ *v1.Service = genService("x")
 var _ *v1.Secret = genSecret("x", nil, nil, nil)
-var _ *appsv1.Deployment = genDeploySpec("x", "", "", config.AttachModeSidecar)
+var _ *appsv1.Deployment = genDeploySpec("x", "", "")
 
 func TestWaitPodReady_Timeout(t *testing.T) {
 	namespace := "test-ns"
@@ -640,27 +640,9 @@ func TestCreateOutboundPod_RecreatesWhenDeploymentMissing(t *testing.T) {
 // all stale node-agent jobs across all namespaces are cleaned up before the new manager starts.
 // This prevents stale agents from reconnecting and competing for DHCP leases, which caused 3-6 minutes
 // of mesh traffic disruption in CI (TestFunctions 03/05).
-func TestResolveAttachModeOnRecreate_PreservesPin(t *testing.T) {
-	ctx := context.Background()
-	// Simulate a manager installed with sidecar (helm values / kubevpn install pin).
-	deploy := genDeploySpec("kubevpn", "img:1", "", config.AttachModeSidecar)
-	clientset := fake.NewSimpleClientset(deploy)
-	if got := resolveAttachModeOnRecreate(ctx, clientset, "kubevpn"); got != config.AttachModeSidecar {
-		t.Fatalf("expected pinned sidecar preserved, got %q", got)
-	}
-}
-
-func TestResolveAttachModeOnRecreate_MissingDeployDefaultsNodeAgent(t *testing.T) {
-	ctx := context.Background()
-	clientset := fake.NewSimpleClientset()
-	if got := resolveAttachModeOnRecreate(ctx, clientset, "kubevpn"); got != config.AttachModeNodeAgent {
-		t.Fatalf("expected node-agent default, got %q", got)
-	}
-}
-
 func TestWaitForManagerPod_ReturnsOnceRunning(t *testing.T) {
 	ctx := context.Background()
-	deploy := genDeploySpec("kubevpn", "img:1", "", config.AttachModeNodeAgent)
+	deploy := genDeploySpec("kubevpn", "img:1", "")
 	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
 		Name: "kubevpn-traffic-manager-x", Namespace: "kubevpn",
 		Labels: map[string]string{"app": config.ConfigMapPodTrafficManager},

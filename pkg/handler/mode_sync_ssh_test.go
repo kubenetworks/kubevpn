@@ -18,6 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
 
+	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
 
@@ -49,6 +50,7 @@ func (u *sshUt) kubevpnSync(t *testing.T, ctx context.Context, isServiceMesh boo
 	if isServiceMesh {
 		args = append(args, "--headers", "env=test")
 	}
+	identity := captureWorkloadIdentity(t, u.clientset, u.namespace, "authors", "authors")
 	runSyncCommand(t, ctx, u.clientset, args)
 
 	list, err := util.GetRunningPodList(ctx, u.clientset, u.namespace, fields.OneTermEqualSelector("origin-workload", "authors").String())
@@ -57,6 +59,19 @@ func (u *sshUt) kubevpnSync(t *testing.T, ctx context.Context, isServiceMesh boo
 	}
 	if len(list) == 0 {
 		t.Fatal("expect at least one pod")
+	}
+	assertWorkloadIdentityUnchanged(t, u.clientset, u.namespace, "authors", "authors", identity)
+	hasSyncthing := false
+	for _, container := range list[0].Spec.Containers {
+		if container.Name == config.ContainerSidecarVPN || container.Name == config.ContainerSidecarEnvoy {
+			t.Fatalf("traffic sidecar found in sync clone: %s", container.Name)
+		}
+		if container.Name == config.ContainerSidecarSyncthing {
+			hasSyncthing = true
+		}
+	}
+	if !hasSyncthing {
+		t.Fatal("sync clone is missing the syncthing helper")
 	}
 
 	remotePath := fmt.Sprintf("%s/%s", remoteDir, name)

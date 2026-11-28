@@ -3,7 +3,7 @@ FROM debian:bookworm-slim
 
 ARG TARGETARCH
 
-RUN apt-get update && apt-get install -y --no-install-recommends iptables util-linux \
+RUN apt-get update && apt-get install -y --no-install-recommends iptables ipset util-linux \
     && apt-get autoremove -y \
     && apt-get clean -y \
     && rm -rf /var/lib/apt/lists/*

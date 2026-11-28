@@ -30,21 +30,19 @@ Connects via the local daemon (same as `kubevpn connect`/`kubevpn proxy`):
 **Teardown (`teardownRunProxy`)** mirrors the proven `kubevpn proxy --foreground` order
 (`cmd/kubevpn/cmds/proxy.go`): it **leaves the proxy first, then disconnects**. Leave runs on its own
 `Leave` RPC, which the daemon resolves by `currentConnectionID` (set in the `Proxy` handler) — so it
-reliably **unpatches the injected sidecars** regardless of how the manager/workload namespaces relate.
+reliably removes the node-agent rules without modifying the workload, regardless of how the manager/workload namespaces relate.
 This matters because a bare disconnect-by-kubeconfig derives the connection ID from the *namespace*
-(see [04-connection-id.md](04-connection-id.md)); relying on it alone left the sidecars patched. Both
+(see [04-connection-id.md](04-connection-id.md)); relying on it alone can leave stale proxy rules. Both
 the `Leave` and `Disconnect` streams render with the spinner + `✓` UX via `grpcutil.RenderGRPCStream`
 (see [30-connect-progress.md](30-connect-progress.md)), and a leading blank line keeps the first step
-off the terminal's `^C` echo. `--no-proxy` runs skip Leave (nothing was injected).
+off the terminal's `^C` echo. `--no-proxy` runs skip Leave (nothing was attached).
 
 > **Port coverage caveat (host mode).** The dev container is a standalone container published on
 > `host:<port>`, and the gvisor `LocalTCPForwarder` dials `127.0.0.1` (`pkg/tunnel/internal/netstack/tcp.go`).
-> Under the unified mesh full-proxy, only the workload's **declared** ports are routed back to the
-> local machine; an undeclared port (e.g. `9090`) falls through the envoy `:15006` capture to
-> `origin_cluster` (the real app), so a run/sync e2e that probes `podIP:9090` will not reach the local
-> dev process. Root cause and restore options: [17-sidecar-injection.md](17-sidecar-injection.md)
-> ("Full-proxy port coverage"). The earlier `run -p` → proxy-portmap experiment (commits `087cc531` /
-> `b68c3181`) was reverted, so run e2e is back to its pre-experiment behavior.
+> Under node-boundary full-proxy, only the workload's **declared** ports are routed back to the
+> local machine; an undeclared port (e.g. `9090`) has no direct listener and reaches the real app,
+> so a run/sync e2e that probes `podIP:9090` will not reach the local dev process. The earlier
+> `run -p` → proxy-portmap experiment (commits `087cc531` / `b68c3181`) was reverted.
 
 ### 3.2 Container Mode (`ConnectModeContainer`)
 
@@ -128,11 +126,10 @@ propagated. Containers run `--user root` with `LC_ALL=C.UTF-8`, the pod's `Subdo
 
 ### 7.2 Volume conversion (`volume.go`)
 
-`GetVolume` turns each non-sidecar container's `VolumeMounts` into Docker **bind mounts** by
+`GetVolume` turns each workload container's `VolumeMounts` into Docker **bind mounts** by
 *downloading* the in-cluster volume contents to a local temp dir (via `pkg/cp` with `MaxTries=10`)
 and binding that dir at the same `MountPath`. Notes:
 
-- The `vpn`/`envoy` sidecar containers are skipped.
 - `MountPath == /tmp` is skipped (Docker manages its own).
 - `SubPath` is appended to the local path so subpath mounts map correctly.
 - Download failure is non-fatal (logged, mount skipped). `RemoveDir` cleans up the temp dirs on

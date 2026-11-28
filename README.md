@@ -101,7 +101,7 @@ curl productpage:9080  # short name works in same namespace
 
 ```bash
 # 1. If you used `kubevpn proxy` or `kubevpn sync`, leave those resources first
-#    This restores the workloads to their original state and removes injected sidecars
+#    This removes your node-agent proxy rules without modifying the workloads
 kubevpn leave deployments/productpage
 
 # 2. Disconnect by connection ID (from `kubevpn status`)
@@ -121,7 +121,7 @@ kubevpn uninstall
 ## Security Notice
 
 - KubeVPN modifies your local TUN device, routing table, and DNS settings
-- Proxy mode injects sidecar containers into workloads, which may require `privileged`, `NET_ADMIN`, or `NET_RAW` capabilities
+- Proxy mode uses a privileged node-agent DaemonSet (`hostPID`, host `/proc` read-only, `hostNetwork=false`); workload PodSpecs and Services are not modified
 - For production clusters, understand the RBAC and network impacts before use
 - Learn more: [Security Documentation](https://kubevpn.dev/docs/operations/security)
 

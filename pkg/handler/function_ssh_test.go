@@ -633,9 +633,13 @@ func (u *sshUt) kubevpnProxyWithServiceMesh(t *testing.T) {
 }
 
 func (u *sshUt) kubevpnProxyWithServiceMeshAndFargateMode(t *testing.T) {
+	identity := captureWorkloadIdentity(t, u.clientset, u.namespace, "reviews", "reviews")
+	targetPorts := captureServiceTargetPorts(t, u.clientset, u.namespace, "reviews")
 	if err := runKubevpn(t, "proxy", "svc/reviews", "--headers", "env=test", "--debug", "--ssh-addr", "localhost:2222", "--ssh-username", "naison", "--ssh-password", "naison"); err != nil {
 		t.Fatal(err)
 	}
+	assertWorkloadIdentityUnchanged(t, u.clientset, u.namespace, "reviews", "reviews", identity)
+	assertServiceTargetPortsUnchanged(t, u.clientset, u.namespace, "reviews", targetPorts)
 }
 
 func (u *sshUt) kubevpnProxyWithServiceMeshAndK8sServicePortMap(t *testing.T) {
@@ -645,9 +649,19 @@ func (u *sshUt) kubevpnProxyWithServiceMeshAndK8sServicePortMap(t *testing.T) {
 }
 
 func (u *sshUt) kubevpnLeave(t *testing.T) {
-	if err := runKubevpn(t, "leave", "deployments/reviews"); err != nil {
-		t.Fatal(err)
+	// Match the non-SSH suite: the in-cluster manager dial can hit a transient
+	// deadline while the SSH-jumped apiserver recovers. Retry the idempotent leave
+	// a bounded number of times instead of failing the whole suite on one blip.
+	var err error
+	for range 3 {
+		err = runKubevpn(t, "leave", "deployments/reviews")
+		if err == nil {
+			return
+		}
+		t.Logf("kubevpn SSH leave deployments/reviews attempt failed: %v", err)
+		time.Sleep(5 * time.Second)
 	}
+	t.Fatal(err)
 }
 
 func (u *sshUt) kubevpnLeaveService(t *testing.T) {
@@ -896,10 +910,6 @@ func (u *sshUt) centerCheckProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 	}}}
 
 	var statuses connStatus
-	if err = json.Unmarshal(output, &statuses); err != nil {
-		t.Fatal(err)
-	}
-	fillDeploymentTunIPs(&expect, &statuses)
 	opt := cmp.FilterPath(func(p cmp.Path) bool {
 		vx := p.Last().String()
 		if vx == `["Headers"]` {
@@ -907,8 +917,32 @@ func (u *sshUt) centerCheckProxyWithServiceMeshAndGvisorStatus(t *testing.T) {
 		}
 		return false
 	}, cmp.Ignore())
-	if !cmp.Equal(statuses, expect, opt) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	err = wait.PollUntilContextTimeout(ctx, time.Second, 30*time.Second, true, func(ctx context.Context) (bool, error) {
+		cmd := exec.Command("kubevpn", "status", "-o", "json")
+		output, err = cmd.Output()
+		if err != nil {
+			return false, nil
+		}
+		statuses = connStatus{}
+		if err = json.Unmarshal(output, &statuses); err != nil {
+			return false, nil
+		}
+		fillDeploymentTunIPs(&expect, &statuses)
+		return cmp.Equal(statuses, expect, opt), nil
+	})
+	if err != nil {
 		marshal, _ := json.Marshal(expect)
+		if list, listErr := u.clientset.CoreV1().ConfigMaps("").List(context.Background(), v1.ListOptions{}); listErr == nil {
+			for _, cm := range list.Items {
+				if cm.Name == pkgconfig.ConfigMapPodTrafficManager {
+					t.Logf("ENVOY_CONFIG for portmap status mismatch (%s):\n%s", cm.Namespace, cm.Data[pkgconfig.KeyEnvoy])
+				}
+			}
+		} else {
+			t.Logf("list traffic-manager ConfigMaps failed: %v", listErr)
+		}
 		t.Fatalf("expect: %s, but was: %s", string(marshal), string(output))
 	}
 }
@@ -1151,78 +1185,6 @@ func (u *sshUt) startupHttpServer(t *testing.T, addr, str string) {
 	mux.HandleFunc("/health", health)
 	t.Logf("Start listening http addr %s ...", addr)
 	_ = http.ListenAndServe(addr, mux)
-}
-
-func (u *sshUt) getCurrentAttachMode(ctx context.Context) (string, error) {
-	return u.getCurrentAttachModeInNamespace(ctx, u.namespace)
-}
-
-func (u *sshUt) getCurrentAttachModeInNamespace(ctx context.Context, namespace string) (string, error) {
-	deploy, err := u.clientset.AppsV1().Deployments(namespace).Get(ctx, pkgconfig.ConfigMapPodTrafficManager, v1.GetOptions{})
-	if err != nil {
-		return "", err
-	}
-	for _, c := range deploy.Spec.Template.Spec.Containers {
-		for _, env := range c.Env {
-			if env.Name == "KUBEVPN_PROXY_ATTACH_MODE" {
-				return env.Value, nil
-			}
-		}
-	}
-	return pkgconfig.AttachModeSidecar, nil
-}
-
-func (u *sshUt) setManagerAttachMode(ctx context.Context, mode string) error {
-	return u.setManagerAttachModeInNamespace(ctx, mode, u.namespace)
-}
-
-func (u *sshUt) setManagerAttachModeInNamespace(ctx context.Context, mode string, namespace string) error {
-	// Use retry with ResourceVersion for safe updates
-	return wait.ExponentialBackoffWithContext(ctx, wait.Backoff{
-		Duration: 500 * time.Millisecond,
-		Factor:   2,
-		Steps:    5,
-	}, func(ctx context.Context) (bool, error) {
-		deploy, err := u.clientset.AppsV1().Deployments(namespace).Get(ctx, pkgconfig.ConfigMapPodTrafficManager, v1.GetOptions{})
-		if err != nil {
-			return false, err
-		}
-
-		updated := false
-		for i := range deploy.Spec.Template.Spec.Containers {
-			c := &deploy.Spec.Template.Spec.Containers[i]
-			found := false
-			for j := range c.Env {
-				if c.Env[j].Name == "KUBEVPN_PROXY_ATTACH_MODE" {
-					found = true
-					if c.Env[j].Value != mode {
-						c.Env[j].Value = mode
-						updated = true
-					}
-					break
-				}
-			}
-			if !found {
-				c.Env = append(c.Env, corev1.EnvVar{
-					Name:  "KUBEVPN_PROXY_ATTACH_MODE",
-					Value: mode,
-				})
-				updated = true
-			}
-		}
-
-		if !updated {
-			// Already set correctly
-			return true, nil
-		}
-
-		_, err = u.clientset.AppsV1().Deployments(namespace).Update(ctx, deploy, v1.UpdateOptions{})
-		if err != nil {
-			// Conflict, retry
-			return false, nil
-		}
-		return true, nil
-	})
 }
 
 // waitSSHManagerReadyWithContext waits for manager to be ready with context

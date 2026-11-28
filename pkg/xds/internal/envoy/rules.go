@@ -80,6 +80,9 @@ func (s *Rules) Sync(ctx context.Context, ownerID string, newIPv4, newIPv6 *net.
 			changed := false
 			for _, v := range virtuals {
 				for _, rule := range v.Rules {
+					if rule.SyncTarget != nil {
+						continue
+					}
 					if rule.OwnerID == ownerID && rule.LocalTunIPv4 != newV4Str {
 						rule.LocalTunIPv4 = newV4Str
 						rule.LocalTunIPv6 = newV6Str

@@ -75,7 +75,7 @@ type Rule struct {
     LocalTunIPv4 string            // destination TUN IP (IPv4)
     LocalTunIPv6 string            // destination TUN IP (IPv6)
     OwnerID      string            // connection UUID prefix (required since v2)
-    PortMap      map[int32]string  // containerPort → "envoyPort" or "envoyPort:localPort"
+    PortMap      map[int32]string  // containerPort → "localPort" (legacy "envoyPort:localPort" also readable)
 }
 ```
 
@@ -91,7 +91,7 @@ type PortMapping struct {
 }
 ```
 
-Format: `"envoyPort"` (mesh mode, LocalPort defaults to ContainerPort) or `"envoyPort:localPort"` (fargate mode).
+Format: node-agent rules use `"localPort"`, where both EnvoyPort and LocalPort resolve to that value. The legacy `"envoyPort:localPort"` pair remains readable for stored configurations.
 
 ### 3.5 Fargate Mode Detection
 

@@ -15,7 +15,6 @@ import (
 	"k8s.io/utils/ptr"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
-	"github.com/wencaiwulue/kubevpn/v2/pkg/inject"
 	plog "github.com/wencaiwulue/kubevpn/v2/pkg/log"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/util"
 )
@@ -95,7 +94,6 @@ func (option *Options) ConvertPodToContainerConfigList(
 	hostConfig *HostConfig,
 ) (ConfigList, error) {
 	temp := *podCtx.TemplateSpec
-	inject.RemoveContainers(&temp.Spec)
 	moveDevContainerFirst(&temp, option.ContainerName)
 
 	portMap, portSet := collectExposedPorts(conf, hostConfig)

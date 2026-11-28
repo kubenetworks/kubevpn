@@ -37,7 +37,6 @@ func TestLeaveAllProxyResources_EmptyConfigMap(t *testing.T) {
 	c := &ConnectOptions{
 		SessionBase:      SessionBase{K8sClient: K8sClient{clientset: clientset}},
 		ManagerNamespace: "test-ns",
-		proxyManager:     newProxyManager(),
 	}
 	err := c.LeaveAllProxyResources(context.Background())
 	if err != nil {
@@ -50,7 +49,6 @@ func TestLeaveAllProxyResources_ConfigMapNotFound(t *testing.T) {
 	c := &ConnectOptions{
 		SessionBase:      SessionBase{K8sClient: K8sClient{clientset: clientset}},
 		ManagerNamespace: "test-ns",
-		proxyManager:     newProxyManager(),
 	}
 	err := c.LeaveAllProxyResources(context.Background())
 	if err != nil {
@@ -71,55 +69,6 @@ func TestLeaveResource_NilResources(t *testing.T) {
 	err := c.LeaveResource(context.Background(), nil, "198.18.0.1")
 	if err != nil {
 		t.Fatalf("expected nil error for nil resources slice, got: %v", err)
-	}
-}
-
-func TestProxyManager_Remove_RemovesWorkload(t *testing.T) {
-	c := newTestConnectOptions(t)
-	c.proxyManager = newProxyManager()
-	c.proxyManager.Add(&Proxy{workload: "deployments.apps/app1", namespace: "default"})
-	c.proxyManager.Add(&Proxy{workload: "deployments.apps/app2", namespace: "default"})
-	c.proxyManager.Add(&Proxy{workload: "services/svc1", namespace: "other-ns"})
-
-	c.proxyManager.Remove("default", "deployments.apps/app1")
-
-	res := c.proxyManager.Resources()
-	if len(res) != 2 {
-		t.Fatalf("expected 2 remaining workloads, got %d", len(res))
-	}
-	for _, p := range res {
-		if p.workload == "deployments.apps/app1" && p.namespace == "default" {
-			t.Fatal("app1 should have been removed")
-		}
-	}
-}
-
-func TestProxyManager_Remove_NonExistentWorkload(t *testing.T) {
-	c := newTestConnectOptions(t)
-	c.proxyManager = newProxyManager()
-	c.proxyManager.Add(&Proxy{workload: "deployments.apps/app1", namespace: "default"})
-
-	// Removing a non-existent workload should not panic or modify the list
-	c.proxyManager.Remove("default", "deployments.apps/does-not-exist")
-
-	res := c.proxyManager.Resources()
-	if len(res) != 1 {
-		t.Fatalf("expected 1 workload unchanged, got %d", len(res))
-	}
-}
-
-func TestProxyManager_Remove_AllWorkloads(t *testing.T) {
-	c := newTestConnectOptions(t)
-	c.proxyManager = newProxyManager()
-	c.proxyManager.Add(&Proxy{workload: "deployments.apps/app1", namespace: "ns1"})
-	c.proxyManager.Add(&Proxy{workload: "deployments.apps/app2", namespace: "ns2"})
-
-	c.proxyManager.Remove("ns1", "deployments.apps/app1")
-	c.proxyManager.Remove("ns2", "deployments.apps/app2")
-
-	res := c.proxyManager.Resources()
-	if len(res) != 0 {
-		t.Fatalf("expected 0 workloads after removing all, got %d", len(res))
 	}
 }
 

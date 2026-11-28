@@ -16,13 +16,23 @@ import (
 // buildServiceAttachments projects Services targeting this workload into every
 // node that has an attached pod. ClusterIP/ServicePort remain the return
 // destination for unmatched traffic, preserving kube-proxy load balancing.
-func buildServiceAttachments(ctx context.Context, clientset kubernetes.Interface, virtual *controlplane.Virtual, pods []corev1.Pod, nodes map[string]struct{}) ([]controlplane.NodeAttachment, error) {
+func buildServiceAttachments(ctx context.Context, clientset kubernetes.Interface, virtual *controlplane.Virtual, pods []corev1.Pod, nodes map[string]struct{}, explicitServices map[string]struct{}) ([]controlplane.NodeAttachment, error) {
 	if len(nodes) == 0 {
 		return nil, nil
 	}
-	services, err := clientset.CoreV1().Services(virtual.Namespace).List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("list services for %s/%s: %w", virtual.Namespace, virtual.UID, err)
+	var services []corev1.Service
+	if virtual.ServiceName != "" {
+		service, err := clientset.CoreV1().Services(virtual.Namespace).Get(ctx, virtual.ServiceName, metav1.GetOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("get service %s/%s: %w", virtual.Namespace, virtual.ServiceName, err)
+		}
+		services = append(services, *service)
+	} else {
+		list, err := clientset.CoreV1().Services(virtual.Namespace).List(ctx, metav1.ListOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("list services for %s/%s: %w", virtual.Namespace, virtual.UID, err)
+		}
+		services = list.Items
 	}
 	nodeNames := make([]string, 0, len(nodes))
 	for nodeName := range nodes {
@@ -31,8 +41,13 @@ func buildServiceAttachments(ctx context.Context, clientset kubernetes.Interface
 	sort.Strings(nodeNames)
 
 	var attachments []controlplane.NodeAttachment
-	for i := range services.Items {
-		service := &services.Items[i]
+	for i := range services {
+		service := &services[i]
+		if virtual.ServiceName == "" {
+			if _, exists := explicitServices[service.Namespace+"/"+service.Name]; exists {
+				continue
+			}
+		}
 		if service.Spec.ClusterIP == "" || service.Spec.ClusterIP == corev1.ClusterIPNone || len(service.Spec.Selector) == 0 {
 			continue
 		}

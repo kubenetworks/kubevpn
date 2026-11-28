@@ -147,8 +147,8 @@ func stripCodeBlocks(content string) string {
 
 var (
 	userDirPatterns = []*regexp.Regexp{
-		regexp.MustCompile(`^/Users/[^/]+`),           // macOS
-		regexp.MustCompile(`^/home/[^/]+`),            // Linux
+		regexp.MustCompile(`^/Users/[^/]+`),             // macOS
+		regexp.MustCompile(`^/home/[^/]+`),              // Linux
 		regexp.MustCompile(`^[A-Za-z]:\\Users\\[^\\]+`), // Windows
 	}
 	// False positive patterns - these look like user dirs but are system paths
@@ -526,7 +526,7 @@ var claudeSymbols = []struct {
 	{"gatherContainerPorts", ""},
 	{"addEnvoyConfig", "envoy.go"},
 	// controlplane / envoy config types
-	{"IsFargateMode", ""},
+	{"SyncTarget", ""},
 	{"ParsePortMap", ""},
 	{"CurrentSchemaVersion", ""},
 }
