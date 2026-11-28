@@ -109,6 +109,8 @@ unique admin port (`adminBase+5000`) and `--base-id`.
   `AGENT_XDS_CONFIG` contains only derived per-node Virtuals. The publisher reads but never
   writes desired state; it is the sole writer of derived Virtuals, attachments, and allocations.
   Old mixed `ENVOY_CONFIG` is rejected rather than migrated and requires a manager reinstall.
+  ResourceVersion conflicts restart the complete derivation from the newest ConfigMap and desired
+  state; the publisher never retries an Update with a stale object or stale rules.
 
 A Service is not collapsed into a pod origin. `originIP=ClusterIP` and
 `originPort=ServicePort` preserve kube-proxy/IPVS load balancing. Host rules are inserted at

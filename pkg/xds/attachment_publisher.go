@@ -11,6 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/yaml"
 
 	"github.com/wencaiwulue/kubevpn/v2/pkg/config"
@@ -46,6 +47,12 @@ func (p *AttachmentPublisher) Start(ctx context.Context) error {
 }
 
 func (p *AttachmentPublisher) reconcileOnce(ctx context.Context) error {
+	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		return p.reconcileAttempt(ctx)
+	})
+}
+
+func (p *AttachmentPublisher) reconcileAttempt(ctx context.Context) error {
 	cm, err := p.clientset.CoreV1().ConfigMaps(p.managerNamespace).Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("read traffic manager configmap: %w", err)

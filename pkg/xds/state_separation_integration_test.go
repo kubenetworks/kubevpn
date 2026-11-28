@@ -2,6 +2,8 @@ package xds
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -9,8 +11,10 @@ import (
 	"github.com/envoyproxy/go-control-plane/pkg/resource/v3"
 	logrus "github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 	"sigs.k8s.io/yaml"
@@ -151,5 +155,59 @@ func TestAttachmentPublisher_RestartRebuildsSameDerivedState(t *testing.T) {
 	}
 	if rebuilt.Data[config.KeyEnvoy] != publisherVirtualsYAML {
 		t.Fatal("publisher restart changed desired state")
+	}
+}
+
+func TestAttachmentPublisher_ConflictRecomputesLatestDesired(t *testing.T) {
+	ctx := context.Background()
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "kubevpn"},
+		Data:       map[string]string{config.KeyEnvoy: publisherVirtualsYAML},
+	}
+	clientset := fake.NewSimpleClientset(cm, newPublisherTestPod())
+	publisher := NewAttachmentPublisher(clientset, "kubevpn")
+	gvr := schema.GroupVersionResource{Version: "v1", Resource: "configmaps"}
+	var attempts int32
+	clientset.PrependReactor("update", "configmaps", func(k8stesting.Action) (bool, runtime.Object, error) {
+		if atomic.AddInt32(&attempts, 1) != 1 {
+			return false, nil, nil
+		}
+		current, err := clientset.Tracker().Get(gvr, "kubevpn", config.ConfigMapPodTrafficManager)
+		if err != nil {
+			return true, nil, err
+		}
+		latest := current.(*corev1.ConfigMap).DeepCopy()
+		latest.Data[config.KeyEnvoy] = strings.Replace(
+			latest.Data[config.KeyEnvoy], "198.18.0.1", "198.18.0.99", 1,
+		)
+		if err := clientset.Tracker().Update(gvr, latest, "kubevpn"); err != nil {
+			return true, nil, err
+		}
+		return true, nil, apierrors.NewConflict(
+			schema.GroupResource{Resource: "configmaps"},
+			config.ConfigMapPodTrafficManager,
+			fmt.Errorf("injected conflict"),
+		)
+	})
+	if err := publisher.reconcileOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := atomic.LoadInt32(&attempts); got != 2 {
+		t.Fatalf("publisher performed %d update attempts, want 2", got)
+	}
+
+	stored, err := clientset.CoreV1().ConfigMaps("kubevpn").Get(ctx, config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var desired, derived []*controlplane.Virtual
+	if err := yaml.Unmarshal([]byte(stored.Data[config.KeyEnvoy]), &desired); err != nil {
+		t.Fatal(err)
+	}
+	if err := yaml.Unmarshal([]byte(stored.Data[config.KeyAgentXDS]), &derived); err != nil {
+		t.Fatal(err)
+	}
+	if len(desired) != 1 || len(derived) != 1 || desired[0].Rules[0].LocalTunIPv4 != "198.18.0.99" || derived[0].Rules[0].LocalTunIPv4 != "198.18.0.99" {
+		t.Fatalf("publisher did not recompute latest desired: desired=%+v derived=%+v", desired, derived)
 	}
 }
