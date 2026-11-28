@@ -257,8 +257,12 @@ Closed writers cannot be registered again.
 ### 7.4 Reference-Counted Packet Pool (`packet.go`)
 
 The data plane avoids per-packet allocation and copying via a single canonical buffer layout and a
-reference count. Every `Packet` wraps a pooled `[]byte` (`config.LPool`) with reserved headroom so
-the wire frame can be stamped in place:
+reference count. Every `Packet` wraps a pooled `[]byte` with reserved headroom so the wire frame can
+be stamped in place. Known-size construction selects the smallest of 4 KiB, 16 KiB, and 64 KiB
+(`config.LPool`) pools; unknown-size `packetReader` reads retain 64 KiB. Oversized storage is not
+returned to a pool. `copyPacketToPool` chooses a class using `headroom + typePrefixLen + pkt.Size()`
+before releasing the gVisor packet. Recycling uses `len(data)`, not `cap(data)`, so Linux's two extra
+capacity bytes do not affect the class:
 
 ```
 data[0:2] = datagram length header (datagramHeaderLen)

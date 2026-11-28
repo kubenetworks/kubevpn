@@ -1,6 +1,7 @@
 package tunnel
 
 import (
+	"bytes"
 	"context"
 	"github.com/wencaiwulue/kubevpn/v2/pkg/tunnel/internal/netstack"
 	"testing"
@@ -62,6 +63,32 @@ func TestCopyPacketToPool_WithHeadroom(t *testing.T) {
 		if packet.data[headroom+1+i] != b {
 			t.Fatalf("payload mismatch at offset %d", i)
 		}
+	}
+}
+
+func TestCopyPacketToPoolUsesActualSizeClass(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		payload int
+		want    int
+	}{
+		{name: "mtu", payload: 1500, want: testSmallBufferSize},
+		{name: "medium", payload: 12000, want: testMediumBufferSize},
+		{name: "large", payload: 65000, want: config.LargeBufferSize},
+		{name: "standalone", payload: 65534, want: 65537},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := bytes.Repeat([]byte{0x5a}, tc.payload)
+			pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{Payload: buffer.MakeWithData(payload)})
+			packet := copyPacketToPool(pkt, packetTypeToTUN, datagramHeaderLen)
+			defer packet.release()
+			if len(packet.data) != tc.want {
+				t.Fatalf("len(data)=%d, want %d", len(packet.data), tc.want)
+			}
+			if !bytes.Equal(packet.ip(), payload) {
+				t.Fatal("payload changed during size-class copy")
+			}
+		})
 	}
 }
 

@@ -225,7 +225,7 @@ func (p *packet) writeTo(w io.Writer) (int, error) {
 // The returned length is prefix + IP data, NOT including headroom. The PacketBuffer's
 // ref count is decremented before returning; the caller owns the returned packet.
 func copyPacketToPool(pkt *stack.PacketBuffer, prefix byte, headroom int) *packet {
-	packet := newPacketFromPool(config.LargeBufferSize)
+	packet := newPacketFromPool(headroom + typePrefixLen + pkt.Size())
 	buf := packet.data
 	// Copy straight from gvisor's section views into the pooled buffer. AsSlices aliases
 	// the views (no copy), so this is a single copy out; ToView().AsSlice() would first
