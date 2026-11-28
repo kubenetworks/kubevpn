@@ -164,7 +164,12 @@ func waitForDeploymentPods(t *testing.T, u *ut, selector string, count int, node
 		seen := make(map[string]struct{})
 		for i := range pods.Items {
 			pod := &pods.Items[i]
-			if pod.DeletionTimestamp == nil && podutils.IsPodReady(pod) {
+			// Do not capture identities while an old ReplicaSet pod is still
+			// terminating; its UID would disappear before the attach assertion.
+			if pod.DeletionTimestamp != nil {
+				return false, nil
+			}
+			if podutils.IsPodReady(pod) {
 				result = append(result, *pod)
 				seen[pod.Spec.NodeName] = struct{}{}
 			}
