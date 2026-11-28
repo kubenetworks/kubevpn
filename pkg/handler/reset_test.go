@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/fake"
 	clienttesting "k8s.io/client-go/testing"
 	"sigs.k8s.io/yaml"
@@ -174,6 +177,59 @@ func TestResetConfigMap_RejectsMixedStateWithoutMutation(t *testing.T) {
 	}
 	if cm.Data[config.KeyEnvoy] != string(data) {
 		t.Fatal("mixed state was modified during rejected reset")
+	}
+}
+
+func TestResetConfigMap_RetriesConflictWithLatestState(t *testing.T) {
+	virtuals := []*controlplane.Virtual{
+		{Namespace: "default", UID: "deployments.apps.nginx"},
+		{Namespace: "default", UID: "deployments.apps.redis"},
+	}
+	data, err := yaml.Marshal(virtuals)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientset := fake.NewSimpleClientset(&corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapPodTrafficManager, Namespace: "test-ns"},
+		Data:       map[string]string{config.KeyEnvoy: string(data)},
+	})
+	gvr := schema.GroupVersionResource{Version: "v1", Resource: "configmaps"}
+	var attempts int32
+	clientset.PrependReactor("update", "configmaps", func(clienttesting.Action) (bool, runtime.Object, error) {
+		if atomic.AddInt32(&attempts, 1) != 1 {
+			return false, nil, nil
+		}
+		current, err := clientset.Tracker().Get(gvr, "test-ns", config.ConfigMapPodTrafficManager)
+		if err != nil {
+			return true, nil, err
+		}
+		latest := current.(*corev1.ConfigMap).DeepCopy()
+		latest.Data[config.KeyNodeAttachments] = "concurrent-update"
+		if err := clientset.Tracker().Update(gvr, latest, "test-ns"); err != nil {
+			return true, nil, err
+		}
+		return true, nil, apierrors.NewConflict(schema.GroupResource{Resource: "configmaps"}, config.ConfigMapPodTrafficManager, fmt.Errorf("injected conflict"))
+	})
+	mapInterface := clientset.CoreV1().ConfigMaps("test-ns")
+	if err := resetConfigMap(context.Background(), mapInterface, "default", []string{"deployments.apps/nginx"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := atomic.LoadInt32(&attempts); got != 2 {
+		t.Fatalf("reset performed %d updates, want 2", got)
+	}
+	cm, err := mapInterface.Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cm.Data[config.KeyNodeAttachments] != "concurrent-update" {
+		t.Fatal("retry overwrote the concurrent ConfigMap update")
+	}
+	var remaining []*controlplane.Virtual
+	if err := yaml.Unmarshal([]byte(cm.Data[config.KeyEnvoy]), &remaining); err != nil {
+		t.Fatal(err)
+	}
+	if len(remaining) != 1 || remaining[0].UID != "deployments.apps.redis" {
+		t.Fatalf("reset did not converge to latest desired state: %+v", remaining)
 	}
 }
 
