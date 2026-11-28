@@ -58,6 +58,9 @@ func resetConfigMap(ctx context.Context, mapInterface v1.ConfigMapInterface, nam
 		plog.G(ctx).Errorf("Unmarshal envoy config error: %v", err)
 		return nil
 	}
+	if err = controlplane.ValidateDesiredVirtuals(v); err != nil {
+		return err
+	}
 	ws := sets.New[string]()
 	for _, workload := range workloads {
 		ws.Insert(util.ConvertWorkloadToUID(workload))
