@@ -43,7 +43,8 @@ KubeVPN uses a custom DHCP mechanism to assign a unique TUN device IP address to
 │  │                       ipv6{cidr,bitmap}} ← dual-stack  │
 │  ├── TUN_ALLOCS   = yaml(ownerID→IP)     ← persisted map  │
 │  ├── CLUSTER_CIDRS = "cidr cidr ..."     ← cluster CIDRs  │
-│  └── ENVOY_CONFIG  = yaml([]*Virtual)    ← envoy routes   │
+│  ├── ENVOY_CONFIG  = yaml([]*Virtual)    ← desired base   │
+│  └── AGENT_XDS_CONFIG = yaml([]*Virtual) ← derived xDS    │
 └──────────────────────────────────────────────────────────┘
          ↑ port-forward
 ┌─────────────────────┐
@@ -96,6 +97,8 @@ Uses `ContiguousAllocationMap` — sequentially scans the bitmap starting from o
 **Concurrency Safety:**
 
 Each key in the ConfigMap is updated independently via JSON Patch (`JSONPatchType`), so writes to `TUN_IP_POOL` do not conflict with writes to `TUN_ALLOCS` or `ENVOY_CONFIG`. The DHCP bitmap update still requires a GET (to parse the current bitmap) followed by a Patch; `RetryOnConflict` retries on conflict with other DHCP operations.
+
+DHCP/lease callbacks modify only desired base Virtuals in `ENVOY_CONFIG`. `AGENT_XDS_CONFIG` is the AttachmentPublisher-owned derived projection consumed by xDS; publisher reconciliation propagates current user TUN IPs and resolves sync clone endpoints without treating derived state as desired input.
 
 **Error Handling:**
 

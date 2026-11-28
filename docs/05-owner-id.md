@@ -4,7 +4,7 @@
 
 ### 1.1 Current State
 
-KubeVPN supports multiple users proxying the same K8s workload simultaneously. Each user's proxy rules are stored in the `controlplane.Rule` struct, serialized as YAML and saved in the cluster ConfigMap (`kubevpn-traffic-manager`) under the `ENVOY_CONFIG` key.
+KubeVPN supports multiple users proxying the same K8s workload simultaneously. Each user's proxy rules are stored in the `controlplane.Rule` struct, serialized as YAML and saved in the cluster ConfigMap (`kubevpn-traffic-manager`) under the desired-only `ENVOY_CONFIG` key. Derived per-node Virtuals used by xDS are stored separately in `AGENT_XDS_CONFIG` and are written only by AttachmentPublisher.
 
 Data model:
 

@@ -2,6 +2,7 @@ package inject
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -173,6 +174,39 @@ func TestVirtualStore_RemoveRule_Found(t *testing.T) {
 	virtuals := getVirtuals(t, clientset, ns)
 	if len(virtuals) != 0 {
 		t.Errorf("expected 0 virtuals after remove, got %d", len(virtuals))
+	}
+}
+
+func TestVirtualStoreRejectsMixedDesiredState(t *testing.T) {
+	mixed := []*controlplane.Virtual{{
+		Namespace: "default", UID: "deployments.apps.reviews.nodes.node-a",
+		AgentOrigins: []*controlplane.AgentOrigin{{PodUID: "pod-a"}},
+	}}
+	data, err := yaml.Marshal(mixed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cm := newTestConfigMap("default")
+	cm.Data[config.KeyEnvoy] = string(data)
+	clientset := fake.NewSimpleClientset(cm)
+	store := NewVirtualStore(clientset.CoreV1().ConfigMaps("default"))
+	called := false
+	err = store.Mutate(context.Background(), func(context.Context, []*controlplane.Virtual) ([]*controlplane.Virtual, error) {
+		called = true
+		return mixed, nil
+	})
+	if !errors.Is(err, controlplane.ErrMixedVirtualState) {
+		t.Fatalf("expected mixed-state rejection, got %v", err)
+	}
+	if called {
+		t.Fatal("mixed-state mutation callback was invoked")
+	}
+	stored, getErr := clientset.CoreV1().ConfigMaps("default").Get(context.Background(), config.ConfigMapPodTrafficManager, metav1.GetOptions{})
+	if getErr != nil {
+		t.Fatal(getErr)
+	}
+	if stored.Data[config.KeyEnvoy] != string(data) {
+		t.Fatal("mixed-state validation rewrote the old config")
 	}
 }
 

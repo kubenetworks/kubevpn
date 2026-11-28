@@ -207,9 +207,6 @@ func buildProxyAndSyncStatus(ctx context.Context, connect handler.Connection) ([
 			return nil, nil, err
 		}
 		for _, virtual := range v {
-			if len(virtual.AgentOrigins) != 0 {
-				continue
-			}
 			// deployments.apps.ry-server --> deployments.apps/ry-server
 			virtual.UID = util.ConvertUIDToWorkload(virtual.UID)
 			var proxyRule []*rpc.ProxyRule

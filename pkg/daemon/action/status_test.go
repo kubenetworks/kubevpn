@@ -218,20 +218,15 @@ func (c statusSnapshotConnection) StatusSnapshot(context.Context) (handler.Sessi
 	return handler.SessionStatus{Envoy: c.envoy}, nil
 }
 
-func TestBuildProxyAndSyncStatus_SkipsDerivedNodeVirtuals(t *testing.T) {
+func TestBuildProxyAndSyncStatus_UsesDesiredVirtuals(t *testing.T) {
 	conn := statusSnapshotConnection{
 		ConnectOptions: &handler.ConnectOptions{OwnerID: "owner"},
 		envoy: `- Namespace: default
   Uid: deployments.apps.reviews
   Rules:
   - ownerID: owner
-- Namespace: default
-  Uid: deployments.apps.reviews.nodes.minikube
-  agentOrigins:
-  - podUID: pod-a
-    podIP: 10.244.0.5
-  Rules:
-  - ownerID: owner
+    PortMap:
+      "9080": "8080"
 `,
 	}
 	proxies, _, err := buildProxyAndSyncStatus(context.Background(), conn)
@@ -239,7 +234,10 @@ func TestBuildProxyAndSyncStatus_SkipsDerivedNodeVirtuals(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(proxies) != 1 || proxies[0].Workload != "deployments.apps/reviews" {
-		t.Fatalf("derived xDS leaked into user status: %+v", proxies)
+		t.Fatalf("unexpected desired workload status: %+v", proxies)
+	}
+	if len(proxies[0].RuleList) != 1 || !proxies[0].RuleList[0].CurrentDevice || proxies[0].RuleList[0].PortMap[9080] != 8080 {
+		t.Fatalf("desired rule was not rendered correctly: %+v", proxies[0].RuleList)
 	}
 }
 

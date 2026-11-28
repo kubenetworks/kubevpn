@@ -2,6 +2,7 @@ package action
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -40,6 +41,9 @@ func TestRegistry_RealGRPCStatusAndDuplicateSelection(t *testing.T) {
 			t.Fatalf("status lists changed: %v", s)
 		}
 		p := s.ProxyList[0]
+		if strings.Contains(p.Workload, ".nodes.") {
+			t.Fatalf("derived per-node state leaked into gRPC status: %s", p.Workload)
+		}
 		sy := s.SyncList[0]
 		if p.Workload != "deployments.apps/web" || !p.RuleList[0].CurrentDevice || p.RuleList[0].PortMap[8080] != 9090 || sy.Workload != "deploy/web" || sy.SyncthingGUIAddr != "http://127.0.0.1:8384" || sy.RuleList[0].DstWorkload != "deploy/web-sync" {
 			t.Fatalf("proxy/sync rendering changed: %v", s)
