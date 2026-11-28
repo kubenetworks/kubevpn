@@ -109,7 +109,7 @@ func TestWaitNodeAgentReady_RequiresResolvedSyncTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cm.Data[config.KeyEnvoy] = string(data)
+	cm.Data[config.KeyAgentXDS] = string(data)
 	if _, err := opts.Clientset.CoreV1().ConfigMaps("kubevpn").Update(context.Background(), cm, metav1.UpdateOptions{}); err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestWaitNodeAgentReady_RequiresResolvedSyncTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cm.Data[config.KeyEnvoy] = string(data)
+	cm.Data[config.KeyAgentXDS] = string(data)
 	if _, err := opts.Clientset.CoreV1().ConfigMaps("kubevpn").Update(context.Background(), cm, metav1.UpdateOptions{}); err != nil {
 		t.Fatal(err)
 	}

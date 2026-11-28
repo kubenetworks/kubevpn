@@ -50,18 +50,14 @@ func (p *AttachmentPublisher) reconcileOnce(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("read traffic manager configmap: %w", err)
 	}
-	var storedVirtuals []*controlplane.Virtual
+	var virtuals []*controlplane.Virtual
 	if data := cm.Data[config.KeyEnvoy]; data != "" {
-		if err := yaml.Unmarshal([]byte(data), &storedVirtuals); err != nil {
-			return fmt.Errorf("parse envoy config: %w", err)
+		if err := yaml.Unmarshal([]byte(data), &virtuals); err != nil {
+			return fmt.Errorf("parse desired envoy config: %w", err)
 		}
 	}
-	// Derived per-node Virtuals are regenerated below, never treated as input.
-	virtuals := make([]*controlplane.Virtual, 0, len(storedVirtuals))
-	for _, virtual := range storedVirtuals {
-		if len(virtual.AgentOrigins) == 0 {
-			virtuals = append(virtuals, virtual)
-		}
+	if err := controlplane.ValidateDesiredVirtuals(virtuals); err != nil {
+		return err
 	}
 	var previous []controlplane.NodeAttachment
 	if data := cm.Data[config.KeyNodeAttachments]; data != "" {
@@ -77,8 +73,7 @@ func (p *AttachmentPublisher) reconcileOnce(ctx context.Context) error {
 		}
 	}
 
-	portsChanged, err := controlplane.EnsureAgentListenerPortsWithState(virtuals, allocations)
-	if err != nil {
+	if _, err = controlplane.EnsureAgentListenerPortsWithState(virtuals, allocations); err != nil {
 		return fmt.Errorf("allocate agent listener ports: %w", err)
 	}
 	virtualByKey := make(map[string]*controlplane.Virtual, len(virtuals))
@@ -190,14 +185,14 @@ func (p *AttachmentPublisher) reconcileOnce(ctx context.Context) error {
 		nodeIDs = append(nodeIDs, nodeID)
 	}
 	sort.Strings(nodeIDs)
-	updatedVirtuals := append([]*controlplane.Virtual{}, virtuals...)
+	derivedVirtuals := make([]*controlplane.Virtual, 0, len(derivedByNodeID))
 	for _, nodeID := range nodeIDs {
-		updatedVirtuals = append(updatedVirtuals, derivedByNodeID[nodeID])
+		derivedVirtuals = append(derivedVirtuals, derivedByNodeID[nodeID])
 	}
 
-	envoyYAML, err := yaml.Marshal(updatedVirtuals)
+	derivedYAML, err := yaml.Marshal(derivedVirtuals)
 	if err != nil {
-		return fmt.Errorf("marshal envoy config: %w", err)
+		return fmt.Errorf("marshal derived xds config: %w", err)
 	}
 	attachmentsYAML, err := yaml.Marshal(attachments)
 	if err != nil {
@@ -207,16 +202,17 @@ func (p *AttachmentPublisher) reconcileOnce(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("marshal agent port allocations: %w", err)
 	}
-	if (portsChanged || cm.Data[config.KeyEnvoy] != string(envoyYAML)) ||
-		(cm.Data[config.KeyNodeAttachments] != string(attachmentsYAML) || cm.Data[config.KeyAgentPortAllocations] != string(allocationsYAML)) {
+	if cm.Data[config.KeyAgentXDS] != string(derivedYAML) ||
+		cm.Data[config.KeyNodeAttachments] != string(attachmentsYAML) ||
+		cm.Data[config.KeyAgentPortAllocations] != string(allocationsYAML) {
 		if cm.Data == nil {
 			cm.Data = make(map[string]string)
 		}
-		cm.Data[config.KeyEnvoy] = string(envoyYAML)
+		cm.Data[config.KeyAgentXDS] = string(derivedYAML)
 		cm.Data[config.KeyNodeAttachments] = string(attachmentsYAML)
 		cm.Data[config.KeyAgentPortAllocations] = string(allocationsYAML)
 		if _, err := p.clientset.CoreV1().ConfigMaps(p.managerNamespace).Update(ctx, cm, metav1.UpdateOptions{}); err != nil {
-			return fmt.Errorf("write node attachments: %w", err)
+			return fmt.Errorf("write derived node-agent state: %w", err)
 		}
 	}
 	return nil
